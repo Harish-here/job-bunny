@@ -1,0 +1,54 @@
+{
+  "current_yoe": 8,
+  "target_seniority": [
+    "Staff",
+    "Lead"
+  ],
+  "core_skills": [
+    "React",
+    "TypeScript",
+    "JavaScript",
+    "Micro Frontends",
+    "UI Systems",
+    "UI Platform Architecture",
+    "Component Architecture",
+    "Design Systems"
+  ],
+  "secondary_skills": [
+    "Vue.js",
+    "Preact",
+    "Redux Toolkit",
+    "TanStack Query",
+    "Tailwind CSS",
+    "Storybook",
+    "React Flow",
+    "Webpack",
+    "Vite",
+    "Web Performance",
+    "Accessibility",
+    "Playwright",
+    "Jest",
+    "CI/CD",
+    "LLM Integration",
+    "Prompt Engineering",
+    "Node.js"
+  ],
+  "preferred_work_type": [
+    "Remote",
+    "Hybrid"
+  ],
+  "location": "Chennai",
+  "domain_experience": [
+    "Enterprise SaaS",
+    "Support Desk Platforms",
+    "Retail and E-commerce",
+    "Document Processing and BFSI",
+    "Corporate Travel"
+  ],
+  "usp": [
+    "Architected the Micro Frontend (MFE) re-platforming into AI Agent Studio at Freshworks, serving 75,000+ business customers",
+    "Authored a high-performance Vanilla JavaScript / Preact UI library powering recommendations for 10+ e-commerce clients across APAC, LATAM, and Europe",
+    "Established a shared UI architecture unifying 5+ applications under one component contract",
+    "Cut build cycles by 50% through a legacy front-end pipeline overhaul"
+  ]
+}
