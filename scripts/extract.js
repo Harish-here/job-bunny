@@ -101,20 +101,36 @@ async function scrollToEnd(page, cfg) {
 }
 
 // ---------- card collection ----------
+// Builds a canonical job_url from url_pattern_of_job (<id> placeholder) when available, so we
+// store a clean URL instead of the tracking-laden href.
+function canonicalUrl(cfg, id, href, base) {
+  if (id && cfg.url_pattern_of_job && cfg.url_pattern_of_job.includes("<id>")) {
+    return cfg.url_pattern_of_job.replace("<id>", id);
+  }
+  return href ? new URL(href, base).toString() : null;
+}
+
 async function collectCards(page, cfg) {
   const cards = page.locator(cfg.job_card);
   const n = await cards.count();
   const out = [];
   for (let i = 0; i < n; i++) {
     const card = cards.nth(i);
+    // Lazy-rendered lists (e.g. LinkedIn) only populate a card's inner DOM once it's on screen.
+    await card.scrollIntoViewIfNeeded().catch(() => {});
+    await sleep(120);
     const text = async (sel) => (sel ? (await card.locator(sel).first().textContent().catch(() => ""))?.trim() ?? "" : "");
     const href = await card.locator(cfg.job_card_href).first().getAttribute("href").catch(() => null);
+    const idAttr = cfg.job_card_id_attr ? await card.getAttribute(cfg.job_card_id_attr).catch(() => null) : null;
+    const job_id = idAttr || extractJobId(href);
     out.push({
       index: i,
       title: await text(cfg.job_card_title),
       company: await text(cfg.job_card_company),
       location: await text(cfg.job_card_location),
-      href: href ? new URL(href, page.url()).toString() : null,
+      href,
+      job_id,
+      job_url: canonicalUrl(cfg, job_id, href, page.url()),
     });
   }
   return out;
@@ -155,7 +171,7 @@ async function captureJd(context, page, cfg, card) {
   if ((cfg.interaction_model || "inline").trim() === "new-page") {
     const jdPage = await context.newPage();
     try {
-      await jdPage.goto(card.href, { waitUntil: "domcontentloaded" });
+      await jdPage.goto(card.job_url || card.href, { waitUntil: "domcontentloaded" });
       await waitSettled(jdPage, cfg);
       return (await jdPage.locator(cfg.jd_body).first().innerText().catch(() => "")).trim();
     } finally {
@@ -212,17 +228,21 @@ async function main() {
         summary.avoided += dropped;
         if (dropped) console.log(`[extract]   Stage A: dropped ${dropped} avoid-list card(s) pre-JD`);
 
+        // Optional safety cap (politeness / testing): EXTRACT_MAX_CARDS per query, 0/unset = all.
+        const cap = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
+        if (cap > 0 && cards.length > cap) cards = cards.slice(0, cap);
+
         for (const card of cards) {
-          if (!card.href) continue;
+          if (!card.job_url) continue;
           await jitter();
           const raw_text = await captureJd(context, page, cfg, card);
           if (!raw_text) continue;
           results.push({
-            job_url: card.href,
+            job_url: card.job_url,
             source_query_url: url,
             raw_text,
             date_found: today(),
-            job_id: extractJobId(card.href),
+            job_id: card.job_id,
           });
           summary.captured++;
         }
