@@ -157,7 +157,9 @@ function parseList(v) {
 async function waitSettled(page, cfg) {
   switch ((cfg.jd_settled_signal || "selector-visible").trim()) {
     case "network-idle":
-      await page.waitForLoadState("networkidle").catch(() => {});
+      // Cap the wait — LinkedIn's long-poll/websocket traffic means networkidle often never
+      // fires, which would otherwise hang ~30s (default timeout) per JD.
+      await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
       break;
     case "url-change":
       await sleep(800);
@@ -306,6 +308,8 @@ async function main() {
         console.error(`[extract] SKIP url (${group.page}) — ${err.message}`);
         summary.skipped.push({ page: group.page, url, reason: err.message });
       }
+      // Incremental flush after each URL — a kill mid-run keeps everything captured so far.
+      await writeFile(OUT, JSON.stringify(results, null, 2) + "\n");
     }
     await page.close().catch(() => {});
     if (jdTab) await jdTab.close().catch(() => {});
