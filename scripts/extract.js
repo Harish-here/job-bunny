@@ -168,21 +168,59 @@ async function waitSettled(page, cfg) {
   }
 }
 
-async function captureJd(context, page, cfg, card) {
+// Extract JD text robustly: try the configured selector first; if empty (e.g. the direct-nav
+// job page uses hashed class names), fall back to the smallest container whose text starts with
+// jd_anchor_text ("About the job"). Anchor text is stable across LinkedIn's CSS churn.
+async function extractJdText(target, cfg) {
+  if (cfg.jd_body) {
+    const t = ((await target.locator(cfg.jd_body).first().innerText().catch(() => "")) || "").trim();
+    if (t) return t;
+  }
+  const anchor = cfg.jd_anchor_text || "About the job";
+  return (
+    await target
+      .evaluate((a) => {
+        const els = [...document.querySelectorAll("section,div,article,main")];
+        // Tightest container that starts with the anchor AND holds real content (>=200 chars) —
+        // skips the bare "About the job" heading and avoids grabbing the whole page wrapper.
+        const m = els
+          .filter((e) => {
+            const t = (e.innerText || "").trim();
+            return t.startsWith(a) && t.length >= 200;
+          })
+          .sort((x, y) => x.innerText.length - y.innerText.length)[0];
+        return m ? m.innerText.trim() : "";
+      }, anchor)
+      .catch(() => "")
+  );
+}
+
+// Token efficiency: cap stored JD length (JD_MAX_CHARS env or max_raw_text_chars in inventory,
+// default 2500). The first ~2500 chars reliably carry title/seniority/skills/YoE/location; the
+// rest is boilerplate (benefits, EEO, "about company") that just inflates the structuring step.
+function jdCap(cfg) {
+  return parseInt(process.env.JD_MAX_CHARS || cfg.max_raw_text_chars || "2500", 10);
+}
+
+// jdTab is a single REUSED tab for the new-page model — we goto() into it per job rather than
+// opening/closing a fresh tab each time. Rapid newPage/close churn was destabilizing the shared
+// CDP browser; one long-lived tab is far more reliable.
+async function captureJd(jdTab, page, cfg, card) {
+  const cap = jdCap(cfg);
   if ((cfg.interaction_model || "inline").trim() === "new-page") {
-    const jdPage = await context.newPage();
-    try {
-      await jdPage.goto(card.job_url || card.href, { waitUntil: "domcontentloaded" });
-      await waitSettled(jdPage, cfg);
-      return (await jdPage.locator(cfg.jd_body).first().innerText().catch(() => "")).trim();
-    } finally {
-      await jdPage.close();
+    await jdTab.goto(card.job_url || card.href, { waitUntil: "domcontentloaded" });
+    await waitSettled(jdTab, cfg);
+    let t = await extractJdText(jdTab, cfg);
+    if (!t) {
+      await jdTab.waitForTimeout(1800);
+      t = await extractJdText(jdTab, cfg);
     }
+    return t.slice(0, cap);
   }
   // inline: clicking the card renders the JD in a side panel on the same page
   await page.locator(cfg.job_card).nth(card.index).click();
   await waitSettled(page, cfg);
-  return (await page.locator(cfg.jd_body).first().innerText().catch(() => "")).trim();
+  return (await extractJdText(page, cfg)).slice(0, cap);
 }
 
 // ---------- main ----------
@@ -213,6 +251,8 @@ async function main() {
     }
 
     let page = await context.newPage();
+    const isNewPage = (cfg.interaction_model || "inline").trim() === "new-page";
+    let jdTab = isNewPage ? await context.newPage() : null;
     for (const { url } of group.urls) {
       // Per-URL resilience: a failure on one search (or a closed tab from outside interaction)
       // skips just that URL, never the rest of the group.
@@ -239,7 +279,14 @@ async function main() {
         for (const card of cards) {
           if (!card.job_url) continue;
           await jitter();
-          const raw_text = await captureJd(context, page, cfg, card);
+          let raw_text;
+          try {
+            if (isNewPage && jdTab.isClosed()) jdTab = await context.newPage();
+            raw_text = await captureJd(jdTab, page, cfg, card);
+          } catch (e) {
+            console.error(`[extract]   skip card ${card.job_id} — ${e.message}`);
+            continue; // one bad JD never aborts the rest
+          }
           if (!raw_text) continue;
           // Carry the card's clean title/company/location alongside raw_text — the structurer
           // needs them when a JD body doesn't restate location/title.
@@ -261,9 +308,11 @@ async function main() {
       }
     }
     await page.close().catch(() => {});
+    if (jdTab) await jdTab.close().catch(() => {});
   }
 
-  await browser.close().catch(() => {});
+  // NOTE: never browser.close() — this is an attach over CDP to the user's running Chrome;
+  // closing it would tear down their browser/session. We just drop the connection on exit.
   await writeFile(OUT, JSON.stringify(results, null, 2) + "\n");
 
   console.log(
@@ -274,8 +323,10 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(`[extract] FAILED: ${err.message}`);
-    process.exit(1);
-  });
+  main()
+    .then(() => process.exit(0)) // drop the CDP connection without closing the user's browser
+    .catch((err) => {
+      console.error(`[extract] FAILED: ${err.message}`);
+      process.exit(1);
+    });
 }

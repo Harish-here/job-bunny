@@ -4,11 +4,13 @@ Filled from live DOM analysis on 2026-06-18 (Chrome 149, logged-in session) agai
 `https://www.linkedin.com/jobs/search/`. extract.js reads this at runtime (config-driven).
 
 ## 1. Behavior (manual)
-- interaction_model: inline
-- job_list_trigger: clicking a card loads the JD into the right-hand #job-details panel (same page)
+- interaction_model: new-page
+- job_list_trigger: open the job's /jobs/view/<id>/ URL directly in a fresh tab (robust; avoids fragile list-clicks)
 - pagination_type: infinite-scroll
 - jd_settled_signal: network-idle
 - url_pattern_of_job: https://www.linkedin.com/jobs/view/<id>/
+- jd_anchor_text: About the job
+- max_raw_text_chars: 2500
 
 ## 2. Selectors (from live page analysis)
 ### Search page
