@@ -4,7 +4,7 @@ description: Structure raw JD text into schema-valid jobs_raw.json (LLM stage �
 
 This stage is **LLM-driven and runs inline — you (Claude Code) do it directly, not via a script.** There is no `structure.js`.
 
-1. Read `jobs_raw_text.json` (array of `{ job_url, source_query_url, raw_text, date_found }`).
+1. Read `jobs_raw_text.json` (array of `{ job_url, source_query_url, raw_text, date_found, job_id, card_title, card_company, card_location }`). The `card_*` fields come straight from the search card (e.g. `card_location` = "Chennai, Tamil Nadu, India (On-site)") — use them for location/work_type/company when the JD body doesn't restate them.
 2. For each record, structure `raw_text` into the Extraction Schema object:
    `job_title, company_name, seniority_level, location_city, work_type (Remote|Hybrid|On-site), years_of_experience (number|null), yoe_is_minimum (bool), key_skills[], job_id (string|null), job_url, date_found, timezone_compatibility (APAC|EMEA|null), source_query_url`.
 3. Rules: normalize skill synonyms here (e.g. "ReactJS"→"React"); set `yoe_is_minimum: true` when the JD says `8+`/`>8` and normalize YoE to the lower bound; populate `timezone_compatibility` only when `work_type = Remote`, else null; set `timezone_incompatible: true` only when the JD explicitly mandates incompatible hours (e.g. "must overlap US Pacific").

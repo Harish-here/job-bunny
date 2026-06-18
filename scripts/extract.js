@@ -19,7 +19,8 @@ import { extractJobId } from "./util.js";
 import { loadAvoid, isAvoided } from "./avoid.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SEARCH_URLS = join(ROOT, "search_urls.md");
+// Defaults to search_urls.md; SEARCH_URLS_FILE overrides it for subset/test runs.
+const SEARCH_URLS = process.env.SEARCH_URLS_FILE || join(ROOT, "search_urls.md");
 const OUT = join(ROOT, "jobs_raw_text.json");
 const CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
 
@@ -211,14 +212,17 @@ async function main() {
       continue;
     }
 
-    const page = await context.newPage();
-    try {
-      for (const { url } of group.urls) {
+    let page = await context.newPage();
+    for (const { url } of group.urls) {
+      // Per-URL resilience: a failure on one search (or a closed tab from outside interaction)
+      // skips just that URL, never the rest of the group.
+      try {
+        if (page.isClosed()) page = await context.newPage();
         console.log(`[extract] ${group.page} ← ${url}`);
         await page.goto(url, { waitUntil: "domcontentloaded" });
         await jitter();
         await scrollToEnd(page, cfg);
-        await runAssertions(page, cfg); // throws → skip whole group
+        await runAssertions(page, cfg);
 
         let cards = await collectCards(page, cfg);
         summary.cards += cards.length;
@@ -237,22 +241,26 @@ async function main() {
           await jitter();
           const raw_text = await captureJd(context, page, cfg, card);
           if (!raw_text) continue;
+          // Carry the card's clean title/company/location alongside raw_text — the structurer
+          // needs them when a JD body doesn't restate location/title.
           results.push({
             job_url: card.job_url,
             source_query_url: url,
             raw_text,
             date_found: today(),
             job_id: card.job_id,
+            card_title: card.title,
+            card_company: card.company,
+            card_location: card.location,
           });
           summary.captured++;
         }
+      } catch (err) {
+        console.error(`[extract] SKIP url (${group.page}) — ${err.message}`);
+        summary.skipped.push({ page: group.page, url, reason: err.message });
       }
-    } catch (err) {
-      console.error(`[extract] SKIP group "${group.page}" — ${err.message}`);
-      summary.skipped.push({ page: group.page, reason: err.message });
-    } finally {
-      await page.close().catch(() => {});
     }
+    await page.close().catch(() => {});
   }
 
   await browser.close().catch(() => {});
