@@ -9,3 +9,5 @@ This stage is **LLM-driven and runs inline — you (Claude Code) do it directly,
    `job_title, company_name, seniority_level, location_city, work_type (Remote|Hybrid|On-site), years_of_experience (number|null), yoe_is_minimum (bool), key_skills[], job_id (string|null), job_url, date_found, timezone_compatibility (APAC|EMEA|null), source_query_url`.
 3. Rules: normalize skill synonyms here (e.g. "ReactJS"→"React"); set `yoe_is_minimum: true` when the JD says `8+`/`>8` and normalize YoE to the lower bound; populate `timezone_compatibility` only when `work_type = Remote`, else null; set `timezone_incompatible: true` only when the JD explicitly mandates incompatible hours (e.g. "must overlap US Pacific").
 4. Write the array to `jobs_raw.json`. Each object must be schema-valid.
+
+See `fixtures/structure_example.md` for a worked `raw_text` → object showing every rule (skill-synonym normalization, `yoe_is_minimum`, Remote-only `timezone_compatibility`, `timezone_incompatible`, `job_id` from the URL).
