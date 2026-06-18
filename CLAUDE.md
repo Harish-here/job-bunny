@@ -25,7 +25,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. `/structure` and `/page-ana
 ## Operational rules
 
 - **Avoid-list matching** normalizes both sides: lowercase, strip legal suffixes, apply the alias map (see `avoid.md`).
-- **`/add-url` strips ephemeral params** (`currentJobId`, `referralSearchId`, `origin`, `originToLandingJobPostings`) and keeps the stable filter params.
+- **`/add-url` strips ephemeral params** (`currentJobId`, `referralSearchId`, `origin`, `originToLandingJobPostings`, `savedSearchId`, `alertAction`, `trackingId`, `refId`, `eBP`), drops stale absolute `f_TPR=a<epoch>-` anchors (keeps relative `r<sec>`), canonicalizes `/jobs/search-results/` → `/jobs/search/`, and keeps the stable filter params.
 - **extract.js is config-driven** — it reads selectors/behavior from `page_inventory/<page>.md` at runtime. DOM drift is fixed by editing the inventory, not by regenerating code.
 - **Notion select strings are byte-exact** (`scripts/schema.js`). Changing one without updating existing Notion options makes sync throw.
 - **Every script:** explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.

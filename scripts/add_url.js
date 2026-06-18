@@ -10,21 +10,38 @@ import { dirname, join } from "node:path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const URLS = join(ROOT, "search_urls.md");
 
-// Ephemeral params that change per click/session — stripped so the same search dedups.
-const EPHEMERAL = ["currentJobId", "referralSearchId", "origin", "originToLandingJobPostings"];
+// Ephemeral params that change per click/session/alert — stripped so the same search dedups.
+const EPHEMERAL = [
+  "currentJobId", "referralSearchId", "origin", "originToLandingJobPostings",
+  "savedSearchId", "alertAction", "trackingId", "refId", "eBP",
+];
 
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
 
 export function stripEphemerals(rawUrl) {
   const u = new URL(rawUrl);
+  // Canonicalize the internal /jobs/search-results/ route to /jobs/search/ — the latter renders the
+  // card list (.scaffold-layout__list) when loaded directly; search-results does not. Same params.
+  if (/^\/jobs\/search-results\/?$/.test(u.pathname)) u.pathname = "/jobs/search/";
   for (const p of EPHEMERAL) u.searchParams.delete(p);
+  // f_TPR absolute anchors (a<epoch>-) are a per-alert "posted after this exact moment" stamp that
+  // goes stale on a recurring search — drop them. Relative windows (r<seconds>, e.g. r86400) stay.
+  const tpr = u.searchParams.get("f_TPR");
+  if (tpr && /^a\d+/.test(tpr)) u.searchParams.delete("f_TPR");
   return u;
 }
 
-// Resolve channel + page-type from the URL. v0 knows LinkedIn jobs search; extend as lanes grow.
+// Resolve channel + page-type from the URL. The jobs search, search-results, and collections
+// surfaces all render the same card DOM (.scaffold-layout__list + li[data-occludable-job-id]),
+// so they share one inventory. Extend as lanes grow.
 export function resolvePage(u) {
-  if (u.hostname.endsWith("linkedin.com") && u.pathname.startsWith("/jobs/search")) {
-    return { channel: "linkedin", page: "linkedin__jobs-search" };
+  if (u.hostname.endsWith("linkedin.com")) {
+    if (/^\/jobs\/(search|search-results)\/?$/.test(u.pathname)) {
+      return { channel: "linkedin", page: "linkedin__jobs-search" };
+    }
+    if (u.pathname.startsWith("/jobs/collections/")) {
+      return { channel: "linkedin", page: "linkedin__jobs-search" };
+    }
   }
   throw new Error(`No page-type mapping for ${u.hostname}${u.pathname} — add one in resolvePage().`);
 }

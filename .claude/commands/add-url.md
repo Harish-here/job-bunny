@@ -6,4 +6,4 @@ description: Add a LinkedIn saved-search URL — strips ephemeral params, files 
 node scripts/add_url.js "<paste the full LinkedIn search URL>" "<short label>"
 ```
 
-Strips ephemeral params (`currentJobId`, `referralSearchId`, `origin`, `originToLandingJobPostings`), keeps the stable filter params, and appends the cleaned URL under its Channel → page node in `search_urls.md`. Warns if that page-type has no `page_inventory/<page>.md` yet (run `/page-analyse` before `/run`).
+Cleans the URL — strips ephemeral params (`currentJobId`, `referralSearchId`, `origin`, `originToLandingJobPostings`, `savedSearchId`, `alertAction`, `trackingId`, `refId`, `eBP`), drops stale absolute `f_TPR=a<epoch>-` date anchors (keeps relative `r<sec>` windows), and canonicalizes the internal `/jobs/search-results/` route to `/jobs/search/` (the one that renders the card list when loaded directly). Keeps the stable filter params, then appends under its Channel → page node in `search_urls.md`. Warns if that page-type has no `page_inventory/<page>.md` yet (run `/page-analyse` before `/run`).
