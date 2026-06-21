@@ -54,9 +54,9 @@ Design-session close-out. Updates the active design doc surgically and appends a
 For each decision made this session that supersedes an existing section: use anchored `update_content` targeting the exact section heading or the specific line. Append a new section only for content that has no prior section covering it — never as a substitute for an anchored replace. Never blind-overwrite the whole doc.
 
 **4. Append to the log**
-Add one entry at the bottom of the main page:
-`YYYY-MM-DD (session <N> — <short label>)` followed by bullet points of decisions made.
-Derive N by counting existing entries that match the `YYYY-MM-DD (session …)` pattern in the already-fetched page content, then add 1. If you cannot count reliably (page truncated, inconsistent formatting), omit the session number and use `YYYY-MM-DD — <short label>` instead.
+Add one entry at the bottom of the main page.
+Heading format: a Notion **date mention** for today (inline `@today` mention — use a rich_text mention object with `{ type: "date", date: { start: "<YYYY-MM-DD>" } }` where YYYY-MM-DD is today's date) followed by plain text ` (session <N> — <short label>)`.
+Derive N by counting existing entries that match the date-mention `(session …)` pattern in the already-fetched page content, then add 1. If you cannot count reliably (page truncated, inconsistent formatting), omit the session number and use the date mention followed by ` — <short label>` instead.
 Never alter any prior entry. End with `Next: <decision>` only if the very next step is itself a decision worth recording.
 
 **5. Confirm**
@@ -73,7 +73,8 @@ Quick log-only note. No design doc, no git, no roadmap, no classification.
 `notion-fetch` the main "Job Bunny" page in full.
 
 **2. Append one dated entry**
-`YYYY-MM-DD (session <N> — <short label>)` + bullet points. Derive N by counting existing entries matching the `YYYY-MM-DD (session …)` pattern in the fetched page content, then add 1. If counting is unreliable, use `YYYY-MM-DD — <short label>` instead. Append-only — never alter prior entries. Conditional `Next:` rule applies.
+Heading format: a Notion **date mention** for today (inline `@today` mention — use a rich_text mention object with `{ type: "date", date: { start: "<YYYY-MM-DD>" } }` where YYYY-MM-DD is today's date) followed by plain text ` (session <N> — <short label>)` + bullet points.
+Derive N by counting existing entries matching the date-mention `(session …)` pattern in the fetched page content, then add 1. If counting is unreliable, use the date mention followed by ` — <short label>` instead. Append-only — never alter prior entries. Conditional `Next:` rule applies.
 
 **3. Confirm**
 - `log: <entry summary>`
@@ -130,7 +131,7 @@ If the repo has no remote configured, skip the push and note it in the confirm o
 `notion-fetch` the roadmap page. In the "v0 LinkedIn lane — hardening increments" table, find the shipped version's row. Append `✅ shipped in vX.Y.Z` to its Items cell via anchored `update_content`. Never delete rows. If the shipped version has no hardening row (e.g. it was a design-only minor), skip this step.
 
 **9. Append to the log**
-One dated entry on the main page: `YYYY-MM-DD (ship — vX.Y.Z)` + 2–3 bullet summary. End with `Next: <next roadmap version and theme>` pulled from the remaining unshipped rows in the hardening increments table.
+One dated entry on the main page: a Notion **date mention** for today (inline `@today` mention — use a rich_text mention object with `{ type: "date", date: { start: "<YYYY-MM-DD>" } }` where YYYY-MM-DD is today's date) followed by plain text ` (ship — vX.Y.Z)` + 2–3 bullet summary. End with `Next: <next roadmap version and theme>` pulled from the remaining unshipped rows in the hardening increments table.
 
 **10. Confirm**
 - `git: tagged vX.Y.Z` (+ pushed, or `no remote — push skipped`)
