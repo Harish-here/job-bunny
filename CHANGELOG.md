@@ -3,6 +3,13 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.1.1] — 2026-06-21
+
+### Added
+- `/wrap` command: session close-out for design, log, improve, and ship modes.
+- `/reconcile` stage: rebuilds job pipeline state from the live Notion DB
+  (Notion = source of truth).
+
 ## [Unreleased]
 
 Hardening increments (see roadmap): `0.2.0` filter precision · `0.3.0` ranking
