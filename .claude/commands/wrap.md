@@ -55,7 +55,8 @@ For each decision made this session that supersedes an existing section: use anc
 
 **4. Append to the log**
 Add one entry at the bottom of the main page:
-`YYYY-MM-DD (session N — <short label>)` followed by bullet points of decisions made.
+`YYYY-MM-DD (session <N> — <short label>)` followed by bullet points of decisions made.
+Derive N by counting existing entries that match the `YYYY-MM-DD (session …)` pattern in the already-fetched page content, then add 1. If you cannot count reliably (page truncated, inconsistent formatting), omit the session number and use `YYYY-MM-DD — <short label>` instead.
 Never alter any prior entry. End with `Next: <decision>` only if the very next step is itself a decision worth recording.
 
 **5. Confirm**
@@ -72,7 +73,7 @@ Quick log-only note. No design doc, no git, no roadmap, no classification.
 `notion-fetch` the main "Job Bunny" page in full.
 
 **2. Append one dated entry**
-`YYYY-MM-DD (session N — <short label>)` + bullet points. Append-only — never alter prior entries. Conditional `Next:` rule applies.
+`YYYY-MM-DD (session <N> — <short label>)` + bullet points. Derive N by counting existing entries matching the `YYYY-MM-DD (session …)` pattern in the fetched page content, then add 1. If counting is unreliable, use `YYYY-MM-DD — <short label>` instead. Append-only — never alter prior entries. Conditional `Next:` rule applies.
 
 **3. Confirm**
 - `log: <entry summary>`
@@ -86,7 +87,10 @@ Dedicated release flow. Run after code work is done and ready to tag.
 **1. Read git history since last tag**
 Run:
 ```bash
-git describe --tags --abbrev=0
+git describe --tags --abbrev=0 2>/dev/null || echo "__no_tags__"
+```
+If the output is `__no_tags__`, run `git log --oneline` instead (all commits) and tell the user: "No prior tag found — will start versioning from scratch; suggest `v0.1.0` or confirm a different base version." Otherwise run:
+```bash
 git log $(git describe --tags --abbrev=0)..HEAD --oneline
 ```
 Show the commit list to the user as context.
@@ -99,31 +103,37 @@ Recommend based on the commit content. Derive the new version string from the la
 Draft a concise summary: what shipped, why it matters, any known gaps. Show for user approval before writing anywhere.
 
 **4. Update CHANGELOG.md**
-Prepend a new version block to `CHANGELOG.md` following the existing format (dated header, bullet list of changes). Stage and commit the CHANGELOG update before tagging:
+Read `CHANGELOG.md` first to confirm the current format. Mirror the `[0.1.0]` block exactly: a `## [X.Y.Z] — YYYY-MM-DD` heading, then `### Added` / `### Fixed` / `### Notes` sub-sections as applicable (omit empty sub-sections). Prepend the new block. Stage and commit before tagging:
 ```bash
 git add CHANGELOG.md
 git commit -m "chore: CHANGELOG for vX.Y.Z"
 ```
 
-**5. Git tag**
+**5. Validate Design Versions table (before tagging)**
+`notion-fetch` the main "Job Bunny" page. Confirm exactly one 🟢 Active row. If not → stop and ask the user to fix it before proceeding. Do not create the git tag until this check passes.
+
+**6. Git tag**
 ```bash
 git tag vMAJOR.MINOR.PATCH
 ```
-On a major bump: also confirm the `vMAJOR.0.0` convention with the user.
+On a major bump: also confirm the `vMAJOR.0.0` convention with the user. Then push both the CHANGELOG commit and the tag:
+```bash
+git push && git push origin vMAJOR.MINOR.PATCH
+```
+If the repo has no remote configured, skip the push and note it in the confirm output.
 
-**6. Validate and update Design Versions table**
-`notion-fetch` the main "Job Bunny" page. Confirm exactly one 🟢 Active row (stop and ask if not).
-- **Major bump:** flip the Active row to ✅ Shipped → set the next relevant Draft row to 🟢 Active → confirm exactly one Active after the operation.
+**7. Update Design Versions table**
+- **Major bump:** flip the Active row to ✅ Shipped → promote the Draft row with the **lowest version number** (e.g. if v1/v2/v3 are all Draft, promote v1) to 🟢 Active. If it is unclear which row to promote, stop and ask the user before writing. Confirm exactly one Active row after both writes.
 - **Minor / patch:** no Design Versions table row changes.
 
-**7. Mark roadmap items done**
+**8. Mark roadmap items done**
 `notion-fetch` the roadmap page. In the "v0 LinkedIn lane — hardening increments" table, find the shipped version's row. Append `✅ shipped in vX.Y.Z` to its Items cell via anchored `update_content`. Never delete rows. If the shipped version has no hardening row (e.g. it was a design-only minor), skip this step.
 
-**8. Append to the log**
+**9. Append to the log**
 One dated entry on the main page: `YYYY-MM-DD (ship — vX.Y.Z)` + 2–3 bullet summary. End with `Next: <next roadmap version and theme>` pulled from the remaining unshipped rows in the hardening increments table.
 
-**9. Confirm**
-- `git: tagged vX.Y.Z`
+**10. Confirm**
+- `git: tagged vX.Y.Z` (+ pushed, or `no remote — push skipped`)
 - `CHANGELOG.md: added vX.Y.Z block`
 - `design versions table: <row flipped / no change>`
 - `roadmap: marked vX.Y.Z items shipped` (or `no hardening row — skipped`)
