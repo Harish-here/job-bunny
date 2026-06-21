@@ -11,10 +11,10 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against your profil
 The pipeline is driven by slash commands, not by reading steps from here.
 
 - **`/run`** — full pipeline, manual. The canonical stage sequence lives there.
-- Stage commands (also standalone for re-run/debug): `/reconcile · /extract · /structure · /filter · /dedup · /rank · /sync`.
-- Setup & maintenance: `/setup · /page-analyse · /add-url · /update-resume · /doctor`.
+- Stage commands (also standalone for re-run/debug): `/doctor · /reconcile · /extract · /structure · /filter · /dedup · /rank · /sync`.
+- Setup & maintenance: `/setup · /page-analyse · /add-url · /update-resume`.
 
-Most stages are thin `node scripts/<x>.js` wrappers. `/structure` and `/page-analyse` are the exceptions: `/structure` is LLM work you do inline (no script, no API key); `/page-analyse` is browser-driven (Claude in Chrome).
+Most stages are thin `node scripts/<x>.js` wrappers. `/structure` and `/page-analyse` are the exceptions: `/structure` invokes the `/structure` skill (no script file — the skill does the LLM work directly); `/page-analyse` is browser-driven (Claude in Chrome).
 
 ## Non-negotiables
 
