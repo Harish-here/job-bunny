@@ -3,6 +3,12 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.1.2] — 2026-06-21
+
+### Fixed
+- `/wrap` log format: use Notion date mentions (`@today`) for inline date rendering.
+- `run.md` + `CLAUDE.md`: clarified `/doctor` and `/structure` behavior.
+
 ## [0.1.1] — 2026-06-21
 
 ### Added
