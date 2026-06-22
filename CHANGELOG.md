@@ -3,6 +3,16 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.2.0] — 2026-06-22
+
+### Added
+- Stage B title gate in `filter.js`: 4-step short-circuit filter (seniority gate → title check → skills fallback → default drop). Drops non-frontend noise (architects, PMs, backend/analyst roles) that previously reached the Notion DB.
+- `filter_config.json`: config-driven keyword lists (`seniority_keywords`, `title_keywords`, `skills_overlap_threshold`) — filter tuning no longer requires code edits.
+
+### Notes
+- `"architect"` treated as a seniority tier, making the old architect shortcut redundant and simplifying the gate to 4 steps.
+- Word-boundary regex (`\bui\b`) guards against false matches on substrings like "fluid", "equity".
+
 ## [0.1.2] — 2026-06-21
 
 ### Fixed
@@ -18,8 +28,8 @@ feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381
 
 ## [Unreleased]
 
-Hardening increments (see roadmap): `0.2.0` filter precision · `0.3.0` ranking
-precision · `0.4.0` deterministic structuring · `0.5.0` extraction token efficiency.
+Hardening increments (see roadmap): `0.3.0` ranking precision · `0.4.0` deterministic
+structuring · `0.5.0` extraction token efficiency.
 
 ## [0.1.0] — 2026-06-18
 
