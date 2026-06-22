@@ -1,0 +1,5 @@
+{
+  "seniority_keywords": ["staff", "lead", "principal", "architect"],
+  "title_keywords": ["frontend", "ui"],
+  "skills_overlap_threshold": 3
+}
