@@ -3,6 +3,14 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.2.1] — 2026-06-22
+
+### Fixed
+- `/wrap ship` now updates the "Active version" column in the Design Versions table on every bump (minor and patch), not just on major bumps.
+
+### Notes
+- `data/cache.json` refreshed to reflect post-v0.2.0 filter run state.
+
 ## [0.2.0] — 2026-06-22
 
 ### Added
