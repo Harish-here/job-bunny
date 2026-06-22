@@ -124,8 +124,8 @@ git push && git push origin vMAJOR.MINOR.PATCH
 If the repo has no remote configured, skip the push and note it in the confirm output.
 
 **7. Update Design Versions table**
-- **Major bump:** flip the Active row to ✅ Shipped → promote the Draft row with the **lowest version number** (e.g. if v1/v2/v3 are all Draft, promote v1) to 🟢 Active. If it is unclear which row to promote, stop and ask the user before writing. Confirm exactly one Active row after both writes.
-- **Minor / patch:** no Design Versions table row changes.
+- **All bumps:** update the "Active version" column in the 🟢 Active row to the new version string (e.g. `0.2.0`) via anchored `update_content`. Use the current cell value as the anchor; if the cell is empty, anchor on the Code Tag value of that row (unique per row).
+- **Major bump only:** also flip the Active row to ✅ Shipped → promote the Draft row with the **lowest version number** (e.g. if v1/v2/v3 are all Draft, promote v1) to 🟢 Active. Set "Active version" in the newly promoted row to the new version string. If it is unclear which row to promote, stop and ask the user before writing. Confirm exactly one Active row after both writes.
 
 **8. Mark roadmap items done**
 `notion-fetch` the roadmap page. In the "v0 LinkedIn lane — hardening increments" table, find the shipped version's row. Append `✅ shipped in vX.Y.Z` to its Items cell via anchored `update_content`. Never delete rows. If the shipped version has no hardening row (e.g. it was a design-only minor), skip this step.
@@ -136,7 +136,7 @@ One dated entry on the main page: a Notion **date mention** for today (inline `@
 **10. Confirm**
 - `git: tagged vX.Y.Z` (+ pushed, or `no remote — push skipped`)
 - `CHANGELOG.md: added vX.Y.Z block`
-- `design versions table: <row flipped / no change>`
+- `design versions table: Active version → vX.Y.Z` (+ `row flipped` on major bump, or `no row flip` on minor/patch)
 - `roadmap: marked vX.Y.Z items shipped` (or `no hardening row — skipped`)
 - `log: <entry summary>`
 - `Next up: <next version and theme>`
