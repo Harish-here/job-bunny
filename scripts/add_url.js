@@ -11,18 +11,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const URLS = join(ROOT, "search_urls.md");
 
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
+// "start" is a pagination offset, not a filter — always reset to beginning.
 const EPHEMERAL = [
   "currentJobId", "referralSearchId", "origin", "originToLandingJobPostings",
-  "savedSearchId", "alertAction", "trackingId", "refId", "eBP",
+  "savedSearchId", "alertAction", "trackingId", "refId", "eBP", "start",
 ];
 
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
 
 export function stripEphemerals(rawUrl) {
   const u = new URL(rawUrl);
-  // Canonicalize the internal /jobs/search-results/ route to /jobs/search/ — the latter renders the
-  // card list (.scaffold-layout__list) when loaded directly; search-results does not. Same params.
-  if (/^\/jobs\/search-results\/?$/.test(u.pathname)) u.pathname = "/jobs/search/";
   for (const p of EPHEMERAL) u.searchParams.delete(p);
   // f_TPR absolute anchors (a<epoch>-) are a per-alert "posted after this exact moment" stamp that
   // goes stale on a recurring search — drop them. Relative windows (r<seconds>, e.g. r86400) stay.
