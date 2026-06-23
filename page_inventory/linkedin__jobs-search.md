@@ -6,7 +6,10 @@ Filled from live DOM analysis on 2026-06-18 (Chrome 149, logged-in session) agai
 ## 1. Behavior (manual)
 - interaction_model: new-page
 - job_list_trigger: open the job's /jobs/view/<id>/ URL directly in a fresh tab (robust; avoids fragile list-clicks)
-- pagination_type: infinite-scroll
+- pagination_type: url-pages
+- pagination_param: start
+- pagination_page_size: 25
+- max_pages: 4
 - jd_settled_signal: network-idle
 - url_pattern_of_job: https://www.linkedin.com/jobs/view/<id>/
 - jd_anchor_text: About the job

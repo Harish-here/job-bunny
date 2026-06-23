@@ -65,7 +65,9 @@ export function parseInventory(text) {
   return cfg;
 }
 
-const REQUIRED_SELECTORS = ["job_card", "job_card_title", "job_card_company", "job_card_href", "jd_body"];
+// job_card_href is optional — pages that provide job IDs via job_card_id_attr + url_pattern_of_job
+// don't need a link selector on the card itself.
+const REQUIRED_SELECTORS = ["job_card", "job_card_title", "job_card_company", "jd_body"];
 
 function validateInventory(cfg, page) {
   const missing = REQUIRED_SELECTORS.filter((k) => !cfg[k]);
@@ -120,9 +122,24 @@ async function collectCards(page, cfg) {
     // Lazy-rendered lists (e.g. LinkedIn) only populate a card's inner DOM once it's on screen.
     await card.scrollIntoViewIfNeeded().catch(() => {});
     await sleep(120);
-    const text = async (sel) => (sel ? (await card.locator(sel).first().textContent().catch(() => ""))?.trim() ?? "" : "");
-    const href = await card.locator(cfg.job_card_href).first().getAttribute("href").catch(() => null);
-    const idAttr = cfg.job_card_id_attr ? await card.getAttribute(cfg.job_card_id_attr).catch(() => null) : null;
+    // Supports ":nth(N)" suffix for pages where sibling selectors aren't usable (hashed classes).
+    // e.g. "p:nth(1)" → card.locator("p").nth(1)
+    const text = async (sel) => {
+      if (!sel) return "";
+      const m = sel.match(/:nth\((\d+)\)$/);
+      const locator = m ? card.locator(sel.slice(0, -m[0].length)).nth(parseInt(m[1], 10)) : card.locator(sel).first();
+      // Card fields (title/company/location) are always single-line. Take the first non-empty line
+      // so that badge text or a11y duplicate spans embedded in the same element don't pollute the value.
+      const raw = (await locator.innerText().catch(() => ""))?.trim() ?? "";
+      return raw.split("\n").find((l) => l.trim()) ?? "";
+    };
+    const href = cfg.job_card_href
+      ? await card.locator(cfg.job_card_href).first().getAttribute("href").catch(() => null)
+      : null;
+    let idAttr = cfg.job_card_id_attr ? await card.getAttribute(cfg.job_card_id_attr).catch(() => null) : null;
+    if (idAttr && cfg.job_card_id_attr_prefix && idAttr.startsWith(cfg.job_card_id_attr_prefix)) {
+      idAttr = idAttr.slice(cfg.job_card_id_attr_prefix.length);
+    }
     const job_id = idAttr || extractJobId(href);
     out.push({
       index: i,
@@ -225,6 +242,58 @@ async function captureJd(jdTab, page, cfg, card) {
   return (await extractJdText(page, cfg)).slice(0, cap);
 }
 
+// ---------- pagination ----------
+// Loads all pages for a URL according to cfg.pagination_type:
+//   "url-pages"      — iterates start=0, 25, 50… stopping when a page returns 0 cards or fewer
+//                      than pagination_page_size (signals last page). Deduplicates by job_id.
+//   "infinite-scroll" (or unset) — existing scroll-and-stabilise behaviour.
+// Runs runAssertions on the first page load only.
+async function collectAllPages(page, url, cfg) {
+  const pType = (cfg.pagination_type || "infinite-scroll").trim();
+
+  if (pType !== "url-pages") {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await jitter();
+    await scrollToEnd(page, cfg);
+    await runAssertions(page, cfg);
+    return collectCards(page, cfg);
+  }
+
+  const param    = cfg.pagination_param    || "start";
+  const pageSize = parseInt(cfg.pagination_page_size || "25", 10);
+  const maxPages = parseInt(cfg.max_pages  || "4", 10);
+  // Honour EXTRACT_MAX_CARDS early — stop fetching pages once we have enough cards,
+  // rather than fetching all max_pages and capping afterwards.
+  const cardCap  = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
+  const seen = new Set();
+  const all  = [];
+
+  for (let p = 0; p < maxPages; p++) {
+    const u = new URL(url);
+    u.searchParams.set(param, p * pageSize);
+    await page.goto(u.toString(), { waitUntil: "domcontentloaded" });
+    await jitter();
+    if (p === 0) await runAssertions(page, cfg);
+    const cards = await collectCards(page, cfg);
+    // Warn on page 2+ returning nothing — could be selector drift rather than a real last page.
+    if (p > 0 && cards.length === 0) {
+      console.warn(`[extract]   ⚠ page ${p + 1} returned 0 cards — possible selector drift`);
+    }
+    // Iterate (not filter+forEach) so seen is updated per-card — prevents same-page duplicates
+    // from both passing the filter before the Set is updated.
+    const prevLen = all.length;
+    for (const card of cards) {
+      if (!card.job_id || seen.has(card.job_id)) continue;
+      seen.add(card.job_id);
+      all.push(card);
+    }
+    console.log(`[extract]   page ${p + 1}: ${cards.length} cards (${all.length - prevLen} new)`);
+    if (cards.length === 0 || cards.length < pageSize) break;
+    if (cardCap > 0 && all.length >= cardCap) break;
+  }
+  return all;
+}
+
 // ---------- main ----------
 async function main() {
   if (!(await exists(SEARCH_URLS))) throw new Error(`${SEARCH_URLS} not found — run /setup.`);
@@ -261,12 +330,7 @@ async function main() {
       try {
         if (page.isClosed()) page = await context.newPage();
         console.log(`[extract] ${group.page} ← ${url}`);
-        await page.goto(url, { waitUntil: "domcontentloaded" });
-        await jitter();
-        await scrollToEnd(page, cfg);
-        await runAssertions(page, cfg);
-
-        let cards = await collectCards(page, cfg);
+        let cards = await collectAllPages(page, url, cfg);
         summary.cards += cards.length;
         const before = cards.length;
         cards = cards.filter((c) => !isAvoided(c.company, avoid));

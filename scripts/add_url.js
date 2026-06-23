@@ -29,16 +29,13 @@ export function stripEphemerals(rawUrl) {
   return u;
 }
 
-// Resolve channel + page-type from the URL. The jobs search, search-results, and collections
-// surfaces all render the same card DOM (.scaffold-layout__list + li[data-occludable-job-id]),
-// so they share one inventory. Extend as lanes grow.
 export function resolvePage(u) {
   if (u.hostname.endsWith("linkedin.com")) {
-    if (/^\/jobs\/(search|search-results)\/?$/.test(u.pathname)) {
+    if (/^\/jobs\/search\/?$/.test(u.pathname) || u.pathname.startsWith("/jobs/collections/")) {
       return { channel: "linkedin", page: "linkedin__jobs-search" };
     }
-    if (u.pathname.startsWith("/jobs/collections/")) {
-      return { channel: "linkedin", page: "linkedin__jobs-search" };
+    if (/^\/jobs\/search-results\/?$/.test(u.pathname)) {
+      return { channel: "linkedin", page: "linkedin__jobs-search-results" };
     }
   }
   throw new Error(`No page-type mapping for ${u.hostname}${u.pathname} — add one in resolvePage().`);
