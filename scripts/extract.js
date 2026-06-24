@@ -10,6 +10,7 @@
 // Quality gate: assertions from the inventory. On a page-group failure, skip THAT group and
 // continue the others; record it in the run summary (one stale selector never kills the run).
 
+import "dotenv/config";
 import { readFile, writeFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,7 @@ import { dirname, join } from "node:path";
 import { chromium } from "playwright";
 import { extractJobId } from "./util.js";
 import { loadAvoid, isAvoided } from "./avoid.js";
+import { readCache } from "./cache.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Defaults to search_urls.md; SEARCH_URLS_FILE overrides it for subset/test runs.
@@ -300,12 +302,15 @@ async function main() {
   const groups = parseSearchUrls(await readFile(SEARCH_URLS, "utf8"));
   if (!groups.length) throw new Error("No search URLs found in search_urls.md (run /add-url).");
 
-  const avoid = await loadAvoid();
+  const [avoid, cache] = await Promise.all([loadAvoid(), readCache()]);
+  const cachedIds = new Set((cache.jobs || []).map((j) => j.job_id).filter(Boolean));
+  console.log(`[extract] cache: ${cachedIds.size} known job IDs (last_run: ${cache.last_run ?? "never"}) — will skip`);
+
   const browser = await chromium.connectOverCDP(CDP_URL);
   const context = browser.contexts()[0] || (await browser.newContext());
 
   const results = [];
-  const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, captured: 0 };
+  const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, captured: 0 };
 
   for (const group of groups) {
     summary.groups++;
@@ -331,16 +336,25 @@ async function main() {
         if (page.isClosed()) page = await context.newPage();
         console.log(`[extract] ${group.page} ← ${url}`);
         let cards = await collectAllPages(page, url, cfg);
-        summary.cards += cards.length;
         const before = cards.length;
         cards = cards.filter((c) => !isAvoided(c.company, avoid));
         const dropped = before - cards.length;
         summary.avoided += dropped;
         if (dropped) console.log(`[extract]   Stage A: dropped ${dropped} avoid-list card(s) pre-JD`);
 
-        // Optional safety cap (politeness / testing): EXTRACT_MAX_CARDS per query, 0/unset = all.
+        // Cards with no job_id can't be matched against the cache and are conservatively
+        // passed through — dedup catches them downstream via role+company fallback.
+        const beforeCache = cards.length;
+        cards = cards.filter((c) => !c.job_id || !cachedIds.has(c.job_id));
+        const cacheSkipped = beforeCache - cards.length;
+        summary.cache_skipped += cacheSkipped;
+        if (cacheSkipped) console.log(`[extract]   cache: skipped ${cacheSkipped} already-known card(s)`);
+
+        // Cap applied after cache-skip so it limits genuinely-new cards only.
         const cap = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
         if (cap > 0 && cards.length > cap) cards = cards.slice(0, cap);
+
+        summary.cards += cards.length; // cards entering JD fetch (post all filters)
 
         for (const card of cards) {
           if (!card.job_url) continue;
@@ -385,7 +399,7 @@ async function main() {
 
   console.log(
     `[extract] groups=${summary.groups} skipped=${summary.skipped.length} ` +
-      `cards=${summary.cards} avoided=${summary.avoided} captured=${summary.captured} → jobs_raw_text.json`
+      `cards=${summary.cards} avoided=${summary.avoided} cache_skipped=${summary.cache_skipped} captured=${summary.captured} → jobs_raw_text.json`
   );
   for (const s of summary.skipped) console.log(`[extract]   skipped ${s.page}: ${s.reason}`);
 }

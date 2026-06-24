@@ -18,7 +18,8 @@ const CACHE_PATH = join(ROOT, "data", "cache.json");
 export async function readCache() {
   try {
     return JSON.parse(await readFile(CACHE_PATH, "utf8"));
-  } catch {
+  } catch (err) {
+    if (err.code !== "ENOENT") console.warn(`[cache] cache.json unreadable (${err.message}) — treating as empty`);
     return { last_run: null, jobs: [] };
   }
 }
