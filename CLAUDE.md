@@ -14,13 +14,13 @@ The pipeline is driven by slash commands, not by reading steps from here.
 - Stage commands (also standalone for re-run/debug): `/doctor · /reconcile · /extract · /structure · /filter · /dedup · /rank · /sync`.
 - Setup & maintenance: `/setup · /page-analyse · /add-url · /update-resume`.
 
-Most stages are thin `node scripts/<x>.js` wrappers. `/structure` and `/page-analyse` are the exceptions: `/structure` invokes the `/structure` skill (no script file — the skill does the LLM work directly); `/page-analyse` is browser-driven (Claude in Chrome).
+Most stages are thin `node scripts/<x>.js` wrappers. `/structure` and `/page-analyse` are the exceptions: `/structure` invokes the `/structure` skill (no script file — the skill does the LLM work directly); `/page-analyse` is browser-driven (Claude in Chrome). Two bookend scripts flank `/structure`: `compress.js` converts `jobs_raw_text.json` → `structure_input.md` (compact markdown table, pre-filtered) before the LLM; `assemble.js` merges the LLM output (`jobs_raw_decisions.json`) with pass-through fields (`structure_passthrough.json`) → `jobs_raw.json` after.
 
 ## Non-negotiables
 
 - **Determinism.** Filtering, dedup, and ranking are pure JS. The **only** runtime LLM stage is `/structure` (raw text → `jobs_raw.json`). Never put ranking or filtering logic behind an LLM.
 - **Surface before implement.** When a spec detail is ambiguous, stop and ask — don't guess a heuristic into existence.
-- **Token efficiency.** Stage A drops avoid-list companies on card data before JDs are opened.
+- **Token efficiency.** Stage A drops avoid-list companies on card data before JDs are opened. `compress.js` further pre-filters by card title (role + frontend signal keywords) and converts the remaining entries to a compact markdown table, stripping pass-through fields the LLM never reads — cutting `/structure` input by ~55-60% vs. raw JSON.
 
 ## Operational rules
 

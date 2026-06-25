@@ -306,8 +306,21 @@ async function main() {
   const cachedIds = new Set((cache.jobs || []).map((j) => j.job_id).filter(Boolean));
   console.log(`[extract] cache: ${cachedIds.size} known job IDs (last_run: ${cache.last_run ?? "never"}) — will skip`);
 
-  const browser = await chromium.connectOverCDP(CDP_URL);
-  const context = browser.contexts()[0] || (await browser.newContext());
+  let browser = await chromium.connectOverCDP(CDP_URL);
+  let context = browser.contexts()[0] || (await browser.newContext());
+
+  // When LinkedIn closes our tab the whole context can die. Reconnect to CDP transparently.
+  async function newPage() {
+    try {
+      return await context.newPage();
+    } catch (e) {
+      if (!/closed/i.test(e.message)) throw e;
+      console.warn("[extract]   context lost — reconnecting to CDP...");
+      browser = await chromium.connectOverCDP(CDP_URL);
+      context = browser.contexts()[0] || (await browser.newContext());
+      return context.newPage();
+    }
+  }
 
   const results = [];
   const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, captured: 0 };
@@ -326,14 +339,14 @@ async function main() {
       continue;
     }
 
-    let page = await context.newPage();
+    let page = await newPage();
     const isNewPage = (cfg.interaction_model || "inline").trim() === "new-page";
-    let jdTab = isNewPage ? await context.newPage() : null;
+    let jdTab = isNewPage ? await newPage() : null;
     for (const { url } of group.urls) {
       // Per-URL resilience: a failure on one search (or a closed tab from outside interaction)
       // skips just that URL, never the rest of the group.
       try {
-        if (page.isClosed()) page = await context.newPage();
+        if (page.isClosed()) page = await newPage();
         console.log(`[extract] ${group.page} ← ${url}`);
         let cards = await collectAllPages(page, url, cfg);
         const before = cards.length;
@@ -361,7 +374,7 @@ async function main() {
           await jitter();
           let raw_text;
           try {
-            if (isNewPage && jdTab.isClosed()) jdTab = await context.newPage();
+            if (isNewPage && jdTab.isClosed()) jdTab = await newPage();
             raw_text = await captureJd(jdTab, page, cfg, card);
           } catch (e) {
             console.error(`[extract]   skip card ${card.job_id} — ${e.message}`);
