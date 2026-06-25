@@ -3,6 +3,21 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.3.0] — 2026-06-26
+
+### Added
+- `compress.js`: pre-LLM stage that pre-filters `jobs_raw_text.json` by card title (role words + frontend signal keywords), sanitises `raw_text`, and emits a compact markdown table (`structure_input.md`) + `structure_passthrough.json`. Cuts `/structure` token input by ~55–60%.
+- `assemble.js`: post-LLM stage that merges `jobs_raw_decisions.json` (LLM-only fields) with `structure_passthrough.json` → `jobs_raw.json`. Fails loud on missing required fields per CLAUDE.md "fail loud" rule.
+- `/structure` skill: reads `structure_input.md`; writes `jobs_raw_decisions.json` (LLM fields only); checkpoints every 25 rows to `jobs_raw_checkpoint.json` for context-compaction recovery; resumes from checkpoint if present.
+- `/run` pipeline expanded 8 → 10 steps (compress at step 4, assemble at step 6).
+- `extract.js`: `newPage()` helper with transparent CDP reconnect on context-closed errors.
+
+### Fixed
+- `compress.js`: escape `|` in `card_title`, `card_company`, `card_location` before table interpolation; real-world titles like `"Frontend Developer - Fully Remote | Upto $85/hr"` were splitting the markdown column.
+- `compress.js`: skip cards with null `job_id` early to prevent `"null"` string landing in the table and aborting `assemble.js`.
+- `compress.js` / `assemble.js`: parallel `Promise.all` for file I/O (was sequential).
+- `filter_config.json`: lower `skills_overlap_threshold` 3 → 2; previous threshold was too strict (4 of 208 jobs passing; 2 correctly includes near-miss frontend roles).
+
 ## [0.2.4] — 2026-06-24
 
 ### Fixed
