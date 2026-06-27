@@ -3,6 +3,12 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.4.1] — 2026-06-27
+
+### Changed
+- `extract.js`: new `stageFilter(cards, pred, msgFn, summaryKey, summary)` helper eliminates 3 duplicated before/after/log blocks (avoid, cache-skip, title-filter); `DEBUG` and `CARD_CAP` hoisted to module-level constants (was double-parsed from `process.env` per call); card field reads parallelised with `Promise.all` (5 attributes per card, all at once); cap now applied after all pre-filters (was before title gate — ordering gap); `title_dropped` counter added to run summary; per-card DROP logs gated behind `DEBUG` env var; dead `selector-visible` case removed from `waitSettled` switch; redundant post-loop `writeFile` removed (incremental flush inside URL loop is sufficient); `captureJd` takes explicit `cap` param computed once per group (not re-read per card via `jdCap(cfg)` each time).
+- `compress.js`: retired `PREFILTER_PATTERNS` / `passesPreFilter` — Stage A already gates by title in `extract.js`; a second divergent hardcoded filter was a maintenance hazard with no added value.
+
 ## [0.4.0] — 2026-06-27
 
 ### Added
