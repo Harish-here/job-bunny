@@ -19,6 +19,7 @@ import { chromium } from "playwright";
 import { extractJobId } from "./util.js";
 import { loadAvoid, isAvoided } from "./avoid.js";
 import { readCache } from "./cache.js";
+import { filterByTitle } from "./title_filter.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Defaults to search_urls.md; SEARCH_URLS_FILE overrides it for subset/test runs.
@@ -366,6 +367,16 @@ async function main() {
         // Cap applied after cache-skip so it limits genuinely-new cards only.
         const cap = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
         if (cap > 0 && cards.length > cap) cards = cards.slice(0, cap);
+
+        // Stage A title filter — drop non-matching titles before any JD tab is opened.
+        const beforeTitle = cards.length;
+        cards = cards.filter((c) => {
+          const r = filterByTitle(c.title || "");
+          if (!r.pass) console.log(`[title-filter] DROP — ${r.reason} — ${c.title}`);
+          return r.pass;
+        });
+        const titleDropped = beforeTitle - cards.length;
+        if (titleDropped) console.log(`[extract]   title-filter: dropped ${titleDropped} card(s) pre-JD`);
 
         summary.cards += cards.length; // cards entering JD fetch (post all filters)
 
