@@ -3,6 +3,16 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.4.0] — 2026-06-27
+
+### Added
+- `scripts/title_filter.js`: universal config-driven title gate; exports `filterByTitle(title) → { pass, reason }`. Evaluation order: `function.block` (hard drop) → `seniority` → `domain`; multi-word terms matched as full phrases, longest-first. Regexes compiled once at module load. `function.allow` is informational only (appears in pass-reason string, not a gate).
+- `filter_config.json`: new `title_filter` key with `seniority`, `domain`, and `function.allow/block` lists — title tuning no longer requires code edits in any script.
+
+### Changed
+- `extract.js` (Stage A): title filter wired after cache-skip and card cap; non-matching titles (non-engineering roles, blocked functions) now dropped before any JD tab is opened — eliminates browser navigation + jitter cost for irrelevant cards.
+- `filter.js` (Stage B): title gate replaced by `filterByTitle()` call; old seniority/title_keywords/skills-fallback logic and `resume_meta.json` dependency removed.
+
 ## [0.3.0] — 2026-06-26
 
 ### Added
