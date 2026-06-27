@@ -26,6 +26,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SEARCH_URLS = process.env.SEARCH_URLS_FILE || join(ROOT, "search_urls.md");
 const OUT = join(ROOT, "jobs_raw_text.json");
 const CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
+const DEBUG = !!process.env.DEBUG;
+const CARD_CAP = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
 
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -136,23 +138,23 @@ async function collectCards(page, cfg) {
       const raw = (await locator.innerText().catch(() => ""))?.trim() ?? "";
       return raw.split("\n").find((l) => l.trim()) ?? "";
     };
-    const href = cfg.job_card_href
-      ? await card.locator(cfg.job_card_href).first().getAttribute("href").catch(() => null)
-      : null;
-    let idAttr = cfg.job_card_id_attr ? await card.getAttribute(cfg.job_card_id_attr).catch(() => null) : null;
+    const [title, company, location, href, idAttr_raw] = await Promise.all([
+      text(cfg.job_card_title),
+      text(cfg.job_card_company),
+      text(cfg.job_card_location),
+      cfg.job_card_href
+        ? card.locator(cfg.job_card_href).first().getAttribute("href").catch(() => null)
+        : Promise.resolve(null),
+      cfg.job_card_id_attr
+        ? card.getAttribute(cfg.job_card_id_attr).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    let idAttr = idAttr_raw;
     if (idAttr && cfg.job_card_id_attr_prefix && idAttr.startsWith(cfg.job_card_id_attr_prefix)) {
       idAttr = idAttr.slice(cfg.job_card_id_attr_prefix.length);
     }
     const job_id = idAttr || extractJobId(href);
-    out.push({
-      index: i,
-      title: await text(cfg.job_card_title),
-      company: await text(cfg.job_card_company),
-      location: await text(cfg.job_card_location),
-      href,
-      job_id,
-      job_url: canonicalUrl(cfg, job_id, href, page.url()),
-    });
+    out.push({ index: i, title, company, location, href, job_id, job_url: canonicalUrl(cfg, job_id, href, page.url()) });
   }
   return out;
 }
@@ -173,6 +175,17 @@ function parseList(v) {
   return v.replace(/^\[|\]$/g, "").split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
 }
 
+// ---------- pre-JD card filter ----------
+// Applies a predicate, logs the drop count via msgFn(n), and accumulates into summary[summaryKey].
+function stageFilter(cards, pred, msgFn, summaryKey, summary) {
+  const before = cards.length;
+  const out = cards.filter(pred);
+  const n = before - out.length;
+  if (summaryKey) summary[summaryKey] += n;
+  if (n) console.log(msgFn(n));
+  return out;
+}
+
 // ---------- JD capture ----------
 async function waitSettled(page, cfg) {
   switch ((cfg.jd_settled_signal || "selector-visible").trim()) {
@@ -184,7 +197,6 @@ async function waitSettled(page, cfg) {
     case "url-change":
       await sleep(800);
       break;
-    case "selector-visible":
     default:
       if (cfg.jd_body) await page.locator(cfg.jd_body).first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
   }
@@ -227,8 +239,7 @@ function jdCap(cfg) {
 // jdTab is a single REUSED tab for the new-page model — we goto() into it per job rather than
 // opening/closing a fresh tab each time. Rapid newPage/close churn was destabilizing the shared
 // CDP browser; one long-lived tab is far more reliable.
-async function captureJd(jdTab, page, cfg, card) {
-  const cap = jdCap(cfg);
+async function captureJd(jdTab, page, cfg, card, cap) {
   if ((cfg.interaction_model || "inline").trim() === "new-page") {
     await jdTab.goto(card.job_url || card.href, { waitUntil: "domcontentloaded" });
     await waitSettled(jdTab, cfg);
@@ -265,9 +276,9 @@ async function collectAllPages(page, url, cfg) {
   const param    = cfg.pagination_param    || "start";
   const pageSize = parseInt(cfg.pagination_page_size || "25", 10);
   const maxPages = parseInt(cfg.max_pages  || "4", 10);
-  // Honour EXTRACT_MAX_CARDS early — stop fetching pages once we have enough cards,
+  // Honour CARD_CAP early — stop fetching pages once we have enough cards,
   // rather than fetching all max_pages and capping afterwards.
-  const cardCap  = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
+  const cardCap  = CARD_CAP;
   const seen = new Set();
   const all  = [];
 
@@ -324,7 +335,7 @@ async function main() {
   }
 
   const results = [];
-  const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, captured: 0 };
+  const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, title_dropped: 0, captured: 0 };
 
   for (const group of groups) {
     summary.groups++;
@@ -343,6 +354,7 @@ async function main() {
     let page = await newPage();
     const isNewPage = (cfg.interaction_model || "inline").trim() === "new-page";
     let jdTab = isNewPage ? await newPage() : null;
+    const groupCap = jdCap(cfg);
     for (const { url } of group.urls) {
       // Per-URL resilience: a failure on one search (or a closed tab from outside interaction)
       // skips just that URL, never the rest of the group.
@@ -350,33 +362,28 @@ async function main() {
         if (page.isClosed()) page = await newPage();
         console.log(`[extract] ${group.page} ← ${url}`);
         let cards = await collectAllPages(page, url, cfg);
-        const before = cards.length;
-        cards = cards.filter((c) => !isAvoided(c.company, avoid));
-        const dropped = before - cards.length;
-        summary.avoided += dropped;
-        if (dropped) console.log(`[extract]   Stage A: dropped ${dropped} avoid-list card(s) pre-JD`);
 
-        // Cards with no job_id can't be matched against the cache and are conservatively
-        // passed through — dedup catches them downstream via role+company fallback.
-        const beforeCache = cards.length;
-        cards = cards.filter((c) => !c.job_id || !cachedIds.has(c.job_id));
-        const cacheSkipped = beforeCache - cards.length;
-        summary.cache_skipped += cacheSkipped;
-        if (cacheSkipped) console.log(`[extract]   cache: skipped ${cacheSkipped} already-known card(s)`);
+        cards = stageFilter(cards,
+          (c) => !isAvoided(c.company, avoid),
+          (n) => `[extract]   Stage A: dropped ${n} avoid-list card(s) pre-JD`,
+          "avoided", summary);
 
-        // Cap applied after cache-skip so it limits genuinely-new cards only.
-        const cap = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
-        if (cap > 0 && cards.length > cap) cards = cards.slice(0, cap);
+        cards = stageFilter(cards,
+          (c) => !c.job_id || !cachedIds.has(c.job_id),
+          (n) => `[extract]   cache: skipped ${n} already-known card(s)`,
+          "cache_skipped", summary);
 
-        // Stage A title filter — drop non-matching titles before any JD tab is opened.
-        const beforeTitle = cards.length;
-        cards = cards.filter((c) => {
-          const r = filterByTitle(c.title || "");
-          if (!r.pass) console.log(`[title-filter] DROP — ${r.reason} — ${c.title}`);
-          return r.pass;
-        });
-        const titleDropped = beforeTitle - cards.length;
-        if (titleDropped) console.log(`[extract]   title-filter: dropped ${titleDropped} card(s) pre-JD`);
+        cards = stageFilter(cards,
+          (c) => {
+            const r = filterByTitle(c.title || "");
+            if (!r.pass && DEBUG) console.log(`[title-filter] DROP — ${r.reason} — ${c.title}`);
+            return r.pass;
+          },
+          (n) => `[extract]   title-filter: dropped ${n} card(s) pre-JD`,
+          "title_dropped", summary);
+
+        // Cap applied after all pre-filters so it limits genuinely-new JD-fetch candidates.
+        if (CARD_CAP > 0 && cards.length > CARD_CAP) cards = cards.slice(0, CARD_CAP);
 
         summary.cards += cards.length; // cards entering JD fetch (post all filters)
 
@@ -386,7 +393,7 @@ async function main() {
           let raw_text;
           try {
             if (isNewPage && jdTab.isClosed()) jdTab = await newPage();
-            raw_text = await captureJd(jdTab, page, cfg, card);
+            raw_text = await captureJd(jdTab, page, cfg, card, groupCap);
           } catch (e) {
             console.error(`[extract]   skip card ${card.job_id} — ${e.message}`);
             continue; // one bad JD never aborts the rest
@@ -419,11 +426,11 @@ async function main() {
 
   // NOTE: never browser.close() — this is an attach over CDP to the user's running Chrome;
   // closing it would tear down their browser/session. We just drop the connection on exit.
-  await writeFile(OUT, JSON.stringify(results, null, 2) + "\n");
 
   console.log(
     `[extract] groups=${summary.groups} skipped=${summary.skipped.length} ` +
-      `cards=${summary.cards} avoided=${summary.avoided} cache_skipped=${summary.cache_skipped} captured=${summary.captured} → jobs_raw_text.json`
+      `cards=${summary.cards} avoided=${summary.avoided} cache_skipped=${summary.cache_skipped} ` +
+      `title_dropped=${summary.title_dropped} captured=${summary.captured} → jobs_raw_text.json`
   );
   for (const s of summary.skipped) console.log(`[extract]   skipped ${s.page}: ${s.reason}`);
 }

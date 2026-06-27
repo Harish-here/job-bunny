@@ -1,6 +1,7 @@
 // scripts/compress.js — pre-LLM compression stage.
-// Reads jobs_raw_text.json, pre-filters by title, sanitises raw_text,
+// Reads jobs_raw_text.json, sanitises raw_text,
 // and writes structure_input.md (compact markdown table) + structure_passthrough.json.
+// Title filtering already happened in extract.js (Stage A); no second gate needed here.
 
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -10,27 +11,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const IN = join(ROOT, "jobs_raw_text.json");
 const OUT_MD = join(ROOT, "structure_input.md");
 const OUT_PT = join(ROOT, "structure_passthrough.json");
-
-const PREFILTER_PATTERNS = [
-  /\bengineer\b/i,
-  /\bdeveloper\b/i,
-  /\barchitect\b/i,
-  /\btechnical\b/i,
-  /\bprogrammer\b/i,
-  /\bfrontend\b/i,
-  /\bfront-end\b/i,
-  /\bui\b/i,
-  /\breact\b/i,
-  /\bjavascript\b/i,
-  /\btypescript\b/i,
-  /\bfullstack\b/i,
-  /\bfull-stack\b/i,
-  /\bfull stack\b/i,
-];
-
-function passesPreFilter(title) {
-  return PREFILTER_PATTERNS.some((re) => re.test(title));
-}
 
 const escapePipe = (v) => (v == null ? "" : String(v).replace(/\|/g, "｜"));
 
@@ -61,11 +41,6 @@ async function main() {
       console.warn(`[compress] skip: no job_id for "${job.card_title}" @ ${job.card_company}`);
       continue;
     }
-    const title = job.card_title || "";
-    if (!passesPreFilter(title)) {
-      console.log(`[compress] pre-filter drop: "${title}" @ ${job.card_company}`);
-      continue;
-    }
     kept.push(job);
     passthrough.push({
       job_id: job.job_id,
@@ -74,8 +49,6 @@ async function main() {
       source_query_url: job.source_query_url,
     });
   }
-
-  const dropped = jobs.length - kept.length;
 
   // Build markdown table
   const header = `# Structure Input — ${today} | ${kept.length}/${jobs.length} jobs\n\n| # | id | card_title | company | location | raw_text |\n|---|----|-----------|---------|----------|----------|\n`;
@@ -90,7 +63,7 @@ async function main() {
     writeFile(OUT_PT, JSON.stringify(passthrough, null, 2) + "\n"),
   ]);
 
-  console.log(`[compress] ${jobs.length} in → ${kept.length} to structure (${dropped} pre-filtered) → structure_input.md`);
+  console.log(`[compress] ${jobs.length} in → ${kept.length} to structure (${jobs.length - kept.length} pre-filtered) → structure_input.md`);
 }
 
 main().catch((err) => {
