@@ -3,6 +3,18 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.6.0] — 2026-06-29
+
+### Added
+- `scripts/assemble.js`: `parseDecisionsMd()` — parses the LLM's markdown table output into structured objects. 11 fixed columns; empty cell = null; `true`/`false` for booleans; semicolon-separated skills → array; `｜` unescaped to `|`. Fails loud with row number and cell count on format drift.
+
+### Changed
+- `/structure` output format: LLM now writes `jobs_raw_decisions.md` (markdown table) instead of `jobs_raw_decisions.json`. Eliminates repeated field names, brackets, and quotes — ~55% fewer output tokens per row at batch scale. Checkpoint also writes markdown (`jobs_raw_checkpoint.md`).
+- `assemble.js`: reads `jobs_raw_decisions.md`; JSON parse replaced by `parseDecisionsMd()`.
+- `fixtures/structure_example.md`: updated to show markdown input → markdown output worked example.
+- `.gitignore`: added `jobs_raw_decisions.md` and `jobs_raw_checkpoint.md`.
+- `CLAUDE.md`: updated output filename reference and token efficiency note.
+
 ## [0.5.0] — 2026-06-29
 
 ### Added
