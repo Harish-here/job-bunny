@@ -7,7 +7,9 @@ node_modules/
 # Per-run intermediate artifacts (regenerated each run)
 jobs_raw_text.json
 jobs_raw_decisions.json
+jobs_raw_decisions.md
 jobs_raw_checkpoint.json
+jobs_raw_checkpoint.md
 jobs_raw.json
 filtered_jobs.json
 new_jobs.json
