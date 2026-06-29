@@ -1,0 +1,72 @@
+{
+  "current_yoe": 8,
+  "target_seniority": ["Staff", "Lead"],
+  "core_skills": [
+    "React",
+    "TypeScript",
+    "JavaScript",
+    "Micro Frontends",
+    "UI Systems",
+    "Component Architecture",
+    "Design Systems"
+  ],
+  "secondary_skills": [
+    "Vue.js",
+    "Redux Toolkit",
+    "Tailwind CSS",
+    "Storybook",
+    "Webpack",
+    "Vite",
+    "Web Performance",
+    "Accessibility",
+    "Playwright",
+    "Jest",
+    "Node.js"
+  ],
+  "preferred_work_type": ["Remote", "Hybrid"],
+  "location": "Your City",
+  "domain_experience": [
+    "Enterprise SaaS",
+    "Retail and E-commerce"
+  ],
+  "usp": [
+    "One-line impact statement highlighting your flagship architecture work",
+    "A second differentiator (scale, performance, or platform ownership)"
+  ],
+  "full_resume": {
+    "name": "Your Name",
+    "title": "Front-end Platform Architect | React, TypeScript, UI Systems",
+    "contact": {
+      "location": "Your City, Country",
+      "phone": "+00 00000 00000",
+      "email": "you@example.com",
+      "linkedin": "linkedin.com/in/your-handle/"
+    },
+    "summary": "One-paragraph professional summary. Used as build-time reference only; the daily pipeline ranks against resume_meta.json, never this block.",
+    "selectedImpact": [
+      "Quantified impact bullet (what you built, the scale, the outcome).",
+      "Another impact bullet."
+    ],
+    "skills": [
+      { "category": "Languages & Frameworks", "items": "TypeScript, JavaScript, React, Vue.js, Redux Toolkit, Tailwind CSS, REST APIs." },
+      { "category": "UI Systems & Architecture", "items": "UI Platform Architecture, Component Architecture, Design Systems, Micro Frontends (MFE), Storybook, Web Performance, Accessibility, Webpack/Vite." },
+      { "category": "Quality & Delivery", "items": "Automated Testing, Jest/RTL, E2E (Playwright), CI/CD Pipeline Design, Build Optimization." }
+    ],
+    "experience": [
+      {
+        "company": "Example Corp",
+        "location": "Your City",
+        "title": "Lead Software Engineer, Front-end",
+        "duration": "MM/YYYY - Present",
+        "responsibilities": [
+          "Responsibility / achievement bullet.",
+          "Another responsibility bullet."
+        ]
+      }
+    ],
+    "education": [
+      { "institution": "Your University", "location": "City", "degree": "Bachelor of Engineering", "duration": "08/YYYY - 05/YYYY" }
+    ],
+    "languages": ["Language, Native", "English, Professional"]
+  }
+}

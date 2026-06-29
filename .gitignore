@@ -1,6 +1,12 @@
 # Secrets — must be ignored before init.js ever writes a token
 .env
 
+# Personal data — public repo ships sanitized *.example.json templates instead
+# resume.json: real contact details + work history (build-time source of truth)
+# data/cache.json: live job pipeline (ratings, salary-band search URLs, Notion IDs)
+resume.json
+data/cache.json
+
 # Dependencies
 node_modules/
 

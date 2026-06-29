@@ -1,0 +1,22 @@
+{
+  "last_run": "2026-01-01T00:00:00.000Z",
+  "jobs": [
+    {
+      "job_id": "0000000000",
+      "job_title": "Lead UI Engineer",
+      "company_name": "Example Corp",
+      "seniority_level": "Lead",
+      "location_city": "Your City",
+      "work_type": "On-site",
+      "years_of_experience": null,
+      "yoe_is_minimum": false,
+      "key_skills": ["React", "TypeScript", "Node.js"],
+      "job_url": "https://www.linkedin.com/jobs/view/0000000000/",
+      "date_found": "2026-01-01",
+      "timezone_compatibility": null,
+      "source_query_url": "https://www.linkedin.com/jobs/search-results/?keywords=lead+frontend+engineer&geoId=00000000&distance=25&f_TPR=r86400",
+      "excitement_level": "Try panalam",
+      "notion_page_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}
