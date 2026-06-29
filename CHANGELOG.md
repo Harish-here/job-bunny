@@ -3,6 +3,20 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.6.2] — 2026-06-29
+
+### Added
+- `README.md`: public-facing overview — Mermaid pipeline diagram, stage table, setup steps, privacy note.
+- `assets/job-bunny-logo.svg`: chunky pixel-art mascot (lavender bunny holding a magnifying glass) — 20×20 sprite, transparent, `crispEdges`.
+- `resume.example.json` and `data/cache.example.json`: sanitized schema templates for a fresh clone.
+
+### Changed
+- `.gitignore`: now excludes `resume.json` and `data/cache.json` (real personal data, kept local-only).
+- `package.json`: version bumped to match the release tag.
+
+### Notes
+- Prepared for public release: removed personal PII (contact details, work history) and the salary-band search filter from the working tree **and rewrote git history** to purge them from all prior commits — tags preserved, commit log intact. No pipeline behaviour changed.
+
 ## [0.6.1] — 2026-06-29
 
 ### Added
