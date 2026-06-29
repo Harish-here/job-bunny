@@ -26,7 +26,6 @@ Most stages are thin `node scripts/<x>.js` wrappers. `/structure` and `/page-ana
 
 - **Avoid-list matching** normalizes both sides: lowercase, strip legal suffixes, apply the alias map (see `avoid.md`).
 - **`/add-url` strips ephemeral params** (`currentJobId`, `referralSearchId`, `origin`, `originToLandingJobPostings`, `savedSearchId`, `alertAction`, `trackingId`, `refId`, `eBP`, `start`), drops stale absolute `f_TPR=a<epoch>-` anchors (keeps relative `r<sec>`), and keeps the stable filter params. Path is preserved as-is (`/jobs/search-results/` and `/jobs/search/` both work with the extractor).
-- **LinkedIn geoId reference** (validated live): `geoId=106888327` = India, `geoId=90009647` = Greater Chennai Area. `f_WT` values: `1` = On-site, `2` = Hybrid, `3` = Remote. Combine with `%2C` for multi-select (e.g. `f_WT=3%2C2` = remote+hybrid).
 - **Chrome for `/extract`** — `/doctor` auto-launches Chrome with `--remote-debugging-port=9222` using the persistent profile at `.chrome-debug/` (gitignored). Login to LinkedIn once; the session is reused across runs. Do not tell the user to launch Chrome manually.
 - **extract.js is config-driven** — it reads selectors/behavior from `page_inventory/<page>.md` at runtime. DOM drift is fixed by editing the inventory, not by regenerating code.
 - **Notion select strings are byte-exact** (`scripts/schema.js`). Changing one without updating existing Notion options makes sync throw.
