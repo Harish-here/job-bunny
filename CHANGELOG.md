@@ -3,6 +3,17 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.5.0] — 2026-06-29
+
+### Added
+- `scripts/doctor.js`: auto-launches Chrome with `--remote-debugging-port=9222` using persistent profile at `.chrome-debug/` when CDP is unreachable; polls up to 10 s before failing. Login to LinkedIn once — session persists across runs. No manual Chrome start needed.
+- `search_urls.md`: expanded from 5 → 13 targeted search URLs. New queries: `Staff React Engineer`, `Lead UI Engineer`, `Principal React Engineer` (India remote); `Staff Frontend Engineer`, `Lead Frontend Engineer`, `Principal Frontend Engineer` (Chennai on-site+hybrid); `Staff Frontend Engineer` and `Lead Frontend Engineer` (India remote). Replaces broad `Lead Software Engineer` (267 title-drops, 0 captures per run) and noisy `Frontend Architect` URLs.
+
+### Changed
+- `search_urls.md`: stripped `f_SAL` salary filter from Banks and Staff FE search-results URLs — salary gate was suppressing results (Banks consistently returning 0; Staff FE unnecessarily filtered).
+- `.gitignore`: added `.chrome-debug/` (persistent browser profile, local-only); added all pipeline intermediate files (`jobs_raw_decisions.json`, `jobs_raw_checkpoint.json`, `structure_input.md`, `structure_passthrough.json`) — these are regenerated each run and were showing as untracked noise.
+- `CLAUDE.md`: documented Chrome auto-launch behaviour so future sessions know not to ask the user to start Chrome manually.
+
 ## [0.4.1] — 2026-06-27
 
 ### Changed
