@@ -3,6 +3,17 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.6.1] — 2026-06-29
+
+### Added
+- `.claude/commands/page-analyse.md`: authored the missing `/page-analyse` command — referenced in 5 places (`CLAUDE.md`, `add-url.md`, `add_url.js`, `doctor.js`, `extract.js`) but never written. Browser-driven (Claude in Chrome), script-less; inspects a page-type's live DOM and writes/refreshes `page_inventory/<page>.md` in the canonical format, with a completeness gate tied to `extract.js`'s `REQUIRED_SELECTORS`.
+
+### Fixed
+- `.claude/commands/run.md`: step 5 now references `jobs_raw_decisions.md` / `jobs_raw_checkpoint.md` — stale `.json` references left over from the v0.6.0 markdown switch (the code in `assemble.js` and the `/structure` skill already used `.md`).
+
+### Notes
+- `CLAUDE.md` cleanup (no behavioural change): removed the duplicate "No LLM in ranking or filtering" guardrail (already covered by the Determinism non-negotiable), replaced the inline `/add-url` param list with a pointer to `add-url.md`, condensed the token-efficiency note, and added `/wrap` to the maintenance command list.
+
 ## [0.6.0] — 2026-06-29
 
 ### Added
