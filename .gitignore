@@ -12,3 +12,6 @@ new_jobs.json
 
 # OS / editor noise
 .DS_Store
+
+# Chrome remote-debug profile (local only)
+.chrome-debug/

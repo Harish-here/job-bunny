@@ -10,6 +10,7 @@ import { readFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
@@ -29,17 +30,46 @@ async function checkSecrets() {
   else fail("NOTION_DB_ID missing (run /setup)");
 }
 
-async function checkCDP() {
-  console.log("[doctor] chrome CDP :9222");
+const CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME_DATA_DIR = join(ROOT, ".chrome-debug");
+
+async function cdpReachable() {
   try {
     const res = await fetch("http://127.0.0.1:9222/json/version", { signal: AbortSignal.timeout(2000) });
-    if (res.ok) {
-      const v = await res.json();
-      pass(`reachable (${v.Browser || "Chrome"})`);
-    } else fail(`responded ${res.status}`);
+    if (!res.ok) return null;
+    return await res.json();
   } catch {
-    fail("not reachable — start Chrome with --remote-debugging-port=9222 and log in to LinkedIn");
+    return null;
   }
+}
+
+async function checkCDP() {
+  console.log("[doctor] chrome CDP :9222");
+  let v = await cdpReachable();
+  if (v) {
+    pass(`reachable (${v.Browser || "Chrome"})`);
+    return;
+  }
+
+  console.log("  … not reachable — launching Chrome with debug profile");
+  const child = spawn(CHROME_BIN, [
+    "--remote-debugging-port=9222",
+    `--user-data-dir=${CHROME_DATA_DIR}`,
+  ], { detached: true, stdio: "ignore" });
+  child.unref();
+
+  // Poll for up to 10 s
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1000));
+    v = await cdpReachable();
+    if (v) {
+      pass(`reachable (${v.Browser || "Chrome"}) — just launched`);
+      return;
+    }
+  }
+
+  fail("Chrome did not start in time — open it manually and retry");
 }
 
 async function checkInventories() {
