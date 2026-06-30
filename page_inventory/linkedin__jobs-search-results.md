@@ -1,8 +1,10 @@
 # Page Inventory — linkedin / linkedin__jobs-search-results
 
-Filled from live DOM analysis on 2026-06-24 (Chrome 149, logged-in session) against
+Filled from live DOM analysis on 2026-06-30 (Chrome 149, logged-in session) against
 `https://www.linkedin.com/jobs/search-results/`. This route uses hashed/obfuscated CSS
 class names (unstable); card identity comes from the stable `componentkey` attribute.
+Selectors verified still valid. `must_exist` changed from job-card selector to
+`[componentkey="JobsSearchFilters"]` so 0-result pages don't false-fail the assertion.
 
 ## 1. Behavior (manual)
 - interaction_model: new-page
@@ -36,5 +38,5 @@ class names (unstable); card identity comes from the stable `componentkey` attri
 - jd_metadata: .job-details-jobs-unified-top-card__primary-description-container
 
 ## 3. Assertions
-- must_exist: [div[componentkey^="job-card-component-ref-"]]
-- min_job_cards: 1
+- must_exist: [[componentkey="JobsSearchFilters"]]
+- min_job_cards: 0
