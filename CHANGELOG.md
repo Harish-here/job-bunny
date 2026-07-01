@@ -3,6 +3,17 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.6.3] — 2026-07-01
+
+### Added
+- `search_urls.md`: 6 new saved searches — Staff/Lead Frontend Engineer, remote-only (`f_WT=2`), for Malaysia (`geoId=106808692`), Singapore (`geoId=102454443`), and Australia (`geoId=101452733`). geoIds verified live against LinkedIn's own location autocomplete.
+
+### Fixed
+- `page_inventory/linkedin__jobs-search.md` + `linkedin__jobs-search-results.md`: `jd_settled_signal` changed from `network-idle` to `selector-visible`. LinkedIn's long-poll/websocket traffic means `networkidle` almost never fires naturally, so every JD fetch was paying the full 4s timeout as dead time; waiting on `#job-details` becoming visible resolves in a fraction of that with no reliability loss.
+
+### Notes
+- Prior commit (`b849cc1`, already on main before this release): fixed the `linkedin__jobs-search-results` `must_exist` assertion.
+
 ## [0.6.2] — 2026-06-29
 
 ### Added
