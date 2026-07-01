@@ -10,7 +10,7 @@ Filled from live DOM analysis on 2026-06-18 (Chrome 149, logged-in session) agai
 - pagination_param: start
 - pagination_page_size: 25
 - max_pages: 4
-- jd_settled_signal: network-idle
+- jd_settled_signal: selector-visible
 - url_pattern_of_job: https://www.linkedin.com/jobs/view/<id>/
 - jd_anchor_text: About the job
 - max_raw_text_chars: 2500

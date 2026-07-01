@@ -13,7 +13,7 @@ Selectors verified still valid. `must_exist` changed from job-card selector to
 - pagination_param: start
 - pagination_page_size: 25
 - max_pages: 4
-- jd_settled_signal: network-idle
+- jd_settled_signal: selector-visible
 - url_pattern_of_job: https://www.linkedin.com/jobs/view/<id>/
 - jd_anchor_text: About the job
 - max_raw_text_chars: 2500

@@ -7,6 +7,12 @@ Add URLs with `/add-url` (strips ephemeral params). Format: `  • <label> - <ur
 ### linkedin__jobs-search
 <!-- inventory: page_inventory/linkedin__jobs-search.md -->
 
+  • Lead Frontend Engineer - Australia Remote - https://www.linkedin.com/jobs/search/?keywords=Lead+Frontend+Engineer&geoId=101452733&f_WT=2&f_TPR=r86400&sortBy=R
+  • Staff Frontend Engineer - Australia Remote - https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&geoId=101452733&f_WT=2&f_TPR=r86400&sortBy=R
+  • Lead Frontend Engineer - Singapore Remote - https://www.linkedin.com/jobs/search/?keywords=Lead+Frontend+Engineer&geoId=102454443&f_WT=2&f_TPR=r86400&sortBy=R
+  • Staff Frontend Engineer - Singapore Remote - https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&geoId=102454443&f_WT=2&f_TPR=r86400&sortBy=R
+  • Lead Frontend Engineer - Malaysia Remote - https://www.linkedin.com/jobs/search/?keywords=Lead+Frontend+Engineer&geoId=106808692&f_WT=2&f_TPR=r86400&sortBy=R
+  • Staff Frontend Engineer - Malaysia Remote - https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&geoId=106808692&f_WT=2&f_TPR=r86400&sortBy=R
   • Staff Frontend Engineer - Chennai - https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&geoId=90009647&f_WT=1%2C2&f_TPR=r86400&sortBy=R
   • Principal Frontend Engineer - Chennai - https://www.linkedin.com/jobs/search/?keywords=Principal+Frontend+Engineer&geoId=90009647&f_WT=1%2C2&f_TPR=r86400&sortBy=R
   • Principal React Engineer - India Remote - https://www.linkedin.com/jobs/search/?keywords=Principal+React+Engineer&geoId=106888327&f_WT=3%2C2&f_TPR=r86400&sortBy=R
