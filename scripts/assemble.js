@@ -7,13 +7,11 @@
 //   empty cell = null · booleans: true/false · skills: semicolon-separated · pipe in value: ｜
 
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { paths } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const IN_DECISIONS  = join(ROOT, "jobs_raw_decisions.md");
-const IN_PASSTHROUGH = join(ROOT, "structure_passthrough.json");
-const OUT = join(ROOT, "jobs_raw.json");
+const IN_DECISIONS  = paths().decisions;
+const IN_PASSTHROUGH = paths().structurePassthrough;
+const OUT = paths().jobsRaw;
 
 const REQUIRED_FIELDS = [
   "job_id", "job_title", "company_name", "seniority_level",

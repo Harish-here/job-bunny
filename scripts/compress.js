@@ -4,13 +4,11 @@
 // Title filtering already happened in extract.js (Stage A); no second gate needed here.
 
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { paths } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const IN = join(ROOT, "jobs_raw_text.json");
-const OUT_MD = join(ROOT, "structure_input.md");
-const OUT_PT = join(ROOT, "structure_passthrough.json");
+const IN = paths().jobsRawText;
+const OUT_MD = paths().structureInput;
+const OUT_PT = paths().structurePassthrough;
 
 const escapePipe = (v) => (v == null ? "" : String(v).replace(/\|/g, "｜"));
 

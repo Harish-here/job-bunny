@@ -3,6 +3,28 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.7.0] — 2026-07-04
+
+### Added
+- **Multi-profile support** — run the pipeline for any profile with `/run <name>` (default from `config.json`). Each profile owns its config (`resume.json`, `resume_meta.json`, `avoid.md`, `filter_config.json`, `search_urls.md`), its own Notion page + "Job Bunny — Jobs" DB in the same workspace, and fully isolated run data (`profiles/<name>/data/` — cache + all per-run intermediates). Shared across profiles: `page_inventory/`, the Chrome debug session, and `NOTION_TOKEN`.
+- `scripts/config.js`: central profile/path resolution (`JOBBUNNY_PROFILE` env → `config.json` `default_profile`), dual-mode — a checkout without `config.json` runs in **legacy mode** with the exact pre-0.7 root paths, so existing installs keep working untouched after `git pull`.
+- `scripts/migrate.js` (+ `/migrate <name>`, `npm run migrate`): one-shot legacy → profiles conversion; adopts the existing Notion DB from `.env`, re-seeds anything missing from `templates/`, prints rollback steps.
+- `templates/`: neutral seeds for new profiles (avoid.md, search_urls.md, filter_config.json, profile.json, cache.example.json — moved from `data/`).
+- `schema.js`: `SENIORITY_OPTIONS` gains `Manager` and `Senior` (additive; existing options byte-identical) so non-engineering profiles (e.g. Customer Success) rank correctly.
+
+### Changed
+- **Home-city filter/rank is now per-profile**: `filter.js` and `rank.js` read the city from `resume_meta.json` `location` instead of the hardcoded `"chennai"` — a real fix for non-Chennai users. `filter.js` therefore now requires `resume_meta.json` (run `npm run meta`).
+- `init.js` is per-profile (`node scripts/init.js <profile>`): scaffolds `profiles/<profile>/` from `templates/`, creates the profile's Notion page under "Job Bunny's List" with its own DB, writes `profiles/<profile>/profile.json`. Refuses to run on an unmigrated legacy checkout.
+- All stage scripts resolve paths via `scripts/config.js` and log the active profile; slash commands accept an optional profile argument (passed as `JOBBUNNY_PROFILE=<p>` per command).
+- `.env` now only needs `NOTION_TOKEN`; per-profile Notion ids live in `profiles/<name>/profile.json` (legacy checkouts still read the old env keys).
+
+### Removed
+- `avoid.md`, `search_urls.md`, `filter_config.json`, `resume_meta.json` are **no longer tracked** — personal config never ships in the repo again (templates replace them; the old contents remain in git history). **Commit/back up local edits to these files before pulling.**
+
+### Upgrade
+- Do nothing → everything keeps working in legacy mode (a one-line hint appears per run).
+- Or `npm run migrate <your-name>` once, then `/run` as usual. See README "Upgrading from ≤ 0.6.x".
+
 ## [0.6.3] — 2026-07-01
 
 ### Added

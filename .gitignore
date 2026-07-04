@@ -1,11 +1,20 @@
 # Secrets — must be ignored before init.js ever writes a token
 .env
 
-# Personal data — public repo ships sanitized *.example.json templates instead
+# Personal data — public repo ships sanitized templates (templates/, resume.example.json) instead
 # resume.json: real contact details + work history (build-time source of truth)
 # data/cache.json: live job pipeline (ratings, salary-band search URLs, Notion IDs)
 resume.json
 data/cache.json
+
+# Profiles (v0.7+) — all profile config/data is local-only; templates/ ships the seeds
+profiles/
+config.json
+# legacy-root personal config (anchored so templates/ copies stay tracked)
+/resume_meta.json
+/avoid.md
+/filter_config.json
+/search_urls.md
 
 # Dependencies
 node_modules/

@@ -7,13 +7,11 @@
 
 import "dotenv/config";
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { Client } from "@notionhq/client";
 import { extractJobId } from "./util.js";
+import { paths, loadProfile } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CACHE_PATH = join(ROOT, "data", "cache.json");
+const CACHE_PATH = paths().cache;
 
 export async function readCache() {
   try {
@@ -63,9 +61,9 @@ function pageToJob(page) {
 }
 
 // Rebuild cache.json from the live Notion DB. Preserves last_run (set by notion_sync).
-export async function reconcile({ token = process.env.NOTION_TOKEN, dbId = process.env.NOTION_DB_ID } = {}) {
+export async function reconcile({ token = process.env.NOTION_TOKEN, dbId = loadProfile().notion_db_id } = {}) {
   if (!token) throw new Error("NOTION_TOKEN missing — run `node scripts/init.js` first.");
-  if (!dbId) throw new Error("NOTION_DB_ID missing — run `node scripts/init.js` first.");
+  if (!dbId) throw new Error("Notion DB id missing — run `node scripts/init.js` first.");
 
   const notion = new Client({ auth: token });
   const jobs = [];

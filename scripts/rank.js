@@ -8,18 +8,17 @@
 //   Seniority match    30  Staff/Lead = full, else 0 (no partial tier)
 //   Skills overlap     30  (|key_skills ∩ core_skills| / |key_skills|) * 30   [core only, Gate 5]
 //   Work type + tz     20  Remote APAC = full · Remote EMEA/unknown = partial ·
-//                          Chennai hybrid/on-site = full · else 0  (tz is a soft-signal, never a drop)
+//                          home-city (meta.location) hybrid/on-site = full · else 0
+//                          (tz is a soft-signal, never a drop)
 //   YoE fit            20  at/above = full · within -2 = partial · below 0
 // Bands: >=85 Vera level · 65-84 Kandipa podu · 45-64 Try panalam · 25-44 Okay tha · <25 Deal la vidu
 
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { normalizeName } from "./util.js";
+import { paths, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const JOBS = join(ROOT, "new_jobs.json");
-const META = join(ROOT, "resume_meta.json");
+const JOBS = paths().newJobs;
+const META = paths().resumeMeta;
 
 const WORKTYPE_PARTIAL = 10;
 const YOE_PARTIAL = 10;
@@ -67,7 +66,7 @@ export function scoreJob(job, meta) {
   // 3. Work type + timezone (20) — tz is a soft-signal here, never a drop.
   let wt = 0;
   let wtReason;
-  const inChennai = normalizeName(job.location_city) === "chennai";
+  const inHomeCity = normalizeName(job.location_city) === normalizeName(meta.location);
   if (job.work_type === "Remote") {
     if (job.timezone_compatibility === "APAC") {
       wt = 20;
@@ -79,9 +78,9 @@ export function scoreJob(job, meta) {
       wt = WORKTYPE_PARTIAL;
       wtReason = `Remote, timezone unknown (+${WORKTYPE_PARTIAL})`;
     }
-  } else if ((job.work_type === "Hybrid" || job.work_type === "On-site") && inChennai) {
+  } else if ((job.work_type === "Hybrid" || job.work_type === "On-site") && inHomeCity) {
     wt = 20;
-    wtReason = `${job.work_type} in Chennai (+20)`;
+    wtReason = `${job.work_type} in ${meta.location} (+20)`;
   } else {
     wt = 0;
     wtReason = `${job.work_type || "Unknown"} location fit (+0)`;
@@ -111,6 +110,7 @@ export function scoreJob(job, meta) {
 }
 
 async function main() {
+  console.log(`[rank] profile=${resolveProfileName()}`);
   let jobs, meta;
   try {
     jobs = JSON.parse(await readFile(JOBS, "utf8"));

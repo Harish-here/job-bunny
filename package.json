@@ -1,6 +1,6 @@
 {
   "name": "job-bunny",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Personal job-search companion — aggregates LinkedIn jobs daily, filters/ranks against your profile, syncs to Notion.",
   "type": "module",
   "private": true,
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "init": "node scripts/init.js",
+    "migrate": "node scripts/migrate.js",
     "meta": "node scripts/generate_meta.js",
     "reconcile": "node scripts/cache.js",
     "filter": "node scripts/filter.js",

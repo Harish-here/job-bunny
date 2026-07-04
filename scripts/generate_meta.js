@@ -4,12 +4,10 @@
 // on re-run (fixed key order, stable formatting). Re-run only when resume.json changes.
 
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { paths, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const IN = join(ROOT, "resume.json");
-const OUT = join(ROOT, "resume_meta.json");
+const IN = paths().resume;
+const OUT = paths().resumeMeta;
 
 // The meta shape, in fixed order. Each entry copies straight from resume.json.
 const FIELDS = [
@@ -24,6 +22,7 @@ const FIELDS = [
 ];
 
 async function main() {
+  console.log(`[meta] profile=${resolveProfileName()}`);
   let resume;
   try {
     resume = JSON.parse(await readFile(IN, "utf8"));

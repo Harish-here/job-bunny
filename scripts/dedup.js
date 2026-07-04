@@ -5,16 +5,15 @@
 // filtered_jobs.json → new_jobs.json.
 
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { dedupKey } from "./util.js";
 import { readCache } from "./cache.js";
+import { paths, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const IN = join(ROOT, "filtered_jobs.json");
-const OUT = join(ROOT, "new_jobs.json");
+const IN = paths().filteredJobs;
+const OUT = paths().newJobs;
 
 async function main() {
+  console.log(`[dedup] profile=${resolveProfileName()}`);
   let jobs;
   try {
     jobs = JSON.parse(await readFile(IN, "utf8"));
