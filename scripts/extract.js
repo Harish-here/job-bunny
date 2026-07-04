@@ -13,18 +13,17 @@
 import "dotenv/config";
 import { readFile, writeFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { chromium } from "playwright";
 import { extractJobId } from "./util.js";
 import { loadAvoid, isAvoided } from "./avoid.js";
 import { readCache } from "./cache.js";
 import { filterByTitle } from "./title_filter.js";
+import { ROOT, paths, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-// Defaults to search_urls.md; SEARCH_URLS_FILE overrides it for subset/test runs.
-const SEARCH_URLS = process.env.SEARCH_URLS_FILE || join(ROOT, "search_urls.md");
-const OUT = join(ROOT, "jobs_raw_text.json");
+// Defaults to the profile's search_urls.md; SEARCH_URLS_FILE overrides it for subset/test runs.
+const SEARCH_URLS = process.env.SEARCH_URLS_FILE || paths().searchUrls;
+const OUT = paths().jobsRawText;
 const CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
 const DEBUG = !!process.env.DEBUG;
 const CARD_CAP = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
@@ -310,6 +309,7 @@ async function collectAllPages(page, url, cfg) {
 
 // ---------- main ----------
 async function main() {
+  console.log(`[extract] profile=${resolveProfileName()}`);
   if (!(await exists(SEARCH_URLS))) throw new Error(`${SEARCH_URLS} not found — run /setup.`);
   const groups = parseSearchUrls(await readFile(SEARCH_URLS, "utf8"));
   if (!groups.length) throw new Error("No search URLs found in search_urls.md (run /add-url).");

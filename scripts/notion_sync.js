@@ -10,14 +10,12 @@
 
 import "dotenv/config";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { Client } from "@notionhq/client";
 import { dedupKey } from "./util.js";
 import { readCache, writeCache } from "./cache.js";
+import { paths, loadProfile, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const IN = join(ROOT, "new_jobs.json");
+const IN = paths().newJobs;
 
 const rt = (s) => [{ type: "text", text: { content: String(s ?? "") } }];
 
@@ -43,9 +41,10 @@ function buildProperties(job) {
 }
 
 async function main() {
+  console.log(`[sync] profile=${resolveProfileName()}`);
   const token = process.env.NOTION_TOKEN;
-  const dbId = process.env.NOTION_DB_ID;
-  if (!token || !dbId) throw new Error("NOTION_TOKEN / NOTION_DB_ID missing — run /setup first.");
+  const dbId = loadProfile().notion_db_id;
+  if (!token || !dbId) throw new Error("NOTION_TOKEN / Notion DB id missing — run /setup first.");
 
   let jobs;
   try {

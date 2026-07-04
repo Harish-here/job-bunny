@@ -10,12 +10,11 @@
 // Multi-word terms are matched as full phrases (checked before single-word terms within each list).
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { paths } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const _raw = JSON.parse(readFileSync(join(ROOT, "filter_config.json"), "utf8"));
-if (!_raw.title_filter) throw new Error('filter_config.json is missing "title_filter" key — run /setup or add it manually.');
+const FILTER_CONFIG = paths().filterConfig;
+const _raw = JSON.parse(readFileSync(FILTER_CONFIG, "utf8"));
+if (!_raw.title_filter) throw new Error(`${FILTER_CONFIG} is missing "title_filter" key — run /setup or add it manually.`);
 const cfg = _raw.title_filter;
 
 // Longest terms first — prevents a single-word prefix from shadowing a multi-word phrase.

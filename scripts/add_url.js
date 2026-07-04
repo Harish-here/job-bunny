@@ -4,11 +4,10 @@
 
 import { readFile, writeFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { ROOT, paths, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const URLS = join(ROOT, "search_urls.md");
+const URLS = paths().searchUrls;
 
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
 // "start" is a pagination offset, not a filter — always reset to beginning.
@@ -42,6 +41,7 @@ export function resolvePage(u) {
 }
 
 async function main() {
+  console.log(`[add-url] profile=${resolveProfileName()}`);
   const [rawUrl, label] = process.argv.slice(2);
   if (!rawUrl) throw new Error('Usage: node scripts/add_url.js "<url>" ["<label>"]');
 

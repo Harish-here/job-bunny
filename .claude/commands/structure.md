@@ -4,6 +4,8 @@ description: Structure job data from compact markdown table into schema-valid jo
 
 This stage is **LLM-driven and runs inline — you (Claude Code) do it directly, not via a script.** There is no `structure.js`.
 
+**Resolve the profile first:** if a profile name was given (as an argument or by the calling `/run`), use it; otherwise read `default_profile` from `config.json`. All three files below live in `profiles/<profile>/data/` (legacy layout — no `config.json` — uses the repo root as before).
+
 **Checkpoint resume:** Before starting, check if `jobs_raw_checkpoint.md` exists. If it does, load it and collect all `job_id`s already present — skip those rows in the input table (resume from where you left off). Delete `jobs_raw_checkpoint.md` once `jobs_raw_decisions.md` is written successfully.
 
 1. Read `structure_input.md` (markdown table produced by `compress.js`). Columns: `# | id | card_title | company | location | raw_text`. The `card_title`, `company`, and `location` columns come straight from the search card — use them for location/work_type/company when the JD body doesn't restate them.
@@ -21,6 +23,7 @@ This stage is **LLM-driven and runs inline — you (Claude Code) do it directly,
 ```
 
 **Column rules:**
+- `seniority` — one of `Staff`, `Lead`, `Mid`, `Manager`, `Senior` (byte-exact — these are the Notion select options), or empty
 - `yoe` — number or empty (= null)
 - `yoe_min` — `true` or `false`
 - `skills` — semicolon-separated list: `React; TypeScript; Node.js`

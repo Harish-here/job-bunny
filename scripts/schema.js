@@ -5,7 +5,7 @@
 export const DB_TITLE = "Job Bunny — Jobs";
 export const PARENT_PAGE_TITLE = "Job Bunny's List";
 
-export const SENIORITY_OPTIONS = ["Staff", "Lead", "Mid"];
+export const SENIORITY_OPTIONS = ["Staff", "Lead", "Mid", "Manager", "Senior"];
 export const WORK_TYPE_OPTIONS = ["Remote", "Hybrid", "On-site"];
 export const TIMEZONE_OPTIONS = ["APAC", "EMEA"];
 export const EXCITEMENT_OPTIONS = [

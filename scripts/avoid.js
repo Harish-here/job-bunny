@@ -4,12 +4,10 @@
 // so the matcher is unit-testable without a browser.
 
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { normalizeName } from "./util.js";
+import { paths } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const AVOID_PATH = join(ROOT, "avoid.md");
+const AVOID_PATH = paths().avoid;
 
 // Parse avoid.md → { companies: Set<normalized>, aliases: Map<normalized, normalized> }.
 // Company bullets live before the "## Alias map" heading; alias bullets ("- X → Y") after it.

@@ -8,11 +8,11 @@
 import "dotenv/config";
 import { readFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { ROOT, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const P = paths();
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
 
 let failed = 0;
@@ -26,8 +26,21 @@ async function checkSecrets() {
   console.log("[doctor] secrets");
   if (process.env.NOTION_TOKEN) pass("NOTION_TOKEN set");
   else fail("NOTION_TOKEN missing (run /setup)");
-  if (process.env.NOTION_DB_ID) pass("NOTION_DB_ID set");
-  else fail("NOTION_DB_ID missing (run /setup)");
+  try {
+    const { notion_db_id } = loadProfile();
+    if (notion_db_id) pass("Notion DB id set");
+    else fail("Notion DB id missing (run /setup)");
+  } catch (err) {
+    fail(err.message);
+  }
+}
+
+async function checkProfileFiles() {
+  console.log("[doctor] profile config");
+  if (await exists(P.resumeMeta)) pass("resume_meta.json present");
+  else fail("resume_meta.json missing (fill resume.json, then run /update-resume)");
+  if (await exists(P.filterConfig)) pass("filter_config.json present");
+  else fail("filter_config.json missing (run /setup)");
 }
 
 const CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -74,8 +87,8 @@ async function checkCDP() {
 
 async function checkInventories() {
   console.log("[doctor] page inventories");
-  if (!(await exists(join(ROOT, "search_urls.md")))) return fail("search_urls.md missing");
-  const text = await readFile(join(ROOT, "search_urls.md"), "utf8");
+  if (!(await exists(P.searchUrls))) return fail("search_urls.md missing");
+  const text = await readFile(P.searchUrls, "utf8");
   const pages = [...text.matchAll(/^###\s+(.+)$/gm)].map((m) => m[1].trim());
   if (!pages.length) return fail("no page-types declared in search_urls.md");
   for (const page of pages) {
@@ -87,7 +100,7 @@ async function checkInventories() {
 async function checkCache() {
   console.log("[doctor] cache");
   try {
-    const c = JSON.parse(await readFile(join(ROOT, "data", "cache.json"), "utf8"));
+    const c = JSON.parse(await readFile(P.cache, "utf8"));
     if (Array.isArray(c.jobs)) pass(`cache.json valid (${c.jobs.length} job(s), last_run=${c.last_run})`);
     else fail("cache.json malformed (no jobs array)");
   } catch {
@@ -96,7 +109,9 @@ async function checkCache() {
 }
 
 async function main() {
+  console.log(`[doctor] mode=${LEGACY ? "legacy" : "profiles"} profile=${resolveProfileName()}`);
   await checkSecrets();
+  await checkProfileFiles();
   await checkCDP();
   await checkInventories();
   await checkCache();
