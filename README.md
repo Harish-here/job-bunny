@@ -10,18 +10,80 @@
 </p>
 
 <p align="center">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.8.0-e8a0bf">
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A520-3c873a">
-  <img alt="Runtime" src="https://img.shields.io/badge/pipeline-deterministic-7B5EA7">
+  <img alt="Pipeline" src="https://img.shields.io/badge/pipeline-deterministic-7B5EA7">
   <img alt="Source of truth" src="https://img.shields.io/badge/source%20of%20truth-Notion-black">
 </p>
 
 ---
 
-## What it does
+Job Bunny automates the tedious half of a job hunt. It opens your LinkedIn saved searches, scrapes the postings, structures the messy job descriptions into clean records, drops the noise (wrong location, wrong timezone, avoid-listed companies), deduplicates against everything you've already seen, scores each role against your résumé, and writes the survivors into a Notion database you can track from anywhere.
 
-Job Bunny automates the tedious half of a job hunt. It opens your LinkedIn saved searches, scrapes the postings, structures the messy job descriptions into clean records, drops the noise (wrong location, wrong timezone, avoid-listed companies), deduplicates against what you've already seen, scores each role against your résumé, and writes the survivors into a Notion database you can track from anywhere.
+**Notion is the source of truth.** Your manual tracking fields (status, notes, next action) are never touched — the pipeline only writes the automated columns, and it rebuilds its local cache from Notion at the start of every run, so the two can never drift apart.
 
-**Notion is the source of truth.** Your manual tracking fields (status, notes, next action) are never touched — the pipeline only writes the automated columns.
+## Requirements
+
+| | |
+|---|---|
+| **[Claude Code](https://claude.com/claude-code)** | The pipeline is driven by slash commands (`/run` and friends), and the one LLM step runs inline in the agent — **no separate API key needed** |
+| **Node ≥ 20** | All deterministic stages are plain Node scripts |
+| **Chrome** | Scraping runs over Chrome DevTools Protocol against your real logged-in LinkedIn session |
+| **Notion** | A workspace plus an [internal integration token](https://www.notion.so/my-integrations) |
+
+## Quick start
+
+```bash
+git clone https://github.com/Harish-here/job-bunny.git
+cd job-bunny
+npm install
+
+cp .env.example .env          # fill in your Notion token
+npm run init <your-name>      # scaffolds profiles/<your-name>/ + its Notion page & DB (idempotent)
+
+# your resume — the real file is gitignored, it never leaves your machine
+cp resume.example.json profiles/<your-name>/resume.json    # then fill it in
+JOBBUNNY_PROFILE=<your-name> npm run meta                  # derive resume_meta.json
+```
+
+Then open Claude Code in the repo and run:
+
+```
+/add-url    # paste your LinkedIn saved-search URLs, one at a time
+/doctor     # preflight — launches Chrome, checks CDP, config, keys
+/run        # the whole pipeline; prints a run summary at the end
+```
+
+`/doctor` launches Chrome with a persistent profile (`.chrome-debug/`, gitignored) — log in to LinkedIn once and the session is reused across every run. Prefer a guided setup? `/setup <your-name>` walks through all of the above interactively.
+
+## Daily use
+
+One command: **`/run`** (or `/run <profile>` for a specific profile). It preflights, scrapes, structures, filters, ranks, syncs, and prints a summary — URLs processed, the extraction funnel, and a table of the top-scored roles. A stale LinkedIn selector skips that page-group and continues; it never kills the run.
+
+Every stage is also a standalone command for re-runs and debugging:
+
+| Command | What it does |
+|---|---|
+| `/doctor` | Preflight — Chrome/CDP reachable, page inventories present, cache valid, keys set |
+| `/reconcile` | Rebuild the profile's `cache.json` from its live Notion DB |
+| `/extract` | Playwright-over-CDP scraper — collect job cards + raw JD text |
+| `/structure` | The one LLM step: raw JD text → schema-valid records (with checkpointing) |
+| `/filter` | Drop wrong-location and incompatible-timezone roles |
+| `/dedup` | De-duplicate against everything already in Notion (by `job_id`) |
+| `/rank` | Deterministic 100-point résumé-match score + an excitement label |
+| `/sync` | Push new roles to Notion — automated fields only, never your tracking columns |
+
+And the maintenance kit:
+
+| Command | What it does |
+|---|---|
+| `/add-url` | Add a saved-search URL — strips tracking/pagination params, files it under the right page-type |
+| `/page-analyse` | LinkedIn changed its DOM? This inspects the live page and refreshes the scraper config |
+| `/cleanup` | Archive Notion jobs marked *Passed* older than 7 days (dry-run by default; not part of `/run`) |
+| `/update-resume` | Regenerate `resume_meta.json` after editing your resume |
+| `/setup` / `/migrate` | Guided onboarding / one-shot upgrade from a pre-0.7 checkout |
+
+The pure-JS stages are exposed as npm scripts too (`npm run filter`, `npm run rank`, …) if you'd rather drive them from a plain terminal.
 
 ## How it works
 
@@ -41,60 +103,31 @@ flowchart LR
   class ST llm;
 ```
 
-The guiding principle is **determinism**: filtering, dedup, and ranking are pure JavaScript, so the same input always yields the same output. The **only** runtime LLM step is `structure` — turning raw job-description text into schema-valid records. Ranking and filtering are never put behind a model.
+Four design choices carry the project:
 
-A few other design choices worth calling out:
+- **Determinism.** Filtering, dedup, and ranking are pure JavaScript — the same input always yields the same output, and a score is always explainable. The **only** runtime LLM step is `structure`, which turns raw job-description text into schema-valid records. Ranking and filtering are never put behind a model.
+- **Config-driven scraping.** `extract.js` reads its selectors and behaviour from `page_inventory/<page>.md` at runtime. When LinkedIn changes its DOM, `/page-analyse` fixes one markdown file — no code changes, no regeneration.
+- **Token-efficient LLM stage.** Avoid-listed companies are dropped before their JDs are ever opened; `compress.js` pre-filters by card title and hands the model a compact markdown table instead of JSON; the model answers in a markdown table too. Together that roughly halves what `structure` costs versus raw JSON in/out.
+- **Profiles (v0.7+).** Everything personal lives in `profiles/<name>/` — resume, avoid list, filter keywords, search URLs, and a per-profile Notion page + database. `/run <name>` runs the pipeline for anyone; plain `/run` uses the default from `config.json`. Profiles share one Chrome/LinkedIn session and one Notion token — and because LinkedIn personalizes results to the logged-in account, account-specific URLs (like the *Recommended* collection) must never be copied between profiles.
 
-- **Config-driven scraping.** `extract.js` reads its selectors and behaviour from `page_inventory/<page>.md` at runtime. When LinkedIn changes its DOM, you fix one markdown file — no code regeneration.
-- **Token-efficient LLM stage.** A pre-filter + compact markdown table (`compress.js`) and a markdown-table output format roughly halve the tokens the `structure` step spends versus raw JSON.
-- **Notion as the mirror's master.** The profile's `cache.json` is just a performance mirror, rebuilt from the live Notion DB at the start of every run (`reconcile`), so cache drift can't accumulate.
-- **Profiles (v0.7+).** All personal config lives in `profiles/<name>/` — resume, avoid list, filter keywords, search URLs, and a per-profile Notion page + database. Run the pipeline for any profile with `/run <name>`; plain `/run` uses the default from `config.json`. Profiles share one Chrome/LinkedIn session and one Notion token; note that search results are personalized to whichever LinkedIn account is logged in, so never copy account-specific URLs (like the *Recommended* collection) between profiles.
+## Configuration
 
-## The pipeline stages
+Each profile is a folder of small, hand-editable files:
 
-| Stage | What it does |
-|-------|--------------|
-| `doctor` | Preflight — Chrome/CDP reachable, every page-type has an inventory, keys present |
-| `reconcile` | Rebuild the profile's `cache.json` from its live Notion DB |
-| `extract` | Playwright-over-CDP scraper — collect job cards + raw JD text |
-| `compress` → `structure` → `assemble` | Pre-filter & compact → LLM structuring → merge back pass-through fields |
-| `filter` | Drop wrong-location / incompatible-timezone roles |
-| `dedup` | De-duplicate against what's already in Notion (by `job_id`) |
-| `rank` | Deterministic 100-point résumé-match score + an excitement label |
-| `sync` | Push new roles to Notion (automated fields only) |
+| File | Purpose |
+|---|---|
+| `resume.json` | Your résumé, hand-maintained — the source the ranker scores against |
+| `resume_meta.json` | Derived from `resume.json` by `npm run meta` — home city, skill sets |
+| `avoid.md` | Companies to skip, with an alias map (matching normalizes both sides) |
+| `filter_config.json` | Title keywords and filter tuning |
+| `search_urls.md` | Your LinkedIn saved-search URLs, organized by page-type (managed by `/add-url`) |
+| `profile.json` | The profile's Notion page + database ids (written by init, never by hand) |
+| `data/` | Run cache + per-run intermediates — regenerated, never edited |
 
-In day-to-day use these run as [Claude Code](https://claude.com/claude-code) slash commands (`/run` drives the whole sequence; each stage is also standalone for debugging). The pure-JS stages are exposed as npm scripts too (`npm run filter`, `npm run rank`, …).
+Useful environment overrides:
 
-## Getting started
-
-> Requires **Node ≥ 20**, a Chrome install, and a Notion integration token.
-
-```bash
-git clone https://github.com/Harish-here/job-bunny.git
-cd job-bunny
-npm install
-
-# secrets
-cp .env.example .env          # fill in your Notion token
-
-npm run init <your-name>      # idempotent: scaffolds profiles/<your-name>/ + its Notion page & DB
-
-# your resume (the real file is gitignored — keep it private)
-cp resume.example.json profiles/<your-name>/resume.json   # then fill it in
-JOBBUNNY_PROFILE=<your-name> npm run meta                  # derive resume_meta.json
-```
-
-`templates/cache.example.json` shows the shape of the run cache; the real cache is rebuilt from Notion on every run, so you never seed it by hand.
-
-### Upgrading from ≤ 0.6.x
-
-Nothing breaks when you pull: without a `config.json` the scripts keep using your existing root-level layout (legacy mode). When you're ready to switch to profiles:
-
-1. If you edited `avoid.md`, `search_urls.md`, `filter_config.json`, or `resume_meta.json`, commit or back them up first — v0.7 stops tracking these files, so the pull may otherwise touch them.
-2. `npm run migrate <your-name>` — moves your config into `profiles/<your-name>/`, adopts your existing Notion DB, and makes you the default profile. Anything the pull deleted is re-seeded from `templates/`.
-3. Verify with `/doctor`.
-
-Also note: the `filter` stage now reads your home city from `resume_meta.json` (previously hardcoded) — if you only ever ran `/filter` standalone, make sure that file exists (`npm run meta`). The old files remain in the repo's git history.
+- `JOBBUNNY_PROFILE=<name>` — select a profile for any script (slash commands set this for you).
+- `JOBBUNNY_WINDOW_HOURS=<n>` — widen the search window for one `/extract` (e.g. `48` after a missed day) without touching your stored URLs.
 
 ## Project layout
 
@@ -102,17 +135,38 @@ Also note: the `filter` stage now reads your home city from `resume_meta.json` (
 scripts/            deterministic pipeline stages (extract, filter, dedup, rank, sync …)
 page_inventory/     per-page scraper config (selectors + behaviour, read at runtime; shared)
 templates/          neutral seeds for new profiles (avoid list, filter config, search URLs)
-profiles/<name>/    YOUR data (gitignored): resume, avoid.md, filter_config.json,
-                    search_urls.md, profile.json (Notion ids), data/ (cache + run files)
-.claude/commands/   Claude Code slash commands that drive the stages
+profiles/<name>/    YOUR data (gitignored) — see Configuration above
+.claude/commands/   the Claude Code slash commands that drive everything
 resume.example.json resume template  →  copy into profiles/<name>/resume.json
 config.json         (gitignored) { "default_profile": "<name>" } — created by init/migrate
-CLAUDE.md           the run-time contract / agent guide
+CLAUDE.md           the agent's contract — rules Claude Code follows in this repo
 ```
+
+## Troubleshooting
+
+- **Extraction started missing jobs or failing an assertion** — LinkedIn shifted its DOM. Run `/page-analyse` for the affected page-type; it rewrites `page_inventory/<page>.md` from the live page and `/extract` picks it up on the next run.
+- **Chrome or login problems** — run `/doctor`. It launches Chrome with the right debug flags and the persistent `.chrome-debug/` profile; if LinkedIn logged you out, log in once in that window.
+- **Missed a day (or three)** — set `JOBBUNNY_WINDOW_HOURS=72` for one `/extract` (or `node scripts/extract.js`) to widen the window for that run only.
+- **`/sync` throws about a select option** — the option strings in `scripts/schema.js` are byte-exact with the Notion DB. If you renamed an option in Notion, rename it back or update both sides together.
+- **Notion filling up with passed jobs** — `/cleanup` archives *Passed* entries older than 7 days; it's dry-run until you confirm.
+
+## Upgrading from ≤ 0.6.x
+
+Nothing breaks when you pull: without a `config.json` the scripts keep using your existing root-level layout (legacy mode). When you're ready to switch to profiles:
+
+1. If you edited `avoid.md`, `search_urls.md`, `filter_config.json`, or `resume_meta.json`, commit or back them up first — v0.7 stopped tracking these files, so the pull may otherwise touch them.
+2. `npm run migrate <your-name>` — moves your config into `profiles/<your-name>/`, adopts your existing Notion DB, and makes you the default profile. Anything the pull deleted is re-seeded from `templates/`.
+3. Verify with `/doctor`.
+
+Also note: the `filter` stage reads your home city from `resume_meta.json` (previously hardcoded) — if you only ever ran `/filter` standalone, make sure that file exists (`npm run meta`). The old files remain in the repo's git history.
 
 ## Privacy
 
-This repo ships **sanitized templates** only. Everything personal — your resume, avoid list, search URLs, filter keywords, Notion ids, and live job cache — lives under `profiles/` (gitignored) and never leaves your machine. Secrets live in `.env`, which is gitignored before any token is ever written.
+This repo ships **sanitized templates** only. Everything personal — your resume, avoid list, search URLs, filter keywords, Notion ids, and live job cache — lives under `profiles/` (gitignored) and never leaves your machine. Secrets live in `.env`, which is gitignored before any token is ever written. The one LLM stage sees job-description text and card titles, not your resume.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
 ---
 
