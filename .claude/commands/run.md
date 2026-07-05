@@ -21,4 +21,23 @@ Stage sequence:
 9. **/rank** — `node scripts/rank.js`.
 10. **/sync** — `node scripts/notion_sync.js` (push automated fields to the profile's DB; update cache + last_run).
 
-After the run, print a summary starting with the profile name: URLs processed, page-groups skipped (with reason), jobs extracted → structured → filtered → new → synced, and the top excitement bands. If any single stage fails hard (not a skippable page-group), stop and surface the error rather than pushing partial data.
+After the run, print a summary in this exact template (fill in real values; omit the Notes line if there's nothing noteworthy):
+
+```
+## Run Summary — profile: <profile>
+
+- **URLs processed:** <n> (<breakdown by page-group type>)
+- **Page-groups skipped:** <n> (with reason, or 0)
+- **Jobs extracted → structured → filtered → new → synced:** <a> → <b> → <c> → <d> → <e>
+
+**Top excitement bands (ranked):**
+| Score | Title | Company |
+|---|---|---|
+| <score> | <title> | <company> |
+...
+
+Notes:
+- <anything noteworthy: cache size swings, heavy dedup collapse, filter drops with reasons, etc.>
+```
+
+If any single stage fails hard (not a skippable page-group), stop and surface the error rather than pushing partial data — skip the summary template in that case and report the failure directly.
