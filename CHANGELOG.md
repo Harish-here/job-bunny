@@ -3,6 +3,19 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.8.0] — 2026-07-05
+
+### Added
+- `/cleanup` (+ `scripts/cleanup.js`): archives Notion jobs marked `Passed` older than a configurable age threshold (`CLEANUP_DAYS_OLD`, default 7 days). Dry-run by default; read-only until `--apply`/`CLEANUP_APPLY=1`. Not part of `/run`.
+- `JOBBUNNY_WINDOW_HOURS` override for `/extract`: widens the `f_TPR` search window for a single invocation (e.g. catching up after a missed daily run) without touching the stored `f_TPR=r86400` default in `search_urls.md`.
+
+### Fixed
+- `scripts/extract.js`: the same job posting could be captured multiple times in one run when overlapping keyword-search URLs (e.g. multiple frontend-title variants) all matched it, since dedup only covered a single URL's own pagination and the cross-run cache — not cross-URL duplicates within a run. Added a run-scoped `job_id` dedup pass (reported as `run_deduped` in the extract summary).
+
+### Notes
+- `/run`'s end-of-run summary is now codified as an exact markdown template (profile, URL/page-group counts, extraction funnel, top excitement bands table).
+- `.claude/commands/wrap.md`: the date-mention/session-numbering log-entry rule was repeated verbatim across three modes — hoisted into one shared "Log entry formatting" section instead (doc-only, no behavior change).
+
 ## [0.7.0] — 2026-07-04
 
 ### Added
