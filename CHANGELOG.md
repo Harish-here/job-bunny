@@ -3,6 +3,18 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.8.1] — 2026-07-06
+
+### Changed
+- `README.md`: maintainer overhaul — requirements table with Claude Code as a headline dependency (the LLM stage runs inline in the agent; no separate API key), quick start that ends in `/add-url → /doctor → /run`, a maintenance-command table (`/add-url`, `/page-analyse`, `/cleanup`, `/update-resume`, `/setup`/`/migrate`), new **Configuration** (per-profile file anatomy + `JOBBUNNY_PROFILE`/`JOBBUNNY_WINDOW_HOURS` overrides) and **Troubleshooting** sections, version badge, CHANGELOG link.
+- `CLAUDE.md`: restructured into task-grouped sections (Ground truths / Commands / Profiles & paths / Running stages / Writing & changing code / Notion writes / Hard guardrails) so rules cluster by the activity they constrain; added the missing `/cleanup` to the command list. All prior rules preserved verbatim in substance.
+
+### Fixed
+- `package.json`: `version` synced to the release tags — it had been stuck at `0.7.0` through the v0.8.0 release.
+
+### Notes
+- Docs-only release; no runtime code touched.
+
 ## [0.8.0] — 2026-07-05
 
 ### Added
