@@ -347,7 +347,8 @@ async function main() {
   }
 
   const results = [];
-  const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, title_dropped: 0, captured: 0 };
+  const seenJobIdsThisRun = new Set();
+  const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, run_deduped: 0, title_dropped: 0, captured: 0 };
 
   for (const group of groups) {
     summary.groups++;
@@ -385,6 +386,16 @@ async function main() {
           (c) => !c.job_id || !cachedIds.has(c.job_id),
           (n) => `[extract]   cache: skipped ${n} already-known card(s)`,
           "cache_skipped", summary);
+
+        cards = stageFilter(cards,
+          (c) => {
+            if (!c.job_id) return true;
+            if (seenJobIdsThisRun.has(c.job_id)) return false;
+            seenJobIdsThisRun.add(c.job_id);
+            return true;
+          },
+          (n) => `[extract]   run-dedup: dropped ${n} duplicate card(s) (already captured from an earlier search URL this run)`,
+          "run_deduped", summary);
 
         cards = stageFilter(cards,
           (c) => {
@@ -443,7 +454,7 @@ async function main() {
   console.log(
     `[extract] groups=${summary.groups} skipped=${summary.skipped.length} ` +
       `cards=${summary.cards} avoided=${summary.avoided} cache_skipped=${summary.cache_skipped} ` +
-      `title_dropped=${summary.title_dropped} captured=${summary.captured} → jobs_raw_text.json`
+      `run_deduped=${summary.run_deduped} title_dropped=${summary.title_dropped} captured=${summary.captured} → jobs_raw_text.json`
   );
   for (const s of summary.skipped) console.log(`[extract]   skipped ${s.page}: ${s.reason}`);
 }
