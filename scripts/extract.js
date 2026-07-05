@@ -28,6 +28,18 @@ const CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
 const DEBUG = !!process.env.DEBUG;
 const CARD_CAP = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
 
+// One-off widen of the f_TPR search window (e.g. a missed daily run) without touching
+// search_urls.md — only rewrites relative windows (r<sec>); absolute anchors (a<epoch>) are a
+// different, already-handled case in add_url.js and are left alone.
+function applyWindowOverride(url) {
+  const hours = parseInt(process.env.JOBBUNNY_WINDOW_HOURS || "0", 10);
+  if (!hours) return url;
+  const u = new URL(url);
+  if (!/^r\d+/.test(u.searchParams.get("f_TPR") || "")) return url;
+  u.searchParams.set("f_TPR", `r${hours * 3600}`);
+  return u.toString();
+}
+
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const jitter = () => sleep(2000 + Math.floor(Math.random() * 3000)); // 2–5s
@@ -355,9 +367,10 @@ async function main() {
     const isNewPage = (cfg.interaction_model || "inline").trim() === "new-page";
     let jdTab = isNewPage ? await newPage() : null;
     const groupCap = jdCap(cfg);
-    for (const { url } of group.urls) {
+    for (const { url: rawUrl } of group.urls) {
       // Per-URL resilience: a failure on one search (or a closed tab from outside interaction)
       // skips just that URL, never the rest of the group.
+      const url = applyWindowOverride(rawUrl);
       try {
         if (page.isClosed()) page = await newPage();
         console.log(`[extract] ${group.page} ← ${url}`);
