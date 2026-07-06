@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { ROOT, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
 import { notify } from "./notify.js";
+import { telegramTokenEnvKey } from "./notifiers/telegram.js";
 
 const P = paths();
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
@@ -51,8 +52,12 @@ async function checkNotifier() {
     pass("Telegram notifications disabled (optional — run /notify-setup to enable)");
     return;
   }
-  if (!process.env.TELEGRAM_BOT_TOKEN) fail("TELEGRAM_BOT_TOKEN missing (run /notify-setup)");
-  else pass("TELEGRAM_BOT_TOKEN set");
+  const perProfileKey = telegramTokenEnvKey(resolveProfileName());
+  if (!process.env[perProfileKey] && !process.env.TELEGRAM_BOT_TOKEN) {
+    fail(`TELEGRAM_BOT_TOKEN (or ${perProfileKey}) missing (run /notify-setup)`);
+  } else {
+    pass(process.env[perProfileKey] ? `${perProfileKey} set` : "TELEGRAM_BOT_TOKEN set (shared)");
+  }
   if (!telegram.chat_id) fail("notify.telegram.chat_id missing in profile.json (run /notify-setup)");
   else pass("notify.telegram.chat_id set");
 }

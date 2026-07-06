@@ -7,9 +7,21 @@
 // Plain text body, no `parse_mode` — Telegram's Markdown/HTML escaping is a real
 // failure source (unescaped `_`/`*`/etc. in job titles or error text would break
 // delivery); skipped for v1.
+//
+// Bot token resolution: most setups share one bot across all profiles
+// (TELEGRAM_BOT_TOKEN, same precedent as NOTION_TOKEN). A profile that wants its own
+// separate bot (e.g. two different people, each with their own @BotFather bot) can
+// override with a per-profile env key instead — see telegramTokenEnvKey().
 
-export async function sendTelegram({ chat_id, severity, title, body }) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+// Profile names are lowercase letters/digits/hyphens only (enforced by init.js) — upper-cased
+// with hyphens turned into underscores gives a valid env var name.
+export function telegramTokenEnvKey(profileName) {
+  return `TELEGRAM_BOT_TOKEN_${String(profileName).toUpperCase().replace(/-/g, "_")}`;
+}
+
+export async function sendTelegram({ chat_id, severity, title, body, profileName }) {
+  const perProfileKey = profileName ? telegramTokenEnvKey(profileName) : null;
+  const token = (perProfileKey && process.env[perProfileKey]) || process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.warn("[telegram] TELEGRAM_BOT_TOKEN missing — skipping send");
     return;

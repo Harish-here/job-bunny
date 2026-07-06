@@ -18,7 +18,9 @@ export async function notify({ severity = "info", title, body } = {}) {
 
     const sends = [];
     if (channels.telegram?.enabled) {
-      sends.push(sendTelegram({ chat_id: channels.telegram.chat_id, severity, title, body }));
+      sends.push(
+        sendTelegram({ chat_id: channels.telegram.chat_id, severity, title, body, profileName: profile.name })
+      );
     }
 
     if (!sends.length) return;

@@ -18,7 +18,7 @@ import { constants } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { ROOT, LEGACY } from "./config.js";
-import { sendTelegram } from "./notifiers/telegram.js";
+import { sendTelegram, telegramTokenEnvKey } from "./notifiers/telegram.js";
 
 const ENV_PATH = join(ROOT, ".env");
 
@@ -75,49 +75,72 @@ async function writeEnvKey(key, value) {
   await writeFile(ENV_PATH, text);
 }
 
+// ---------- prompts share ONE readline interface for the whole script's lifetime ----------
+// A fresh createInterface() per question looks idiomatic (mirrors init.js, which only ever
+// asks one question total) but breaks down here since notify_setup.js asks up to three: on
+// piped/non-TTY stdin, closing one interface can leave the next one never seeing further
+// input (observed hang when scripting this non-interactively). One shared interface, closed
+// once at the very end, avoids that entirely and works identically for a real interactive TTY.
+
 // ---------- masked prompt (never echoes, never a CLI arg) — mirrors init.js ----------
-function promptMasked(question) {
+function promptMasked(rl, question) {
   return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
     const onData = () => rl.output.write("\x1B[2K\x1B[200D" + question);
     process.stdout.write(question);
     rl.input.on("data", onData);
     rl.question("", (answer) => {
       rl.input.removeListener("data", onData);
-      rl.close();
       process.stdout.write("\n");
       resolve(answer.trim());
     });
   });
 }
 
-// ---------- plain prompt (for the Y/n confirmation) ----------
-function prompt(question) {
+// ---------- plain prompt (for the shared/separate and Y/n confirmations) ----------
+function prompt(rl, question) {
   return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+    rl.question(question, (answer) => resolve(answer.trim()));
   });
 }
 
-async function ensureToken(env) {
-  if (env.TELEGRAM_BOT_TOKEN) {
-    ok("TELEGRAM_BOT_TOKEN already present (shared across profiles)");
-    return env.TELEGRAM_BOT_TOKEN;
+// Most setups share one bot across all profiles (TELEGRAM_BOT_TOKEN). A profile can opt
+// into its own separate bot instead (its own per-profile env key) — e.g. two different
+// people, each with their own @BotFather bot. Resolution order: a token already scoped to
+// this profile > prompt to reuse the shared one > prompt for a brand-new (shared or
+// per-profile) token.
+async function ensureToken(rl, env, profileName) {
+  const perProfileKey = telegramTokenEnvKey(profileName);
+
+  if (env[perProfileKey]) {
+    ok(`${perProfileKey} already present (this profile's own bot)`);
+    return env[perProfileKey];
   }
+
+  if (env.TELEGRAM_BOT_TOKEN) {
+    console.log("");
+    log(`A shared TELEGRAM_BOT_TOKEN is already configured (used by other profiles).`);
+    const answer = await prompt(rl, `Use the shared bot for "${profileName}" too, or set up a separate bot just for it? [shared/separate] `);
+    if (!/^sep/i.test(answer)) {
+      ok("using the shared TELEGRAM_BOT_TOKEN");
+      return env.TELEGRAM_BOT_TOKEN;
+    }
+  }
+
   console.log("");
   log("No Telegram bot yet? Create one via @BotFather:");
   log("  1. Open Telegram, search for @BotFather, start a chat.");
   log("  2. Send /newbot and follow the prompts (name + username).");
   log("  3. BotFather replies with a token like 123456789:AAF...  — copy it.");
   console.log("");
-  const token = await promptMasked("Paste your Telegram bot token (hidden): ");
+  const token = await promptMasked(rl, "Paste your Telegram bot token (hidden): ");
   if (!token) throw new Error("No token entered — aborting.");
-  await writeEnvKey("TELEGRAM_BOT_TOKEN", token);
-  process.env.TELEGRAM_BOT_TOKEN = token; // so sendTelegram() sees it later in this same run
-  ok("TELEGRAM_BOT_TOKEN written to .env");
+
+  // First bot ever configured goes to the shared key (simplest default for single-bot
+  // setups); once a shared one exists, any additional bot is scoped per-profile.
+  const key = env.TELEGRAM_BOT_TOKEN ? perProfileKey : "TELEGRAM_BOT_TOKEN";
+  await writeEnvKey(key, token);
+  process.env[key] = token; // so sendTelegram() sees it later in this same run
+  ok(`${key} written to .env`);
   return token;
 }
 
@@ -171,22 +194,30 @@ async function main() {
   const { name, profileJsonPath } = await resolveProfileArg();
   log(`starting Telegram setup for profile "${name}"`);
 
-  const env = await readEnv();
-  const token = await ensureToken(env);
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const env = await readEnv();
+    const token = await ensureToken(rl, env, name);
 
-  const detected = await pollForChatId(token);
-  if (!detected) {
-    throw new Error("No message received within 60s — message your bot on Telegram, then re-run this script.");
+    const detected = await pollForChatId(token);
+    if (!detected) {
+      throw new Error("No message received within 60s — message your bot on Telegram, then re-run this script.");
+    }
+
+    const senderName = [detected.from?.first_name, detected.from?.last_name].filter(Boolean).join(" ") || "(unknown)";
+    console.log("");
+    log(`detected a message from "${senderName}" — chat_id=${detected.chat_id}`);
+    const answer = await prompt(rl, "Use this chat_id? [Y/n] ");
+    if (answer && /^n/i.test(answer)) {
+      throw new Error("Aborted by user — re-run and message the bot again to retry.");
+    }
+    await finishSetup(name, profileJsonPath, detected);
+  } finally {
+    rl.close();
   }
+}
 
-  const senderName = [detected.from?.first_name, detected.from?.last_name].filter(Boolean).join(" ") || "(unknown)";
-  console.log("");
-  log(`detected a message from "${senderName}" — chat_id=${detected.chat_id}`);
-  const answer = await prompt("Use this chat_id? [Y/n] ");
-  if (answer && /^n/i.test(answer)) {
-    throw new Error("Aborted by user — re-run and message the bot again to retry.");
-  }
-
+async function finishSetup(name, profileJsonPath, detected) {
   const merged = await mergeNotifyIntoProfile(profileJsonPath, detected.chat_id);
   ok(`profiles/${name}/profile.json updated — notify.telegram.enabled=true, chat_id=${detected.chat_id}`);
   log(`(schedule + all other existing keys preserved: ${Object.keys(merged).join(", ")})`);
@@ -207,6 +238,7 @@ async function main() {
     severity: "info",
     title: "Job Bunny — Telegram connected",
     body: `Setup complete for profile "${name}". You'll get pipeline alerts here.`,
+    profileName: name,
   });
   console.warn = origWarn;
 
