@@ -55,7 +55,10 @@ for profile in "$@"; do
 
   # Background claude directly (not as part of a `|` pipe) so $! is its own PID, not tee's.
   # Process substitution still tees its stdout+stderr to both the terminal and the log file.
-  claude -p "/run $profile" --dangerously-skip-permissions > >(tee "$log_file") 2>&1 &
+  # JOBBUNNY_HEADLESS=1 tells run.md's own forwarding instructions to skip their own Telegram
+  # send, since this script sends its own digest below once claude exits — without this, both
+  # layers fire and every scheduled run double-notifies (found via live testing).
+  JOBBUNNY_HEADLESS=1 claude -p "/run $profile" --dangerously-skip-permissions > >(tee "$log_file") 2>&1 &
   claude_pid=$!
 
   (
