@@ -3,6 +3,16 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.10.3] — 2026-07-06
+
+### Fixed
+- `scripts/notifiers/telegram_format.js`: the banner and an optional title were both bold text sitting directly above the body with only a blank line between them — especially hard to distinguish from the Run Summary's own bold heading. Adds a visible separator between the envelope (banner + optional title) and the body, and drops the now-redundant "Run complete" title from the success digest entirely (the Run Summary body already opens with its own heading).
+- Deterministic PASS/FAIL detection: `run_scheduled.sh` relied on `grep -q "## Run Summary" "$log_file"` to detect success — a real live-tested run genuinely succeeded (jobs synced, confirmed via `cache.json`) but was reported FAILED, and fired a false "run failed" alert, because the headless agent printed a shorter completion sentence instead of the exact template. Adds `scripts/mark_run_result.js` (called explicitly by the `/run` orchestration on both its success and failure paths — a mechanical script call, not freeform prose) and `scripts/check_run_result.js` (the new deterministic check, with a staleness guard against the run's start time so a crash before ever reaching the marker doesn't reuse an old "success").
+- Duplicate Telegram digest on scheduled runs: a live test showed one completed run sending two Telegram messages — one from inside the agent (per `run.md`'s own forwarding instruction) and a second from `run_scheduled.sh`'s wrapper-level forward, since neither layer knew about the other. `run_scheduled.sh` now sets `JOBBUNNY_HEADLESS=1` when invoking `claude`; `run.md`'s forwarding instructions check for it and skip their own send when set, since the wrapper will send its own digest once `claude` exits.
+
+### Notes
+- Also relocated the repo out of `~/Desktop` during today's live testing (see README Troubleshooting) — a background `launchd` job doesn't inherit the folder-access grants an interactive Terminal session has, so both `bash` and Chrome itself could get silently blocked or hang on a permission prompt with nobody there to answer it. Not a code change, but the root cause behind two of today's fixes surfacing at all.
+
 ## [0.10.2] — 2026-07-06
 
 ### Added
