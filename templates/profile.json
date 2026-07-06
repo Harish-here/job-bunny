@@ -1,4 +1,5 @@
 {
   "notion_db_id": "",
-  "notion_parent_page_id": ""
+  "notion_parent_page_id": "",
+  "schedule": { "enabled": false, "time": "09:00" }
 }
