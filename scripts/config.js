@@ -119,3 +119,13 @@ export function loadProfile(name = resolveProfileName()) {
   }
   return { name, ...profile };
 }
+
+// List all profile directory names under profiles/, sorted. Returns empty array in
+// legacy mode or if profiles dir doesn't exist.
+export function listProfiles() {
+  if (LEGACY || !existsSync(PROFILES_DIR)) return [];
+  return readdirSync(PROFILES_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+}

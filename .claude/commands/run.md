@@ -2,7 +2,7 @@
 description: Run the full v0 pipeline end-to-end for a profile, manually. Hard-aborts on red /doctor; skips a broken page-group and continues.
 ---
 
-Orchestrate the daily pipeline in order. v0 is triggered manually (scheduled/headless runs are a roadmap item).
+Orchestrate the daily pipeline in order. Triggered manually, or headlessly by launchd via `/schedule` (`scripts/run_scheduled.sh` → `claude -p "/run <profile>" --dangerously-skip-permissions`) — same stage sequence either way.
 
 **Step 0 — resolve the profile.** If `$ARGUMENTS` has a profile name, use it. Otherwise read `default_profile` from `config.json` (no `config.json` = legacy layout, no profile). State which profile the run is for before starting. When a profile was given, prefix **every** `node` command below with `JOBBUNNY_PROFILE=<profile>` — each bash call is a fresh shell, so repeat the prefix every time; never rely on `export`.
 
