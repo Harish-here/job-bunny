@@ -3,6 +3,18 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.10.2] — 2026-07-06
+
+### Added
+- `scripts/notifiers/telegram_format.js`: a proper message template for Telegram alerts — a consistent banner (severity icon + "Job Bunny" + profile name), Unicode "fake bold" for headings/labels (different codepoints, not markup — can't cause a parse/send failure the way real `parse_mode` escaping bugs could), and generic markdown-table-to-bullet-list conversion so the Run Summary's excitement-bands table renders as clean bullets instead of raw pipe/dash text. New `"success"` severity (✅, previously `"info"` was reused for this) for a clean PASSED run digest.
+- `npm test` (`node --test scripts/`): `node:test`-based unit tests for `telegram_format.js`'s pure functions (bold-mapping incl. surrogate-pair correctness, table-to-bullet conversion, heading/inline-bold stripping, truncation boundary).
+
+### Fixed
+- Call-site titles (`doctor.js`, `notion_sync.js`, `extract.js`, `notify_setup.js`, `run_scheduled.sh`, `run.md`) no longer redundantly repeat `— profile X` — the new banner already carries it.
+
+### Notes
+- `sendTelegram()` falls back to the old plain-text concatenation if formatting ever throws, so this can't regress the notifier's never-throws contract — verified live via fault injection, plus two live Telegram sends (success + blocking) confirmed visually.
+
 ## [0.10.1] — 2026-07-06
 
 ### Fixed
