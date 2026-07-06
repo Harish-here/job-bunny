@@ -49,6 +49,10 @@ for profile in "$@"; do
   timed_out_flag="$(mktemp)"
   rm -f "$timed_out_flag"
 
+  # Recorded before launching claude — check_run_result.js uses this to reject a stale
+  # marker left over from an earlier run (see its own header comment).
+  run_start_epoch=$(date +%s)
+
   # Background claude directly (not as part of a `|` pipe) so $! is its own PID, not tee's.
   # Process substitution still tees its stdout+stderr to both the terminal and the log file.
   claude -p "/run $profile" --dangerously-skip-permissions > >(tee "$log_file") 2>&1 &
@@ -84,11 +88,19 @@ for profile in "$@"; do
     timed_out=0
   fi
 
-  # Check for success marker in the log file, and that claude itself exited cleanly.
+  # PASS/FAIL comes from profiles/<profile>/data/last_run_result.json (written explicitly by
+  # the /run orchestration via mark_run_result.js — see run.md), NOT from grepping the log for
+  # a literal "## Run Summary" heading. That grep depended on a fresh headless agent's exact
+  # text-template compliance, which isn't guaranteed run to run — a genuinely successful run
+  # that printed a slightly different completion sentence would be misreported as FAILED (and
+  # fire a false "run failed" alert) purely because the wording didn't match. check_run_result.js
+  # is deterministic: a mechanical script call, not freeform prose, plus a staleness check
+  # against $run_start_epoch so a crash before ever reaching the marker doesn't reuse an old
+  # "success" from a prior day.
   if [ "$timed_out" -eq 1 ]; then
     status="FAILED"
     message="Job Bunny run TIMED OUT after ${TIMEOUT_SECONDS}s for $profile (killed) — check log: $log_file"
-  elif [ "$exit_code" -eq 0 ] && grep -q "## Run Summary" "$log_file"; then
+  elif [ "$exit_code" -eq 0 ] && node "$ROOT/scripts/check_run_result.js" "$profile" "$run_start_epoch"; then
     status="PASSED"
     message="Job Bunny run completed successfully for $profile. Log: $log_file"
   else
