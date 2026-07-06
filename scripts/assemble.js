@@ -6,7 +6,7 @@
 //   |--------|-------|---------|-----------|------|-----------|-----|---------|--------|-----|--------|
 //   empty cell = null · booleans: true/false · skills: semicolon-separated · pipe in value: ｜
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, unlink } from "node:fs/promises";
 import { paths } from "./config.js";
 
 const IN_DECISIONS  = paths().decisions;
@@ -98,6 +98,13 @@ async function main() {
   });
 
   await writeFile(OUT, JSON.stringify(merged, null, 2) + "\n");
+
+  try {
+    await unlink(IN_DECISIONS);
+  } catch (err) {
+    console.warn(`[assemble] warning: could not remove ${IN_DECISIONS}: ${err.message}`);
+  }
+
   console.log(`[assemble] ${merged.length} jobs merged → jobs_raw.json`);
 }
 
