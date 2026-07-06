@@ -3,6 +3,11 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.10.1] — 2026-07-06
+
+### Fixed
+- `scripts/run_scheduled.sh`: a hung headless `/run` (as opposed to a clean stage failure) previously blocked that profile's scheduled slot indefinitely with no alert at all, since every `notify()` hook fires on a stage *completing* with an error, never on the process simply never finishing. The script now backgrounds the `claude` invocation with a watchdog that kills it after a configurable timeout (`JOBBUNNY_RUN_TIMEOUT_SECONDS`, default 2700s/45min — neither `timeout` nor `gtimeout` ships on stock macOS, so this is a portable bash background+poll+kill watchdog instead). `set -m` + a negative-PID kill terminate the whole process group, not just the top-level `claude` PID — verified live that a single-PID kill orphans child processes (e.g. subprocesses `claude` itself spawns), while the group-kill correctly takes down the whole tree. A timeout now fires the existing FAILED-path alerts (macOS notification + Telegram) with a distinct "TIMED OUT after Ns" message.
+
 ## [0.10.0] — 2026-07-06
 
 ### Added
