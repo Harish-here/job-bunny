@@ -3,6 +3,20 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.9.0] — 2026-07-06
+
+### Added
+- `/schedule` (+ `scripts/schedule.js`): generates and installs macOS launchd LaunchAgents from each profile's `schedule` config (`profile.json`: `enabled`/`time`). Profiles sharing an identical fire time are grouped into one launchd job and run strictly sequentially via `scripts/run_scheduled.sh` — never concurrently, since profiles share one Chrome/CDP session.
+- `scripts/run_scheduled.sh`: the launchd entrypoint — invokes `claude -p "/run <profile>" --dangerously-skip-permissions` headlessly, logs each run to `profiles/<name>/data/logs/`, and fires a pass/fail macOS notification.
+- `scripts/config.js`: `listProfiles()` export.
+
+### Fixed
+- `assemble.js`: cleans up `jobs_raw_decisions.md` after merging into `jobs_raw.json`.
+
+### Notes
+- `/run` is no longer manual-only — `run.md` updated to describe both manual and headless/scheduled triggering.
+- Optional hardening for machines that sleep through the scheduled time: `sudo pmset repeat wakeorpoweron` (documented in `schedule.md`); launchd already fires a missed job once on next wake with no data loss.
+
 ## [0.8.1] — 2026-07-06
 
 ### Changed
