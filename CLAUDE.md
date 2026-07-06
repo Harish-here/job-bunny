@@ -8,12 +8,13 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 - **The only runtime LLM stage is `/structure`** (raw JD text → structured records). Filtering, dedup, and ranking are pure deterministic JS — never move their logic behind an LLM.
 - **The design doc (design_v0) lives in Notion** and is build-time reference only: fetch it on demand when authoring/changing code, never in the run path.
 - **Surface before implement.** When a spec detail is ambiguous, stop and ask — don't guess a heuristic into existence.
+- **Notifications are best-effort.** `scripts/notify.js` and its connectors (e.g. `scripts/notifiers/telegram.js`) must never throw in a way that breaks the calling pipeline stage — a notification failure is never a reason to fail `/doctor`, `/extract`, or `/sync`.
 
 ## Commands
 
 - `/run [profile]` — full pipeline, manual. No argument = `config.json` `default_profile`.
 - Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /structure · /filter · /dedup · /rank · /sync`.
-- Setup & maintenance: `/setup <profile> · /migrate <name> · /page-analyse · /add-url · /cleanup · /update-resume · /wrap`.
+- Setup & maintenance: `/setup <profile> · /migrate <name> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /wrap`.
 
 Most stages are thin `node scripts/<x>.js` wrappers. Two exceptions:
 

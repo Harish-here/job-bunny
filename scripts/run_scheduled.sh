@@ -42,5 +42,17 @@ for profile in "$@"; do
   # Fire macOS notification.
   osascript -e "display notification \"$message\" with title \"Job Bunny $status\""
 
+  # Forward the same digest to Telegram (best-effort — notify.js never throws/exits non-zero).
+  # On success, the body is the log's "## Run Summary" block onward; on failure, a plain message.
+  if [ "$status" = "PASSED" ]; then
+    notify_body=$(sed -n '/## Run Summary/,$p' "$log_file")
+    if [ -z "$notify_body" ]; then
+      notify_body="$message"
+    fi
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity info --title "Job Bunny $status — $profile" --body "$notify_body"
+  else
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Job Bunny $status — $profile" --body "$message"
+  fi
+
   echo "[run_scheduled.sh] Finished profile: $profile (status: $status)" >&2
 done

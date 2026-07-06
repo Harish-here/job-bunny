@@ -14,6 +14,7 @@ import { Client } from "@notionhq/client";
 import { dedupKey } from "./util.js";
 import { readCache, writeCache } from "./cache.js";
 import { paths, loadProfile, resolveProfileName } from "./config.js";
+import { notify } from "./notify.js";
 
 const IN = paths().newJobs;
 
@@ -60,22 +61,47 @@ async function main() {
 
   let inserted = 0;
   let skipped = 0;
-  for (const job of jobs) {
+  let syncError = null;
+  let remaining = 0;
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i];
     const key = dedupKey(job);
     if (seen.has(key)) {
       skipped++;
       continue;
     }
-    const page = await notion.pages.create({ parent: { database_id: dbId }, properties: buildProperties(job) });
-    seen.add(key);
-    cache.jobs.push({ ...job, notion_page_id: page.id });
-    inserted++;
-    console.log(`[sync] + ${job.excitement_level || "?"}  ${job.job_title} @ ${job.company_name}`);
+    try {
+      const page = await notion.pages.create({ parent: { database_id: dbId }, properties: buildProperties(job) });
+      seen.add(key);
+      cache.jobs.push({ ...job, notion_page_id: page.id });
+      inserted++;
+      console.log(`[sync] + ${job.excitement_level || "?"}  ${job.job_title} @ ${job.company_name}`);
+      // Incremental flush after every successful insert — a mid-loop failure (rate-limit,
+      // auth, a bad select value) never loses already-inserted jobs from the cache mirror,
+      // which would otherwise cause duplicate Notion rows on retry.
+      await writeCache(cache);
+    } catch (err) {
+      syncError = err;
+      remaining = jobs.length - i - 1; // jobs not attempted after this one
+      console.error(`[sync] FAILED inserting "${job.job_title}" @ ${job.company_name}: ${err.message}`);
+      break; // a rate-limit/auth error will likely repeat — don't burn through the rest
+    }
   }
 
   cache.last_run = new Date().toISOString();
   await writeCache(cache);
   console.log(`[sync] inserted ${inserted}, skipped ${skipped} (already in cache); cache now ${cache.jobs.length} job(s)`);
+
+  if (syncError) {
+    await notify({
+      severity: "blocking",
+      title: `Notion sync failed — profile ${resolveProfileName()}`,
+      body:
+        `${inserted} inserted, ${skipped} skipped, ${remaining} not attempted — cache safe to retry. ` +
+        `Error: ${syncError.message}`,
+    });
+    throw syncError;
+  }
 }
 
 main().catch((err) => {

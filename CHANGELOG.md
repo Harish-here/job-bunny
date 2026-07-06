@@ -3,6 +3,21 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.10.0] — 2026-07-06
+
+### Added
+- Telegram notification system: `scripts/notify.js` (generic dispatcher — reads the active profile's `notify` block, fans out to enabled channels via `Promise.allSettled`, never throws) + `scripts/notifiers/telegram.js` (plain-text Telegram channel, `AbortSignal.timeout(5000)`, never throws on missing token/chat_id/non-2xx/timeout) + `/notify-setup` (`scripts/notify_setup.js`, guided BotFather + `chat_id` auto-detect flow; read-parse-merge-writes `profile.json`, never overwrites wholesale).
+- `scripts/doctor.js`: `checkNotifier()` — passes ("optional — run /notify-setup to enable") when `notify.telegram.enabled` is false; hard-fails on missing `TELEGRAM_BOT_TOKEN` or missing `chat_id` when enabled. No live Telegram API reachability check (deliberate — a transient API blip must not hard-abort the pipeline). `/doctor` now self-notifies (`severity: "blocking"`) before exiting on any red check.
+- `scripts/extract.js`: aggregate "every URL failed" detection — if 100% of this run's URLs failed (group-level and URL-level skips distinguished by presence of a `url` key), fires a blocking alert shaped like a LinkedIn-logout hint. Partial failures and legitimately quiet zero-card days do not trigger it.
+- `scripts/run_scheduled.sh` + `.claude/commands/run.md`: both entrypoints now forward the run digest to Telegram after the existing macOS notification — the log's `## Run Summary` block on success, a plain failure message otherwise. The two entrypoints never double-send within a single run.
+
+### Fixed
+- `scripts/notion_sync.js`: `writeCache()` was unreachable if `pages.create()` threw mid-loop, so already-inserted jobs could be lost from the cache mirror and re-inserted as duplicate Notion rows on retry. The insert loop now writes the cache after every successful insert, wraps `pages.create()` in try/catch, breaks on first failure (a rate-limit/auth error will likely repeat), and always runs the final `cache.last_run`/`writeCache()` regardless of an early break. A failed sync now also fires a blocking Telegram alert with inserted/skipped/remaining counts and the Notion error text before re-throwing.
+
+### Notes
+- Setup is a guided skill, not manual `.env` editing — `TELEGRAM_BOT_TOKEN` is shared across profiles (same split as `NOTION_TOKEN`); per-profile `chat_id` lives in `profile.json`.
+- v1 scope is intentionally narrow: final run digest + blocking mid-pipeline alerts (doctor red, Notion sync failure, LinkedIn-logout-shaped extract failure) — not a full observability firehose.
+
 ## [0.9.0] — 2026-07-06
 
 ### Added

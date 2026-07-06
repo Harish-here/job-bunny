@@ -11,6 +11,7 @@ import { constants } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { ROOT, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
+import { notify } from "./notify.js";
 
 const P = paths();
 const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
@@ -33,6 +34,27 @@ async function checkSecrets() {
   } catch (err) {
     fail(err.message);
   }
+}
+
+// No live Telegram API reachability check here (deliberate, unlike checkCDP): doctor gates
+// the whole pipeline, and a transient Telegram API blip must not hard-abort scraping/syncing
+// for a reason unrelated to the pipeline itself.
+async function checkNotifier() {
+  console.log("[doctor] notifications");
+  let telegram;
+  try {
+    telegram = loadProfile().notify?.telegram;
+  } catch (err) {
+    return fail(err.message);
+  }
+  if (!telegram?.enabled) {
+    pass("Telegram notifications disabled (optional — run /notify-setup to enable)");
+    return;
+  }
+  if (!process.env.TELEGRAM_BOT_TOKEN) fail("TELEGRAM_BOT_TOKEN missing (run /notify-setup)");
+  else pass("TELEGRAM_BOT_TOKEN set");
+  if (!telegram.chat_id) fail("notify.telegram.chat_id missing in profile.json (run /notify-setup)");
+  else pass("notify.telegram.chat_id set");
 }
 
 async function checkProfileFiles() {
@@ -111,6 +133,7 @@ async function checkCache() {
 async function main() {
   console.log(`[doctor] mode=${LEGACY ? "legacy" : "profiles"} profile=${resolveProfileName()}`);
   await checkSecrets();
+  await checkNotifier();
   await checkProfileFiles();
   await checkCDP();
   await checkInventories();
@@ -118,6 +141,11 @@ async function main() {
   console.log("");
   if (failed) {
     console.error(`[doctor] ${failed} check(s) failed — not ready to /run.`);
+    await notify({
+      severity: "blocking",
+      title: `Doctor red — profile ${resolveProfileName()}`,
+      body: `${failed} check(s) failed`,
+    });
     process.exit(1);
   }
   console.log("[doctor] all green — ready to /run.");

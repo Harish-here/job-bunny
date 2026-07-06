@@ -40,4 +40,6 @@ Notes:
 - <anything noteworthy: cache size swings, heavy dedup collapse, filter drops with reasons, etc.>
 ```
 
-If any single stage fails hard (not a skippable page-group), stop and surface the error rather than pushing partial data — skip the summary template in that case and report the failure directly.
+After printing the summary, forward the same digest to Telegram (best-effort — this mirrors what `run_scheduled.sh` does for headless runs, so interactive `/run` gets the same notification): shell out with `JOBBUNNY_PROFILE=<profile> node scripts/notify.js --severity info --title "Job Bunny PASSED — <profile>" --body "<the exact summary text just printed>"`.
+
+If any single stage fails hard (not a skippable page-group), stop and surface the error rather than pushing partial data — skip the summary template in that case and report the failure directly. Also forward a failure digest to Telegram the same way: `JOBBUNNY_PROFILE=<profile> node scripts/notify.js --severity blocking --title "Job Bunny FAILED — <profile>" --body "<the failure just reported>"`. These two forwarding calls are mutually exclusive per run (success xor failure) — never send both.

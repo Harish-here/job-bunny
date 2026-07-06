@@ -20,6 +20,7 @@ import { loadAvoid, isAvoided } from "./avoid.js";
 import { readCache } from "./cache.js";
 import { filterByTitle } from "./title_filter.js";
 import { ROOT, paths, resolveProfileName } from "./config.js";
+import { notify } from "./notify.js";
 
 // Defaults to the profile's search_urls.md; SEARCH_URLS_FILE overrides it for subset/test runs.
 const SEARCH_URLS = process.env.SEARCH_URLS_FILE || paths().searchUrls;
@@ -457,6 +458,40 @@ async function main() {
       `run_deduped=${summary.run_deduped} title_dropped=${summary.title_dropped} captured=${summary.captured} → jobs_raw_text.json`
   );
   for (const s of summary.skipped) console.log(`[extract]   skipped ${s.page}: ${s.reason}`);
+
+  await checkAggregateFailure(groups, summary);
+}
+
+// Aggregate "every URL failed" detection — a stale/expired LinkedIn session tends to make
+// every single group fail (inventory/assertion errors), not just one flaky selector. Group-
+// level skips (pushed before the per-URL loop starts, no `url` key) count ALL of that group's
+// URLs as failed; URL-level skips (have a `url` key) count just that one URL. A legitimately
+// quiet day with zero cards found (but URLs that loaded fine) must NOT trigger this — that's
+// exactly the case the "no url key" vs "has url key" distinction protects against.
+export function computeAggregateFailure(groups, summary) {
+  const totalUrls = groups.reduce((sum, g) => sum + g.urls.length, 0);
+  let failedUrls = 0;
+  for (const g of groups) {
+    const groupLevelSkip = summary.skipped.find((s) => s.page === g.page && !("url" in s));
+    if (groupLevelSkip) {
+      failedUrls += g.urls.length;
+    } else {
+      failedUrls += summary.skipped.filter((s) => s.page === g.page && "url" in s).length;
+    }
+  }
+  return { totalUrls, failedUrls, allFailed: totalUrls > 0 && failedUrls === totalUrls };
+}
+
+async function checkAggregateFailure(groups, summary) {
+  const { totalUrls, failedUrls, allFailed } = computeAggregateFailure(groups, summary);
+  if (!allFailed) return;
+  await notify({
+    severity: "blocking",
+    title: `Extract: every URL failed — profile ${resolveProfileName()}`,
+    body:
+      `${failedUrls}/${totalUrls} URL(s) failed this run — shaped like a LinkedIn logout — ` +
+      `check .chrome-debug/ session.`,
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
