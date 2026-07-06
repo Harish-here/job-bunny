@@ -102,13 +102,15 @@ for profile in "$@"; do
   # Forward the same digest to Telegram (best-effort — notify.js never throws/exits non-zero).
   # On success, the body is the log's "## Run Summary" block onward; on failure, a plain message.
   # Title/profile no longer repeat "Job Bunny .. — $profile" — the Telegram formatter's own
-  # banner already carries both, per telegram_format.js.
+  # banner already carries both, per telegram_format.js. No --title on success either: the
+  # Run Summary body already opens with its own bold heading, so a separate "Run complete"
+  # title was just a redundant second headline stacked right above it.
   if [ "$status" = "PASSED" ]; then
     notify_body=$(sed -n '/## Run Summary/,$p' "$log_file")
     if [ -z "$notify_body" ]; then
       notify_body="$message"
     fi
-    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity success --title "Run complete" --body "$notify_body"
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity success --body "$notify_body"
   elif [ "$timed_out" -eq 1 ]; then
     JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Run timed out" --body "$message"
   else

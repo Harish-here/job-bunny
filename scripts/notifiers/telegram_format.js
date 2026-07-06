@@ -98,10 +98,16 @@ export function truncate(text) {
   return codepoints.slice(0, SAFE_LIMIT).join("") + TRUNCATION_NOTE;
 }
 
+// A visible rule between the envelope (banner + optional title) and the content — both are
+// bold text and blend together with only a blank line between them, especially when the body
+// starts with its own bold heading (e.g. the Run Summary's "Run Summary — profile: X").
+const SEPARATOR = "────────────────";
+
 export function formatTelegramMessage({ severity, title, body, profileName }) {
   const banner = `${severityIcon(severity)} Job Bunny${profileName ? ` — ${profileName}` : ""}`;
   const boldTitle = title ? toBoldUnicode(title) : "";
   const formattedBody = reformatBody(body || "");
-  const parts = [banner, boldTitle, formattedBody].filter((p) => p !== "");
+  const header = [banner, boldTitle].filter((p) => p !== "").join("\n");
+  const parts = [header, SEPARATOR, formattedBody].filter((p) => p !== "");
   return truncate(parts.join("\n\n").trim());
 }
