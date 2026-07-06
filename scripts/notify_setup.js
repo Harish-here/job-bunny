@@ -235,8 +235,8 @@ async function finishSetup(name, profileJsonPath, detected) {
   };
   await sendTelegram({
     chat_id: detected.chat_id,
-    severity: "info",
-    title: "Job Bunny — Telegram connected",
+    severity: "success",
+    title: "Telegram connected",
     body: `Setup complete for profile "${name}". You'll get pipeline alerts here.`,
     profileName: name,
   });

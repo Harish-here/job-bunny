@@ -487,7 +487,7 @@ async function checkAggregateFailure(groups, summary) {
   if (!allFailed) return;
   await notify({
     severity: "blocking",
-    title: `Extract: every URL failed — profile ${resolveProfileName()}`,
+    title: "Extract: every URL failed",
     body:
       `${failedUrls}/${totalUrls} URL(s) failed this run — shaped like a LinkedIn logout — ` +
       `check .chrome-debug/ session.`,

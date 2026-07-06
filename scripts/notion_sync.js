@@ -95,7 +95,7 @@ async function main() {
   if (syncError) {
     await notify({
       severity: "blocking",
-      title: `Notion sync failed — profile ${resolveProfileName()}`,
+      title: "Notion sync failed",
       body:
         `${inserted} inserted, ${skipped} skipped, ${remaining} not attempted — cache safe to retry. ` +
         `Error: ${syncError.message}`,

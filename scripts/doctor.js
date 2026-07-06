@@ -148,7 +148,7 @@ async function main() {
     console.error(`[doctor] ${failed} check(s) failed — not ready to /run.`);
     await notify({
       severity: "blocking",
-      title: `Doctor red — profile ${resolveProfileName()}`,
+      title: "Doctor red",
       body: `${failed} check(s) failed`,
     });
     process.exit(1);

@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test": "node --test scripts/",
     "init": "node scripts/init.js",
     "migrate": "node scripts/migrate.js",
     "meta": "node scripts/generate_meta.js",
