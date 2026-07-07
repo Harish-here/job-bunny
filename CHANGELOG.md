@@ -3,6 +3,20 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.11.0] — 2026-07-07
+
+### Added
+- `/setup` overhaul: turned into a single guided walkthrough instead of stopping after the Notion wiring. `scripts/init.js` gained a dependency preflight (`checkDependencies()`: Node version, package resolvability via dynamic import derived live from `package.json`, Chrome presence, and a warning if the repo sits under a macOS-protected folder like `~/Desktop`/`~/Documents`/`~/Downloads`) and now seeds `profiles/<profile>/resume.json` from `resume.example.json` (self-healing via the same empty-file check `cache.json` already used). `.claude/commands/setup.md` now walks through résumé fill-in, `/update-resume`, a new title-filter review step, first `/add-url`, optional `/notify-setup`, and a closing `/doctor` run with real pass/fail output, all in one invocation. `CHROME_BIN` is now a single shared export in `config.js` instead of being duplicated in `doctor.js`. README quick-start reframed around `/setup` as the one-command path.
+- Title-filter review step: `filter_config.json`'s `title_filter` block was previously scaffolded silently from a frontend/UI-biased template with no review — a mismatch here silently drops every job ("no domain match") with no visible error. `/setup` now has an explicit step to review and tune it before continuing.
+- `node:test` unit tests (91 assertions, 7 new files) for the deterministic, LLM-free pipeline core: `rank.js` (scoring), `filter.js` (location/timezone hard-drops), `title_filter.js` (title gating), `avoid.js` (avoid-list matching), `util.js` (normalization/dedup helpers), `add_url.js` (URL cleaning), and a narrow read-only slice of `config.js` (path resolution). The `title_filter`/`filter`/`config` tests use disposable fixture profiles under `profiles/` so they never read or depend on real personal profile data.
+
+### Fixed
+- `/run`: never background a stage command, even a slow one — a backgrounded stage in a headless/scheduled run (`claude -p ... --dangerously-skip-permissions`, a single-shot non-interactive call) could silently truncate the whole run right after the backgrounded stage starts, with no error and no `mark_run_result.js` call.
+- `filter.js`, `dedup.js`, `generate_meta.js`, `compress.js`, `assemble.js`: were missing the `import.meta.url === file://...` guard that `rank.js`/`add_url.js` already had around their `main()` call, so importing any of them (as the new tests do) silently ran the full file-based pipeline as an unawaited side effect — surfaced as a real race (`ENOTEMPTY` on test fixture cleanup) while writing `filter.test.js`. All five now only run `main()` when invoked directly, consistent with the rest of the pipeline.
+
+### Notes
+- Removed dead `seniority_keywords`/`title_keywords`/`skills_overlap_threshold` keys from `templates/filter_config.json` and both real profiles (`harish`, `uvashree`) — leftover from a pre-`title_filter` schema (see 0.4.0/0.5.0 below); nothing reads them, only the `title_filter` block is used.
+
 ## [0.10.3] — 2026-07-06
 
 ### Fixed

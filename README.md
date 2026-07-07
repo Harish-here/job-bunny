@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.10.3-e8a0bf">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.11.0-e8a0bf">
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A520-3c873a">
   <img alt="Pipeline" src="https://img.shields.io/badge/pipeline-deterministic-7B5EA7">
   <img alt="Source of truth" src="https://img.shields.io/badge/source%20of%20truth-Notion-black">
