@@ -12,8 +12,6 @@ export const EXCITEMENT_OPTIONS = [
   "Vera level",
   "Kandipa podu",
   "Try panalam",
-  "Okay tha",
-  "Deal la vidu",
 ];
 export const STATUS_OPTIONS = [
   "Lead",
