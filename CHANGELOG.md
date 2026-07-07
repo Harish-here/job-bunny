@@ -3,6 +3,15 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.13.0] — 2026-07-07
+
+### Added
+- Repost handling in `/dedup` (roadmap "Stale / repost handling", pulled forward from v3): LinkedIn reposts get a fresh `job_id`, so they always passed the id-keyed dedup and inserted a duplicate Notion row for a job already tracked. New `repostKey()` in `util.js` (normalized title + company + city — city included so a company posting the same title in two cities keeps both openings) and a repost drop in `dedup.js`: fresh id but known repost key → dropped and counted separately, nothing written to Notion (the existing row stands; sync stays insert-only). `dedup.js` core extracted into a pure exported `dedupJobs(jobs, cacheJobs)` (same import-safe pattern the rest of the pipeline got in 0.11.0) with new `dedup.test.js` + `repostKey` cases in `util.test.js` (114 tests total).
+- Stale-lead rule in `/cleanup`: pages with **no Status at all** (never triaged — sync never writes Status, so empty means untouched) older than `CLEANUP_LEAD_DAYS_OLD` (default 30) are now listed/archived alongside the existing 7-day `Passed` rule. Any manually set Status exempts a row; dry-run by default, `--apply` unchanged; per-rule labels and counts in the output. Also added the `import.meta.url` main-guard that 0.11.0 gave every other script — `cleanup.js` was missed and still ran on import.
+
+### Notes
+- A repost still costs one JD fetch + one `/structure` row per repost event before dedup drops it (extract's pre-JD cache skip is id-based). Catching it at card level needs fuzzy card-location matching — deferred to the roadmap as a token optimization, alongside browser-driven "no longer accepting applications" detection.
+
 ## [0.12.0] — 2026-07-07
 
 ### Changed
