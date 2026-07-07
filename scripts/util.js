@@ -40,3 +40,10 @@ export function dedupKey(job) {
   if (id) return `id:${id}`;
   return `rc:${normalizeName(job.job_title)}::${normalizeName(job.company_name)}`;
 }
+
+// Repost key: same role at same company in same city — a fresh job_id on this key is a repost.
+// location_city is included deliberately: a company posting the same title in two cities is two
+// distinct openings, while a LinkedIn repost keeps its location.
+export function repostKey(job) {
+  return `rp:${normalizeName(job.job_title)}::${normalizeName(job.company_name)}::${normalizeName(job.location_city)}`;
+}

@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeName, extractJobId, dedupKey } from "./util.js";
+import { normalizeName, extractJobId, dedupKey, repostKey } from "./util.js";
 
 // --- normalizeName ---------------------------------------------------------
 
@@ -89,5 +89,33 @@ test("dedupKey falls back to normalized role+company when neither job_id nor a p
   assert.equal(
     dedupKey({ job_title: "Senior Backend Engineer", company_name: "Acme Inc" }),
     "rc:senior backend engineer::acme",
+  );
+});
+
+// --- repostKey ------------------------------------------------------------
+
+test("repostKey ignores job_id — same role+company+city yields the same key across fresh ids", () => {
+  const a = { job_id: "111", job_title: "Staff Engineer", company_name: "Acme Inc", location_city: "Chennai" };
+  const b = { job_id: "222", job_title: "Staff Engineer", company_name: "Acme Inc", location_city: "Chennai" };
+  assert.equal(repostKey(a), repostKey(b));
+});
+
+test("repostKey normalizes case, punctuation, and legal suffixes on every part", () => {
+  assert.equal(
+    repostKey({ job_title: "Staff Engineer", company_name: "Acme, Inc.", location_city: "Chennai" }),
+    repostKey({ job_title: "STAFF ENGINEER", company_name: "acme", location_city: "chennai" }),
+  );
+});
+
+test("repostKey differs when only the city differs — two openings, not a repost", () => {
+  const chennai = { job_title: "Staff Engineer", company_name: "Acme", location_city: "Chennai" };
+  const bangalore = { job_title: "Staff Engineer", company_name: "Acme", location_city: "Bangalore" };
+  assert.notEqual(repostKey(chennai), repostKey(bangalore));
+});
+
+test("repostKey treats null and empty location_city as the same (both normalize to empty)", () => {
+  assert.equal(
+    repostKey({ job_title: "Staff Engineer", company_name: "Acme", location_city: null }),
+    repostKey({ job_title: "Staff Engineer", company_name: "Acme", location_city: "" }),
   );
 });
