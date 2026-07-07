@@ -19,19 +19,83 @@
 import { readFile, writeFile, mkdir, access, copyFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@notionhq/client";
 import { DB_TITLE, PARENT_PAGE_TITLE, DB_PROPERTIES } from "./schema.js";
-import { ROOT } from "./config.js";
+import { ROOT, CHROME_BIN } from "./config.js";
+
+// @notionhq/client is deliberately NOT statically imported here — a static import is
+// resolved at module load, before checkDependencies() ever runs, so a missing install
+// would crash with a raw ERR_MODULE_NOT_FOUND instead of the intended friendly error.
+// checkDependencies() dynamic-imports it (and every other required package) and hands
+// the module back to main() once the preflight has actually confirmed it's installed.
 
 const ENV_PATH = join(ROOT, ".env");
 const CONFIG_PATH = join(ROOT, "config.json");
+const PACKAGE_JSON_PATH = join(ROOT, "package.json");
+const MIN_NODE_MAJOR = 20;
+const PROTECTED_MACOS_DIRS = ["Desktop", "Documents", "Downloads"];
 
 const log = (msg) => console.log(`[init] ${msg}`);
 const ok = (msg) => console.log(`[init] ✓ ${msg}`);
+const warn = (msg) => console.log(`[init] ⚠ ${msg}`);
 
 const exists = (p) =>
   access(p, constants.F_OK).then(() => true).catch(() => false);
+
+// ---------- Step 0: dependency preflight (fail fast, before any writes) ----------
+// Node-version and npm-package checks throw (setup cannot proceed at all without them).
+// Chrome and the protected-folder check only warn: /doctor is the authoritative gate for
+// Chrome/CDP readiness, and a protected-folder repo still works for manual /run, it only
+// breaks /schedule later — neither is a reason to hard-abort /setup itself.
+async function checkDependencies() {
+  log("checking dependencies");
+
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  if (nodeMajor < MIN_NODE_MAJOR) {
+    throw new Error(
+      `Node ${process.version} detected — Job Bunny requires Node >= ${MIN_NODE_MAJOR}. Install a newer Node and re-run.`
+    );
+  }
+  ok(`Node ${process.version} (>= ${MIN_NODE_MAJOR})`);
+
+  const { dependencies = {} } = JSON.parse(await readFile(PACKAGE_JSON_PATH, "utf8"));
+  const requiredPackages = Object.keys(dependencies);
+
+  const missingPackages = [];
+  let notionModule;
+  for (const pkg of requiredPackages) {
+    try {
+      const mod = await import(pkg);
+      if (pkg === "@notionhq/client") notionModule = mod;
+    } catch {
+      missingPackages.push(pkg);
+    }
+  }
+  if (missingPackages.length) {
+    throw new Error(
+      `Missing package(s): ${missingPackages.join(", ")} — run \`npm install\` first, then re-run /setup.`
+    );
+  }
+  ok("npm packages installed");
+
+  if (await exists(CHROME_BIN)) {
+    ok("Google Chrome found");
+  } else {
+    warn(`Google Chrome not found at ${CHROME_BIN} — /extract runs over Chrome DevTools Protocol and needs it installed.`);
+  }
+
+  const home = homedir();
+  const inProtectedDir = PROTECTED_MACOS_DIRS.some((d) => ROOT.startsWith(join(home, d) + "/") || ROOT === join(home, d));
+  if (inProtectedDir) {
+    warn(
+      "repo is under ~/Desktop, ~/Documents, or ~/Downloads — macOS sandboxes these from background launchd jobs, " +
+        "which silently breaks /schedule. Consider moving the repo elsewhere (e.g. ~/job-bunny) before relying on scheduled runs."
+    );
+  }
+
+  return notionModule;
+}
 
 // ---------- profile resolution ----------
 async function resolveProfileArg() {
@@ -268,6 +332,12 @@ async function scaffold(profile, profileDir) {
     JSON.stringify({ last_run: null, jobs: [] }, null, 2) + "\n",
     `profiles/${profile}/data/cache.json`
   );
+
+  await ensureFile(
+    join(profileDir, "resume.json"),
+    await readFile(join(ROOT, "resume.example.json"), "utf8"),
+    `profiles/${profile}/resume.json`
+  );
 }
 
 async function ensureConfigJson(profile) {
@@ -281,6 +351,7 @@ async function ensureConfigJson(profile) {
 
 // ---------- main ----------
 async function main() {
+  const notionModule = await checkDependencies();
   const profile = await resolveProfileArg();
   log(`starting idempotent setup for profile "${profile}"`);
   await guardAgainstLegacyLayout();
@@ -292,13 +363,13 @@ async function main() {
   await scaffold(profile, profileDir);
   await ensureConfigJson(profile);
 
-  const notion = new Client({ auth: token });
+  const notion = new notionModule.Client({ auth: token });
   const dbId = await resolveNotion(notion, profile, join(profileDir, "profile.json"));
 
   console.log("");
   ok(`setup complete for "${profile}"`);
   log(`Notion DB: ${dbId}`);
-  log(`Next: fill profiles/${profile}/resume.json (start from resume.example.json),`);
+  log(`Next: fill in profiles/${profile}/resume.json,`);
   log(`then run \`JOBBUNNY_PROFILE=${profile} node scripts/generate_meta.js\`.`);
   log("Add searches with /add-url. /doctor checks Chrome + LinkedIn login before /run.");
 }

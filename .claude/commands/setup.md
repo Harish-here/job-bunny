@@ -1,20 +1,33 @@
 ---
-description: Onboarding wizard — per-profile Notion page + DB, secrets, resume, first URLs. Idempotent (wraps init.js).
+description: Onboarding wizard — one command from a fresh clone to a running profile. Idempotent, resumable at any step.
 ---
 
-Run the idempotent per-profile setup (`$ARGUMENTS` = profile name, lowercase/digits/hyphens):
+`$ARGUMENTS` = profile name (lowercase letters, digits, hyphens — e.g. `harish`). Walk through every step below in order, in this one invocation — don't stop after the Notion wiring and leave the rest as homework. Re-running later is always safe: every step is check-before-act and skips what's already done.
+
+A pre-v0.7 checkout (root-level config files, no `config.json`) must run `/migrate <name>` first — `init.js` refuses to mix layouts.
+
+**1. Dependencies.** If `node_modules/` is missing (fresh clone), run `npm install` before anything else — nothing downstream works without it. `node scripts/init.js` also re-checks this: Node version and installed packages are hard gates (it aborts with a clear fix if either is missing); Chrome presence and whether the repo sits under a macOS-protected folder like `~/Desktop`/`~/Documents`/`~/Downloads` (which silently breaks `/schedule` later) are soft warnings that let setup continue, since `/doctor` is the authoritative Chrome/CDP gate. Surface whichever message it prints verbatim rather than guessing at a workaround.
+
+**2. Core setup:**
 
 ```bash
 node scripts/init.js <profile>
 ```
 
-It ensures `.gitignore` ignores `.env`, `profiles/`, and `config.json` first, prompts (masked) for the shared Notion token, scaffolds `profiles/<profile>/` (avoid.md, search_urls.md, filter_config.json from `templates/`, empty data/cache.json), writes `config.json` (default profile) if missing, then locates-or-creates the profile's own Notion page (a child of "Job Bunny's List", which must be shared with your integration) with a "Job Bunny — Jobs" DB inside it, persisting both IDs to `profiles/<profile>/profile.json`. Re-running repairs a missing piece without clobbering filled files or duplicating Notion structure.
+This ensures `.gitignore` ignores `.env`/`profiles/`/`config.json` first, prompts (masked) for the shared Notion token, scaffolds `profiles/<profile>/` (avoid.md, search_urls.md, filter_config.json, resume.json — all seeded from `templates/`/`resume.example.json`, none clobbered if already filled), writes `config.json` if missing, then locates-or-creates the profile's own Notion page (a child of "Job Bunny's List", which must already be shared with your integration) with a "Job Bunny — Jobs" DB inside it, persisting both IDs to `profiles/<profile>/profile.json`.
 
-A pre-v0.7 checkout (root-level config files) must run `/migrate <name>` first — init refuses to mix layouts.
+**3. Résumé.** `profiles/<profile>/resume.json` now exists (seeded from `resume.example.json` if it wasn't already there). Tell the user its path and pause here — ask them to fill in `current_yoe`, `target_seniority`, `core_skills`, `secondary_skills`, `preferred_work_type`, `location`, `domain_experience`, `usp`. Don't proceed to step 4 until they confirm it's done. (No PDF parsing — hand-edited JSON is the source of truth, per CLAUDE.md.)
 
-Then:
-1. Fill `profiles/<profile>/resume.json` (start from `resume.example.json`; explicit `core_skills` / `secondary_skills` etc.). One-time PDF→resume.json seeding may be offered here — LLM drafts, you verify. Never in the daily path.
-2. Run `/update-resume <profile>` to generate its `resume_meta.json`.
-3. Add its first search URLs with `/add-url <profile> <url> <label>`.
+**4. Derive résumé metadata**, once step 3 is confirmed:
 
-Setup completing ≠ ready to run: Chrome/CDP readiness is checked separately by `/doctor`.
+```bash
+JOBBUNNY_PROFILE=<profile> node scripts/generate_meta.js
+```
+
+**5. First search URL.** Ask for one LinkedIn saved-search URL and a short label, then invoke `/add-url <profile> <url> <label>` (or run `JOBBUNNY_PROFILE=<profile> node scripts/add_url.js "<url>" "<label>"` directly). More can be added later the same way — this just gets the profile past "zero searches."
+
+**6. Notifications (optional).** Ask if they want a Telegram run digest. If yes, run `/notify-setup <profile>`; if no, skip — `/doctor` treats this as optional and won't fail on it.
+
+**7. Verify.** Finish by running `/doctor` yourself and reporting its actual pass/fail output — don't just tell the user to run it later. A red Chrome/CDP check at this point is expected if they haven't logged into LinkedIn in `.chrome-debug/` yet; say so rather than treating it as a setup failure.
+
+Report a short summary at the end: what's done, what's still red (if anything), and the one-line next action (usually `/run <profile>`).

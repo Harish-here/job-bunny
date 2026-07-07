@@ -10,7 +10,7 @@ import { readFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { ROOT, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
+import { ROOT, CHROME_BIN, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
 import { notify } from "./notify.js";
 import { telegramTokenEnvKey } from "./notifiers/telegram.js";
 
@@ -70,7 +70,6 @@ async function checkProfileFiles() {
   else fail("filter_config.json missing (run /setup)");
 }
 
-const CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CHROME_DATA_DIR = join(ROOT, ".chrome-debug");
 
 async function cdpReachable() {

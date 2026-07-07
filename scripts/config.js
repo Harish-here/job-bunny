@@ -16,6 +16,9 @@ import { dirname, join } from "node:path";
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+// Shared by doctor.js (launch-time) and init.js (setup-time preflight) — one path to update.
+export const CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
 const CONFIG_PATH = join(ROOT, "config.json");
 const PROFILES_DIR = join(ROOT, "profiles");
 

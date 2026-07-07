@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.8.0-e8a0bf">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.10.3-e8a0bf">
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A520-3c873a">
   <img alt="Pipeline" src="https://img.shields.io/badge/pipeline-deterministic-7B5EA7">
   <img alt="Source of truth" src="https://img.shields.io/badge/source%20of%20truth-Notion-black">
@@ -27,17 +27,33 @@ Job Bunny automates the tedious half of a job hunt. It opens your LinkedIn saved
 | | |
 |---|---|
 | **[Claude Code](https://claude.com/claude-code)** | The pipeline is driven by slash commands (`/run` and friends), and the one LLM step runs inline in the agent — **no separate API key needed** |
-| **Node ≥ 20** | All deterministic stages are plain Node scripts |
+| **Node ≥ 20** | All deterministic stages are plain Node scripts — `/setup` checks this for you |
 | **Chrome** | Scraping runs over Chrome DevTools Protocol against your real logged-in LinkedIn session |
-| **Notion** | A workspace plus an [internal integration token](https://www.notion.so/my-integrations) |
+| **Notion** | A workspace plus an [internal integration token](https://www.notion.so/my-integrations), shared with a page named **"Job Bunny's List"** |
+
+On macOS, clone the repo somewhere *outside* `~/Desktop`, `~/Documents`, or `~/Downloads` — those folders are sandboxed from background `launchd` jobs, which silently breaks scheduled runs later (see [Troubleshooting](#troubleshooting)). `~/job-bunny` or `~/dev/job-bunny` are fine. `/setup` warns you if it detects this.
 
 ## Quick start
 
 ```bash
 git clone https://github.com/Harish-here/job-bunny.git
 cd job-bunny
-npm install
+```
 
+Then open Claude Code in the repo and run:
+
+```
+/setup <your-name>   # one command: deps check, Notion page & DB, resume seeding, first URL, /doctor
+/run                  # the whole pipeline; prints a run summary at the end
+```
+
+`/setup` walks you through everything end to end — checks Node/Chrome/`npm install`, wires up your profile's Notion page + database, seeds `profiles/<your-name>/resume.json` for you to fill in, derives `resume_meta.json`, asks for your first LinkedIn saved-search URL, offers optional Telegram notifications (`/notify-setup`), and finishes by running `/doctor` itself. `/doctor` launches Chrome with a persistent profile (`.chrome-debug/`, gitignored) — log in to LinkedIn once and the session is reused across every run.
+
+<details>
+<summary>Prefer no agent driving it? Manual/terminal-only path</summary>
+
+```bash
+npm install
 cp .env.example .env          # fill in your Notion token
 npm run init <your-name>      # scaffolds profiles/<your-name>/ + its Notion page & DB (idempotent)
 
@@ -46,15 +62,9 @@ cp resume.example.json profiles/<your-name>/resume.json    # then fill it in
 JOBBUNNY_PROFILE=<your-name> npm run meta                  # derive resume_meta.json
 ```
 
-Then open Claude Code in the repo and run:
+Then open Claude Code for `/add-url` (paste your saved-search URLs), `/doctor` (preflight), and `/run`.
 
-```
-/add-url    # paste your LinkedIn saved-search URLs, one at a time
-/doctor     # preflight — launches Chrome, checks CDP, config, keys
-/run        # the whole pipeline; prints a run summary at the end
-```
-
-`/doctor` launches Chrome with a persistent profile (`.chrome-debug/`, gitignored) — log in to LinkedIn once and the session is reused across every run. Prefer a guided setup? `/setup <your-name>` walks through all of the above interactively.
+</details>
 
 ## Daily use
 
