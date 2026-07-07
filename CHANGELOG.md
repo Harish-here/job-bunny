@@ -3,6 +3,13 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [0.12.0] — 2026-07-07
+
+### Changed
+- `rank.js` ground-up rework (roadmap "Ranking precision", long-deferred from v0.2.0): the old formula let absence-of-signal award full credit, so a job with 0/N skills matched could still hit 70 = "Kandipa podu" via seniority (+30) + home-city (+20) + null-YoE (+20) — the EPAM Solution Architect = 70 class, reproduced live with "Tech Lead – Automation Solutions (Power Platform, K2)". New 100-pt split makes relevance dominant (70 pts) over logistics (30 pts): skills overlap 40 (core ×1.0, `secondary_skills` now count ×0.5, denominator clamped to [3, 8] so 1-skill JDs can't spike and laundry-list JDs can't tank a strong core match) · title relevance 15 (new axis — `job_title` vs the profile's `filter_config.json` `title_filter.domain` keywords; neutral 8 when none configured, so legacy mode is unaffected) · seniority 15 (was 30) · work type + timezone 20 (unchanged logic) · YoE 10 (was 20; **null requirement now scores neutral 5 instead of full credit**). Hard cap: zero core-skill matches → score capped at 50, so a role that isn't ours can never reach "Kandipa podu" no matter how convenient the logistics — this cap is also the architect-title over-credit fix (a bare "Architect" structured as Staff/Lead used to collect the full seniority points with no skills relevance).
+- Excitement bands reduced from five to three: ≥85 "Vera level" · 65–84 "Kandipa podu" · <65 "Try panalam" (floor catch-all). "Okay tha" and "Deal la vidu" dropped from `rank.js` and `schema.js` `EXCITEMENT_OPTIONS` (affects fresh DB creation only — existing Notion rows/options keep their values and age out via `/cleanup`).
+- `rank.test.js` rewritten for the new formula (36 tests): per-axis coverage incl. denominator-clamp boundaries, secondary-skill half weight, title hit/miss/legacy-neutral, the zero-core cap (incl. secondary-only match still capped), and the new band boundaries.
+
 ## [0.11.0] — 2026-07-07
 
 ### Added
