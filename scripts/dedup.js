@@ -47,7 +47,9 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(`[dedup] FAILED: ${err.message}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[dedup] FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}

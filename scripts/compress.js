@@ -64,7 +64,9 @@ async function main() {
   console.log(`[compress] ${jobs.length} in → ${kept.length} to structure (${jobs.length - kept.length} pre-filtered) → structure_input.md`);
 }
 
-main().catch((err) => {
-  console.error(`[compress] FAILED: ${err.message}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[compress] FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}

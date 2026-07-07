@@ -74,7 +74,9 @@ async function main() {
   console.log(`[filter] ${jobs.length} in → ${kept.length} kept, ${dropped} dropped → filtered_jobs.json`);
 }
 
-main().catch((err) => {
-  console.error(`[filter] FAILED: ${err.message}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[filter] FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}

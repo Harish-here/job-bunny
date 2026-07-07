@@ -108,7 +108,9 @@ async function main() {
   console.log(`[assemble] ${merged.length} jobs merged → jobs_raw.json`);
 }
 
-main().catch((err) => {
-  console.error(`[assemble] FAILED: ${err.message}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[assemble] FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}

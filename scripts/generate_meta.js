@@ -45,7 +45,9 @@ async function main() {
   console.log(`[meta] wrote resume_meta.json (${FIELDS.length} fields, direct copy)`);
 }
 
-main().catch((err) => {
-  console.error(`[meta] FAILED: ${err.message}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[meta] FAILED: ${err.message}`);
+    process.exit(1);
+  });
+}
