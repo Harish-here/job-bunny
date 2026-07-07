@@ -8,6 +8,8 @@ Orchestrate the daily pipeline in order. Triggered manually, or headlessly by la
 
 Run each stage; on a **page-group assertion failure during extract, skip that group and continue** — one stale selector must never kill the whole run. Collect a run summary at the end. Stage files live in `profiles/<profile>/data/` (legacy: repo root).
 
+**Never background a stage command (no `run_in_background`), even if it's slow.** Every `node scripts/*.js` call below must run in the foreground and be waited on before moving to the next stage. This matters most for headless/scheduled runs: `run_scheduled.sh` invokes this command via `claude -p ... --dangerously-skip-permissions`, a single-shot non-interactive call — if a stage is backgrounded on the promise of "I'll be notified when it finishes," that notification can never arrive because the process exits at the end of this one turn, silently truncating the whole run right after the backgrounded stage starts (with no error, no summary, no `mark_run_result.js` call). Extract is the slowest stage and the one most tempting to background — run it synchronously regardless.
+
 Stage sequence:
 
 1. **/doctor** — `node scripts/doctor.js`. Stop the run if any check is red.
