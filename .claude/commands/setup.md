@@ -24,10 +24,12 @@ This ensures `.gitignore` ignores `.env`/`profiles/`/`config.json` first, prompt
 JOBBUNNY_PROFILE=<profile> node scripts/generate_meta.js
 ```
 
-**5. First search URL.** Ask for one LinkedIn saved-search URL and a short label, then invoke `/add-url <profile> <url> <label>` (or run `JOBBUNNY_PROFILE=<profile> node scripts/add_url.js "<url>" "<label>"` directly). More can be added later the same way — this just gets the profile past "zero searches."
+**5. Title filter.** `profiles/<profile>/filter_config.json`'s `title_filter` block (`seniority`, `domain`, `function.allow`, `function.block` term lists) is what `filter.js`/`title_filter.js` use to gate which job titles survive — it was seeded from `templates/filter_config.json`, which is written for a **frontend/UI persona** (`domain` includes "frontend"/"react"/"design systems"; `function.block` includes "backend"/"data"/"devops"). Show the user this block and ask them to edit `domain` and `function.block` to match their actual target roles. A mismatch here doesn't error — it silently drops every job with "no domain match", so someone in a different domain would see zero results with no obvious cause. Don't proceed until they've confirmed it reflects their real target roles (or explicitly say the default is fine, e.g. they genuinely are targeting frontend/UI roles). If the file also has `seniority_keywords`, `title_keywords`, or `skills_overlap_threshold` keys (older profiles seeded before these were removed from the template), ignore them — only `title_filter` is read.
 
-**6. Notifications (optional).** Ask if they want a Telegram run digest. If yes, run `/notify-setup <profile>`; if no, skip — `/doctor` treats this as optional and won't fail on it.
+**6. First search URL.** Ask for one LinkedIn saved-search URL and a short label, then invoke `/add-url <profile> <url> <label>` (or run `JOBBUNNY_PROFILE=<profile> node scripts/add_url.js "<url>" "<label>"` directly). More can be added later the same way — this just gets the profile past "zero searches."
 
-**7. Verify.** Finish by running `/doctor` yourself and reporting its actual pass/fail output — don't just tell the user to run it later. A red Chrome/CDP check at this point is expected if they haven't logged into LinkedIn in `.chrome-debug/` yet; say so rather than treating it as a setup failure.
+**7. Notifications (optional).** Ask if they want a Telegram run digest. If yes, run `/notify-setup <profile>`; if no, skip — `/doctor` treats this as optional and won't fail on it.
+
+**8. Verify.** Finish by running `/doctor` yourself and reporting its actual pass/fail output — don't just tell the user to run it later. A red Chrome/CDP check at this point is expected if they haven't logged into LinkedIn in `.chrome-debug/` yet; say so rather than treating it as a setup failure.
 
 Report a short summary at the end: what's done, what's still red (if anything), and the one-line next action (usually `/run <profile>`).

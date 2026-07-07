@@ -1,7 +1,4 @@
 {
-  "seniority_keywords": ["staff", "lead", "principal", "architect"],
-  "title_keywords": ["frontend", "ui"],
-  "skills_overlap_threshold": 2,
   "title_filter": {
     "seniority": [
       "staff", "lead", "principal", "architect",

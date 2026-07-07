@@ -47,7 +47,7 @@ Then open Claude Code in the repo and run:
 /run                  # the whole pipeline; prints a run summary at the end
 ```
 
-`/setup` walks you through everything end to end — checks Node/Chrome/`npm install`, wires up your profile's Notion page + database, seeds `profiles/<your-name>/resume.json` for you to fill in, derives `resume_meta.json`, asks for your first LinkedIn saved-search URL, offers optional Telegram notifications (`/notify-setup`), and finishes by running `/doctor` itself. `/doctor` launches Chrome with a persistent profile (`.chrome-debug/`, gitignored) — log in to LinkedIn once and the session is reused across every run.
+`/setup` walks you through everything end to end — checks Node/Chrome/`npm install`, wires up your profile's Notion page + database, seeds `profiles/<your-name>/resume.json` for you to fill in, derives `resume_meta.json`, has you tune `filter_config.json`'s title-filter terms to your target roles (the seeded default is frontend/UI-biased and will silently filter out everything for other domains if left as-is), asks for your first LinkedIn saved-search URL, offers optional Telegram notifications (`/notify-setup`), and finishes by running `/doctor` itself. `/doctor` launches Chrome with a persistent profile (`.chrome-debug/`, gitignored) — log in to LinkedIn once and the session is reused across every run.
 
 <details>
 <summary>Prefer no agent driving it? Manual/terminal-only path</summary>
