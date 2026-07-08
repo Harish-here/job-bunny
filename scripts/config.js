@@ -1,13 +1,18 @@
 // scripts/config.js — central profile/path resolution. The only place that knows the layout.
 //
-// Two modes, detected by the presence of config.json at the repo root:
-//   profiles mode — config.json exists; profile files live in profiles/<name>/,
-//                   per-run intermediates in profiles/<name>/data/.
-//   legacy mode   — no config.json (pre-v0.7 checkout); every path resolves to the
-//                   old root layout, byte-for-byte identical behavior. Nothing breaks
-//                   on `git pull`; `node scripts/migrate.js <name>` opts in to profiles.
+// Two modes:
+//   profiles mode — profile files live in profiles/<name>/, per-run intermediates in
+//                   profiles/<name>/data/. Selected by an explicit profile (JOBBUNNY_PROFILE
+//                   env var, or a name argument to paths()/loadProfile()) or by config.json's
+//                   default_profile.
+//   legacy mode   — the no-signal fallback: no config.json AND no explicit profile
+//                   (pre-v0.7 checkout); every path resolves to the old root layout,
+//                   byte-for-byte identical behavior. Nothing breaks on `git pull`;
+//                   `node scripts/migrate.js <name>` opts in to profiles.
 //
-// Profile precedence (profiles mode): JOBBUNNY_PROFILE env var → config.json default_profile.
+// Profile precedence: JOBBUNNY_PROFILE env var → config.json default_profile → legacy.
+// An explicit profile always wins — a checkout without config.json (fresh clone, CI) still
+// resolves profiles/<name>/ when one is named, so the test suite runs anywhere.
 // Synchronous on purpose — title_filter.js reads its config at module load.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -32,13 +37,7 @@ export function resolveProfileName() {
 
   const envName = process.env.JOBBUNNY_PROFILE;
 
-  if (LEGACY) {
-    if (envName) {
-      throw new Error(
-        `JOBBUNNY_PROFILE=${envName} is set but this checkout uses the legacy layout (no config.json). ` +
-          "Run `node scripts/migrate.js <your-name>` first."
-      );
-    }
+  if (LEGACY && !envName) {
     if (!legacyHinted) {
       legacyHinted = true;
       console.error("[config] legacy layout — run `node scripts/migrate.js <your-name>` to switch to profiles");
@@ -77,8 +76,9 @@ export function resolveProfileName() {
 // Absolute paths for the active profile. Pure joins — no existence checks; every
 // script keeps its own fail-loud read (explicit input → explicit output).
 export function paths(name = resolveProfileName()) {
-  const profileDir = LEGACY ? ROOT : join(PROFILES_DIR, name);
-  const dataDir = LEGACY ? ROOT : join(profileDir, "data");
+  const legacy = name === "legacy";
+  const profileDir = legacy ? ROOT : join(PROFILES_DIR, name);
+  const dataDir = legacy ? ROOT : join(profileDir, "data");
   return {
     profileDir,
     dataDir,
@@ -88,8 +88,8 @@ export function paths(name = resolveProfileName()) {
     avoid: join(profileDir, "avoid.md"),
     filterConfig: join(profileDir, "filter_config.json"),
     searchUrls: join(profileDir, "search_urls.md"),
-    greenhouseBoards: LEGACY ? join(ROOT, "greenhouse_boards.md") : join(profileDir, "greenhouse_boards.md"),
-    cache: LEGACY ? join(ROOT, "data", "cache.json") : join(dataDir, "cache.json"),
+    greenhouseBoards: legacy ? join(ROOT, "greenhouse_boards.md") : join(profileDir, "greenhouse_boards.md"),
+    cache: legacy ? join(ROOT, "data", "cache.json") : join(dataDir, "cache.json"),
     jobsRawText: join(dataDir, "jobs_raw_text.json"),
     structureInput: join(dataDir, "structure_input.md"),
     structurePassthrough: join(dataDir, "structure_passthrough.json"),
@@ -107,7 +107,7 @@ export function paths(name = resolveProfileName()) {
 // Per-profile Notion wiring. Legacy mode mirrors the old env-var behavior exactly;
 // callers keep their own missing-id errors there.
 export function loadProfile(name = resolveProfileName()) {
-  if (LEGACY) {
+  if (name === "legacy") {
     return {
       name: "legacy",
       notion_db_id: process.env.NOTION_DB_ID,
