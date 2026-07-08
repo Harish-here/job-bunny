@@ -14,9 +14,9 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 
 - `/run [profile]` — full pipeline, manual. No argument = `config.json` `default_profile`.
 - Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /greenhouse · /structure · /filter · /dedup · /rank · /sync`.
-- Setup & maintenance: `/setup <profile> · /migrate <name> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /wrap`.
+- Setup & maintenance: `/setup <profile> · /migrate <name> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /schedule · /wrap`. `/schedule` takes no profile argument — it always reads every profile (grouping crosses profile boundaries).
 
-Most stages are thin `node scripts/<x>.js` wrappers. Two exceptions:
+Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 
 - **`/structure` is a skill, no script** — the agent does the LLM work inline. Bookend scripts flank it: `compress.js` (`jobs_raw_text.json` → `structure_input.md`, a pre-filtered compact markdown table) before; `assemble.js` (LLM output `jobs_raw_decisions.md` + `structure_passthrough.json` → `jobs_raw.json`) after.
 - **`/page-analyse` is browser-driven** (Claude in Chrome), script-less.
@@ -26,7 +26,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Two exceptions:
 
 - Each persona lives in `profiles/<name>/`: resume, resume_meta, `avoid.md`, `filter_config.json`, `search_urls.md`, `profile.json` (its own Notion page + DB ids), and `data/` (cache + per-run intermediates).
 - Resolution: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. **`scripts/config.js` is the only module that knows the layout** — resolve every path through it.
-- No `config.json` = **legacy mode** (pre-v0.7 root paths, env Notion ids). Keep legacy mode working; `/migrate <name>` is the opt-in conversion.
+- **Legacy mode** (pre-v0.7 root paths, env Notion ids) is the no-signal fallback: no `config.json` **and** no explicit `JOBBUNNY_PROFILE` — an explicit profile always wins over legacy detection. Keep legacy mode working; `/migrate <name>` is the opt-in conversion.
 - Shared across profiles: `page_inventory/`, `.chrome-debug/` (one Chrome/LinkedIn session — never copy account-personalized URLs like the *Recommended* collection between profiles), `templates/`, and `NOTION_TOKEN` in `.env`.
 
 ## Running stages
@@ -34,6 +34,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Two exceptions:
 - **Pass the profile as an env prefix per command** (`JOBBUNNY_PROFILE=<p> node scripts/<x>.js`). Each bash call is a fresh shell — repeat the prefix every time; never rely on `export`. Scripts never take a profile argv.
 - **Chrome for `/extract`:** `/doctor` auto-launches Chrome with `--remote-debugging-port=9222` on the persistent `.chrome-debug/` profile (gitignored). LinkedIn login persists across runs. Never tell the user to launch Chrome manually.
 - **DOM drift is a config fix, not a code fix.** `extract.js` reads selectors/behavior from `page_inventory/<page>.md` at runtime — repair breakage by editing the inventory (via `/page-analyse`), not by regenerating code.
+- **Scheduled runs never overlap.** `/schedule` installs launchd jobs that fire `claude -p "/run <profile>"` headlessly; profiles sharing a `schedule.time` run strictly sequentially inside `run_scheduled.sh` because they share the one Chrome/CDP session. Never introduce concurrent `/run`s.
 
 ## Writing & changing code
 
