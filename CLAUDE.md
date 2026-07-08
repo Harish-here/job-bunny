@@ -13,13 +13,14 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 ## Commands
 
 - `/run [profile]` — full pipeline, manual. No argument = `config.json` `default_profile`.
-- Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /structure · /filter · /dedup · /rank · /sync`.
+- Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /greenhouse · /structure · /filter · /dedup · /rank · /sync`.
 - Setup & maintenance: `/setup <profile> · /migrate <name> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /wrap`.
 
 Most stages are thin `node scripts/<x>.js` wrappers. Two exceptions:
 
 - **`/structure` is a skill, no script** — the agent does the LLM work inline. Bookend scripts flank it: `compress.js` (`jobs_raw_text.json` → `structure_input.md`, a pre-filtered compact markdown table) before; `assemble.js` (LLM output `jobs_raw_decisions.md` + `structure_passthrough.json` → `jobs_raw.json`) after.
 - **`/page-analyse` is browser-driven** (Claude in Chrome), script-less.
+- **`/greenhouse` is a second, optional channel**: keyless Greenhouse boards API, watchlist at the profile's `greenhouse_boards.md`, merges into `jobs_raw_text.json` ahead of `/structure`. Fail-soft — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
 
 ## Profiles & paths (v0.7+)
 

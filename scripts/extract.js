@@ -349,6 +349,10 @@ async function main() {
 
   const results = [];
   const seenJobIdsThisRun = new Set();
+  // Companies that survive Stage A (avoid-drop) but before the cache-skip/title gates — a
+  // title-dropped company is still probe-worthy for the Greenhouse lane, so this is captured
+  // ahead of those filters, not after them.
+  const companiesSeen = new Set();
   const summary = { groups: 0, skipped: [], cards: 0, avoided: 0, cache_skipped: 0, run_deduped: 0, title_dropped: 0, captured: 0 };
 
   for (const group of groups) {
@@ -382,6 +386,8 @@ async function main() {
           (c) => !isAvoided(c.company, avoid),
           (n) => `[extract]   Stage A: dropped ${n} avoid-list card(s) pre-JD`,
           "avoided", summary);
+
+        for (const c of cards) if (c.company) companiesSeen.add(c.company.trim());
 
         cards = stageFilter(cards,
           (c) => !c.job_id || !cachedIds.has(c.job_id),
@@ -452,10 +458,13 @@ async function main() {
   // NOTE: never browser.close() — this is an attach over CDP to the user's running Chrome;
   // closing it would tear down their browser/session. We just drop the connection on exit.
 
+  await writeFile(paths().companiesSeen, JSON.stringify([...companiesSeen].sort(), null, 2) + "\n");
+
   console.log(
     `[extract] groups=${summary.groups} skipped=${summary.skipped.length} ` +
       `cards=${summary.cards} avoided=${summary.avoided} cache_skipped=${summary.cache_skipped} ` +
-      `run_deduped=${summary.run_deduped} title_dropped=${summary.title_dropped} captured=${summary.captured} → jobs_raw_text.json`
+      `run_deduped=${summary.run_deduped} title_dropped=${summary.title_dropped} captured=${summary.captured} ` +
+      `companies_seen=${companiesSeen.size} → jobs_raw_text.json`
   );
   for (const s of summary.skipped) console.log(`[extract]   skipped ${s.page}: ${s.reason}`);
 

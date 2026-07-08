@@ -26,12 +26,21 @@ export function normalizeName(raw) {
   return s.replace(/\s+/g, " ").trim();
 }
 
-// G6: job_id is the LinkedIn id in the /jobs/view/<id>/ segment of the card/job href.
-// Returns the id string, or null when the URL carries no view id.
+// G6: job_id from a job URL, or null when the URL carries none.
+//  - LinkedIn: the id in the /jobs/view/<id>/ segment.
+//  - Greenhouse (the /greenhouse lane): embedded boards carry ?gh_jid=<id>; hosted boards are
+//    greenhouse.io/<token>/jobs/<id>. Returned as "gh-<id>" — the exact id the lane emits —
+//    so a /reconcile rebuild of the cache round-trips to the same job_id.
 export function extractJobId(url) {
   if (!url) return null;
-  const m = String(url).match(/\/jobs\/view\/([^/?#]+)/);
-  return m ? m[1] : null;
+  const s = String(url);
+  const li = s.match(/\/jobs\/view\/([^/?#]+)/);
+  if (li) return li[1];
+  const gh =
+    s.match(/[?&]gh_jid=(\d+)/) ||
+    (s.includes("greenhouse.io/") ? s.match(/\/jobs\/(\d+)(?:[/?#]|$)/) : null);
+  if (gh) return `gh-${gh[1]}`;
+  return null;
 }
 
 // Dedup key: job_id primary; fallback to normalized role + company when job_id is absent.

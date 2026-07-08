@@ -14,14 +14,15 @@ Stage sequence:
 
 1. **/doctor** — `node scripts/doctor.js`. Stop the run if any check is red.
 2. **/reconcile** — `node scripts/cache.js` (rebuild the profile's cache from its Notion DB).
-3. **/extract** — `node scripts/extract.js` (browser; Stage A avoid-drop; skip-broken-group-and-continue). Requires `/doctor` green — do not proceed if step 1 was red. Output: `jobs_raw_text.json`.
-4. **compress** — `node scripts/compress.js` (sanitise raw_text; emit compact markdown table). Output: `structure_input.md` + `structure_passthrough.json`.
-5. **/structure** — invoke the `/structure` skill **for this profile**. Do NOT write custom code. Reads the profile's `structure_input.md`; checkpoints every 25 rows to `jobs_raw_checkpoint.md`; writes `jobs_raw_decisions.md`.
-6. **assemble** — `node scripts/assemble.js` (merge LLM decisions with passthrough fields). Output: `jobs_raw.json`.
-7. **/filter** — `node scripts/filter.js` (Stage B; home city from the profile's resume_meta).
-8. **/dedup** — `node scripts/dedup.js`.
-9. **/rank** — `node scripts/rank.js`.
-10. **/sync** — `node scripts/notion_sync.js` (push automated fields to the profile's DB; update cache + last_run).
+3. **/extract** — `node scripts/extract.js` (browser; Stage A avoid-drop; skip-broken-group-and-continue). Requires `/doctor` green — do not proceed if step 1 was red. Output: `jobs_raw_text.json`, plus `data/companies_seen.json` for the greenhouse lane below.
+4. **/greenhouse** — `node scripts/greenhouse.js` (keyless Greenhouse boards API lane; probes new companies from `companies_seen.json`, fetches curated/auto-discovered boards, appends to `jobs_raw_text.json`). **Fail-soft, like a skipped page-group**: an absent watchlist or a whole-lane network failure exits 0 and must NOT stop the run — note it in the Run Summary instead of treating it as a hard failure.
+5. **compress** — `node scripts/compress.js` (sanitise raw_text; emit compact markdown table). Output: `structure_input.md` + `structure_passthrough.json`.
+6. **/structure** — invoke the `/structure` skill **for this profile**. Do NOT write custom code. Reads the profile's `structure_input.md`; checkpoints every 25 rows to `jobs_raw_checkpoint.md`; writes `jobs_raw_decisions.md`.
+7. **assemble** — `node scripts/assemble.js` (merge LLM decisions with passthrough fields). Output: `jobs_raw.json`.
+8. **/filter** — `node scripts/filter.js` (Stage B; home city from the profile's resume_meta).
+9. **/dedup** — `node scripts/dedup.js`.
+10. **/rank** — `node scripts/rank.js`.
+11. **/sync** — `node scripts/notion_sync.js` (push automated fields to the profile's DB; update cache + last_run).
 
 After the run, print a summary in this exact template (fill in real values; omit the Notes line if there's nothing noteworthy):
 

@@ -72,6 +72,29 @@ test("extractJobId returns null when the url has no /jobs/view/ segment", () => 
   );
 });
 
+test("extractJobId parses a Greenhouse-hosted board URL as gh-<id>", () => {
+  assert.equal(
+    extractJobId("https://job-boards.greenhouse.io/agoda/jobs/6161339"),
+    "gh-6161339",
+  );
+});
+
+test("extractJobId parses an embedded-board gh_jid param as gh-<id>", () => {
+  assert.equal(
+    extractJobId("https://www.netskope.com/company/careers/open-positions/?gh_jid=7597616"),
+    "gh-7597616",
+  );
+  // gh_jid wins even when the path also carries the numeric id
+  assert.equal(
+    extractJobId("https://www.coinbase.com/careers/positions/7366208?gh_jid=7366208"),
+    "gh-7366208",
+  );
+});
+
+test("extractJobId does NOT treat a non-greenhouse /jobs/<n> path as a Greenhouse id", () => {
+  assert.equal(extractJobId("https://example.com/company/jobs/12345"), null);
+});
+
 // --- dedupKey ------------------------------------------------------------
 
 test("dedupKey uses job_id directly when present", () => {

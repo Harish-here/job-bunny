@@ -77,6 +77,7 @@ Every stage is also a standalone command for re-runs and debugging:
 | `/doctor` | Preflight — Chrome/CDP reachable, page inventories present, cache valid, keys set |
 | `/reconcile` | Rebuild the profile's `cache.json` from its live Notion DB |
 | `/extract` | Playwright-over-CDP scraper — collect job cards + raw JD text |
+| `/greenhouse` | Optional: keyless Greenhouse boards API lane — watchlist-driven, merges into the same raw text file |
 | `/structure` | The one LLM step: raw JD text → schema-valid records (with checkpointing) |
 | `/filter` | Drop wrong-location and incompatible-timezone roles |
 | `/dedup` | De-duplicate against everything already in Notion (by `job_id`) |
@@ -112,6 +113,8 @@ flowchart LR
   classDef llm fill:#EDE7FB,stroke:#7B5EA7,stroke-width:2px;
   class ST llm;
 ```
+
+**Channels.** LinkedIn (browser, discovery) is the primary channel — saved searches surface roles you haven't heard of. Greenhouse (`/greenhouse`, optional) is a second, keyless-API channel for *monitoring*: it watches a per-profile list of companies' Greenhouse boards (`profiles/<name>/greenhouse_boards.md`) that auto-grows from companies seen on LinkedIn cards, and merges any new postings into the same `jobs_raw_text.json` ahead of `/structure`. No watchlist, no browser — it's a no-op that exits cleanly.
 
 Four design choices carry the project:
 

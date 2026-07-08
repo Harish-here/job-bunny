@@ -88,6 +88,7 @@ export function paths(name = resolveProfileName()) {
     avoid: join(profileDir, "avoid.md"),
     filterConfig: join(profileDir, "filter_config.json"),
     searchUrls: join(profileDir, "search_urls.md"),
+    greenhouseBoards: LEGACY ? join(ROOT, "greenhouse_boards.md") : join(profileDir, "greenhouse_boards.md"),
     cache: LEGACY ? join(ROOT, "data", "cache.json") : join(dataDir, "cache.json"),
     jobsRawText: join(dataDir, "jobs_raw_text.json"),
     structureInput: join(dataDir, "structure_input.md"),
@@ -97,6 +98,9 @@ export function paths(name = resolveProfileName()) {
     jobsRaw: join(dataDir, "jobs_raw.json"),
     filteredJobs: join(dataDir, "filtered_jobs.json"),
     newJobs: join(dataDir, "new_jobs.json"),
+    companiesSeen: join(dataDir, "companies_seen.json"),
+    ghProbeLedger: join(dataDir, "gh_probe_ledger.json"),
+    ghSeen: join(dataDir, "gh_seen.json"),
   };
 }
 
