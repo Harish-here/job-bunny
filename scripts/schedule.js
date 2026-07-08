@@ -44,11 +44,18 @@ for (const profileName of listProfiles()) {
   // schedule.times (array) takes precedence when present; otherwise fall back to the
   // legacy single schedule.time. Either way we end up with a flat list of "HH:MM" strings
   // this profile should fire at.
-  const timeList = Array.isArray(profile.schedule.times)
-    ? profile.schedule.times
-    : profile.schedule.time
-      ? [profile.schedule.time]
-      : [];
+  // Deduped — a repeated entry (e.g. a copy-paste slip building a multi-time array) must
+  // not register the profile twice under the same time, which would otherwise run its
+  // whole pipeline twice in one slot.
+  const timeList = [
+    ...new Set(
+      Array.isArray(profile.schedule.times)
+        ? profile.schedule.times
+        : profile.schedule.time
+          ? [profile.schedule.time]
+          : []
+    ),
+  ];
 
   if (!timeList.length) {
     console.error(
