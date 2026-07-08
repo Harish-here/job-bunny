@@ -11,7 +11,7 @@
 // continue the others; record it in the run summary (one stale selector never kills the run).
 
 import "dotenv/config";
-import { readFile, writeFile, access } from "node:fs/promises";
+import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -320,8 +320,18 @@ async function collectAllPages(page, url, cfg) {
   return all;
 }
 
+// Written as the very first thing main() does, before any file reads or CDP work — lets
+// run_scheduled.sh's heartbeat watchdog confirm extract actually started executing within a
+// few minutes, instead of only finding out via the full-run timeout (see run_scheduled.sh).
+async function markStarted() {
+  const dataDir = paths().dataDir;
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(paths().extractStarted, JSON.stringify({ timestamp: new Date().toISOString() }, null, 2) + "\n");
+}
+
 // ---------- main ----------
 async function main() {
+  await markStarted();
   console.log(`[extract] profile=${resolveProfileName()}`);
   if (!(await exists(SEARCH_URLS))) throw new Error(`${SEARCH_URLS} not found — run /setup.`);
   const groups = parseSearchUrls(await readFile(SEARCH_URLS, "utf8"));
