@@ -10,7 +10,8 @@ import "dotenv/config";
 import { readFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import { chromium } from "playwright";
 import { ROOT, CHROME_BIN, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
 import { notify } from "./notify.js";
 import { telegramTokenEnvKey } from "./notifiers/telegram.js";
@@ -106,15 +107,71 @@ async function cdpReachable() {
   }
 }
 
-async function checkCDP() {
-  console.log("[doctor] chrome CDP :9222");
-  let v = await cdpReachable();
-  if (v) {
-    pass(`reachable (${v.Browser || "Chrome"})`);
-    return;
-  }
+// The debug Chrome instance is never restarted on its own — CDP-reachable used to be the
+// only thing checkCDP verified. Left alone across days it just accumulates tabs/memory (found
+// via a live incident: 3-day uptime, 80% swap used, 56 Chrome processes on an 8GB machine).
+// Recycling past this age keeps the same on-disk profile/LinkedIn session intact — only the
+// process restarts, never the user-data-dir — while capping how long any one instance lives.
+const CHROME_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-  console.log("  … not reachable — launching Chrome with debug profile");
+function getChromePid() {
+  try {
+    const out = execFileSync("lsof", ["-ti", ":9222", "-sTCP:LISTEN"], { encoding: "utf8" }).trim();
+    const pid = out.split("\n")[0];
+    return pid ? Number(pid) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ps `etime` format: [[DD-]HH:]MM:SS
+function parseEtimeToMs(etime) {
+  let days = 0;
+  let rest = etime.trim();
+  if (rest.includes("-")) {
+    const [d, r] = rest.split("-");
+    days = Number(d);
+    rest = r;
+  }
+  const parts = rest.split(":").map(Number);
+  let h = 0, m = 0, s = 0;
+  if (parts.length === 3) [h, m, s] = parts;
+  else if (parts.length === 2) [m, s] = parts;
+  else if (parts.length === 1) [s] = parts;
+  return (((days * 24 + h) * 60 + m) * 60 + s) * 1000;
+}
+
+function getProcessAgeMs(pid) {
+  try {
+    const etime = execFileSync("ps", ["-o", "etime=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    return parseEtimeToMs(etime);
+  } catch {
+    return null;
+  }
+}
+
+// Chrome opens its default "New Tab Page" whenever it's launched with no URL argument;
+// extract.js never touches it (it only ever opens its own new pages), so it just sits there
+// indefinitely. Closed over the same CDP attach path extract.js uses, following its documented
+// rule: never browser.close() here — this attaches to the user's real, persistent Chrome, and
+// closing the Browser object over CDP would take the whole process down with it.
+async function closeBlankTabs() {
+  try {
+    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+    const context = browser.contexts()[0];
+    if (!context) return;
+    for (const page of context.pages()) {
+      if (page.url() === "about:blank" || page.url() === "chrome://newtab/") {
+        await page.close().catch(() => {});
+      }
+    }
+  } catch {
+    // best-effort cleanup only — never fail doctor over it
+  }
+}
+
+async function launchChrome() {
+  console.log("  … launching Chrome with debug profile");
   const child = spawn(CHROME_BIN, [
     "--remote-debugging-port=9222",
     `--user-data-dir=${CHROME_DATA_DIR}`,
@@ -125,14 +182,54 @@ async function checkCDP() {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000));
-    v = await cdpReachable();
+    const v = await cdpReachable();
     if (v) {
       pass(`reachable (${v.Browser || "Chrome"}) — just launched`);
-      return;
+      await closeBlankTabs();
+      return true;
     }
   }
+  return false;
+}
 
-  fail("Chrome did not start in time — open it manually and retry");
+async function checkCDP() {
+  console.log("[doctor] chrome CDP :9222");
+  const v = await cdpReachable();
+  if (v) {
+    const pid = getChromePid();
+    const ageMs = pid !== null ? getProcessAgeMs(pid) : null;
+    if (ageMs === null || ageMs <= CHROME_MAX_AGE_MS) {
+      pass(`reachable (${v.Browser || "Chrome"})`);
+      await closeBlankTabs();
+      return;
+    }
+
+    console.log(`  … reachable but ${Math.round(ageMs / 3_600_000)}h old — recycling (same profile/session, fresh process)`);
+    process.kill(pid, "SIGTERM");
+    const freeDeadline = Date.now() + 10_000;
+    let stillUp = true;
+    while (Date.now() < freeDeadline) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (!(await cdpReachable())) {
+        stillUp = false;
+        break;
+      }
+    }
+    if (stillUp) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } else {
+    console.log("  … not reachable");
+  }
+
+  if (!(await launchChrome())) {
+    fail("Chrome did not start in time — open it manually and retry");
+  }
 }
 
 async function checkInventories() {
@@ -178,6 +275,11 @@ async function main() {
     process.exit(1);
   }
   console.log("[doctor] all green — ready to /run.");
+  // checkCDP()'s closeBlankTabs() may leave an open CDP/WebSocket handle behind — exit
+  // explicitly rather than let the process hang on it (same rationale as extract.js's own
+  // "never browser.close(), just process.exit()" note: this attaches to the user's real,
+  // persistent Chrome, so we drop the connection without touching the browser itself).
+  process.exit(0);
 }
 
 main();
