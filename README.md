@@ -10,7 +10,8 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.12.0-e8a0bf">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-e8a0bf">
+  <a href="https://github.com/Harish-here/job-bunny/actions/workflows/test.yml"><img alt="Tests" src="https://github.com/Harish-here/job-bunny/actions/workflows/test.yml/badge.svg"></a>
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A520-3c873a">
   <img alt="Pipeline" src="https://img.shields.io/badge/pipeline-deterministic-7B5EA7">
   <img alt="Source of truth" src="https://img.shields.io/badge/source%20of%20truth-Notion-black">
@@ -177,6 +178,17 @@ Also note: the `filter` stage reads your home city from `resume_meta.json` (prev
 ## Privacy
 
 This repo ships **sanitized templates** only. Everything personal — your resume, avoid list, search URLs, filter keywords, Notion ids, and live job cache — lives under `profiles/` (gitignored) and never leaves your machine. Secrets live in `.env`, which is gitignored before any token is ever written. The one LLM stage sees job-description text and card titles, not your resume.
+
+## Contributing
+
+`main` is protected — nothing lands on it directly. The flow:
+
+1. **Branch off `main`**: `git checkout -b feat/<short-slug>` (or `fix/…`, `chore/…`, `docs/…` — same prefixes the commit history uses).
+2. **Keep the suite green**: `npm test` locally; CI runs the same `node --test scripts/` on every pull request.
+3. **Open a PR against `main`.** Small and focused beats big and sweeping — the pipeline's invariants live in [CLAUDE.md](CLAUDE.md) (deterministic stages stay deterministic, every script is explicit-input → explicit-output and fail-loud, Notion select strings are byte-exact).
+4. Never commit anything personal: `profiles/`, `config.json`, and `.env` are gitignored for a reason — PRs should only ever touch code, templates, and docs.
+
+Releases (CHANGELOG + version sync + tag) are cut by the maintainer via the `/wrap ship` flow.
 
 ## Changelog
 

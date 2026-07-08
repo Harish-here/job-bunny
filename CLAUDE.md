@@ -37,6 +37,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Two exceptions:
 
 ## Writing & changing code
 
+- **`main` is protected — branch + PR.** Feature work branches off `main` (`feat/<slug>`, `fix/<slug>`, …) and lands via a pull request with `npm test` green (CI runs the same suite). Never commit directly to `main`; the one exception is the maintainer's `/wrap ship` release commit + tag.
 - **Every script:** explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
 - **Token efficiency is a design constraint on the `/structure` path.** Stage A drops avoid-list companies on card data before JDs are opened; `compress.js` pre-filters by card title and emits a compact markdown table; `/structure` outputs a markdown table too (`jobs_raw_decisions.md`), not JSON. Preserve this shape — it roughly halves the stage's token cost.
 - **Avoid-list matching** normalizes both sides: lowercase, strip legal suffixes, apply the alias map (see the profile's `avoid.md`).
