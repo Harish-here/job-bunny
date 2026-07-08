@@ -85,7 +85,7 @@ Formatted per **Log entry formatting** above: `(session <N> — <short label>)` 
 
 ## Mode: `/wrap ship`
 
-Dedicated release flow. Run after code work is done and ready to tag.
+Dedicated release flow. Run after code work is done and ready to tag. `main` is protected (PR + green `test` check required, admins included) — feature work is assumed to have already landed via its own PRs; ship itself adds only the version-sync chore, via a short release PR, and then pushes the tag (tag pushes are not branch pushes, so protection never blocks them).
 
 **1. Read git history since last tag**
 Run:
@@ -105,25 +105,40 @@ Recommend based on the commit content. Derive the new version string from the la
 **3. Generate release summary**
 Draft a concise summary: what shipped, why it matters, any known gaps. Show for user approval before writing anywhere.
 
-**4. Update CHANGELOG.md**
-Read `CHANGELOG.md` first to confirm the current format. Mirror the `[0.1.0]` block exactly: a `## [X.Y.Z] — YYYY-MM-DD` heading, then `### Added` / `### Fixed` / `### Notes` sub-sections as applicable (omit empty sub-sections). Prepend the new block. Stage and commit before tagging:
+**4. Release branch + version sync**
+Branch off an up-to-date `main`:
 ```bash
-git add CHANGELOG.md
-git commit -m "chore: CHANGELOG for vX.Y.Z"
+git checkout main && git pull && git checkout -b release/vX.Y.Z
+```
+Then apply the **version-sync checklist — every item, every ship** (the first two drifted repeatedly when they were ad-hoc: `package.json` sat at 0.7.0 through the v0.8.0 release, the README badge at 0.12.0 through v1.0.0):
+1. `CHANGELOG.md` — read it first to confirm the current format; mirror the latest block exactly (`## [X.Y.Z] — YYYY-MM-DD` heading, then `### Added` / `### Changed` / `### Fixed` / `### Notes` as applicable, omit empty sub-sections). Prepend the new block. If the block was already written during the session, verify it and skip rewriting.
+2. `npm version X.Y.Z --no-git-tag-version` — syncs `package.json` + `package-lock.json`. If already at X.Y.Z, verify and skip.
+3. `README.md` version badge — update the `img.shields.io/badge/version-X.Y.Z-…` URL to the new version.
+
+Commit everything as one chore:
+```bash
+git add CHANGELOG.md package.json package-lock.json README.md
+git commit -m "chore: CHANGELOG + version sync for vX.Y.Z"
 ```
 
-**5. Validate Design Versions table (before tagging)**
-`notion-fetch` the main "Job Bunny" page. Confirm exactly one 🟢 Active row. If not → stop and ask the user to fix it before proceeding. Do not create the git tag until this check passes.
+**5. Validate Design Versions table (before the PR merges)**
+`notion-fetch` the main "Job Bunny" page. Confirm exactly one 🟢 Active row. If not → stop and ask the user to fix it before proceeding. Do not merge the release PR or create the git tag until this check passes.
 
-**6. Git tag**
+**6. Release PR → merge on green → tag**
 ```bash
+git push -u origin release/vX.Y.Z
+gh pr create --title "release: vX.Y.Z" --body "<the approved release summary>"
+gh pr merge --auto --squash --delete-branch
+gh pr checks --watch          # wait for the required `test` check
+```
+- **If the `test` check fails: stop and surface it.** No merge, no tag, no Notion writes — fix on the release branch and re-push instead.
+- Once merged, the squash rewrote the commit, so the tag MUST point at the real `main` HEAD — never tag the local branch commit:
+```bash
+git checkout main && git pull
 git tag vMAJOR.MINOR.PATCH
+git push origin vMAJOR.MINOR.PATCH
 ```
-On a major bump: also confirm the `vMAJOR.0.0` convention with the user. Then push both the CHANGELOG commit and the tag:
-```bash
-git push && git push origin vMAJOR.MINOR.PATCH
-```
-If the repo has no remote configured, skip the push and note it in the confirm output.
+On a major bump: confirm the `vMAJOR.0.0` convention with the user before tagging. If the repo has no remote configured, fall back to committing directly on `main` locally + tagging, and note it in the confirm output.
 
 **7. Update Design Versions table**
 - **All bumps:** update the "Active version" column in the 🟢 Active row to the new version string (e.g. `0.2.0`) via anchored `update_content`. Use the current cell value as the anchor; if the cell is empty, anchor on the Code Tag value of that row (unique per row).
@@ -136,8 +151,9 @@ If the repo has no remote configured, skip the push and note it in the confirm o
 One dated entry on the main page, formatted per **Log entry formatting** above but with `(ship — vX.Y.Z)` in place of the session label, + 2–3 bullet summary. End with `Next: <next roadmap version and theme>` pulled from the remaining unshipped rows in the hardening increments table.
 
 **10. Confirm**
+- `release PR: #<n> merged (test check green)` (or `no remote — direct local commit`)
 - `git: tagged vX.Y.Z` (+ pushed, or `no remote — push skipped`)
-- `CHANGELOG.md: added vX.Y.Z block`
+- `version sync: CHANGELOG block + package.json/package-lock + README badge → X.Y.Z`
 - `design versions table: Active version → vX.Y.Z` (+ `row flipped` on major bump, or `no row flip` on minor/patch)
 - `roadmap: marked vX.Y.Z items shipped` (or `no hardening row — skipped`)
 - `log: <entry summary>`
