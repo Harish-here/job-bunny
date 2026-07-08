@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-e8a0bf">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.1-e8a0bf">
   <a href="https://github.com/Harish-here/job-bunny/actions/workflows/test.yml"><img alt="Tests" src="https://github.com/Harish-here/job-bunny/actions/workflows/test.yml/badge.svg"></a>
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A520-3c873a">
   <img alt="Pipeline" src="https://img.shields.io/badge/pipeline-deterministic-7B5EA7">

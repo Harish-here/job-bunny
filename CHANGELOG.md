@@ -3,6 +3,16 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.0.1] — 2026-07-08
+
+### Changed
+- Open-source contributor workflow: GitHub Actions CI runs the test suite on every PR, plus a PR template and contributing docs. `main` is branch-protected — PR with green `test` check required, admins included; only tags push directly.
+- `/wrap ship` hardened: the version-sync chore now lands via a short `release/vX.Y.Z` PR (required by branch protection) and a mandatory three-item checklist — CHANGELOG block, `npm version --no-git-tag-version`, README version badge — closing the drift that left `package.json` at 0.7.0 through v0.8.0 and the README badge at 0.12.0 through v1.0.0. The tag is created from merged `main` HEAD, never the local branch commit.
+- CLAUDE.md refreshed to match the repo: `/schedule` lane documented (headless launchd `claude -p "/run <profile>"` firings; profiles sharing a `schedule.time` run strictly sequentially on the one Chrome/CDP session — never concurrent), legacy-mode rule matched to `scripts/config.js`, "Two exceptions" wording fixed.
+
+### Fixed
+- Profile resolution: an explicit `JOBBUNNY_PROFILE` now always wins over legacy-layout detection, so profile-mode invocations — including the test suite's fixture profiles — work on a fresh clone with no `config.json`. Legacy mode is now strictly the no-signal fallback.
+
 ## [1.0.0] — 2026-07-08
 
 ### Added
