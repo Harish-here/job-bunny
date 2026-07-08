@@ -188,7 +188,7 @@ This repo ships **sanitized templates** only. Everything personal — your resum
 3. **Open a PR against `main`.** Small and focused beats big and sweeping — the pipeline's invariants live in [CLAUDE.md](CLAUDE.md) (deterministic stages stay deterministic, every script is explicit-input → explicit-output and fail-loud, Notion select strings are byte-exact).
 4. Never commit anything personal: `profiles/`, `config.json`, and `.env` are gitignored for a reason — PRs should only ever touch code, templates, and docs.
 
-Releases (CHANGELOG + version sync + tag) are cut by the maintainer via the `/wrap ship` flow.
+Releases are cut by the maintainer via the `/wrap ship` flow: a short `release/vX.Y.Z` PR carrying the CHANGELOG block + version sync (package.json, README badge), auto-merged when CI is green, then the tag is pushed. Protection applies to admins too — nothing lands on `main` outside a PR.
 
 ## Changelog
 
