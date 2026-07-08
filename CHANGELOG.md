@@ -3,6 +3,23 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.1.0] — 2026-07-08
+
+### Added
+- `/schedule` now accepts `schedule.times` (array) alongside the existing single `schedule.time`, for a same-day multi-fire cadence per profile — e.g. every 2.5h through working hours via `["09:00", "11:30", "14:00", "16:30", "19:00"]`. A profile registers under every time it lists; grouping-by-time and one-launchd-job-per-time behavior is unchanged, so profiles sharing a time still run strictly sequentially over one Chrome/CDP session. Fully backward compatible with `schedule.time`-only profiles.
+- `doctor.js` recycles the debug Chrome instance once it's been alive past 24h (SIGTERM, SIGKILL fallback, same on-disk profile/LinkedIn session — only the process restarts) and closes the blank "New Tab Page" every Chrome launch leaves behind, which `extract.js` never touches.
+- `run_scheduled.sh` gained a second, ~5-minute heartbeat watchdog (`check_extract_started.js` + `extract_started.json`, written by `extract.js` as its literal first action) alongside the existing 45-minute timeout watchdog — catches a backgrounded/never-started `/extract` far faster than waiting out the full timeout.
+- `run_scheduled.sh` retries a profile once, same slot, on a heartbeat failure or a transient API disconnect (e.g. "API Error: Connection closed mid-response") that occurred before `/extract` started — cheap insurance against a blip that isn't a real pipeline problem, without re-scraping LinkedIn.
+- `run_scheduled.sh` closes the debug Chrome after all of a scheduled invocation's profiles finish, instead of leaving it idle until the next slot (as little as 2.5h away on a multi-fire schedule). Relaunched fresh next time — the LinkedIn session lives in the on-disk `.chrome-debug` profile, not the running process. Scoped to scheduled runs only; interactive `/run` still leaves Chrome open on purpose.
+
+### Fixed
+- Traced two consecutive days of failed scheduled runs to (a) a headless agent backgrounding `/extract` against `run.md`'s explicit no-backgrounding rule, hanging until the 45-min timeout, and (b) a transient Anthropic API disconnect — both addressed by the heartbeat/retry work above. Also found and fixed an unrelated resource-pressure issue found during the investigation: the debug Chrome instance was never recycled and had been alive 3 days straight (80% swap used, 56 Chrome processes on an 8GB machine) — addressed by the age-recycle and close-after-run changes above.
+- Post-merge code review of the above (8 findings, all fixed): guarded a Chrome-recycle race that could crash `/doctor` outright on an unhandled `ESRCH`; anchored the transient-API retry match to the CLI's actual `^API Error:` error-line prefix so scraped job-posting text can't trigger a false-positive retry; narrowed that retry to skip cases where `/extract` had already started (avoids doubling LinkedIn scrape traffic on a late-pipeline blip) while extending it to also cover heartbeat failures (previously excluded, even though those are always cheap to retry since nothing was scraped); fixed `check_extract_started.js` hardcoding its marker path instead of resolving it through `config.js`'s `paths()` (broke in legacy mode); deduped `schedule.times` so a repeated time entry can't run a profile's pipeline twice in one slot; guarded the end-of-run Chrome close against killing a concurrent interactive session.
+
+### Notes
+- The heartbeat watchdog only guards `/extract`'s start, not the other stages in the pipeline, nor a genuine mid-stage hang — both still fall back to the full 45-minute timeout.
+- No dead-man's-switch yet for the case where a scheduled job never fires at all (e.g. the machine is off); lid/sleep was investigated this session and ruled out as a live contributor (the machine was confirmed awake for both failed runs).
+
 ## [1.0.1] — 2026-07-08
 
 ### Changed
