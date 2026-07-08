@@ -9,15 +9,14 @@
 // turn ends immediately, /extract's process (and therefore this marker) never runs at all.
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { ROOT } from "./config.js";
+import { paths } from "./config.js";
 
 const [profile, startEpochStr] = process.argv.slice(2);
 const startEpoch = Number(startEpochStr);
 const CLOCK_SKEW_ALLOWANCE_SECONDS = 5;
 
 try {
-  const raw = await readFile(join(ROOT, "profiles", profile, "data", "extract_started.json"), "utf8");
+  const raw = await readFile(paths(profile).extractStarted, "utf8");
   const marker = JSON.parse(raw);
   const markerEpoch = Date.parse(marker.timestamp) / 1000;
   const fresh = Number.isFinite(markerEpoch) && markerEpoch >= startEpoch - CLOCK_SKEW_ALLOWANCE_SECONDS;

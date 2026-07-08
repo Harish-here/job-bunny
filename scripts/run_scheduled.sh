@@ -144,8 +144,11 @@ determine_status() {
     STATUS="FAILED"
     # A transient API-side disconnect (e.g. "API Error: Connection closed mid-response") isn't
     # a real pipeline problem — it's worth one immediate retry rather than losing the whole
-    # day's run for this profile over it. Anything else falls through as a normal failure.
-    if grep -qi "connection closed\|econnreset\|network error" "$log_file" 2>/dev/null; then
+    # day's run for this profile over it. Anchored to "^API Error:" — the claude CLI's own
+    # error-line prefix — rather than a bare content grep, so a scraped job posting whose
+    # description happens to mention "network error" or "connection closed" can't be
+    # misread as a transient API disconnect. Anything else falls through as a normal failure.
+    if grep -qiE "^API Error:.*(connection closed|econnreset|network error)" "$log_file" 2>/dev/null; then
       REASON="transient_api"
     else
       REASON="other"
@@ -166,10 +169,27 @@ for profile in "$@"; do
   run_attempt "$profile" "$log_file"
   determine_status "$profile" "$log_file"
 
-  # One immediate retry, same slot, only for a transient API disconnect — see determine_status.
-  # Never retries a heartbeat/timeout/genuine-failure outcome, and never retries more than once.
-  if [ "$STATUS" = "FAILED" ] && [ "$REASON" = "transient_api" ]; then
-    echo "[run_scheduled.sh] $profile failed on a transient API disconnect — retrying once" >&2
+  # One immediate retry, same slot, in two cases — both deliberately cheap, since neither
+  # can have reached /extract (which would mean re-scraping LinkedIn from scratch, since
+  # there's no mid-pipeline resume):
+  #   - heartbeat: by definition /extract's start marker never appeared, so nothing was
+  #     scraped — always safe to retry, including the case that caused this fix (a healthy
+  #     run whose /doctor+/reconcile just ran long and tripped the heartbeat early).
+  #   - transient_api: only retried if /extract also hadn't started yet in the failed
+  #     attempt (checked against that attempt's own start time) — a transient disconnect
+  #     surfacing after /extract already ran is NOT retried here, to avoid doubling that
+  #     slot's LinkedIn scrape traffic over a blip late in the pipeline.
+  # Never retries a timeout/genuine-failure outcome, and never retries more than once.
+  retry=0
+  if [ "$STATUS" = "FAILED" ] && [ "$REASON" = "heartbeat" ]; then
+    retry=1
+  elif [ "$STATUS" = "FAILED" ] && [ "$REASON" = "transient_api" ] \
+    && ! node "$ROOT/scripts/check_extract_started.js" "$profile" "$ATTEMPT_RUN_START_EPOCH"; then
+    retry=1
+  fi
+
+  if [ "$retry" -eq 1 ]; then
+    echo "[run_scheduled.sh] $profile failed ($REASON, extract hadn't started) — retrying once" >&2
     retry_log_file="$ROOT/profiles/$profile/data/logs/run_$(date +%Y%m%d_%H%M%S)_retry.log"
     run_attempt "$profile" "$retry_log_file"
     log_file="$retry_log_file"
@@ -207,13 +227,21 @@ done
 # relaunched fresh by doctor.js at the start of the next run; the LinkedIn session lives in
 # the on-disk .chrome-debug profile, not the running process, so nothing is lost by closing
 # it. Scoped to scheduled runs only — an interactive /run leaves Chrome open on purpose, e.g.
-# to inspect a page after a selector-drift failure.
-chrome_pid=$(lsof -ti :9222 -sTCP:LISTEN 2>/dev/null | head -1)
-if [ -n "${chrome_pid:-}" ]; then
-  echo "[run_scheduled.sh] Closing debug Chrome (pid $chrome_pid)" >&2
-  kill -TERM "$chrome_pid" 2>/dev/null
-  sleep 3
-  if kill -0 "$chrome_pid" 2>/dev/null; then
-    kill -KILL "$chrome_pid" 2>/dev/null
+# to inspect a page after a selector-drift failure. That scoping is enforced here, not just
+# assumed: skip the close if any OTHER `claude -p` process is currently alive (our own has
+# already been waited on and is done by this point in the script), since scheduled
+# invocations never overlap each other — any live one found here can only be a manual/
+# interactive session actively using this same shared Chrome.
+if pgrep -f "claude -p " >/dev/null 2>&1; then
+  echo "[run_scheduled.sh] Another claude invocation is active — leaving debug Chrome open" >&2
+else
+  chrome_pid=$(lsof -ti :9222 -sTCP:LISTEN 2>/dev/null | head -1)
+  if [ -n "${chrome_pid:-}" ]; then
+    echo "[run_scheduled.sh] Closing debug Chrome (pid $chrome_pid)" >&2
+    kill -TERM "$chrome_pid" 2>/dev/null
+    sleep 3
+    if kill -0 "$chrome_pid" 2>/dev/null; then
+      kill -KILL "$chrome_pid" 2>/dev/null
+    fi
   fi
 fi
