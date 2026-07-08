@@ -3,6 +3,21 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.0.0] — 2026-07-08
+
+### Added
+- **Greenhouse API lane (channel #2)** — the v1 design version (design_v1 in Notion). A second, browser-less channel alongside LinkedIn: `/greenhouse` (`scripts/greenhouse.js`) fetches open positions for a per-profile company watchlist (`profiles/<name>/greenhouse_boards.md`, `## Curated` + `## Auto-discovered` sections) from the public keyless boards API and appends them to `jobs_raw_text.json` in the exact extract record shape with `gh-<id>` job ids — everything downstream (`compress → /structure → assemble → filter → dedup → rank → sync`) is reused untouched. Per-job gates mirror the LinkedIn lane: seen-ledger (`data/gh_seen.json` — Greenhouse has no `f_TPR`-style window, so each job is structured at most once ever), cache skip, avoid list, title filter; `GH_MAX_NEW` (default 40) caps new records per run so a big board's first fetch can't flood `/structure`. Fail-soft: a failing board is skipped (page-group pattern); a whole-lane outage notifies info-level and exits 0 — the lane can never kill `/run`.
+- **Probe loop (discovery → monitoring):** `extract.js` now writes `data/companies_seen.json` (unique card companies post-avoid, including title-dropped ones); `/greenhouse` probes new names against the boards API (token guesses from `normalizeName`, ≤25/run, 300ms apart), verifies the board's own `name` matches before trusting a hit (live-caught counterexample: token `sage` belongs to "EverSurance"), auto-adds hits under `## Auto-discovered`, and records misses in `data/gh_probe_ledger.json` so they're never re-probed.
+- `extractJobId()` now parses both Greenhouse URL shapes (`job-boards.greenhouse.io/<token>/jobs/<id>` and embedded `?gh_jid=<id>`) as `gh-<id>`, so a `/reconcile` cache rebuild round-trips Greenhouse job ids exactly.
+- `/doctor`: `checkGreenhouse()` — absent watchlist passes ("optional — lane disabled"); malformed line is red; no live API reachability check (same rationale as the Telegram check). `.claude/commands/greenhouse.md` skill doc; `/run` stage 4 (fail-soft); CLAUDE.md + README channel notes; `templates/greenhouse_boards.md`.
+- `scripts/greenhouse.test.js` (27 tests) + Greenhouse `extractJobId` cases in `util.test.js` — suite now 145.
+- Watchlists seeded (all tokens probe-verified live): 16 boards for harish, 11 for uvashree.
+
+### Notes
+- Verified end-to-end live: probe drill (hit auto-added, name-mismatch rejected, avoid-listed never probed, misses ledgered), standalone lane run + idempotent re-run (`seen_skipped` exact), bogus-board fail-soft drill, then the full tail — 12 Greenhouse jobs through `/structure`/filter/dedup/rank, 4 remote roles synced to Notion with company-site Job URLs, and a reconcile round-trip preserving `gh-` ids. Title gate dropped 1,026 of ~1,040 fetched jobs pre-LLM, confirming token cost stays bounded.
+- Known edge (documented in `greenhouse.md`): a run crashing between `/greenhouse` and `/sync` strands that batch behind the seen-ledger; recovery is deleting `data/gh_seen.json`.
+- The Greenhouse boards API supplies title/company/location/JD but not skills/seniority/YoE, so Greenhouse jobs go through the shared `/structure` LLM stage like every other job — "no LLM" applies to fetching, not structuring.
+
 ## [0.13.0] — 2026-07-07
 
 ### Added
