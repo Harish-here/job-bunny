@@ -8,13 +8,17 @@ Regenerate launchd LaunchAgents for scheduled headless `/run` invocations:
 node scripts/schedule.js
 ```
 
-Reads every `profiles/<name>/profile.json`. Profiles with `schedule.enabled: true` are
-grouped by identical `schedule.time` (`"HH:MM"`, 24h) into one launchd job per distinct
-time — profiles sharing a time run strictly sequentially inside `scripts/run_scheduled.sh`,
-since they share one Chrome/CDP session (CLAUDE.md: ".chrome-debug/ — one Chrome/LinkedIn
-session") and can never run concurrently. Installs weekday-only (Mon–Fri) jobs into
-`~/Library/LaunchAgents/com.jobbunny.run.<HHMM>.plist` via `launchctl bootstrap`; removes
-any previously-installed job whose time no longer matches a profile.
+Reads every `profiles/<name>/profile.json`. Profiles with `schedule.enabled: true` declare
+either a single `schedule.time` (`"HH:MM"`, 24h) or multiple via `schedule.times`
+(`["HH:MM", ...]`) for a same-day multi-fire cadence — e.g. every 2.5h through working
+hours via `["09:00", "11:30", "14:00", "16:30", "19:00"]`. A profile is registered under
+every time it lists. All profiles are then grouped by identical time into one launchd job
+per distinct time — profiles sharing a time run strictly sequentially inside
+`scripts/run_scheduled.sh`, since they share one Chrome/CDP session (CLAUDE.md:
+".chrome-debug/ — one Chrome/LinkedIn session") and can never run concurrently. Installs
+weekday-only (Mon–Fri) jobs into `~/Library/LaunchAgents/com.jobbunny.run.<HHMM>.plist` via
+`launchctl bootstrap`; removes any previously-installed job whose time no longer matches a
+profile.
 
 This command takes no profile argument — unlike stage commands, scheduling is inherently
 whole-machine (grouping crosses profile boundaries), so it always reads every profile.

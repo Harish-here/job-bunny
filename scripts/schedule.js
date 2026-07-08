@@ -2,7 +2,11 @@
 // scripts/schedule.js — generate and install launchd jobs for scheduled /run invocations.
 // Usage: node scripts/schedule.js
 // Reads profiles/<name>/profile.json, collects entries with schedule.enabled: true,
-// groups by schedule.time, and installs one launchd job per distinct time.
+// groups by schedule time, and installs one launchd job per distinct time. A profile may
+// declare either a single schedule.time ("HH:MM") or multiple via schedule.times
+// (["HH:MM", ...]) for a same-day multi-fire cadence (e.g. every 2.5h through working
+// hours) — it's registered under every time it lists, so it can land in more than one
+// launchd job/group.
 
 import { readFileSync, readdirSync, mkdirSync, unlinkSync, existsSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -37,22 +41,38 @@ for (const profileName of listProfiles()) {
     continue;
   }
 
-  const { time } = profile.schedule;
+  // schedule.times (array) takes precedence when present; otherwise fall back to the
+  // legacy single schedule.time. Either way we end up with a flat list of "HH:MM" strings
+  // this profile should fire at.
+  const timeList = Array.isArray(profile.schedule.times)
+    ? profile.schedule.times
+    : profile.schedule.time
+      ? [profile.schedule.time]
+      : [];
 
-  // Validate time format (HH:MM).
-  if (!TIME_REGEX.test(time)) {
+  if (!timeList.length) {
     console.error(
-      `[schedule.js] Error: Invalid schedule.time "${time}" in ${profileName} — ` +
-        `expected HH:MM format (e.g., "09:00"). Skipping.`
+      `[schedule.js] Error: schedule.enabled is true in ${profileName} but no time/times given. Skipping.`
     );
     continue;
   }
 
-  // Group profiles by time.
-  if (!profilesByTime.has(time)) {
-    profilesByTime.set(time, []);
+  for (const time of timeList) {
+    // Validate time format (HH:MM).
+    if (!TIME_REGEX.test(time)) {
+      console.error(
+        `[schedule.js] Error: Invalid schedule time "${time}" in ${profileName} — ` +
+          `expected HH:MM format (e.g., "09:00"). Skipping this time.`
+      );
+      continue;
+    }
+
+    // Group profiles by time.
+    if (!profilesByTime.has(time)) {
+      profilesByTime.set(time, []);
+    }
+    profilesByTime.get(time).push(profileName);
   }
-  profilesByTime.get(time).push(profileName);
 }
 
 // If no profiles are scheduled, exit cleanly.

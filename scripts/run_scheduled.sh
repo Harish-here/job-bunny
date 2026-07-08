@@ -17,7 +17,7 @@ set -uo pipefail
 # Enable job control (monitor mode) even though this script runs non-interactively — without
 # it, a backgrounded command shares the script's own process group, so signaling just its PID
 # on timeout would NOT reach any child processes it spawned (they'd be orphaned, still running,
-# still holding files/connections open). With -m, `claude &` gets its own process group, so the
+# still holding files/connections open). With -m, `claude &` gets its own process group, so a
 # watchdog can signal the whole group (`kill -TERM -- -$pid`) and actually take down the tree.
 set -m
 
@@ -33,24 +33,35 @@ set -m
 # (then SIGKILLs) it if it's still alive past the deadline, and `wait` for whichever finishes.
 TIMEOUT_SECONDS="${JOBBUNNY_RUN_TIMEOUT_SECONDS:-2700}"
 
-# Loop over profiles strictly sequentially.
-for profile in "$@"; do
-  # Ensure the logs directory exists.
-  mkdir -p "$ROOT/profiles/$profile/data/logs"
+# Second, much shorter watchdog: how long to wait for /extract's start marker
+# (extract_started.json, written by extract.js as literally its first action — see
+# check_extract_started.js) before concluding /extract never actually started. This exists
+# because of a real incident: run.md explicitly forbids backgrounding /extract in headless
+# mode (a backgrounded stage's promised "I'll be notified when it finishes" can never arrive,
+# since the single-shot `claude -p` process exits at the end of that turn) — but a fresh
+# headless agent violated that rule anyway, and the run just hung until the full 45-min
+# timeout above killed it, with no useful signal until then. 5 min is comfortably longer than
+# doctor+reconcile ever take alone, so a healthy run's marker is always in place well before
+# this fires. Override with JOBBUNNY_EXTRACT_HEARTBEAT_SECONDS if needed.
+HEARTBEAT_SECONDS="${JOBBUNNY_EXTRACT_HEARTBEAT_SECONDS:-300}"
 
-  # Run the /run stage sequence, capture both stdout and stderr, and tee to a timestamped log file.
-  timestamp=$(date +%Y%m%d_%H%M%S)
-  log_file="$ROOT/profiles/$profile/data/logs/run_${timestamp}.log"
+# Runs one attempt of `claude -p "/run $profile"`, tee'd to $2, racing two independent
+# watchdogs against the same process — the heartbeat watchdog above, and the full-timeout
+# watchdog as the final backstop for any other kind of hang. Sets ATTEMPT_EXIT_CODE,
+# ATTEMPT_TIMED_OUT, ATTEMPT_HEARTBEAT_FAILED, ATTEMPT_RUN_START_EPOCH as globals for the
+# caller to read; does not itself decide PASS/FAIL or notify.
+run_attempt() {
+  local profile="$1" log_file="$2"
+  local timed_out_flag heartbeat_failed_flag run_start_epoch
+  local claude_pid timeout_watchdog_pid heartbeat_watchdog_pid
 
-  echo "[run_scheduled.sh] Starting profile: $profile (timeout: ${TIMEOUT_SECONDS}s)" >&2
+  # Flags' presence (not content) is the signal a watchdog fired — avoids inferring "did it
+  # fire?" from a magic signal-derived exit code.
+  timed_out_flag="$(mktemp)"; rm -f "$timed_out_flag"
+  heartbeat_failed_flag="$(mktemp)"; rm -f "$heartbeat_failed_flag"
 
-  # timed_out_flag's presence (not its content) is the signal the watchdog fired — avoids
-  # inferring "did we time out?" from a magic signal-derived exit code.
-  timed_out_flag="$(mktemp)"
-  rm -f "$timed_out_flag"
-
-  # Recorded before launching claude — check_run_result.js uses this to reject a stale
-  # marker left over from an earlier run (see its own header comment).
+  # Recorded before launching claude — check_run_result.js / check_extract_started.js both use
+  # this to reject a stale marker left over from an earlier run.
   run_start_epoch=$(date +%s)
 
   # Background claude directly (not as part of a `|` pipe) so $! is its own PID, not tee's.
@@ -66,53 +77,107 @@ for profile in "$@"; do
     if kill -0 "$claude_pid" 2>/dev/null; then
       touch "$timed_out_flag"
       # Negative PID = signal the whole process group (claude + any children it spawned),
-      # not just the top-level PID — see the set -m comment above for why this matters.
+      # not just the top-level PID — see the `set -m` comment above for why this matters.
       kill -TERM -- "-$claude_pid" 2>/dev/null
       sleep 5
       kill -KILL -- "-$claude_pid" 2>/dev/null
     fi
   ) &
-  watchdog_pid=$!
+  timeout_watchdog_pid=$!
+
+  (
+    sleep "$HEARTBEAT_SECONDS"
+    if kill -0 "$claude_pid" 2>/dev/null \
+      && ! node "$ROOT/scripts/check_extract_started.js" "$profile" "$run_start_epoch"; then
+      touch "$heartbeat_failed_flag"
+      kill -TERM -- "-$claude_pid" 2>/dev/null
+      sleep 5
+      kill -KILL -- "-$claude_pid" 2>/dev/null
+    fi
+  ) &
+  heartbeat_watchdog_pid=$!
 
   wait "$claude_pid" 2>/dev/null
-  exit_code=$?
+  ATTEMPT_EXIT_CODE=$?
 
-  # Run finished on its own — stop the now-pointless watchdog rather than leave it ticking.
-  kill "$watchdog_pid" 2>/dev/null
-  wait "$watchdog_pid" 2>/dev/null
+  # Run finished (or was killed) — stop whichever watchdog didn't fire rather than leave it ticking.
+  kill "$timeout_watchdog_pid" 2>/dev/null; wait "$timeout_watchdog_pid" 2>/dev/null
+  kill "$heartbeat_watchdog_pid" 2>/dev/null; wait "$heartbeat_watchdog_pid" 2>/dev/null
 
-  # Brief grace period for the tee process substitution to flush its last lines before we grep it.
+  # Brief grace period for the tee process substitution to flush its last lines before anyone greps it.
   sleep 1
 
-  if [ -f "$timed_out_flag" ]; then
-    timed_out=1
-    rm -f "$timed_out_flag"
-  else
-    timed_out=0
-  fi
+  if [ -f "$timed_out_flag" ]; then ATTEMPT_TIMED_OUT=1; else ATTEMPT_TIMED_OUT=0; fi
+  if [ -f "$heartbeat_failed_flag" ]; then ATTEMPT_HEARTBEAT_FAILED=1; else ATTEMPT_HEARTBEAT_FAILED=0; fi
+  rm -f "$timed_out_flag" "$heartbeat_failed_flag"
 
-  # PASS/FAIL comes from profiles/<profile>/data/last_run_result.json (written explicitly by
-  # the /run orchestration via mark_run_result.js — see run.md), NOT from grepping the log for
-  # a literal "## Run Summary" heading. That grep depended on a fresh headless agent's exact
-  # text-template compliance, which isn't guaranteed run to run — a genuinely successful run
-  # that printed a slightly different completion sentence would be misreported as FAILED (and
-  # fire a false "run failed" alert) purely because the wording didn't match. check_run_result.js
-  # is deterministic: a mechanical script call, not freeform prose, plus a staleness check
-  # against $run_start_epoch so a crash before ever reaching the marker doesn't reuse an old
-  # "success" from a prior day.
-  if [ "$timed_out" -eq 1 ]; then
-    status="FAILED"
-    message="Job Bunny run TIMED OUT after ${TIMEOUT_SECONDS}s for $profile (killed) — check log: $log_file"
-  elif [ "$exit_code" -eq 0 ] && node "$ROOT/scripts/check_run_result.js" "$profile" "$run_start_epoch"; then
-    status="PASSED"
-    message="Job Bunny run completed successfully for $profile. Log: $log_file"
+  ATTEMPT_RUN_START_EPOCH="$run_start_epoch"
+}
+
+# Turns the ATTEMPT_* globals from the most recent run_attempt call into STATUS/REASON/MESSAGE.
+# REASON drives both the retry decision and which notify title to use below.
+determine_status() {
+  local profile="$1" log_file="$2"
+
+  if [ "$ATTEMPT_HEARTBEAT_FAILED" -eq 1 ]; then
+    STATUS="FAILED"
+    REASON="heartbeat"
+    MESSAGE="Job Bunny run for $profile: /extract never started within ${HEARTBEAT_SECONDS}s (likely backgrounded against run.md's no-backgrounding rule) — killed. Check log: $log_file"
+  elif [ "$ATTEMPT_TIMED_OUT" -eq 1 ]; then
+    STATUS="FAILED"
+    REASON="timeout"
+    MESSAGE="Job Bunny run TIMED OUT after ${TIMEOUT_SECONDS}s for $profile (killed) — check log: $log_file"
+  # PASS/FAIL otherwise comes from profiles/<profile>/data/last_run_result.json (written
+  # explicitly by the /run orchestration via mark_run_result.js — see run.md), NOT from
+  # grepping the log for a literal "## Run Summary" heading. That grep depended on a fresh
+  # headless agent's exact text-template compliance, which isn't guaranteed run to run — a
+  # genuinely successful run that printed a slightly different completion sentence would be
+  # misreported as FAILED (and fire a false "run failed" alert) purely because the wording
+  # didn't match. check_run_result.js is deterministic: a mechanical script call, not freeform
+  # prose, plus a staleness check against run_start_epoch so a crash before ever reaching the
+  # marker doesn't reuse an old "success" from a prior day.
+  elif [ "$ATTEMPT_EXIT_CODE" -eq 0 ] && node "$ROOT/scripts/check_run_result.js" "$profile" "$ATTEMPT_RUN_START_EPOCH"; then
+    STATUS="PASSED"
+    REASON="passed"
+    MESSAGE="Job Bunny run completed successfully for $profile. Log: $log_file"
   else
-    status="FAILED"
-    message="Job Bunny run failed for $profile. Check log: $log_file"
+    STATUS="FAILED"
+    # A transient API-side disconnect (e.g. "API Error: Connection closed mid-response") isn't
+    # a real pipeline problem — it's worth one immediate retry rather than losing the whole
+    # day's run for this profile over it. Anything else falls through as a normal failure.
+    if grep -qi "connection closed\|econnreset\|network error" "$log_file" 2>/dev/null; then
+      REASON="transient_api"
+    else
+      REASON="other"
+    fi
+    MESSAGE="Job Bunny run failed for $profile. Check log: $log_file"
+  fi
+}
+
+# Loop over profiles strictly sequentially.
+for profile in "$@"; do
+  # Ensure the logs directory exists.
+  mkdir -p "$ROOT/profiles/$profile/data/logs"
+
+  timestamp=$(date +%Y%m%d_%H%M%S)
+  log_file="$ROOT/profiles/$profile/data/logs/run_${timestamp}.log"
+
+  echo "[run_scheduled.sh] Starting profile: $profile (timeout: ${TIMEOUT_SECONDS}s)" >&2
+  run_attempt "$profile" "$log_file"
+  determine_status "$profile" "$log_file"
+
+  # One immediate retry, same slot, only for a transient API disconnect — see determine_status.
+  # Never retries a heartbeat/timeout/genuine-failure outcome, and never retries more than once.
+  if [ "$STATUS" = "FAILED" ] && [ "$REASON" = "transient_api" ]; then
+    echo "[run_scheduled.sh] $profile failed on a transient API disconnect — retrying once" >&2
+    retry_log_file="$ROOT/profiles/$profile/data/logs/run_$(date +%Y%m%d_%H%M%S)_retry.log"
+    run_attempt "$profile" "$retry_log_file"
+    log_file="$retry_log_file"
+    determine_status "$profile" "$log_file"
   fi
 
   # Fire macOS notification.
-  osascript -e "display notification \"$message\" with title \"Job Bunny $status\""
+  osascript -e "display notification \"$MESSAGE\" with title \"Job Bunny $STATUS\""
 
   # Forward the same digest to Telegram (best-effort — notify.js never throws/exits non-zero).
   # On success, the body is the log's "## Run Summary" block onward; on failure, a plain message.
@@ -120,17 +185,35 @@ for profile in "$@"; do
   # banner already carries both, per telegram_format.js. No --title on success either: the
   # Run Summary body already opens with its own bold heading, so a separate "Run complete"
   # title was just a redundant second headline stacked right above it.
-  if [ "$status" = "PASSED" ]; then
+  if [ "$STATUS" = "PASSED" ]; then
     notify_body=$(sed -n '/## Run Summary/,$p' "$log_file")
     if [ -z "$notify_body" ]; then
-      notify_body="$message"
+      notify_body="$MESSAGE"
     fi
     JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity success --body "$notify_body"
-  elif [ "$timed_out" -eq 1 ]; then
-    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Run timed out" --body "$message"
+  elif [ "$REASON" = "timeout" ]; then
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Run timed out" --body "$MESSAGE"
+  elif [ "$REASON" = "heartbeat" ]; then
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Extract did not start" --body "$MESSAGE"
   else
-    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Run failed" --body "$message"
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify.js" --severity blocking --title "Run failed" --body "$MESSAGE"
   fi
 
-  echo "[run_scheduled.sh] Finished profile: $profile (status: $status)" >&2
+  echo "[run_scheduled.sh] Finished profile: $profile (status: $STATUS)" >&2
 done
+
+# All scheduled profiles for this invocation are done — close the debug Chrome instead of
+# leaving it idle until the next slot (as little as 2.5h away on a multi-fire schedule). It's
+# relaunched fresh by doctor.js at the start of the next run; the LinkedIn session lives in
+# the on-disk .chrome-debug profile, not the running process, so nothing is lost by closing
+# it. Scoped to scheduled runs only — an interactive /run leaves Chrome open on purpose, e.g.
+# to inspect a page after a selector-drift failure.
+chrome_pid=$(lsof -ti :9222 -sTCP:LISTEN 2>/dev/null | head -1)
+if [ -n "${chrome_pid:-}" ]; then
+  echo "[run_scheduled.sh] Closing debug Chrome (pid $chrome_pid)" >&2
+  kill -TERM "$chrome_pid" 2>/dev/null
+  sleep 3
+  if kill -0 "$chrome_pid" 2>/dev/null; then
+    kill -KILL "$chrome_pid" 2>/dev/null
+  fi
+fi
