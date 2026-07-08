@@ -161,7 +161,14 @@ async function closeBlankTabs() {
     const context = browser.contexts()[0];
     if (!context) return;
     for (const page of context.pages()) {
-      if (page.url() === "about:blank" || page.url() === "chrome://newtab/") {
+      // "chrome://newtab/" is what this Chrome version (verified live against a fresh
+      // profile) actually reports for its default New Tab Page; "chrome://new-tab-page/"
+      // is included defensively for other/future Chrome versions that resolve it there.
+      if (
+        page.url() === "about:blank" ||
+        page.url() === "chrome://newtab/" ||
+        page.url() === "chrome://new-tab-page/"
+      ) {
         await page.close().catch(() => {});
       }
     }
@@ -205,7 +212,13 @@ async function checkCDP() {
     }
 
     console.log(`  … reachable but ${Math.round(ageMs / 3_600_000)}h old — recycling (same profile/session, fresh process)`);
-    process.kill(pid, "SIGTERM");
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Already gone (e.g. it crashed/quit in the gap between the age check above and
+      // here) — nothing to signal; fall through to the reachability poll below, which
+      // will find it already unreachable and skip straight to relaunching.
+    }
     const freeDeadline = Date.now() + 10_000;
     let stillUp = true;
     while (Date.now() < freeDeadline) {
