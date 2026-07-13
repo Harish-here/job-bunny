@@ -16,7 +16,8 @@
 // Hard cap: 0 core-skill matches → score capped at 50 (can never reach Kandipa podu).
 // Bands: >=85 Vera level · 65-84 Kandipa podu · <65 Try panalam
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { readJson, writeJson } from "../lib/io.js";
 import { normalizeName } from "../lib/util.js";
 import { paths, resolveProfileName } from "../lib/config.js";
 
@@ -171,17 +172,8 @@ async function loadDomainKeywords() {
 async function main() {
   console.log(`[rank] profile=${resolveProfileName()}`);
   const { newJobs: JOBS, resumeMeta: META } = paths();
-  let jobs, meta;
-  try {
-    jobs = JSON.parse(await readFile(JOBS, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${JOBS}: ${err.message}`);
-  }
-  try {
-    meta = JSON.parse(await readFile(META, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${META} (run generate_meta.js first): ${err.message}`);
-  }
+  const jobs = await readJson(JOBS);
+  const meta = await readJson(META, "run generate_meta.js first");
   if (!Array.isArray(jobs)) throw new Error(`${JOBS} must be a JSON array`);
 
   const domainKeywords = await loadDomainKeywords();
@@ -192,7 +184,7 @@ async function main() {
     return { ...job, score, excitement_level, match_reasons };
   });
 
-  await writeFile(JOBS, JSON.stringify(ranked, null, 2) + "\n");
+  await writeJson(JOBS, ranked);
   for (const j of ranked) console.log(`[rank] ${j.score}  ${j.excitement_level}  — ${j.job_title} @ ${j.company_name}`);
   console.log(`[rank] scored ${ranked.length} job(s) → new_jobs.json`);
 }

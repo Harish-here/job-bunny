@@ -8,7 +8,8 @@
 // Usage: JOBBUNNY_PROFILE=<profile> node scripts/ops/mark_run_result.js --status success|failed [--message "..."]
 // Writes profiles/<profile>/data/last_run_result.json — read by check_run_result.js.
 
-import { writeFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
+import { writeJson } from "../lib/io.js";
 import { paths } from "../lib/config.js";
 
 const args = process.argv.slice(2);
@@ -29,5 +30,5 @@ const result = {
 
 const { dataDir, lastRunResult: outPath } = paths();
 await mkdir(dataDir, { recursive: true });
-await writeFile(outPath, JSON.stringify(result, null, 2) + "\n");
+await writeJson(outPath, result);
 console.log(`[mark-run-result] wrote ${outPath}: ${status}`);

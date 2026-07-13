@@ -6,7 +6,7 @@
 //
 // filtered_jobs.json → new_jobs.json.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readJson, writeJson } from "../lib/io.js";
 import { dedupKey, repostKey } from "../lib/util.js";
 import { readCache } from "../notion/cache.js";
 import { paths, resolveProfileName } from "../lib/config.js";
@@ -47,18 +47,13 @@ export function dedupJobs(jobs, cacheJobs, log = console.log) {
 async function main() {
   console.log(`[dedup] profile=${resolveProfileName()}`);
   const { filteredJobs: IN, newJobs: OUT } = paths();
-  let jobs;
-  try {
-    jobs = JSON.parse(await readFile(IN, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${IN}: ${err.message}`);
-  }
+  const jobs = await readJson(IN);
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
   const cache = await readCache();
   const { kept, dupCache, dupBatch, reposts } = dedupJobs(jobs, cache.jobs);
 
-  await writeFile(OUT, JSON.stringify(kept, null, 2) + "\n");
+  await writeJson(OUT, kept);
   console.log(
     `[dedup] ${jobs.length} in → ${kept.length} new (${dupCache} in cache, ${dupBatch} intra-batch, ${reposts} repost) → new_jobs.json`
   );

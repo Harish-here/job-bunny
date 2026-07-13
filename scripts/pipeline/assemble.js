@@ -6,7 +6,8 @@
 //   |--------|-------|---------|-----------|------|-----------|-----|---------|--------|-----|--------|
 //   empty cell = null · booleans: true/false · skills: semicolon-separated · pipe in value: ｜
 
-import { readFile, writeFile, unlink } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
+import { writeJson } from "../lib/io.js";
 import { paths } from "../lib/config.js";
 
 const IN_DECISIONS  = paths().decisions;
@@ -97,7 +98,7 @@ async function main() {
     return job;
   });
 
-  await writeFile(OUT, JSON.stringify(merged, null, 2) + "\n");
+  await writeJson(OUT, merged);
 
   try {
     await unlink(IN_DECISIONS);

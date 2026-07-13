@@ -13,7 +13,7 @@
 //
 // jobs_raw.json + filter_config.json + resume_meta.json → filtered_jobs.json.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readJson, writeJson } from "../lib/io.js";
 import { normalizeName } from "../lib/util.js";
 import { filterByTitle } from "./title_filter.js";
 import { paths, resolveProfileName } from "../lib/config.js";
@@ -42,20 +42,10 @@ export function dropReason(job, homeLocation) {
 
 async function main() {
   console.log(`[filter] profile=${resolveProfileName()}`);
-  let jobs;
-  try {
-    jobs = JSON.parse(await readFile(IN, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${IN}: ${err.message}`);
-  }
+  const jobs = await readJson(IN);
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
-  let meta;
-  try {
-    meta = JSON.parse(await readFile(META, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${META} (run generate_meta.js first): ${err.message}`);
-  }
+  const meta = await readJson(META, "run generate_meta.js first");
   if (!meta.location) throw new Error(`${META} has no "location" — required for the on-site home-city check.`);
 
   const kept = [];
@@ -70,7 +60,7 @@ async function main() {
     }
   }
 
-  await writeFile(OUT, JSON.stringify(kept, null, 2) + "\n");
+  await writeJson(OUT, kept);
   console.log(`[filter] ${jobs.length} in → ${kept.length} kept, ${dropped} dropped → filtered_jobs.json`);
 }
 

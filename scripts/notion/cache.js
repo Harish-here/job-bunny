@@ -6,8 +6,9 @@
 // Run directly (`node scripts/notion/cache.js`, i.e. /reconcile): reconcile against live Notion.
 
 import "dotenv/config";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { Client } from "@notionhq/client";
+import { writeJson } from "../lib/io.js";
 import { extractJobId } from "../lib/util.js";
 import { paths, loadProfile } from "../lib/config.js";
 
@@ -23,7 +24,7 @@ export async function readCache() {
 }
 
 export async function writeCache(cache) {
-  await writeFile(paths().cache, JSON.stringify(cache, null, 2) + "\n");
+  await writeJson(paths().cache, cache);
 }
 
 // --- Notion property readers ---

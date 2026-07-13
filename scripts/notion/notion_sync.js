@@ -9,8 +9,8 @@
 // new_jobs.json → Notion rows; updates data/cache.json + last_run.
 
 import "dotenv/config";
-import { readFile } from "node:fs/promises";
 import { Client } from "@notionhq/client";
+import { readJson } from "../lib/io.js";
 import { dedupKey } from "../lib/util.js";
 import { readCache, writeCache } from "./cache.js";
 import { paths, loadProfile, resolveProfileName } from "../lib/config.js";
@@ -47,12 +47,7 @@ async function main() {
   const dbId = loadProfile().notion_db_id;
   if (!token || !dbId) throw new Error("NOTION_TOKEN / Notion DB id missing — run /setup first.");
 
-  let jobs;
-  try {
-    jobs = JSON.parse(await readFile(IN, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${IN}: ${err.message}`);
-  }
+  const jobs = await readJson(IN);
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
   const notion = new Client({ auth: token });

@@ -3,7 +3,7 @@
 // fields in resume.json that copy straight through. Output is deterministic & byte-identical
 // on re-run (fixed key order, stable formatting). Re-run only when resume.json changes.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readJson, writeJson } from "../lib/io.js";
 import { paths, resolveProfileName } from "../lib/config.js";
 
 const IN = paths().resume;
@@ -23,12 +23,7 @@ const FIELDS = [
 
 async function main() {
   console.log(`[meta] profile=${resolveProfileName()}`);
-  let resume;
-  try {
-    resume = JSON.parse(await readFile(IN, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${IN}: ${err.message}`);
-  }
+  const resume = await readJson(IN);
 
   const missing = FIELDS.filter((f) => !(f in resume));
   if (missing.length) {
@@ -41,7 +36,7 @@ async function main() {
   const meta = {};
   for (const f of FIELDS) meta[f] = resume[f];
 
-  await writeFile(OUT, JSON.stringify(meta, null, 2) + "\n");
+  await writeJson(OUT, meta);
   console.log(`[meta] wrote resume_meta.json (${FIELDS.length} fields, direct copy)`);
 }
 

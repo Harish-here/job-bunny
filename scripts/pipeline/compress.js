@@ -3,7 +3,8 @@
 // and writes structure_input.md (compact markdown table) + structure_passthrough.json.
 // Title filtering already happened in extract.js (Stage A); no second gate needed here.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
+import { readJson, writeJson } from "../lib/io.js";
 import { paths } from "../lib/config.js";
 
 const IN = paths().jobsRawText;
@@ -22,12 +23,7 @@ function sanitiseRawText(raw) {
 }
 
 async function main() {
-  let jobs;
-  try {
-    jobs = JSON.parse(await readFile(IN, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read/parse ${IN}: ${err.message}`);
-  }
+  const jobs = await readJson(IN);
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -58,7 +54,7 @@ async function main() {
 
   await Promise.all([
     writeFile(OUT_MD, md),
-    writeFile(OUT_PT, JSON.stringify(passthrough, null, 2) + "\n"),
+    writeJson(OUT_PT, passthrough),
   ]);
 
   console.log(`[compress] ${jobs.length} in → ${kept.length} to structure (${jobs.length - kept.length} pre-filtered) → structure_input.md`);
