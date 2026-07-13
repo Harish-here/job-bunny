@@ -8,7 +8,7 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 - **The only runtime LLM stage is `/structure`** (raw JD text → structured records). Filtering, dedup, and ranking are pure deterministic JS — never move their logic behind an LLM.
 - **The design doc (design_v0) lives in Notion** and is build-time reference only: fetch it on demand when authoring/changing code, never in the run path.
 - **Surface before implement.** When a spec detail is ambiguous, stop and ask — don't guess a heuristic into existence.
-- **Notifications are best-effort.** `scripts/notify.js` and its connectors (e.g. `scripts/notifiers/telegram.js`) must never throw in a way that breaks the calling pipeline stage — a notification failure is never a reason to fail `/doctor`, `/extract`, or `/sync`.
+- **Notifications are best-effort.** `scripts/notify/notify.js` and its connectors (e.g. `scripts/notify/telegram.js`) must never throw in a way that breaks the calling pipeline stage — a notification failure is never a reason to fail `/doctor`, `/extract`, or `/sync`.
 
 ## Commands
 
@@ -25,7 +25,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 ## Profiles & paths
 
 - Each persona lives in `profiles/<name>/`: resume, resume_meta, `avoid.md`, `filter_config.json`, `search_urls.md`, `profile.json` (its own Notion page + DB ids), and `data/` (cache + per-run intermediates).
-- Resolution: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. **`scripts/config.js` is the only module that knows the layout** — resolve every path through it.
+- Resolution: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. **`scripts/lib/config.js` is the only module that knows the layout** — resolve every path through it.
 - **Profiles-only layout.** Legacy mode (pre-v0.7 root paths, env Notion ids) was removed in v1.2; no `config.json` and no explicit `JOBBUNNY_PROFILE` fails loud pointing at `/setup`.
 - Shared across profiles: `page_inventory/`, `.chrome-debug/` (one Chrome/LinkedIn session — never copy account-personalized URLs like the *Recommended* collection between profiles), `templates/`, and `NOTION_TOKEN` in `.env`.
 
@@ -46,7 +46,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 
 ## Notion writes
 
-- **Select option strings are byte-exact** (`scripts/schema.js`). Changing one without updating the existing Notion options makes sync throw.
+- **Select option strings are byte-exact** (`scripts/notion/schema.js`). Changing one without updating the existing Notion options makes sync throw.
 - `notion_sync` writes **automated fields only** — manual tracking fields (Status, Notes, …) are never touched. Inserts/anchored updates only; never whole-page overwrite or delete.
 - Design docs in Notion: append or anchored-replace only; never blind-overwrite.
 

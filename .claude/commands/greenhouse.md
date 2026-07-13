@@ -5,8 +5,8 @@ description: Greenhouse boards API lane — probes new companies seen by /extrac
 If a profile name was given as `$ARGUMENTS`, prefix with it:
 
 ```bash
-JOBBUNNY_PROFILE=<profile> node scripts/greenhouse.js   # with profile argument
-node scripts/greenhouse.js                              # default profile
+JOBBUNNY_PROFILE=<profile> node scripts/pipeline/greenhouse.js   # with profile argument
+node scripts/pipeline/greenhouse.js                              # default profile
 ```
 
 A second, keyless discovery channel alongside LinkedIn: no browser, no login, just Greenhouse's public boards API. Reads the profile's `greenhouse_boards.md` — if it's absent, the lane is disabled and the script exits 0 (nothing to do).

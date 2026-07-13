@@ -9,13 +9,13 @@
   },
   "scripts": {
     "test": "node --test scripts/",
-    "init": "node scripts/init.js",
-    "meta": "node scripts/generate_meta.js",
-    "reconcile": "node scripts/cache.js",
-    "filter": "node scripts/filter.js",
-    "dedup": "node scripts/dedup.js",
-    "rank": "node scripts/rank.js",
-    "sync": "node scripts/notion_sync.js"
+    "init": "node scripts/setup/init.js",
+    "meta": "node scripts/setup/generate_meta.js",
+    "reconcile": "node scripts/notion/cache.js",
+    "filter": "node scripts/pipeline/filter.js",
+    "dedup": "node scripts/pipeline/dedup.js",
+    "rank": "node scripts/pipeline/rank.js",
+    "sync": "node scripts/notion/notion_sync.js"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",

@@ -146,7 +146,13 @@ Useful environment overrides:
 ## Project layout
 
 ```
-scripts/            deterministic pipeline stages (extract, filter, dedup, rank, sync …)
+scripts/
+  lib/              shared helpers — config (profile/path resolution), util
+  pipeline/         deterministic stages (extract, greenhouse, compress, assemble, filter, dedup, rank)
+  notion/           everything Notion — schema, cache/reconcile, sync, cleanup
+  notify/           notification dispatcher + connectors (telegram)
+  ops/              machine ops — doctor, schedule, run_scheduled.sh, run markers
+  setup/            onboarding & profile maintenance — init, notify_setup, generate_meta, add_url
 page_inventory/     per-page scraper config (selectors + behaviour, read at runtime; shared)
 templates/          neutral seeds for new profiles (avoid list, filter config, search URLs)
 profiles/<name>/    YOUR data (gitignored) — see Configuration above
@@ -160,8 +166,8 @@ CLAUDE.md           the agent's contract — rules Claude Code follows in this r
 
 - **Extraction started missing jobs or failing an assertion** — LinkedIn shifted its DOM. Run `/page-analyse` for the affected page-type; it rewrites `page_inventory/<page>.md` from the live page and `/extract` picks it up on the next run.
 - **Chrome or login problems** — run `/doctor`. It launches Chrome with the right debug flags and the persistent `.chrome-debug/` profile; if LinkedIn logged you out, log in once in that window.
-- **Missed a day (or three)** — set `JOBBUNNY_WINDOW_HOURS=72` for one `/extract` (or `node scripts/extract.js`) to widen the window for that run only.
-- **`/sync` throws about a select option** — the option strings in `scripts/schema.js` are byte-exact with the Notion DB. If you renamed an option in Notion, rename it back or update both sides together.
+- **Missed a day (or three)** — set `JOBBUNNY_WINDOW_HOURS=72` for one `/extract` (or `node scripts/pipeline/extract.js`) to widen the window for that run only.
+- **`/sync` throws about a select option** — the option strings in `scripts/notion/schema.js` are byte-exact with the Notion DB. If you renamed an option in Notion, rename it back or update both sides together.
 - **Notion filling up with passed jobs** — `/cleanup` archives *Passed* entries older than 7 days; it's dry-run until you confirm.
 - **`/schedule` fails silently with `Operation not permitted` in `~/Library/Logs/JobBunny/*.err.log`, or a scheduled Chrome launch prompts for folder access with nobody there to click it** — macOS treats `~/Desktop`, `~/Documents`, and `~/Downloads` as protected folders; a background `launchd` job (unlike an interactive Terminal session) doesn't automatically get access to them, so both the shell script and Chrome itself can get silently blocked or hang waiting on a permission dialog. Keep the repo outside those three folders (e.g. `~/Job-bunny` or `~/dev/Job-bunny`) if you plan to use `/schedule` — it sidesteps the whole category of issue rather than granting access app-by-app.
 

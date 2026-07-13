@@ -5,10 +5,10 @@ description: Archive stale Notion jobs — Passed older than 7 days, untouched l
 Run the cleanup stage. If a profile name was given as `$ARGUMENTS`, prefix with it:
 
 ```bash
-JOBBUNNY_PROFILE=<profile> node scripts/cleanup.js            # dry-run, default profile
-JOBBUNNY_PROFILE=<profile> node scripts/cleanup.js --apply    # actually archive
-CLEANUP_DAYS_OLD=14 JOBBUNNY_PROFILE=<profile> node scripts/cleanup.js --apply        # override Passed age
-CLEANUP_LEAD_DAYS_OLD=60 JOBBUNNY_PROFILE=<profile> node scripts/cleanup.js --apply   # override stale-lead age
+JOBBUNNY_PROFILE=<profile> node scripts/notion/cleanup.js            # dry-run, default profile
+JOBBUNNY_PROFILE=<profile> node scripts/notion/cleanup.js --apply    # actually archive
+CLEANUP_DAYS_OLD=14 JOBBUNNY_PROFILE=<profile> node scripts/notion/cleanup.js --apply        # override Passed age
+CLEANUP_LEAD_DAYS_OLD=60 JOBBUNNY_PROFILE=<profile> node scripts/notion/cleanup.js --apply   # override stale-lead age
 ```
 
 Queries the profile's live Notion DB (read-only) for two rule sets, both aged from `Date Found` (when the job was first synced):

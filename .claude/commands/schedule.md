@@ -5,7 +5,7 @@ description: (Re)generate and install this machine's launchd jobs from each prof
 Regenerate launchd LaunchAgents for scheduled headless `/run` invocations:
 
 ```bash
-node scripts/schedule.js
+node scripts/ops/schedule.js
 ```
 
 Reads every `profiles/<name>/profile.json`. Profiles with `schedule.enabled: true` declare
@@ -14,7 +14,7 @@ either a single `schedule.time` (`"HH:MM"`, 24h) or multiple via `schedule.times
 hours via `["09:00", "11:30", "14:00", "16:30", "19:00"]`. A profile is registered under
 every time it lists. All profiles are then grouped by identical time into one launchd job
 per distinct time — profiles sharing a time run strictly sequentially inside
-`scripts/run_scheduled.sh`, since they share one Chrome/CDP session (CLAUDE.md:
+`scripts/ops/run_scheduled.sh`, since they share one Chrome/CDP session (CLAUDE.md:
 ".chrome-debug/ — one Chrome/LinkedIn session") and can never run concurrently. Installs
 weekday-only (Mon–Fri) jobs into `~/Library/LaunchAgents/com.jobbunny.run.<HHMM>.plist` via
 `launchctl bootstrap`; removes any previously-installed job whose time no longer matches a
