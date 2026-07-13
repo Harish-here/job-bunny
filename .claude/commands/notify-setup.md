@@ -5,7 +5,7 @@ description: Guided Telegram notification setup for one profile — bot token, c
 Run the guided Telegram setup (`$ARGUMENTS` = profile name; falls back to `JOBBUNNY_PROFILE` / `config.json` `default_profile`):
 
 ```bash
-node scripts/notify_setup.js <profile>
+node scripts/setup/notify_setup.js <profile>
 ```
 
 Requires the profile to already exist (`profiles/<profile>/profile.json`, from `/setup <profile>`) — this command only adds notification config to it, never creates a profile.

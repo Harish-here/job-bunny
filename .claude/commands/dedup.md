@@ -5,8 +5,8 @@ description: Dedup against the reconciled cache by job_id (fallback role+company
 If a profile name was given as `$ARGUMENTS`, prefix with it:
 
 ```bash
-JOBBUNNY_PROFILE=<profile> node scripts/dedup.js   # with profile argument
-node scripts/dedup.js                              # default profile / legacy
+JOBBUNNY_PROFILE=<profile> node scripts/pipeline/dedup.js   # with profile argument
+node scripts/pipeline/dedup.js                              # default profile
 ```
 
 Reads the profile's `data/cache.json` (reconcile first via `/reconcile`). Two drop classes:
