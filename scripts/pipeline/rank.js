@@ -19,7 +19,7 @@
 import { readFile } from "node:fs/promises";
 import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
-import { normalizeName } from "../lib/util.js";
+import { homeLocations, isHomeCity } from "../lib/util.js";
 import { paths, resolveProfileName } from "../lib/config.js";
 
 const SKILLS_MAX = 40;
@@ -104,10 +104,18 @@ export function scoreJob(job, meta, opts = {}) {
     reasons.push(`${job.seniority_level || "Unknown"} below target seniority (+0)`);
   }
 
-  // 4. Work type + timezone (20) — tz is a soft-signal here, never a drop.
+  // 4. Work type + timezone (20) — tz is a soft-signal here, never a drop. A missing/invalid
+  // meta.location degrades to "not home city" here (never throws) — main() validates the
+  // shape up front for the real pipeline run; scoreJob() itself stays tolerant so axis-
+  // isolation callers can omit location entirely when it's irrelevant to what they're testing.
   let wt = 0;
   let wtReason;
-  const inHomeCity = normalizeName(job.location_city) === normalizeName(meta.location);
+  let inHomeCity = false;
+  try {
+    inHomeCity = isHomeCity(job.location_city, meta.location);
+  } catch {
+    // invalid/missing location — treated as "no home city match", not an error, here.
+  }
   if (job.work_type === "Remote") {
     if (job.timezone_compatibility === "APAC") {
       wt = WORKTYPE_MAX;
@@ -121,7 +129,7 @@ export function scoreJob(job, meta, opts = {}) {
     }
   } else if ((job.work_type === "Hybrid" || job.work_type === "On-site") && inHomeCity) {
     wt = WORKTYPE_MAX;
-    wtReason = `${job.work_type} in ${meta.location} (+${WORKTYPE_MAX})`;
+    wtReason = `${job.work_type} in ${homeLocations(meta.location).join("/")} (+${WORKTYPE_MAX})`;
   } else {
     wt = 0;
     wtReason = `${job.work_type || "Unknown"} location fit (+0)`;
@@ -176,6 +184,11 @@ async function main() {
   const jobs = await readJson(JOBS);
   const meta = await readJson(META, "run generate_meta.js first");
   if (!Array.isArray(jobs)) throw new Error(`${JOBS} must be a JSON array`);
+  try {
+    homeLocations(meta.location);
+  } catch (err) {
+    throw new Error(`${META} "location" is invalid — required for the work-type/home-city axis: ${err.message}`);
+  }
 
   const domainKeywords = await loadDomainKeywords();
   if (domainKeywords.length === 0) console.log(`[rank] no domain keywords — title axis neutral`);

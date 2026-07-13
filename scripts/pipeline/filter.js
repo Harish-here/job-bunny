@@ -1,7 +1,8 @@
 // scripts/pipeline/filter.js — Stage B filter. HARD DROPS ONLY.
 //
 // Location/work-type checks:
-//   1. On-site AND location_city != the profile's home city (resume_meta.json `location`)
+//   1. On-site AND location_city doesn't match any of the profile's home cities
+//      (resume_meta.json `location` — a string or an array of strings)
 //   2. Remote AND the JD explicitly states incompatible hours
 //      (structurer sets `timezone_incompatible: true`)
 // Absence of timezone info NEVER drops — that is a ranking soft-signal only (rank.js).
@@ -15,7 +16,7 @@
 
 import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
-import { normalizeName } from "../lib/util.js";
+import { homeLocations, isHomeCity } from "../lib/util.js";
 import { filterByTitle } from "./title_filter.js";
 import { paths, resolveProfileName } from "../lib/config.js";
 
@@ -23,12 +24,13 @@ const IN = paths().jobsRaw;
 const OUT = paths().filteredJobs;
 const META = paths().resumeMeta;
 
-// Returns a drop-reason string, or null to keep. homeLocation is meta.location verbatim.
+// Returns a drop-reason string, or null to keep. homeLocation is meta.location verbatim
+// (string or array) — validated/normalized via lib/util.js's homeLocations/isHomeCity.
 export function dropReason(job, homeLocation) {
   // --- Location / work-type checks ---
   const workType = job.work_type;
-  if (workType === "On-site" && normalizeName(job.location_city) !== normalizeName(homeLocation)) {
-    return `on-site outside ${homeLocation} (${job.location_city})`;
+  if (workType === "On-site" && !isHomeCity(job.location_city, homeLocation)) {
+    return `on-site outside ${homeLocations(homeLocation).join("/")} (${job.location_city})`;
   }
   if (workType === "Remote" && job.timezone_incompatible === true) {
     return "remote with explicit incompatible hours";
@@ -47,7 +49,11 @@ async function main() {
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
   const meta = await readJson(META, "run generate_meta.js first");
-  if (!meta.location) throw new Error(`${META} has no "location" — required for the on-site home-city check.`);
+  try {
+    homeLocations(meta.location);
+  } catch (err) {
+    throw new Error(`${META} "location" is invalid — required for the on-site home-city check: ${err.message}`);
+  }
 
   const kept = [];
   let dropped = 0;

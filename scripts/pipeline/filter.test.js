@@ -101,6 +101,28 @@ test("job passing everything returns null", () => {
   assert.equal(reason, null);
 });
 
+test("on-site job matching the SECOND city of a multi-city home location is kept", () => {
+  const job = {
+    job_title: "Staff Software Engineer",
+    work_type: "On-site",
+    location_city: "Chennai",
+  };
+  const reason = dropReason(job, ["Bengaluru", "Chennai"]);
+  assert.equal(reason, null);
+});
+
+test("on-site job outside ALL cities of a multi-city home location is dropped, reason lists all cities", () => {
+  const job = {
+    job_title: "Staff Software Engineer",
+    work_type: "On-site",
+    location_city: "Mumbai",
+  };
+  const reason = dropReason(job, ["Bengaluru", "Chennai"]);
+  assert.ok(reason, "expected a drop reason");
+  assert.match(reason, /on-site outside Bengaluru\/Chennai/);
+  assert.match(reason, /Mumbai/);
+});
+
 test.after(async () => {
   delete process.env.JOBBUNNY_PROFILE;
   await rm(FIXTURE_DIR, { recursive: true, force: true });

@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeName, extractJobId, dedupKey, repostKey } from "./util.js";
+import { normalizeName, extractJobId, dedupKey, repostKey, homeLocations, isHomeCity } from "./util.js";
 
 // --- normalizeName ---------------------------------------------------------
 
@@ -141,4 +141,56 @@ test("repostKey treats null and empty location_city as the same (both normalize 
     repostKey({ job_title: "Staff Engineer", company_name: "Acme", location_city: null }),
     repostKey({ job_title: "Staff Engineer", company_name: "Acme", location_city: "" }),
   );
+});
+
+// --- homeLocations / isHomeCity ------------------------------------------------
+
+test("homeLocations wraps a single string into a one-element array", () => {
+  assert.deepEqual(homeLocations("Bengaluru"), ["Bengaluru"]);
+});
+
+test("homeLocations passes through an array of strings unchanged", () => {
+  assert.deepEqual(homeLocations(["Bengaluru", "Chennai"]), ["Bengaluru", "Chennai"]);
+});
+
+test("homeLocations throws for undefined/null/missing location", () => {
+  assert.throws(() => homeLocations(undefined), /non-empty string or a non-empty array/);
+  assert.throws(() => homeLocations(null), /non-empty string or a non-empty array/);
+});
+
+test("homeLocations throws for an empty string", () => {
+  assert.throws(() => homeLocations(""), /non-empty string or a non-empty array/);
+});
+
+test("homeLocations throws for an empty array", () => {
+  assert.throws(() => homeLocations([]), /non-empty string or a non-empty array/);
+});
+
+test("homeLocations throws for an array containing a non-string", () => {
+  assert.throws(() => homeLocations(["Bengaluru", 42]), /non-empty string or a non-empty array/);
+});
+
+test("homeLocations throws for an array containing an empty string", () => {
+  assert.throws(() => homeLocations(["Bengaluru", ""]), /non-empty string or a non-empty array/);
+});
+
+test("homeLocations throws for a non-string, non-array value (e.g. a number or object)", () => {
+  assert.throws(() => homeLocations(42), /non-empty string or a non-empty array/);
+  assert.throws(() => homeLocations({ city: "Bengaluru" }), /non-empty string or a non-empty array/);
+});
+
+test("isHomeCity matches a single-string home location, case/whitespace-insensitive", () => {
+  assert.equal(isHomeCity("bengaluru ", "Bengaluru"), true);
+  assert.equal(isHomeCity("Chennai", "Bengaluru"), false);
+});
+
+test("isHomeCity matches ANY city in a multi-city home location array", () => {
+  const home = ["Bengaluru", "Chennai"];
+  assert.equal(isHomeCity("Chennai", home), true);
+  assert.equal(isHomeCity("Bengaluru", home), true);
+  assert.equal(isHomeCity("Pune", home), false);
+});
+
+test("isHomeCity propagates homeLocations' shape error for an invalid location", () => {
+  assert.throws(() => isHomeCity("Bengaluru", ["Bengaluru", 42]), /non-empty string or a non-empty array/);
 });

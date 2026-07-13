@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 import { ROOT, CHROME_BIN, paths, loadProfile, resolveProfileName } from "../lib/config.js";
+import { homeLocations } from "../lib/util.js";
 import { notify } from "../notify/notify.js";
 import { telegramTokenEnvKey } from "../notify/telegram.js";
 
@@ -89,8 +90,17 @@ async function checkGreenhouse() {
 
 async function checkProfileFiles() {
   console.log("[doctor] profile config");
-  if (await exists(P.resumeMeta)) pass("resume_meta.json present");
-  else fail("resume_meta.json missing (fill resume.json, then run /update-resume)");
+  if (await exists(P.resumeMeta)) {
+    try {
+      const meta = JSON.parse(await readFile(P.resumeMeta, "utf8"));
+      homeLocations(meta.location);
+      pass("resume_meta.json present, location shape valid");
+    } catch (err) {
+      fail(`resume_meta.json present but invalid (${err.message}) — run /update-resume`);
+    }
+  } else {
+    fail("resume_meta.json missing (fill resume.json, then run /update-resume)");
+  }
   if (await exists(P.filterConfig)) pass("filter_config.json present");
   else fail("filter_config.json missing (run /setup)");
 }

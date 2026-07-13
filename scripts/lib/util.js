@@ -56,3 +56,24 @@ export function dedupKey(job) {
 export function repostKey(job) {
   return `rp:${normalizeName(job.job_title)}::${normalizeName(job.company_name)}::${normalizeName(job.location_city)}`;
 }
+
+// resume_meta.json `location` is a string (single home city) or an array of strings
+// (multiple home cities). Anything else — including an array that isn't all non-empty
+// strings — is a shape error: fail loud rather than let it silently coerce (an array
+// naively stringified normalizes to a joined string that never matches any single city,
+// which used to make filter.js/rank.js drop every on-site job with no error at all).
+export function homeLocations(location) {
+  const arr = Array.isArray(location) ? location : [location];
+  if (!arr.length || !arr.every((l) => typeof l === "string" && l.trim())) {
+    throw new Error(
+      `location must be a non-empty string or a non-empty array of non-empty strings, got ${JSON.stringify(location)}`
+    );
+  }
+  return arr;
+}
+
+// True when `city` matches ANY of the configured home locations (string or array).
+export function isHomeCity(city, location) {
+  const norm = normalizeName(city);
+  return homeLocations(location).some((l) => normalizeName(l) === norm);
+}

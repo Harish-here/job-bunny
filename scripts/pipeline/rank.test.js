@@ -191,6 +191,30 @@ test("scoreJob: missing work_type → +0 with 'Unknown location fit' reason", ()
   assert.ok(match_reasons.some((r) => r === "Unknown location fit (+0)"));
 });
 
+test("scoreJob: On-site in the SECOND city of a multi-city home location → +20", () => {
+  const job = { ...zeroed, work_type: "On-site", location_city: "Chennai" };
+  const meta = { location: ["Bangalore", "Chennai"] };
+  const { score, match_reasons } = scoreJob(job, meta, MISS_TITLE);
+  assert.equal(score, 20);
+  assert.ok(match_reasons.some((r) => r === "On-site in Bangalore/Chennai (+20)"));
+});
+
+test("scoreJob: On-site outside ALL cities of a multi-city home location → +0", () => {
+  const job = { ...zeroed, work_type: "On-site", location_city: "Mumbai" };
+  const meta = { location: ["Bangalore", "Chennai"] };
+  const { score, match_reasons } = scoreJob(job, meta, MISS_TITLE);
+  assert.equal(score, 0);
+  assert.ok(match_reasons.some((r) => r === "On-site location fit (+0)"));
+});
+
+test("scoreJob: an invalid meta.location degrades to 'not home city' rather than throwing", () => {
+  const job = { ...zeroed, work_type: "On-site", location_city: "Bangalore" };
+  const meta = { location: ["Bangalore", 42] };
+  const { score, match_reasons } = scoreJob(job, meta, MISS_TITLE);
+  assert.equal(score, 0);
+  assert.ok(match_reasons.some((r) => r === "On-site location fit (+0)"));
+});
+
 // ---- 5. YoE fit (10 pts) ----
 
 test("scoreJob: null years_of_experience → +5 neutral", () => {
