@@ -167,7 +167,7 @@ function getProcessAgeMs(pid) {
 // closing the Browser object over CDP would take the whole process down with it.
 async function closeBlankTabs() {
   try {
-    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222", { noDefaults: true });
     const context = browser.contexts()[0];
     if (!context) return;
     for (const page of context.pages()) {

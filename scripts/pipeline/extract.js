@@ -342,7 +342,11 @@ async function main() {
   const cachedIds = new Set((cache.jobs || []).map((j) => j.job_id).filter(Boolean));
   console.log(`[extract] cache: ${cachedIds.size} known job IDs (last_run: ${cache.last_run ?? "never"}) — will skip`);
 
-  let browser = await chromium.connectOverCDP(CDP_URL);
+  // noDefaults: this is a real, user-owned Chrome (the persistent .chrome-debug/ LinkedIn
+  // session), not a browser Playwright launched itself. Without it, connectOverCDP's default
+  // Browser.setDownloadBehavior override throws "Browser context management is not supported"
+  // on Chrome builds that don't expose multi-context download/focus/media management to CDP.
+  let browser = await chromium.connectOverCDP(CDP_URL, { noDefaults: true });
   let context = browser.contexts()[0] || (await browser.newContext());
 
   // When LinkedIn closes our tab the whole context can die. Reconnect to CDP transparently.
@@ -352,7 +356,7 @@ async function main() {
     } catch (e) {
       if (!/closed/i.test(e.message)) throw e;
       console.warn("[extract]   context lost — reconnecting to CDP...");
-      browser = await chromium.connectOverCDP(CDP_URL);
+      browser = await chromium.connectOverCDP(CDP_URL, { noDefaults: true });
       context = browser.contexts()[0] || (await browser.newContext());
       return context.newPage();
     }
