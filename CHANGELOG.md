@@ -3,6 +3,21 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.2.0] — 2026-07-13
+
+### Changed
+- **`scripts/` reorganized into domain folders** — `lib/` (config, util, io, cli, env_file, prompt), `pipeline/` (extract, greenhouse, compress, assemble, filter, dedup, rank, avoid, title_filter), `notion/` (schema, client, cache, notion_sync, cleanup), `notify/` (dispatcher + telegram connector — `notifiers/` dissolved in), `ops/` (doctor, schedule, run_scheduled.sh, run markers), `setup/` (init, notify_setup, generate_meta, add_url). Pure `git mv` — basenames and behavior unchanged, tests stay colocated. Every path reference updated (commands, `package.json`, `run_scheduled.sh`, docs).
+- **Duplication removed via 5 new shared modules**: `lib/io.js` (`readJson`/`writeJson`, replacing ad-hoc JSON boilerplate in ~9 stages), `notion/client.js` (Notion client + `NOTION_TOKEN` guard, previously duplicated in `cache.js`/`notion_sync.js`/`cleanup.js`), `lib/cli.js` (the `file://argv[1]` run-guard and `--flag value` parser, previously reimplemented per-script), `lib/env_file.js` + `lib/prompt.js` (`.env` read/write and readline prompts, byte-for-byte duplicated between `init.js` and `notify_setup.js`), and `notion/schema.js`'s new `PROP` constants (Notion column names were hardcoded independently in the writer and reader sides — `notion_sync.js`'s own header claimed "from schema.js" without ever importing it).
+- **Legacy mode and `/migrate` removed.** The pre-v0.7 root-layout fallback is gone — a checkout with no `config.json` and no `JOBBUNNY_PROFILE` now fails loud pointing at `/setup`, instead of silently falling back to root-path resolution. Pre-v0.7 checkouts convert via tag `v1.1.0`'s `/migrate` before upgrading past this release.
+- **`/setup` revamped** to cut onboarding friction: Notion prerequisites (integration token, shared root page) are collected up front instead of causing a mid-wizard failure; the résumé step now has the agent parse a PDF/text résumé directly into `resume.json` (one follow-up round + one confirmation) instead of leaving all 8 fields as hand-edit homework; the title-filter step derives `filter_config.json`'s domain/function terms from the target roles already gathered instead of dumping raw JSON on the user to edit blind. Hand-editing `resume.json` directly remains a supported fallback.
+
+### Fixed
+- **Multi-city `location` silently broke filtering and ranking.** Setting `resume.json`'s `location` to an array (e.g. two home cities) passed through `generate_meta.js` unvalidated; `filter.js`/`rank.js` then string-coerced the array via `normalizeName()`, which joins it into one string that can never equal a single city — every on-site job was silently dropped and rank's 20-point home-city credit was silently zeroed, with no crash and no test coverage. New `homeLocations()`/`isHomeCity()` in `lib/util.js` properly support a string or an array of home cities end-to-end; `generate_meta.js` and `doctor.js` now shape-validate `location` (and every other résumé field) and fail loud on a bad shape instead of letting it corrupt scoring downstream.
+
+### Notes
+- **Rollout:** anyone with an installed `/schedule` cron must re-run `/schedule` once after upgrading — the previously-installed launchd plists embed the pre-move absolute path to `run_scheduled.sh`; until re-run, scheduled slots fail silently at the bash level with no Telegram alert (notify.js never runs).
+- Landed as a single squash-merged PR (#8, 10 commits internally — folder moves, dedup extraction, legacy removal, the location fix, and the `/setup` revamp, each keeping `npm test` green).
+
 ## [1.1.0] — 2026-07-08
 
 ### Added
