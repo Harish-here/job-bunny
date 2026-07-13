@@ -1,4 +1,4 @@
-// scripts/add_url.test.js — node:test unit tests for the pure URL helpers
+// scripts/setup/add_url.test.js — node:test unit tests for the pure URL helpers
 // (no I/O — fast, deterministic). main() is out of scope (real file I/O). Run with:
 //   node --test scripts/add_url.test.js
 

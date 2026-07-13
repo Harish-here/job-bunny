@@ -1,4 +1,4 @@
-// scripts/avoid.test.js — node:test unit tests for the pure avoid-list helpers
+// scripts/pipeline/avoid.test.js — node:test unit tests for the pure avoid-list helpers
 // (parseAvoid, isAvoided). No I/O, no fetch — fast, deterministic. loadAvoid is out of
 // scope (does real file I/O against the active profile). Run with:
 //   node --test scripts/avoid.test.js

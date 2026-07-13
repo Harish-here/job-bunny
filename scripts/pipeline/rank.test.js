@@ -1,4 +1,4 @@
-// scripts/rank.test.js — node:test unit tests for the pure scorer scoreJob() (no I/O,
+// scripts/pipeline/rank.test.js — node:test unit tests for the pure scorer scoreJob() (no I/O,
 // no network — fast, deterministic). Run with:
 //   node --test scripts/rank.test.js
 

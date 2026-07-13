@@ -1,4 +1,4 @@
-// scripts/dedup.test.js — node:test unit tests for the pure dedup core (dedupJobs).
+// scripts/pipeline/dedup.test.js — node:test unit tests for the pure dedup core (dedupJobs).
 // No I/O: cache rows are passed in directly, drop logs go to a capture array. Run with:
 //   node --test scripts/dedup.test.js
 

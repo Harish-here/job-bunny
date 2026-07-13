@@ -1,4 +1,4 @@
-// scripts/greenhouse.test.js — node:test unit tests for the pure helpers in greenhouse.js
+// scripts/pipeline/greenhouse.test.js — node:test unit tests for the pure helpers in greenhouse.js
 // (tokenCandidates, verifyBoardName, htmlToText, mapGhJob, parseWatchlist,
 // formatWatchlistAppend, mergeByJobId). No network calls — probeCandidate/main() aren't
 // exercised here. Needs a fixture profile + filter_config.json up front because greenhouse.js

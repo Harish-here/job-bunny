@@ -1,4 +1,4 @@
-// scripts/config.test.js — node:test unit tests for a narrow, safe subset of
+// scripts/lib/config.test.js — node:test unit tests for a narrow, safe subset of
 // scripts/lib/config.js: paths(name), loadProfile(name), listProfiles(). Read-only
 // against the real repo (config.json, profiles/harish, profiles/uvashree) — any
 // mutation happens only inside a disposable fixture directory that is created

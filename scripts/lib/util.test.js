@@ -1,4 +1,4 @@
-// scripts/util.test.js — node:test unit tests for the pure helpers in util.js
+// scripts/lib/util.test.js — node:test unit tests for the pure helpers in util.js
 // (no I/O, no network — fast, deterministic). Run with:
 //   node --test scripts/util.test.js
 
