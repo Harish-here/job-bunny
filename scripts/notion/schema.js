@@ -70,3 +70,23 @@ export const AUTOMATED_FIELDS = [
   "Excitement",
   "Match Reasons",
 ];
+
+// Property-name constants for the reader (cache.js) and writer (notion_sync.js) sides —
+// values must stay byte-exact with the DB_PROPERTIES keys above (schema.test.js checks this).
+export const PROP = Object.freeze({
+  JOB_TITLE: "Job Title",
+  COMPANY: "Company",
+  SENIORITY_LEVEL: "Seniority Level",
+  LOCATION_CITY: "Location City",
+  WORK_TYPE: "Work Type",
+  YOE: "YoE",
+  YOE_IS_MINIMUM: "YoE Is Minimum",
+  KEY_SKILLS: "Key Skills",
+  JOB_URL: "Job URL",
+  DATE_FOUND: "Date Found",
+  TIMEZONE: "Timezone",
+  SOURCE_URL: "Source URL",
+  EXCITEMENT: "Excitement",
+  MATCH_REASONS: "Match Reasons",
+  STATUS: "Status",
+});

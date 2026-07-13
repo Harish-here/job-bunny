@@ -14,6 +14,7 @@ import { dedupKey } from "../lib/util.js";
 import { readCache, writeCache } from "./cache.js";
 import { paths, loadProfile, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
+import { PROP } from "./schema.js";
 
 const IN = paths().newJobs;
 
@@ -22,21 +23,21 @@ const rt = (s) => [{ type: "text", text: { content: String(s ?? "") } }];
 // Map a ranked job to Notion properties — automated fields only.
 function buildProperties(job) {
   const props = {
-    "Job Title": { title: rt(job.job_title) },
-    Company: { rich_text: rt(job.company_name) },
-    "Location City": { rich_text: rt(job.location_city) },
-    "Key Skills": { rich_text: rt((job.key_skills || []).join(", ")) },
-    "YoE Is Minimum": { checkbox: !!job.yoe_is_minimum },
-    "Match Reasons": { rich_text: rt((job.match_reasons || []).join("\n")) },
+    [PROP.JOB_TITLE]: { title: rt(job.job_title) },
+    [PROP.COMPANY]: { rich_text: rt(job.company_name) },
+    [PROP.LOCATION_CITY]: { rich_text: rt(job.location_city) },
+    [PROP.KEY_SKILLS]: { rich_text: rt((job.key_skills || []).join(", ")) },
+    [PROP.YOE_IS_MINIMUM]: { checkbox: !!job.yoe_is_minimum },
+    [PROP.MATCH_REASONS]: { rich_text: rt((job.match_reasons || []).join("\n")) },
   };
-  if (typeof job.years_of_experience === "number") props.YoE = { number: job.years_of_experience };
-  if (job.job_url) props["Job URL"] = { url: job.job_url };
-  if (job.source_query_url) props["Source URL"] = { url: job.source_query_url };
-  if (job.date_found) props["Date Found"] = { date: { start: job.date_found } };
-  if (job.seniority_level) props["Seniority Level"] = { select: { name: job.seniority_level } };
-  if (job.work_type) props["Work Type"] = { select: { name: job.work_type } };
-  if (job.timezone_compatibility) props.Timezone = { select: { name: job.timezone_compatibility } };
-  if (job.excitement_level) props.Excitement = { select: { name: job.excitement_level } };
+  if (typeof job.years_of_experience === "number") props[PROP.YOE] = { number: job.years_of_experience };
+  if (job.job_url) props[PROP.JOB_URL] = { url: job.job_url };
+  if (job.source_query_url) props[PROP.SOURCE_URL] = { url: job.source_query_url };
+  if (job.date_found) props[PROP.DATE_FOUND] = { date: { start: job.date_found } };
+  if (job.seniority_level) props[PROP.SENIORITY_LEVEL] = { select: { name: job.seniority_level } };
+  if (job.work_type) props[PROP.WORK_TYPE] = { select: { name: job.work_type } };
+  if (job.timezone_compatibility) props[PROP.TIMEZONE] = { select: { name: job.timezone_compatibility } };
+  if (job.excitement_level) props[PROP.EXCITEMENT] = { select: { name: job.excitement_level } };
   return props;
 }
 

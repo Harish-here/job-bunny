@@ -12,6 +12,7 @@
 import { isMain } from "../lib/cli.js";
 import { createClient } from "./client.js";
 import { loadProfile, resolveProfileName } from "../lib/config.js";
+import { PROP } from "./schema.js";
 
 const DAYS_OLD = parseInt(process.env.CLEANUP_DAYS_OLD || "7", 10);
 const LEAD_DAYS_OLD = parseInt(process.env.CLEANUP_LEAD_DAYS_OLD || "30", 10);
@@ -33,8 +34,8 @@ async function findStaleJobs(notion, dbId, statusFilter, cutoff) {
       page_size: 100,
       filter: {
         and: [
-          { property: "Status", select: statusFilter },
-          { property: "Date Found", date: { before: cutoff } },
+          { property: PROP.STATUS, select: statusFilter },
+          { property: PROP.DATE_FOUND, date: { before: cutoff } },
         ],
       },
     });
@@ -47,9 +48,9 @@ async function findStaleJobs(notion, dbId, statusFilter, cutoff) {
 async function archiveMatches(notion, pages, label) {
   for (const page of pages) {
     const P = page.properties;
-    const title = P["Job Title"]?.title?.[0]?.plain_text || "?";
-    const company = P["Company"]?.rich_text?.[0]?.plain_text || "?";
-    const dateFound = P["Date Found"]?.date?.start || "?";
+    const title = P[PROP.JOB_TITLE]?.title?.[0]?.plain_text || "?";
+    const company = P[PROP.COMPANY]?.rich_text?.[0]?.plain_text || "?";
+    const dateFound = P[PROP.DATE_FOUND]?.date?.start || "?";
     console.log(`[cleanup] ${APPLY ? "archiving" : "found"} (${label}): ${title} @ ${company} (found ${dateFound})`);
     if (APPLY) await notion.pages.update({ page_id: page.id, archived: true });
   }

@@ -8,6 +8,7 @@
 import { readFile } from "node:fs/promises";
 import { isMain } from "../lib/cli.js";
 import { createClient, requireToken } from "./client.js";
+import { PROP } from "./schema.js";
 import { writeJson } from "../lib/io.js";
 import { extractJobId } from "../lib/util.js";
 import { paths, loadProfile } from "../lib/config.js";
@@ -40,23 +41,23 @@ const propDate = (p) => p?.date?.start ?? null;
 // (G6) since the DB has no job_id column.
 function pageToJob(page) {
   const P = page.properties;
-  const job_url = propUrl(P["Job URL"]);
-  const skills = propText(P["Key Skills"]);
+  const job_url = propUrl(P[PROP.JOB_URL]);
+  const skills = propText(P[PROP.KEY_SKILLS]);
   return {
     job_id: extractJobId(job_url),
-    job_title: propText(P["Job Title"]),
-    company_name: propText(P["Company"]),
-    seniority_level: propSelect(P["Seniority Level"]),
-    location_city: propText(P["Location City"]),
-    work_type: propSelect(P["Work Type"]),
-    years_of_experience: propNumber(P["YoE"]),
-    yoe_is_minimum: propCheckbox(P["YoE Is Minimum"]),
+    job_title: propText(P[PROP.JOB_TITLE]),
+    company_name: propText(P[PROP.COMPANY]),
+    seniority_level: propSelect(P[PROP.SENIORITY_LEVEL]),
+    location_city: propText(P[PROP.LOCATION_CITY]),
+    work_type: propSelect(P[PROP.WORK_TYPE]),
+    years_of_experience: propNumber(P[PROP.YOE]),
+    yoe_is_minimum: propCheckbox(P[PROP.YOE_IS_MINIMUM]),
     key_skills: skills ? skills.split(",").map((s) => s.trim()).filter(Boolean) : [],
     job_url,
-    date_found: propDate(P["Date Found"]),
-    timezone_compatibility: propSelect(P["Timezone"]),
-    source_query_url: propUrl(P["Source URL"]),
-    excitement_level: propSelect(P["Excitement"]),
+    date_found: propDate(P[PROP.DATE_FOUND]),
+    timezone_compatibility: propSelect(P[PROP.TIMEZONE]),
+    source_query_url: propUrl(P[PROP.SOURCE_URL]),
+    excitement_level: propSelect(P[PROP.EXCITEMENT]),
     notion_page_id: page.id,
   };
 }
