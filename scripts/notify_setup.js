@@ -17,7 +17,7 @@ import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { ROOT } from "./config.js";
+import { ROOT, paths } from "./config.js";
 import { sendTelegram, telegramTokenEnvKey } from "./notifiers/telegram.js";
 
 const ENV_PATH = join(ROOT, ".env");
@@ -41,7 +41,7 @@ async function resolveProfileArg() {
   if (!name) {
     throw new Error("Usage: node scripts/notify_setup.js <profile>   (e.g. node scripts/notify_setup.js harish)");
   }
-  const profileJsonPath = join(ROOT, "profiles", name, "profile.json");
+  const profileJsonPath = paths(name).profileJson;
   if (!(await exists(profileJsonPath))) {
     throw new Error(`profiles/${name}/profile.json not found — run \`/setup ${name}\` first.`);
   }

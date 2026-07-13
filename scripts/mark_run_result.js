@@ -9,7 +9,6 @@
 // Writes profiles/<profile>/data/last_run_result.json — read by check_run_result.js.
 
 import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { paths } from "./config.js";
 
 const args = process.argv.slice(2);
@@ -28,8 +27,7 @@ const result = {
   message: flags.message || "",
 };
 
-const dataDir = paths().dataDir;
+const { dataDir, lastRunResult: outPath } = paths();
 await mkdir(dataDir, { recursive: true });
-const outPath = join(dataDir, "last_run_result.json");
 await writeFile(outPath, JSON.stringify(result, null, 2) + "\n");
 console.log(`[mark-run-result] wrote ${outPath}: ${status}`);

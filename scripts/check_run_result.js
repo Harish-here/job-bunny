@@ -10,15 +10,14 @@
 // yesterday's "success" marker and be misreported as passing.
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { ROOT } from "./config.js";
+import { paths } from "./config.js";
 
 const [profile, startEpochStr] = process.argv.slice(2);
 const startEpoch = Number(startEpochStr);
 const CLOCK_SKEW_ALLOWANCE_SECONDS = 5;
 
 try {
-  const raw = await readFile(join(ROOT, "profiles", profile, "data", "last_run_result.json"), "utf8");
+  const raw = await readFile(paths(profile).lastRunResult, "utf8");
   const result = JSON.parse(raw);
   const resultEpoch = Date.parse(result.timestamp) / 1000;
   const fresh = Number.isFinite(resultEpoch) && resultEpoch >= startEpoch - CLOCK_SKEW_ALLOWANCE_SECONDS;

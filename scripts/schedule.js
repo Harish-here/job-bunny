@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, mkdirSync, unlinkSync, existsSync, writeFile
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ROOT, listProfiles } from "./config.js";
+import { ROOT, paths, listProfiles } from "./config.js";
 
 const LAUNCH_AGENTS_DIR = join(homedir(), "Library", "LaunchAgents");
 const LOGS_DIR = join(homedir(), "Library", "Logs", "JobBunny");
@@ -26,7 +26,7 @@ mkdirSync(LOGS_DIR, { recursive: true });
 const profilesByTime = new Map();
 
 for (const profileName of listProfiles()) {
-  const profileJsonPath = join(ROOT, "profiles", profileName, "profile.json");
+  const profileJsonPath = paths(profileName).profileJson;
   let profile;
 
   try {

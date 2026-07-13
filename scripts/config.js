@@ -84,6 +84,7 @@ export function paths(name = resolveProfileName()) {
     ghProbeLedger: join(dataDir, "gh_probe_ledger.json"),
     ghSeen: join(dataDir, "gh_seen.json"),
     extractStarted: join(dataDir, "extract_started.json"),
+    lastRunResult: join(dataDir, "last_run_result.json"),
   };
 }
 
