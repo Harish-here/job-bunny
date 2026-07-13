@@ -42,6 +42,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 - **Every script:** explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
 - **Token efficiency is a design constraint on the `/structure` path.** Stage A drops avoid-list companies on card data before JDs are opened; `compress.js` pre-filters by card title and emits a compact markdown table; `/structure` outputs a markdown table too (`jobs_raw_decisions.md`), not JSON. Preserve this shape — it roughly halves the stage's token cost.
 - **Avoid-list matching** normalizes both sides: lowercase, strip legal suffixes, apply the alias map (see the profile's `avoid.md`).
+- **`resume_meta.json`'s `location`** is a string (one home city) or an array of strings (multiple home cities) — never assume a bare string. Use `homeLocations()`/`isHomeCity()` from `scripts/lib/util.js` for any home-city check; don't re-implement the comparison.
 - **`/add-url` cleans URLs** before filing them under their Channel → page node: strips ephemeral tracking/pagination params, drops stale absolute `f_TPR=a<epoch>-` anchors (keeps relative `r<sec>`), keeps stable filter params, preserves the path as-is. Exact param list: `add-url.md`.
 
 ## Notion writes
