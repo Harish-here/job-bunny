@@ -18,9 +18,9 @@ import { constants } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { ROOT, paths } from "../lib/config.js";
+import { readEnvFile, writeEnvKey } from "../lib/env_file.js";
+import { prompt, promptMasked } from "../lib/prompt.js";
 import { sendTelegram, telegramTokenEnvKey } from "../notify/telegram.js";
-
-const ENV_PATH = join(ROOT, ".env");
 
 const log = (msg) => console.log(`[notify-setup] ${msg}`);
 const ok = (msg) => console.log(`[notify-setup] ✓ ${msg}`);
@@ -48,54 +48,12 @@ async function resolveProfileArg() {
   return { name, profileJsonPath };
 }
 
-// ---------- .env helpers (mirrors init.js) ----------
-async function readEnv() {
-  if (!(await exists(ENV_PATH))) return {};
-  const text = await readFile(ENV_PATH, "utf8");
-  const env = {};
-  for (const line of text.split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) env[m[1]] = m[2];
-  }
-  return env;
-}
-
-async function writeEnvKey(key, value) {
-  let text = (await exists(ENV_PATH)) ? await readFile(ENV_PATH, "utf8") : "";
-  const line = `${key}=${value}`;
-  const re = new RegExp(`^${key}=.*$`, "m");
-  if (re.test(text)) text = text.replace(re, line);
-  else text = text.replace(/\n*$/, "\n") + line + "\n";
-  await writeFile(ENV_PATH, text);
-}
-
 // ---------- prompts share ONE readline interface for the whole script's lifetime ----------
 // A fresh createInterface() per question looks idiomatic (mirrors init.js, which only ever
 // asks one question total) but breaks down here since notify_setup.js asks up to three: on
 // piped/non-TTY stdin, closing one interface can leave the next one never seeing further
 // input (observed hang when scripting this non-interactively). One shared interface, closed
 // once at the very end, avoids that entirely and works identically for a real interactive TTY.
-
-// ---------- masked prompt (never echoes, never a CLI arg) — mirrors init.js ----------
-function promptMasked(rl, question) {
-  return new Promise((resolve) => {
-    const onData = () => rl.output.write("\x1B[2K\x1B[200D" + question);
-    process.stdout.write(question);
-    rl.input.on("data", onData);
-    rl.question("", (answer) => {
-      rl.input.removeListener("data", onData);
-      process.stdout.write("\n");
-      resolve(answer.trim());
-    });
-  });
-}
-
-// ---------- plain prompt (for the shared/separate and Y/n confirmations) ----------
-function prompt(rl, question) {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
-  });
-}
 
 // Most setups share one bot across all profiles (TELEGRAM_BOT_TOKEN). A profile can opt
 // into its own separate bot instead (its own per-profile env key) — e.g. two different
@@ -190,7 +148,7 @@ async function main() {
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const env = await readEnv();
+    const env = await readEnvFile();
     const token = await ensureToken(rl, env, name);
 
     const detected = await pollForChatId(token);

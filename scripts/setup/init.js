@@ -19,6 +19,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DB_TITLE, PARENT_PAGE_TITLE, DB_PROPERTIES } from "../notion/schema.js";
 import { ROOT, CHROME_BIN } from "../lib/config.js";
+import { readEnvFile, writeEnvKey } from "../lib/env_file.js";
+import { promptMasked } from "../lib/prompt.js";
 
 // @notionhq/client is deliberately NOT statically imported here — a static import is
 // resolved at module load, before checkDependencies() ever runs, so a missing install
@@ -26,7 +28,6 @@ import { ROOT, CHROME_BIN } from "../lib/config.js";
 // checkDependencies() dynamic-imports it (and every other required package) and hands
 // the module back to main() once the preflight has actually confirmed it's installed.
 
-const ENV_PATH = join(ROOT, ".env");
 const CONFIG_PATH = join(ROOT, "config.json");
 const PACKAGE_JSON_PATH = join(ROOT, "package.json");
 const MIN_NODE_MAJOR = 20;
@@ -109,43 +110,6 @@ async function resolveProfileArg() {
   throw new Error("Usage: node scripts/setup/init.js <profile>   (e.g. node scripts/setup/init.js harish)");
 }
 
-// ---------- .env helpers ----------
-async function readEnv() {
-  if (!(await exists(ENV_PATH))) return {};
-  const text = await readFile(ENV_PATH, "utf8");
-  const env = {};
-  for (const line of text.split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) env[m[1]] = m[2];
-  }
-  return env;
-}
-
-async function writeEnvKey(key, value) {
-  let text = (await exists(ENV_PATH)) ? await readFile(ENV_PATH, "utf8") : "";
-  const line = `${key}=${value}`;
-  const re = new RegExp(`^${key}=.*$`, "m");
-  if (re.test(text)) text = text.replace(re, line);
-  else text = text.replace(/\n*$/, "\n") + line + "\n";
-  await writeFile(ENV_PATH, text);
-}
-
-// ---------- masked prompt (never echoes, never a CLI arg) ----------
-function promptMasked(question) {
-  return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const onData = () => rl.output.write("\x1B[2K\x1B[200D" + question);
-    process.stdout.write(question);
-    rl.input.on("data", onData);
-    rl.question("", (answer) => {
-      rl.input.removeListener("data", onData);
-      rl.close();
-      process.stdout.write("\n");
-      resolve(answer.trim());
-    });
-  });
-}
-
 // ---------- Step 1: secrets first ----------
 async function ensureGitignore() {
   const path = join(ROOT, ".gitignore");
@@ -162,12 +126,12 @@ async function ensureGitignore() {
   ok(`added to .gitignore: ${missing.join(", ")} (before any secret write)`);
 }
 
-async function ensureToken(env) {
+async function ensureToken(rl, env) {
   if (env.NOTION_TOKEN) {
     ok("NOTION_TOKEN already present (shared across profiles)");
     return env.NOTION_TOKEN;
   }
-  const token = await promptMasked("Paste your Notion integration token (hidden): ");
+  const token = await promptMasked(rl, "Paste your Notion integration token (hidden): ");
   if (!token) throw new Error("No token entered — aborting.");
   await writeEnvKey("NOTION_TOKEN", token);
   ok("NOTION_TOKEN written to .env");
@@ -339,8 +303,14 @@ async function main() {
   const profile = await resolveProfileArg();
   log(`starting idempotent setup for profile "${profile}"`);
   await ensureGitignore();
-  const env = await readEnv();
-  const token = await ensureToken(env);
+  const env = await readEnvFile();
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  let token;
+  try {
+    token = await ensureToken(rl, env);
+  } finally {
+    rl.close();
+  }
 
   const profileDir = join(ROOT, "profiles", profile);
   await scaffold(profile, profileDir);
