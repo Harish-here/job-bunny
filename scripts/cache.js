@@ -11,11 +11,11 @@ import { Client } from "@notionhq/client";
 import { extractJobId } from "./util.js";
 import { paths, loadProfile } from "./config.js";
 
-const CACHE_PATH = paths().cache;
-
+// Cache path resolved at call time, not module load — importing these helpers must not
+// require an active profile.
 export async function readCache() {
   try {
-    return JSON.parse(await readFile(CACHE_PATH, "utf8"));
+    return JSON.parse(await readFile(paths().cache, "utf8"));
   } catch (err) {
     if (err.code !== "ENOENT") console.warn(`[cache] cache.json unreadable (${err.message}) — treating as empty`);
     return { last_run: null, jobs: [] };
@@ -23,7 +23,7 @@ export async function readCache() {
 }
 
 export async function writeCache(cache) {
-  await writeFile(CACHE_PATH, JSON.stringify(cache, null, 2) + "\n");
+  await writeFile(paths().cache, JSON.stringify(cache, null, 2) + "\n");
 }
 
 // --- Notion property readers ---
@@ -62,8 +62,8 @@ function pageToJob(page) {
 
 // Rebuild cache.json from the live Notion DB. Preserves last_run (set by notion_sync).
 export async function reconcile({ token = process.env.NOTION_TOKEN, dbId = loadProfile().notion_db_id } = {}) {
-  if (!token) throw new Error("NOTION_TOKEN missing — run `node scripts/init.js` first.");
-  if (!dbId) throw new Error("Notion DB id missing — run `node scripts/init.js` first.");
+  if (!token) throw new Error("NOTION_TOKEN missing — run /setup first.");
+  if (!dbId) throw new Error("Notion DB id missing — run /setup first.");
 
   const notion = new Client({ auth: token });
   const jobs = [];

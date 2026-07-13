@@ -1,16 +1,10 @@
 // scripts/config.js — central profile/path resolution. The only place that knows the layout.
 //
-// Two modes:
-//   profiles mode — profile files live in profiles/<name>/, per-run intermediates in
-//                   profiles/<name>/data/. Selected by an explicit profile (JOBBUNNY_PROFILE
-//                   env var, or a name argument to paths()/loadProfile()) or by config.json's
-//                   default_profile.
-//   legacy mode   — the no-signal fallback: no config.json AND no explicit profile
-//                   (pre-v0.7 checkout); every path resolves to the old root layout,
-//                   byte-for-byte identical behavior. Nothing breaks on `git pull`;
-//                   `node scripts/migrate.js <name>` opts in to profiles.
+// Profile files live in profiles/<name>/, per-run intermediates in profiles/<name>/data/.
+// Selected by an explicit profile (JOBBUNNY_PROFILE env var, or a name argument to
+// paths()/loadProfile()) or by config.json's default_profile.
 //
-// Profile precedence: JOBBUNNY_PROFILE env var → config.json default_profile → legacy.
+// Profile precedence: JOBBUNNY_PROFILE env var → config.json default_profile.
 // An explicit profile always wins — a checkout without config.json (fresh clone, CI) still
 // resolves profiles/<name>/ when one is named, so the test suite runs anywhere.
 // Synchronous on purpose — title_filter.js reads its config at module load.
@@ -27,26 +21,15 @@ export const CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google
 const CONFIG_PATH = join(ROOT, "config.json");
 const PROFILES_DIR = join(ROOT, "profiles");
 
-export const LEGACY = !existsSync(CONFIG_PATH);
-
 let resolvedName = null;
-let legacyHinted = false;
 
 export function resolveProfileName() {
   if (resolvedName) return resolvedName;
 
-  const envName = process.env.JOBBUNNY_PROFILE;
-
-  if (LEGACY && !envName) {
-    if (!legacyHinted) {
-      legacyHinted = true;
-      console.error("[config] legacy layout — run `node scripts/migrate.js <your-name>` to switch to profiles");
-    }
-    resolvedName = "legacy";
-    return resolvedName;
+  let name = process.env.JOBBUNNY_PROFILE;
+  if (!name && !existsSync(CONFIG_PATH)) {
+    throw new Error("No profile selected — run `/setup <name>` first (creates config.json), or set JOBBUNNY_PROFILE.");
   }
-
-  let name = envName;
   if (!name) {
     let cfg;
     try {
@@ -76,9 +59,8 @@ export function resolveProfileName() {
 // Absolute paths for the active profile. Pure joins — no existence checks; every
 // script keeps its own fail-loud read (explicit input → explicit output).
 export function paths(name = resolveProfileName()) {
-  const legacy = name === "legacy";
-  const profileDir = legacy ? ROOT : join(PROFILES_DIR, name);
-  const dataDir = legacy ? ROOT : join(profileDir, "data");
+  const profileDir = join(PROFILES_DIR, name);
+  const dataDir = join(profileDir, "data");
   return {
     profileDir,
     dataDir,
@@ -88,8 +70,8 @@ export function paths(name = resolveProfileName()) {
     avoid: join(profileDir, "avoid.md"),
     filterConfig: join(profileDir, "filter_config.json"),
     searchUrls: join(profileDir, "search_urls.md"),
-    greenhouseBoards: legacy ? join(ROOT, "greenhouse_boards.md") : join(profileDir, "greenhouse_boards.md"),
-    cache: legacy ? join(ROOT, "data", "cache.json") : join(dataDir, "cache.json"),
+    greenhouseBoards: join(profileDir, "greenhouse_boards.md"),
+    cache: join(dataDir, "cache.json"),
     jobsRawText: join(dataDir, "jobs_raw_text.json"),
     structureInput: join(dataDir, "structure_input.md"),
     structurePassthrough: join(dataDir, "structure_passthrough.json"),
@@ -105,16 +87,8 @@ export function paths(name = resolveProfileName()) {
   };
 }
 
-// Per-profile Notion wiring. Legacy mode mirrors the old env-var behavior exactly;
-// callers keep their own missing-id errors there.
+// Per-profile Notion wiring.
 export function loadProfile(name = resolveProfileName()) {
-  if (name === "legacy") {
-    return {
-      name: "legacy",
-      notion_db_id: process.env.NOTION_DB_ID,
-      notion_parent_page_id: process.env.NOTION_PARENT_PAGE_ID,
-    };
-  }
   const p = join(PROFILES_DIR, name, "profile.json");
   let profile;
   try {
@@ -128,10 +102,10 @@ export function loadProfile(name = resolveProfileName()) {
   return { name, ...profile };
 }
 
-// List all profile directory names under profiles/, sorted. Returns empty array in
-// legacy mode or if profiles dir doesn't exist.
+// List all profile directory names under profiles/, sorted. Returns empty array if
+// the profiles dir doesn't exist.
 export function listProfiles() {
-  if (LEGACY || !existsSync(PROFILES_DIR)) return [];
+  if (!existsSync(PROFILES_DIR)) return [];
   return readdirSync(PROFILES_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)

@@ -14,7 +14,7 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 
 - `/run [profile]` — full pipeline, manual. No argument = `config.json` `default_profile`.
 - Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /greenhouse · /structure · /filter · /dedup · /rank · /sync`.
-- Setup & maintenance: `/setup <profile> · /migrate <name> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /schedule · /wrap`. `/schedule` takes no profile argument — it always reads every profile (grouping crosses profile boundaries).
+- Setup & maintenance: `/setup <profile> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /schedule · /wrap`. `/schedule` takes no profile argument — it always reads every profile (grouping crosses profile boundaries).
 
 Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 
@@ -22,11 +22,11 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 - **`/page-analyse` is browser-driven** (Claude in Chrome), script-less.
 - **`/greenhouse` is a second, optional channel**: keyless Greenhouse boards API, watchlist at the profile's `greenhouse_boards.md`, merges into `jobs_raw_text.json` ahead of `/structure`. Fail-soft — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
 
-## Profiles & paths (v0.7+)
+## Profiles & paths
 
 - Each persona lives in `profiles/<name>/`: resume, resume_meta, `avoid.md`, `filter_config.json`, `search_urls.md`, `profile.json` (its own Notion page + DB ids), and `data/` (cache + per-run intermediates).
 - Resolution: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. **`scripts/config.js` is the only module that knows the layout** — resolve every path through it.
-- **Legacy mode** (pre-v0.7 root paths, env Notion ids) is the no-signal fallback: no `config.json` **and** no explicit `JOBBUNNY_PROFILE` — an explicit profile always wins over legacy detection. Keep legacy mode working; `/migrate <name>` is the opt-in conversion.
+- **Profiles-only layout.** Legacy mode (pre-v0.7 root paths, env Notion ids) was removed in v1.2; no `config.json` and no explicit `JOBBUNNY_PROFILE` fails loud pointing at `/setup`.
 - Shared across profiles: `page_inventory/`, `.chrome-debug/` (one Chrome/LinkedIn session — never copy account-personalized URLs like the *Recommended* collection between profiles), `templates/`, and `NOTION_TOKEN` in `.env`.
 
 ## Running stages

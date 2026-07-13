@@ -20,10 +20,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import { normalizeName } from "./util.js";
 import { paths, resolveProfileName } from "./config.js";
 
-const JOBS = paths().newJobs;
-const META = paths().resumeMeta;
-const FILTER_CONFIG = paths().filterConfig;
-
 const SKILLS_MAX = 40;
 const TITLE_MAX = 15;
 const TITLE_NEUTRAL = 8;
@@ -165,7 +161,7 @@ export function scoreJob(job, meta, opts = {}) {
 // (legacy mode) must degrade to neutral title scoring, never fail the stage.
 async function loadDomainKeywords() {
   try {
-    const cfg = JSON.parse(await readFile(FILTER_CONFIG, "utf8"));
+    const cfg = JSON.parse(await readFile(paths().filterConfig, "utf8"));
     return cfg?.title_filter?.domain || [];
   } catch {
     return [];
@@ -174,6 +170,7 @@ async function loadDomainKeywords() {
 
 async function main() {
   console.log(`[rank] profile=${resolveProfileName()}`);
+  const { newJobs: JOBS, resumeMeta: META } = paths();
   let jobs, meta;
   try {
     jobs = JSON.parse(await readFile(JOBS, "utf8"));

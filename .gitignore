@@ -7,14 +7,9 @@
 resume.json
 data/cache.json
 
-# Profiles (v0.7+) — all profile config/data is local-only; templates/ ships the seeds
+# Profiles — all profile config/data is local-only; templates/ ships the seeds
 profiles/
 config.json
-# legacy-root personal config (anchored so templates/ copies stay tracked)
-/resume_meta.json
-/avoid.md
-/filter_config.json
-/search_urls.md
 
 # Dependencies
 node_modules/

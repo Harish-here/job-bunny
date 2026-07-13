@@ -1,8 +1,8 @@
 // scripts/notify.js — generic notification dispatcher. Best-effort: this module must
 // never throw out into a calling pipeline stage. Reads the active profile's `notify`
 // block, fans out to each enabled channel in parallel, and swallows every failure
-// (including a loadProfile() throw — LEGACY mode, or a profile with no notify config
-// at all) behind a console.warn.
+// (including a loadProfile() throw — e.g. a missing/incomplete profile.json)
+// behind a console.warn.
 //
 // As a module: import { notify } from "./notify.js".
 // Run directly (CLI): JOBBUNNY_PROFILE=<p> node scripts/notify.js --severity <s> --title <t> --body <b>

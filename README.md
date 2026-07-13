@@ -93,7 +93,7 @@ And the maintenance kit:
 | `/page-analyse` | LinkedIn changed its DOM? This inspects the live page and refreshes the scraper config |
 | `/cleanup` | Archive Notion jobs marked *Passed* older than 7 days (dry-run by default; not part of `/run`) |
 | `/update-resume` | Regenerate `resume_meta.json` after editing your resume |
-| `/setup` / `/migrate` | Guided onboarding / one-shot upgrade from a pre-0.7 checkout |
+| `/setup` | Guided onboarding — one command from a fresh clone to a running profile |
 
 The pure-JS stages are exposed as npm scripts too (`npm run filter`, `npm run rank`, …) if you'd rather drive them from a plain terminal.
 
@@ -152,7 +152,7 @@ templates/          neutral seeds for new profiles (avoid list, filter config, s
 profiles/<name>/    YOUR data (gitignored) — see Configuration above
 .claude/commands/   the Claude Code slash commands that drive everything
 resume.example.json resume template  →  copy into profiles/<name>/resume.json
-config.json         (gitignored) { "default_profile": "<name>" } — created by init/migrate
+config.json         (gitignored) { "default_profile": "<name>" } — created by init
 CLAUDE.md           the agent's contract — rules Claude Code follows in this repo
 ```
 
@@ -167,13 +167,7 @@ CLAUDE.md           the agent's contract — rules Claude Code follows in this r
 
 ## Upgrading from ≤ 0.6.x
 
-Nothing breaks when you pull: without a `config.json` the scripts keep using your existing root-level layout (legacy mode). When you're ready to switch to profiles:
-
-1. If you edited `avoid.md`, `search_urls.md`, `filter_config.json`, or `resume_meta.json`, commit or back them up first — v0.7 stopped tracking these files, so the pull may otherwise touch them.
-2. `npm run migrate <your-name>` — moves your config into `profiles/<your-name>/`, adopts your existing Notion DB, and makes you the default profile. Anything the pull deleted is re-seeded from `templates/`.
-3. Verify with `/doctor`.
-
-Also note: the `filter` stage reads your home city from `resume_meta.json` (previously hardcoded) — if you only ever ran `/filter` standalone, make sure that file exists (`npm run meta`). The old files remain in the repo's git history.
+The pre-0.7 root-level layout (legacy mode) and `/migrate` were removed. If you're on a pre-0.7 checkout, first check out tag `v1.1.0` and run `npm run migrate <your-name>` there to convert to the profiles layout, then upgrade and verify with `/doctor`.
 
 ## Privacy
 

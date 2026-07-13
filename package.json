@@ -10,7 +10,6 @@
   "scripts": {
     "test": "node --test scripts/",
     "init": "node scripts/init.js",
-    "migrate": "node scripts/migrate.js",
     "meta": "node scripts/generate_meta.js",
     "reconcile": "node scripts/cache.js",
     "filter": "node scripts/filter.js",

@@ -11,9 +11,6 @@ import { dedupKey, repostKey } from "./util.js";
 import { readCache } from "./cache.js";
 import { paths, resolveProfileName } from "./config.js";
 
-const IN = paths().filteredJobs;
-const OUT = paths().newJobs;
-
 // Pure core: dedup `jobs` against `cacheJobs` + earlier entries in the batch.
 // Returns { kept, dupCache, dupBatch, reposts } — logs each drop with its reason.
 export function dedupJobs(jobs, cacheJobs, log = console.log) {
@@ -49,6 +46,7 @@ export function dedupJobs(jobs, cacheJobs, log = console.log) {
 
 async function main() {
   console.log(`[dedup] profile=${resolveProfileName()}`);
+  const { filteredJobs: IN, newJobs: OUT } = paths();
   let jobs;
   try {
     jobs = JSON.parse(await readFile(IN, "utf8"));

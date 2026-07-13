@@ -9,12 +9,8 @@
 //
 // Notion layout (same account for every profile): the root page "Job Bunny's List" is
 // shared with the integration once. Each profile gets its own child page (titled with
-// the profile name) holding its own "Job Bunny — Jobs" DB. The first profile of a
-// pre-v0.7 install keeps its original page/DB via the adopt path (profile.json IDs,
-// pre-written by migrate.js).
-//
-// A legacy checkout (root-level search_urls.md / data/cache.json, no config.json) must be
-// converted with `node scripts/migrate.js <name>` first — init refuses to mix layouts.
+// the profile name) holding its own "Job Bunny — Jobs" DB. An existing page/DB is
+// adopted via profile.json IDs rather than recreated.
 
 import { readFile, writeFile, mkdir, access, copyFile } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -111,18 +107,6 @@ async function resolveProfileArg() {
     if (cfg.default_profile) return cfg.default_profile;
   }
   throw new Error("Usage: node scripts/init.js <profile>   (e.g. node scripts/init.js harish)");
-}
-
-async function guardAgainstLegacyLayout() {
-  if (await exists(CONFIG_PATH)) return; // already profiles mode
-  const legacyMarkers = ["search_urls.md", "resume_meta.json", join("data", "cache.json")];
-  for (const m of legacyMarkers) {
-    if (await exists(join(ROOT, m))) {
-      throw new Error(
-        `Legacy layout detected (${m} at repo root). Run \`node scripts/migrate.js <your-name>\` first — init won't mix layouts.`
-      );
-    }
-  }
 }
 
 // ---------- .env helpers ----------
@@ -354,7 +338,6 @@ async function main() {
   const notionModule = await checkDependencies();
   const profile = await resolveProfileArg();
   log(`starting idempotent setup for profile "${profile}"`);
-  await guardAgainstLegacyLayout();
   await ensureGitignore();
   const env = await readEnv();
   const token = await ensureToken(env);

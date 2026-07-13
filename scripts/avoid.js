@@ -7,8 +7,6 @@ import { readFile } from "node:fs/promises";
 import { normalizeName } from "./util.js";
 import { paths } from "./config.js";
 
-const AVOID_PATH = paths().avoid;
-
 // Parse avoid.md → { companies: Set<normalized>, aliases: Map<normalized, normalized> }.
 // Company bullets live before the "## Alias map" heading; alias bullets ("- X → Y") after it.
 export function parseAvoid(text) {
@@ -35,7 +33,9 @@ export function parseAvoid(text) {
   return { companies, aliases };
 }
 
-export async function loadAvoid(path = AVOID_PATH) {
+// Path resolved at call time, not module load — importing the pure helpers must not
+// require an active profile.
+export async function loadAvoid(path = paths().avoid) {
   return parseAvoid(await readFile(path, "utf8"));
 }
 

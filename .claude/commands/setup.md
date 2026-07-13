@@ -4,8 +4,6 @@ description: Onboarding wizard — one command from a fresh clone to a running p
 
 `$ARGUMENTS` = profile name (lowercase letters, digits, hyphens — e.g. `harish`). Walk through every step below in order, in this one invocation — don't stop after the Notion wiring and leave the rest as homework. Re-running later is always safe: every step is check-before-act and skips what's already done.
 
-A pre-v0.7 checkout (root-level config files, no `config.json`) must run `/migrate <name>` first — `init.js` refuses to mix layouts.
-
 **1. Dependencies.** If `node_modules/` is missing (fresh clone), run `npm install` before anything else — nothing downstream works without it. `node scripts/init.js` also re-checks this: Node version and installed packages are hard gates (it aborts with a clear fix if either is missing); Chrome presence and whether the repo sits under a macOS-protected folder like `~/Desktop`/`~/Documents`/`~/Downloads` (which silently breaks `/schedule` later) are soft warnings that let setup continue, since `/doctor` is the authoritative Chrome/CDP gate. Surface whichever message it prints verbatim rather than guessing at a workaround.
 
 **2. Core setup:**

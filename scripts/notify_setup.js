@@ -17,7 +17,7 @@ import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { ROOT, LEGACY } from "./config.js";
+import { ROOT } from "./config.js";
 import { sendTelegram, telegramTokenEnvKey } from "./notifiers/telegram.js";
 
 const ENV_PATH = join(ROOT, ".env");
@@ -29,12 +29,6 @@ const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => fal
 
 // ---------- profile resolution ----------
 async function resolveProfileArg() {
-  if (LEGACY) {
-    throw new Error(
-      "This checkout uses the legacy layout (no config.json) — notify config lives in " +
-        "profile.json, which legacy mode doesn't have. Run `node scripts/migrate.js <name>` first."
-    );
-  }
   const arg = process.argv[2] || process.env.JOBBUNNY_PROFILE;
   let name = arg;
   if (!name) {

@@ -7,8 +7,6 @@ import { constants } from "node:fs";
 import { join } from "node:path";
 import { ROOT, paths, resolveProfileName } from "./config.js";
 
-const URLS = paths().searchUrls;
-
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
 // "start" is a pagination offset, not a filter — always reset to beginning.
 const EPHEMERAL = [
@@ -42,6 +40,7 @@ export function resolvePage(u) {
 
 async function main() {
   console.log(`[add-url] profile=${resolveProfileName()}`);
+  const URLS = paths().searchUrls;
   const [rawUrl, label] = process.argv.slice(2);
   if (!rawUrl) throw new Error('Usage: node scripts/add_url.js "<url>" ["<label>"]');
 

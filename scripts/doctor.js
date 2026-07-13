@@ -1,5 +1,5 @@
 // scripts/doctor.js — preflight for /run. Checks (no mutations):
-//   1. Secrets present (.env has NOTION_TOKEN + NOTION_DB_ID)
+//   1. Secrets present (.env has NOTION_TOKEN; profile.json has notion_db_id)
 //   2. Greenhouse lane's greenhouse_boards.md (optional — absent = lane disabled, still a pass)
 //   3. Chrome CDP reachable on :9222 (real LinkedIn session lives there)
 //   4. Every page-type referenced in search_urls.md has a page_inventory/<page>.md
@@ -12,7 +12,7 @@ import { constants } from "node:fs";
 import { join } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { chromium } from "playwright";
-import { ROOT, CHROME_BIN, LEGACY, paths, loadProfile, resolveProfileName } from "./config.js";
+import { ROOT, CHROME_BIN, paths, loadProfile, resolveProfileName } from "./config.js";
 import { notify } from "./notify.js";
 import { telegramTokenEnvKey } from "./notifiers/telegram.js";
 
@@ -269,7 +269,7 @@ async function checkCache() {
 }
 
 async function main() {
-  console.log(`[doctor] mode=${LEGACY ? "legacy" : "profiles"} profile=${resolveProfileName()}`);
+  console.log(`[doctor] profile=${resolveProfileName()}`);
   await checkSecrets();
   await checkNotifier();
   await checkGreenhouse();
