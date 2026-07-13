@@ -15,6 +15,7 @@ import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { isMain } from "../lib/cli.js";
 import { extractJobId } from "../lib/util.js";
 import { loadAvoid, isAvoided } from "./avoid.js";
 import { readCache } from "../notion/cache.js";
@@ -513,7 +514,7 @@ async function checkAggregateFailure(groups, summary) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main()
     .then(() => process.exit(0)) // drop the CDP connection without closing the user's browser
     .catch((err) => {

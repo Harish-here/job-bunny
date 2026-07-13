@@ -13,6 +13,7 @@
 //
 // jobs_raw.json + filter_config.json + resume_meta.json → filtered_jobs.json.
 
+import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
 import { normalizeName } from "../lib/util.js";
 import { filterByTitle } from "./title_filter.js";
@@ -64,7 +65,7 @@ async function main() {
   console.log(`[filter] ${jobs.length} in → ${kept.length} kept, ${dropped} dropped → filtered_jobs.json`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[filter] FAILED: ${err.message}`);
     process.exit(1);

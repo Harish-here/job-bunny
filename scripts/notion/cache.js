@@ -5,9 +5,9 @@
 // As a module: import { readCache, writeCache, reconcile }.
 // Run directly (`node scripts/notion/cache.js`, i.e. /reconcile): reconcile against live Notion.
 
-import "dotenv/config";
 import { readFile } from "node:fs/promises";
-import { Client } from "@notionhq/client";
+import { isMain } from "../lib/cli.js";
+import { createClient, requireToken } from "./client.js";
 import { writeJson } from "../lib/io.js";
 import { extractJobId } from "../lib/util.js";
 import { paths, loadProfile } from "../lib/config.js";
@@ -62,11 +62,10 @@ function pageToJob(page) {
 }
 
 // Rebuild cache.json from the live Notion DB. Preserves last_run (set by notion_sync).
-export async function reconcile({ token = process.env.NOTION_TOKEN, dbId = loadProfile().notion_db_id } = {}) {
-  if (!token) throw new Error("NOTION_TOKEN missing — run /setup first.");
+export async function reconcile({ token = requireToken(), dbId = loadProfile().notion_db_id } = {}) {
   if (!dbId) throw new Error("Notion DB id missing — run /setup first.");
 
-  const notion = new Client({ auth: token });
+  const notion = createClient(token);
   const jobs = [];
   let cursor;
   do {
@@ -82,7 +81,7 @@ export async function reconcile({ token = process.env.NOTION_TOKEN, dbId = loadP
 }
 
 // Run directly → /reconcile
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   reconcile()
     .then((c) => console.log(`[reconcile] cache rebuilt from Notion: ${c.jobs.length} job(s)`))
     .catch((err) => {

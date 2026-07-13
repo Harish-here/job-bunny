@@ -21,6 +21,7 @@
 import { readFile, writeFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
+import { isMain } from "../lib/cli.js";
 import { normalizeName } from "../lib/util.js";
 import { loadAvoid, isAvoided } from "./avoid.js";
 import { filterByTitle } from "./title_filter.js";
@@ -400,7 +401,7 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[greenhouse] FAILED: ${err.message}`);
     process.exit(1);

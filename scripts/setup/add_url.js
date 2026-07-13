@@ -5,6 +5,7 @@
 import { readFile, writeFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
+import { isMain } from "../lib/cli.js";
 import { ROOT, paths, resolveProfileName } from "../lib/config.js";
 
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
@@ -82,7 +83,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[add-url] FAILED: ${err.message}`);
     process.exit(1);

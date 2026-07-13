@@ -3,6 +3,7 @@
 // fields in resume.json that copy straight through. Output is deterministic & byte-identical
 // on re-run (fixed key order, stable formatting). Re-run only when resume.json changes.
 
+import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
 import { paths, resolveProfileName } from "../lib/config.js";
 
@@ -40,7 +41,7 @@ async function main() {
   console.log(`[meta] wrote resume_meta.json (${FIELDS.length} fields, direct copy)`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[meta] FAILED: ${err.message}`);
     process.exit(1);

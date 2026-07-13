@@ -7,6 +7,7 @@
 //   empty cell = null · booleans: true/false · skills: semicolon-separated · pipe in value: ｜
 
 import { readFile, unlink } from "node:fs/promises";
+import { isMain } from "../lib/cli.js";
 import { writeJson } from "../lib/io.js";
 import { paths } from "../lib/config.js";
 
@@ -109,7 +110,7 @@ async function main() {
   console.log(`[assemble] ${merged.length} jobs merged → jobs_raw.json`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[assemble] FAILED: ${err.message}`);
     process.exit(1);

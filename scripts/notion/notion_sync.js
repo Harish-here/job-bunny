@@ -8,8 +8,7 @@
 //
 // new_jobs.json → Notion rows; updates data/cache.json + last_run.
 
-import "dotenv/config";
-import { Client } from "@notionhq/client";
+import { createClient } from "./client.js";
 import { readJson } from "../lib/io.js";
 import { dedupKey } from "../lib/util.js";
 import { readCache, writeCache } from "./cache.js";
@@ -43,14 +42,13 @@ function buildProperties(job) {
 
 async function main() {
   console.log(`[sync] profile=${resolveProfileName()}`);
-  const token = process.env.NOTION_TOKEN;
   const dbId = loadProfile().notion_db_id;
-  if (!token || !dbId) throw new Error("NOTION_TOKEN / Notion DB id missing — run /setup first.");
+  if (!dbId) throw new Error("Notion DB id missing — run /setup first.");
 
   const jobs = await readJson(IN);
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
-  const notion = new Client({ auth: token });
+  const notion = createClient();
   const cache = await readCache();
   const seen = new Set(cache.jobs.map(dedupKey));
 

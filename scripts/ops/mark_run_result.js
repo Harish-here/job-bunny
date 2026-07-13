@@ -9,17 +9,11 @@
 // Writes profiles/<profile>/data/last_run_result.json — read by check_run_result.js.
 
 import { mkdir } from "node:fs/promises";
+import { parseFlags } from "../lib/cli.js";
 import { writeJson } from "../lib/io.js";
 import { paths } from "../lib/config.js";
 
-const args = process.argv.slice(2);
-const flags = {};
-for (let i = 0; i < args.length; i++) {
-  if (args[i].startsWith("--")) {
-    flags[args[i].slice(2)] = args[i + 1];
-    i++;
-  }
-}
+const { flags } = parseFlags();
 
 const status = flags.status === "success" ? "success" : "failed";
 const result = {

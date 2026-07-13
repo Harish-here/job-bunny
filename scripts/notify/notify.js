@@ -8,6 +8,7 @@
 // Run directly (CLI): JOBBUNNY_PROFILE=<p> node scripts/notify/notify.js --severity <s> --title <t> --body <b>
 
 import "dotenv/config";
+import { isMain, parseFlags } from "../lib/cli.js";
 import { loadProfile } from "../lib/config.js";
 import { sendTelegram } from "./telegram.js";
 
@@ -35,15 +36,8 @@ export async function notify({ severity = "info", title, body } = {}) {
 }
 
 // Run directly → CLI mode, e.g. from run_scheduled.sh / run.md digest hooks.
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const args = process.argv.slice(2);
-  const flags = {};
-  for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--")) {
-      flags[args[i].slice(2)] = args[i + 1];
-      i++;
-    }
-  }
+if (isMain(import.meta.url)) {
+  const { flags } = parseFlags();
 
   notify({ severity: flags.severity ?? "info", title: flags.title, body: flags.body })
     .catch((err) => console.warn(`[notify] unexpected error: ${err.message}`))

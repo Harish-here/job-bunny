@@ -17,6 +17,7 @@
 // Bands: >=85 Vera level · 65-84 Kandipa podu · <65 Try panalam
 
 import { readFile } from "node:fs/promises";
+import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
 import { normalizeName } from "../lib/util.js";
 import { paths, resolveProfileName } from "../lib/config.js";
@@ -190,7 +191,7 @@ async function main() {
 }
 
 // Run directly → /rank
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[rank] FAILED: ${err.message}`);
     process.exit(1);

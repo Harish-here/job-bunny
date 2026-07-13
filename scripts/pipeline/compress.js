@@ -4,6 +4,7 @@
 // Title filtering already happened in extract.js (Stage A); no second gate needed here.
 
 import { writeFile } from "node:fs/promises";
+import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
 import { paths } from "../lib/config.js";
 
@@ -60,7 +61,7 @@ async function main() {
   console.log(`[compress] ${jobs.length} in → ${kept.length} to structure (${jobs.length - kept.length} pre-filtered) → structure_input.md`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[compress] FAILED: ${err.message}`);
     process.exit(1);

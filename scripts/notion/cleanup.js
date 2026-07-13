@@ -9,8 +9,8 @@
 // Nothing needs to touch data/cache.json here: Notion's databases.query excludes archived pages
 // by default, so the next /reconcile naturally drops them from the local mirror.
 
-import "dotenv/config";
-import { Client } from "@notionhq/client";
+import { isMain } from "../lib/cli.js";
+import { createClient } from "./client.js";
 import { loadProfile, resolveProfileName } from "../lib/config.js";
 
 const DAYS_OLD = parseInt(process.env.CLEANUP_DAYS_OLD || "7", 10);
@@ -59,11 +59,10 @@ async function main() {
   console.log(
     `[cleanup] profile=${resolveProfileName()} days_old=${DAYS_OLD} lead_days_old=${LEAD_DAYS_OLD} apply=${APPLY}`
   );
-  const token = process.env.NOTION_TOKEN;
   const dbId = loadProfile().notion_db_id;
-  if (!token || !dbId) throw new Error("NOTION_TOKEN / Notion DB id missing — run /setup first.");
+  if (!dbId) throw new Error("Notion DB id missing — run /setup first.");
 
-  const notion = new Client({ auth: token });
+  const notion = createClient();
   const passed = await findStaleJobs(notion, dbId, { equals: "Passed" }, cutoffISO(DAYS_OLD));
   const staleLeads = await findStaleJobs(notion, dbId, { is_empty: true }, cutoffISO(LEAD_DAYS_OLD));
 
@@ -84,7 +83,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[cleanup] FAILED: ${err.message}`);
     process.exit(1);

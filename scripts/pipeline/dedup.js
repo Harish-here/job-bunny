@@ -6,6 +6,7 @@
 //
 // filtered_jobs.json → new_jobs.json.
 
+import { isMain } from "../lib/cli.js";
 import { readJson, writeJson } from "../lib/io.js";
 import { dedupKey, repostKey } from "../lib/util.js";
 import { readCache } from "../notion/cache.js";
@@ -59,7 +60,7 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main().catch((err) => {
     console.error(`[dedup] FAILED: ${err.message}`);
     process.exit(1);
