@@ -28,6 +28,11 @@ const CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
 const PACKAGE_JSON_PATH = join(ROOT, "package.json");
 const README_PATH = join(ROOT, "README.md");
 
+// /wrap ship writes the CHANGELOG.md release-note block on `main` before invoking this
+// script and deliberately leaves it uncommitted for ensureCommit() to pick up — so the
+// clean-tree preflight must tolerate exactly these files being dirty, not the whole tree.
+const VERSION_SYNC_FILES = ["CHANGELOG.md", "package.json", "package-lock.json", "README.md"];
+
 const CHECK_POLL_MS = 15_000;
 const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -183,7 +188,7 @@ function ensureVersionSync(version) {
 }
 
 function ensureCommit(version) {
-  run("git", ["add", "CHANGELOG.md", "package.json", "package-lock.json", "README.md"]);
+  run("git", ["add", ...VERSION_SYNC_FILES]);
   const staged = run("git", ["diff", "--cached", "--name-only"]);
   if (!staged) {
     log("no version-sync changes to commit — skip");
@@ -295,7 +300,13 @@ async function main() {
   }
   if (currentBranch === "main") {
     const dirty = run("git", ["status", "--porcelain"]);
-    if (dirty) throw new Error("working tree is dirty — commit or stash changes first");
+    const strayDirty = dirty
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => !VERSION_SYNC_FILES.includes(line.slice(3).trim()));
+    if (strayDirty.length) {
+      throw new Error(`working tree has unrelated uncommitted changes — commit or stash first:\n${strayDirty.join("\n")}`);
+    }
     run("git", ["fetch", "origin", "main", "--quiet"]);
     const local = run("git", ["rev-parse", "HEAD"]);
     const remote = run("git", ["rev-parse", "origin/main"]);
@@ -326,10 +337,7 @@ async function main() {
     pkgVersionMatches = pkgAtRef !== null && packageJsonVersion(pkgAtRef) === version;
     readmeBadgeMatches = readmeAtRef !== null && !updateReadmeBadge(readmeAtRef, version).changed;
     if (currentBranch === branch) {
-      const dirty = run("git", [
-        "status", "--porcelain", "--",
-        "CHANGELOG.md", "package.json", "package-lock.json", "README.md",
-      ]);
+      const dirty = run("git", ["status", "--porcelain", "--", ...VERSION_SYNC_FILES]);
       hasUncommittedVersionSyncDiff = dirty !== "";
     }
   }
