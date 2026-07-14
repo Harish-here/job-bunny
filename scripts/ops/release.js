@@ -124,6 +124,13 @@ function run(cmd, args) {
   return execFileSync(cmd, args, { encoding: "utf8", cwd: ROOT }).trim();
 }
 
+// `git status --porcelain` uses fixed two-character status columns before each path (e.g.
+// " M CHANGELOG.md") — run()'s .trim() strips a leading space off the *first* line only,
+// shifting that line's column parse by one character. Porcelain output must stay untrimmed.
+function runPorcelain(cmd, args) {
+  return execFileSync(cmd, args, { encoding: "utf8", cwd: ROOT });
+}
+
 function runOk(cmd, args) {
   try {
     return { ok: true, out: run(cmd, args) };
@@ -299,7 +306,7 @@ async function main() {
     throw new Error(`on branch "${currentBranch}" — expected "main" or "${branch}"`);
   }
   if (currentBranch === "main") {
-    const dirty = run("git", ["status", "--porcelain"]);
+    const dirty = runPorcelain("git", ["status", "--porcelain"]);
     const strayDirty = dirty
       .split("\n")
       .filter(Boolean)
