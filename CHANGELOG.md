@@ -3,6 +3,11 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.2.1] — 2026-07-14
+
+### Fixed
+- **Real-Chrome CDP attach failed with "Browser context management is not supported."** `connectOverCDP`'s default `Browser.setDownloadBehavior` override doesn't work when attaching to a real, user-owned Chrome (our persistent `.chrome-debug/` LinkedIn session) rather than a browser Playwright launched itself. Now passes `noDefaults` (added in Playwright 1.60 for exactly this case); bumped the `playwright` dependency floor to `^1.60.0` so a fresh install can't silently resolve below the version that supports it.
+
 ## [1.2.0] — 2026-07-13
 
 ### Changed
