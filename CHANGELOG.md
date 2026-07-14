@@ -3,6 +3,18 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.3.0] — 2026-07-14
+
+### Added
+- **Deterministic release mechanics** — `scripts/ops/release.js` owns the mechanical git/GitHub spine of `/wrap ship`: preflight (clean tree, on `main`, up to date with origin, tag doesn't already exist, `CHANGELOG.md` has a dated block for the target version) → version-sync (`npm version --no-git-tag-version` + README badge regex-replace, both skipped if already correct) → release branch/commit/push/PR → bounded polling for the `test` check (15s interval, 10m cap) → a merge confirmation pause (never unconditional auto-merge) → tags only after confirming the merged commit is reachable from `origin/main` post-pull (fixes the "tag the pre-squash local commit, tag an orphan" hazard). Fully idempotent — re-running after any failure re-derives state and resumes from wherever it left off rather than erroring or duplicating work. Deliberately never writes release-note prose — that stays a `/wrap ship` judgment step.
+
+### Changed
+- `.claude/commands/wrap.md`'s `/wrap ship` mode rewritten to call `node scripts/ops/release.js X.Y.Z` instead of hand-running `git`/`gh` every release.
+
+### Notes
+- 27 new `node:test` unit tests (`scripts/ops/release.test.js`) cover the pure decision functions (`parseVersion`, `changelogHasVersionBlock`, `packageJsonVersion`, `updateReadmeBadge`, `resolveResumeStage`); suite is 213/213 green.
+- Not yet exercised end-to-end against real GitHub prior to this release — this release is that first live exercise.
+
 ## [1.2.1] — 2026-07-14
 
 ### Fixed
