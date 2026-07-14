@@ -1,6 +1,21 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, and syncs to Notion. The pipeline is driven by **slash commands, not this file** — `/run` owns the canonical stage sequence; treat this file as the invariants those commands operate under.
+
+## Architecture
+
+`scripts/` is organized by domain, not by pipeline stage:
+
+- `lib/` — shared plumbing every stage imports: `config.js` (profile/path resolution — the only module that knows the on-disk layout), `util.js`, `io.js` (JSON read/write), `cli.js` (run-guard + `--flag value` parsing), `env_file.js` / `prompt.js` (readline helpers).
+- `pipeline/` — the deterministic stages, run in sequence by `/run`: `extract → greenhouse (optional) → compress → [structure, LLM] → assemble → filter → dedup → rank`. Each stage is explicit-input-file → explicit-output-file (see Writing & changing code).
+- `notion/` — `schema.js` (byte-exact select options), `cache.js` (`/reconcile`), `notion_sync.js` (`/sync`), `cleanup.js`.
+- `notify/` — best-effort dispatcher (`notify.js`) + connectors (`telegram.js`).
+- `ops/` — machine/process orchestration: `doctor.js`, `schedule.js` + `run_scheduled.sh`, `release.js` (release mechanics — see Writing & changing code).
+- `setup/` — onboarding: `init.js`, `notify_setup.js`, `generate_meta.js`, `add_url.js`.
+
+`.claude/commands/*.md` are the slash-command definitions — most are thin one-stage wrappers around a single `scripts/<domain>/<x>.js`; `/run`/`run.md` owns orchestration across the full sequence.
 
 ## Ground truths
 
@@ -22,6 +37,13 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 - **`/page-analyse` is browser-driven** (Claude in Chrome), script-less.
 - **`/greenhouse` is a second, optional channel**: keyless Greenhouse boards API, watchlist at the profile's `greenhouse_boards.md`, merges into `jobs_raw_text.json` ahead of `/structure`. Fail-soft — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
 
+## Development
+
+- `npm test` — the full suite (`node --test scripts/`, Node's built-in test runner, recursive).
+- Run a single test file: `node --test scripts/ops/release.test.js` (or any other `*.test.js`).
+- Tests are colocated next to the module they cover (e.g. `dedup.js` → `dedup.test.js`). Pure/exported functions are unit-tested; `main()` orchestration (file I/O, `execFileSync` shell-outs) is deliberately not — see any `pipeline/*.js` or `ops/release.js` for the pattern.
+- No lint or build step is configured.
+
 ## Profiles & paths
 
 - Each persona lives in `profiles/<name>/`: resume, resume_meta, `avoid.md`, `filter_config.json`, `search_urls.md`, `profile.json` (its own Notion page + DB ids), and `data/` (cache + per-run intermediates).
@@ -39,6 +61,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 ## Writing & changing code
 
 - **`main` is protected — branch + PR, no exceptions.** All work (features and the `/wrap ship` version-sync chore alike) branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`, …) and lands via a pull request with the `test` check green. Nothing pushes to `main` directly — enforced for admins too; only tags are pushed straight (`git push origin vX.Y.Z`).
+- **`/wrap ship`'s mechanics are owned by `scripts/ops/release.js`**, not freeform `git`/`gh` commands: preflight (clean tree, tag doesn't already exist, `CHANGELOG.md` has a dated block for the target version) → version-sync → release branch/PR → checks → a merge-confirmation pause (never unconditional auto-merge) → tag only after confirming the merged commit is reachable from `origin/main` (avoids tagging a pre-squash orphan commit). Idempotent — re-running after any failure resumes from wherever it left off. Its merge-confirmation prompt needs live stdin, so never run it backgrounded/detached.
 - **Every script:** explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
 - **Token efficiency is a design constraint on the `/structure` path.** Stage A drops avoid-list companies on card data before JDs are opened; `compress.js` pre-filters by card title and emits a compact markdown table; `/structure` outputs a markdown table too (`jobs_raw_decisions.md`), not JSON. Preserve this shape — it roughly halves the stage's token cost.
 - **Avoid-list matching** normalizes both sides: lowercase, strip legal suffixes, apply the alias map (see the profile's `avoid.md`).
