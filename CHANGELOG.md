@@ -3,6 +3,14 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.3.1] — 2026-07-14
+
+### Fixed
+- **`/extract` could hang for many minutes with no way out.** Each locator action inside `collectCards` already carried Playwright's ~30s default action timeout, but nothing bounded the total time across all cards on a page — under DOM instability (e.g. a reflowing third-party ad iframe), several per-card actions could each hit their full ~30s ceiling, and across dozens of cards that compounded into a many-minute hang. Added a hard wall-clock cap (`EXTRACT_COLLECT_CARDS_MAX_MS`, default 120s); on hit, `extract.js` now warns and returns the cards collected so far instead of throwing, consistent with the file's existing skip-and-continue convention.
+
+### Notes
+- CLAUDE.md gained Architecture and Development sections (`scripts/`'s domain-folder layout and pipeline stage chain, plus the `npm test` / colocated-`*.test.js` convention) — no behavior change, but closes gaps a future Claude instance would otherwise have to piece together from multiple files.
+
 ## [1.3.0] — 2026-07-14
 
 ### Added
