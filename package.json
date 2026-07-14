@@ -15,7 +15,8 @@
     "filter": "node scripts/pipeline/filter.js",
     "dedup": "node scripts/pipeline/dedup.js",
     "rank": "node scripts/pipeline/rank.js",
-    "sync": "node scripts/notion/notion_sync.js"
+    "sync": "node scripts/notion/notion_sync.js",
+    "release": "node scripts/ops/release.js"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",
