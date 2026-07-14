@@ -131,11 +131,27 @@ function canonicalUrl(cfg, id, href, base) {
   return href ? new URL(href, base).toString() : null;
 }
 
+// Hard wall-clock cap on the whole loop below. Each individual locator action already has
+// Playwright's own ~30s default action timeout, but nothing previously bounded the TOTAL time
+// across all n cards — if the DOM keeps shifting under a card (e.g. a reflowing third-party ad
+// iframe), several of those per-action timeouts can each run to their full ~30s ceiling and
+// compound over dozens of cards into a many-minute hang. Once hit, log a warning and return
+// whatever was collected so far rather than throwing — consistent with this file's per-URL/
+// per-page skip-and-continue convention.
+const COLLECT_CARDS_MAX_MS = parseInt(process.env.EXTRACT_COLLECT_CARDS_MAX_MS || "120000", 10);
+
 async function collectCards(page, cfg) {
   const cards = page.locator(cfg.job_card);
   const n = await cards.count();
   const out = [];
+  const startedAt = Date.now();
   for (let i = 0; i < n; i++) {
+    if (Date.now() - startedAt > COLLECT_CARDS_MAX_MS) {
+      console.warn(
+        `[extract]   ⚠ collectCards: hit ${COLLECT_CARDS_MAX_MS}ms cap after ${i}/${n} cards — proceeding with what was collected`
+      );
+      break;
+    }
     const card = cards.nth(i);
     // Lazy-rendered lists (e.g. LinkedIn) only populate a card's inner DOM once it's on screen.
     await card.scrollIntoViewIfNeeded().catch(() => {});
