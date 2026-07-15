@@ -45,20 +45,29 @@ TIMEOUT_SECONDS="${JOBBUNNY_RUN_TIMEOUT_SECONDS:-2700}"
 # this fires. Override with JOBBUNNY_EXTRACT_HEARTBEAT_SECONDS if needed.
 HEARTBEAT_SECONDS="${JOBBUNNY_EXTRACT_HEARTBEAT_SECONDS:-300}"
 
+# How long extract's progress file (data/extract_progress.json) may go without an update before
+# the run is declared STALLED (as opposed to never-started, above) and killed. extract.js
+# rewrites this file at every checkpoint — stage boundary, per-URL start/end, every 5 JD
+# captures — so a healthy run updates it far more often than this; only a genuine hang (e.g. a
+# wedged page load) would go this long between checkpoints. Override with
+# JOBBUNNY_EXTRACT_STALL_SECONDS if needed.
+STALL_SECONDS="${JOBBUNNY_EXTRACT_STALL_SECONDS:-600}"
+
 # Runs one attempt of `claude -p "/run $profile"`, tee'd to $2, racing two independent
 # watchdogs against the same process — the heartbeat watchdog above, and the full-timeout
 # watchdog as the final backstop for any other kind of hang. Sets ATTEMPT_EXIT_CODE,
-# ATTEMPT_TIMED_OUT, ATTEMPT_HEARTBEAT_FAILED, ATTEMPT_RUN_START_EPOCH as globals for the
-# caller to read; does not itself decide PASS/FAIL or notify.
+# ATTEMPT_TIMED_OUT, ATTEMPT_HEARTBEAT_FAILED, ATTEMPT_STALLED, ATTEMPT_RUN_START_EPOCH as
+# globals for the caller to read; does not itself decide PASS/FAIL or notify.
 run_attempt() {
   local profile="$1" log_file="$2"
-  local timed_out_flag heartbeat_failed_flag run_start_epoch
+  local timed_out_flag heartbeat_failed_flag stalled_flag run_start_epoch
   local claude_pid timeout_watchdog_pid heartbeat_watchdog_pid
 
   # Flags' presence (not content) is the signal a watchdog fired — avoids inferring "did it
   # fire?" from a magic signal-derived exit code.
   timed_out_flag="$(mktemp)"; rm -f "$timed_out_flag"
   heartbeat_failed_flag="$(mktemp)"; rm -f "$heartbeat_failed_flag"
+  stalled_flag="$(mktemp)"; rm -f "$stalled_flag"
 
   # Recorded before launching claude — check_run_result.js / check_extract_started.js both use
   # this to reject a stale marker left over from an earlier run.
@@ -85,15 +94,28 @@ run_attempt() {
   ) &
   timeout_watchdog_pid=$!
 
+  # Polling stall watchdog: after the initial grace window (time for /doctor + /reconcile to
+  # run before /extract even gets a chance to write its start marker), poll the 3-arg
+  # check_extract_started.js every 60s for as long as claude is alive. rc=1 means never-started
+  # (the original failure mode this watchdog was built for); rc=2 means the run DID start but
+  # its progress file has gone stale for longer than STALL_SECONDS — a mid-run hang. A finished
+  # extract writes done:true to its progress file, so a completed run keeps polling healthy
+  # (rc=0) until claude itself exits and this loop's `kill -0` check ends it.
   (
-    sleep "$HEARTBEAT_SECONDS"
-    if kill -0 "$claude_pid" 2>/dev/null \
-      && ! node "$ROOT/scripts/ops/check_extract_started.js" "$profile" "$run_start_epoch"; then
-      touch "$heartbeat_failed_flag"
-      kill -TERM -- "-$claude_pid" 2>/dev/null
-      sleep 5
-      kill -KILL -- "-$claude_pid" 2>/dev/null
-    fi
+    sleep "$HEARTBEAT_SECONDS"          # grace window for doctor+reconcile before the first check
+    while kill -0 "$claude_pid" 2>/dev/null; do
+      node "$ROOT/scripts/ops/check_extract_started.js" "$profile" "$run_start_epoch" "$STALL_SECONDS"
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        touch "$heartbeat_failed_flag"
+        [ "$rc" -eq 2 ] && touch "$stalled_flag"
+        kill -TERM -- "-$claude_pid" 2>/dev/null
+        sleep 5
+        kill -KILL -- "-$claude_pid" 2>/dev/null
+        break
+      fi
+      sleep 60
+    done
   ) &
   heartbeat_watchdog_pid=$!
 
@@ -109,7 +131,8 @@ run_attempt() {
 
   if [ -f "$timed_out_flag" ]; then ATTEMPT_TIMED_OUT=1; else ATTEMPT_TIMED_OUT=0; fi
   if [ -f "$heartbeat_failed_flag" ]; then ATTEMPT_HEARTBEAT_FAILED=1; else ATTEMPT_HEARTBEAT_FAILED=0; fi
-  rm -f "$timed_out_flag" "$heartbeat_failed_flag"
+  if [ -f "$stalled_flag" ]; then ATTEMPT_STALLED=1; else ATTEMPT_STALLED=0; fi
+  rm -f "$timed_out_flag" "$heartbeat_failed_flag" "$stalled_flag"
 
   ATTEMPT_RUN_START_EPOCH="$run_start_epoch"
 }
@@ -119,7 +142,11 @@ run_attempt() {
 determine_status() {
   local profile="$1" log_file="$2"
 
-  if [ "$ATTEMPT_HEARTBEAT_FAILED" -eq 1 ]; then
+  if [ "${ATTEMPT_STALLED:-0}" -eq 1 ]; then
+    STATUS="FAILED"
+    REASON="stalled"
+    MESSAGE="Job Bunny run for $profile: /extract started but its progress file went stale for >${STALL_SECONDS}s — killed. It can be resumed: rerunning the same day skips already-completed search URLs. Check log: $log_file"
+  elif [ "$ATTEMPT_HEARTBEAT_FAILED" -eq 1 ]; then
     STATUS="FAILED"
     REASON="heartbeat"
     MESSAGE="Job Bunny run for $profile: /extract never started within ${HEARTBEAT_SECONDS}s (likely backgrounded against run.md's no-backgrounding rule) — killed. Check log: $log_file"
@@ -169,9 +196,7 @@ for profile in "$@"; do
   run_attempt "$profile" "$log_file"
   determine_status "$profile" "$log_file"
 
-  # One immediate retry, same slot, in two cases — both deliberately cheap, since neither
-  # can have reached /extract (which would mean re-scraping LinkedIn from scratch, since
-  # there's no mid-pipeline resume):
+  # One immediate retry, same slot, in two cases:
   #   - heartbeat: by definition /extract's start marker never appeared, so nothing was
   #     scraped — always safe to retry, including the case that caused this fix (a healthy
   #     run whose /doctor+/reconcile just ran long and tripped the heartbeat early).
@@ -179,9 +204,19 @@ for profile in "$@"; do
   #     attempt (checked against that attempt's own start time) — a transient disconnect
   #     surfacing after /extract already ran is NOT retried here, to avoid doubling that
   #     slot's LinkedIn scrape traffic over a blip late in the pipeline.
+  # A stall (REASON="stalled") is deliberately NOT retried, even though it also touches
+  # heartbeat_failed_flag internally (see the watchdog loop above — rc=2 sets both flags):
+  # scraping had already begun, so an immediate retry would double that slot's LinkedIn
+  # traffic rather than avoid it, and per-URL resume (extract_resume.json) means nothing is
+  # lost by waiting for the next scheduled slot or a manual rerun instead — the resumed run
+  # skips every search URL /extract had already finished before it stalled.
+  # determine_status() checks ATTEMPT_STALLED before ATTEMPT_HEARTBEAT_FAILED, so REASON is
+  # only ever "heartbeat" when ATTEMPT_STALLED is NOT 1 for that same attempt — but the
+  # ATTEMPT_STALLED guard below is kept anyway as a second, independent line of defense
+  # against a stall ever being misclassified as a plain heartbeat retry.
   # Never retries a timeout/genuine-failure outcome, and never retries more than once.
   retry=0
-  if [ "$STATUS" = "FAILED" ] && [ "$REASON" = "heartbeat" ]; then
+  if [ "$STATUS" = "FAILED" ] && [ "$REASON" = "heartbeat" ] && [ "${ATTEMPT_STALLED:-0}" -ne 1 ]; then
     retry=1
   elif [ "$STATUS" = "FAILED" ] && [ "$REASON" = "transient_api" ] \
     && ! node "$ROOT/scripts/ops/check_extract_started.js" "$profile" "$ATTEMPT_RUN_START_EPOCH"; then
@@ -213,6 +248,8 @@ for profile in "$@"; do
     JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify/notify.js" --severity success --body "$notify_body"
   elif [ "$REASON" = "timeout" ]; then
     JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify/notify.js" --severity blocking --title "Run timed out" --body "$MESSAGE"
+  elif [ "$REASON" = "stalled" ]; then
+    JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify/notify.js" --severity blocking --title "Extract stalled mid-run" --body "$MESSAGE"
   elif [ "$REASON" = "heartbeat" ]; then
     JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify/notify.js" --severity blocking --title "Extract did not start" --body "$MESSAGE"
   else
@@ -232,6 +269,14 @@ done
 # already been waited on and is done by this point in the script), since scheduled
 # invocations never overlap each other — any live one found here can only be a manual/
 # interactive session actively using this same shared Chrome.
+#
+# This is now a BACKSTOP, not the primary Chrome-lifecycle owner: extract.js itself kills
+# Chrome on every exit path (success, error, and signal handlers alike — see teardown() in
+# extract.js), so a normally-finishing run (including one killed cleanly via SIGTERM by either
+# watchdog above) has already closed it by the time we get here. This block only still matters
+# for a SIGKILLed run (extract's own signal handler never got to run) or a manual
+# JOBBUNNY_KEEP_BROWSER=1 run whose Chrome was deliberately left open and then abandoned. The
+# pgrep guard and kill logic below are unchanged.
 if pgrep -f "claude -p " >/dev/null 2>&1; then
   echo "[run_scheduled.sh] Another claude invocation is active — leaving debug Chrome open" >&2
 else
