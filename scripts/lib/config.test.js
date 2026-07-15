@@ -33,6 +33,9 @@ test("paths(name) returns pure joins under profiles/<name> (profiles mode)", () 
   assert.equal(p.jobsRaw, join(dataDir, "jobs_raw.json"));
   assert.equal(p.filteredJobs, join(dataDir, "filtered_jobs.json"));
   assert.equal(p.newJobs, join(dataDir, "new_jobs.json"));
+  assert.equal(p.extractProgress, join(dataDir, "extract_progress.json"));
+  assert.equal(p.extractResume, join(dataDir, "extract_resume.json"));
+  assert.equal(p.extractLogDir, join(dataDir, "logs"));
 
   // Sanity: profileDir really does end with a path separator + the fixture name segment,
   // not just a string suffix coincidence (e.g. "other-profiles/some-fixture-profile").
