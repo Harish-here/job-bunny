@@ -58,6 +58,20 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 - **DOM drift is a config fix, not a code fix.** `extract.js` reads selectors/behavior from `page_inventory/<page>.md` at runtime — repair breakage by editing the inventory (via `/page-analyse`), not by regenerating code.
 - **Scheduled runs never overlap.** `/schedule` installs launchd jobs that fire `claude -p "/run <profile>"` headlessly; profiles sharing a `schedule.time` run strictly sequentially inside `run_scheduled.sh` because they share the one Chrome/CDP session. Never introduce concurrent `/run`s.
 
+## Code quality principles
+
+Consult these before writing or architecting anything — they apply to every line of code, not just the repo-specific rules below. This codebase is read and edited by other people; optimizing for "it works" alone is not acceptable.
+
+- **Design before typing.** Before writing code, read the neighboring code and `scripts/lib/` for existing utilities; state (to yourself or the user) the shape of the change — inputs, outputs, where it lives — before implementing it. Reuse beats reimplementation, always.
+- **Simplest complete solution.** The smallest design that fully solves the problem wins. No speculative generality, no config knobs "for later", no abstraction until a second concrete caller exists (YAGNI). If a function needs a comment to explain *what* it does, restructure it instead.
+- **One home per concern.** Follow the domain layout (`lib/` shared, `pipeline/` stages, `notion/`, `notify/`, `ops/`, `setup/`). New logic goes where a future reader would look for it — never inline a second copy of something `lib/` already owns.
+- **Write for the next editor, not this ticket.** Names say what things are; functions are small and single-purpose; pure logic is separated from I/O orchestration (this is also what makes it testable — see the existing `main()`-vs-exported-functions pattern). Assume the next person editing this has no memory of this conversation.
+- **Think beyond one point of view.** Before settling on a design, check it against: other callers of the touched code, other profiles, the scheduled/headless path, and failure modes (missing file, empty input, network down). A fix that works only for the case at hand is not done.
+- **Consistency over preference.** Match the file's existing idioms — naming, error style, CLI parsing via `lib/cli.js`, JSON I/O via `lib/io.js` — even when you'd personally choose differently.
+- **Markdown is code here — write it with surgical precision.** This repo's `.md` files (`CLAUDE.md`, `.claude/commands/*.md`, `page_inventory/*.md`, profile docs) are LLM instructions loaded into context: every line costs tokens and dilutes attention. State each rule once, in the fewest words that remove ambiguity — no filler, no hedging, no restating what code or another doc already says. When editing, prefer tightening an existing line over adding a new one; bloat compounds.
+
+**After coding — mandatory before any PR that touches product code:** run `npm test`, then `/simplify` (reuse/simplification/efficiency pass on the changed code), then `/verify` (exercise the change end-to-end). For larger changes, also run `/code-review`. Do not open the PR until all pass clean. Doc-only and `release.js` version-sync PRs need only `npm test`.
+
 ## Writing & changing code
 
 - **`main` is protected — branch + PR, no exceptions.** All work (features and the `/wrap ship` version-sync chore alike) branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`, …) and lands via a pull request with the `test` check green. Nothing pushes to `main` directly — enforced for admins too; only tags are pushed straight (`git push origin vX.Y.Z`).
