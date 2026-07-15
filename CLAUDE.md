@@ -8,8 +8,8 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 
 `scripts/` is organized by domain, not by pipeline stage:
 
-- `lib/` — shared plumbing every stage imports: `config.js` (profile/path resolution — the only module that knows the on-disk layout), `util.js`, `io.js` (JSON read/write), `cli.js` (run-guard + `--flag value` parsing), `env_file.js` / `prompt.js` (readline helpers).
-- `pipeline/` — the deterministic stages, run in sequence by `/run`: `extract → greenhouse (optional) → compress → [structure, LLM] → assemble → filter → dedup → rank`. Each stage is explicit-input-file → explicit-output-file (see Writing & changing code).
+- `lib/` — shared plumbing every stage imports: `config.js` (profile/path resolution — the only module that knows the on-disk layout), `util.js`, `io.js` (JSON read/write), `cli.js` (run-guard + `--flag value` parsing), `env_file.js` / `prompt.js` (readline helpers), `browser.js` (Chrome/CDP lifecycle), `page_actions.js` (humanized page interaction), `run_log.js` (checkpoint logger).
+- `pipeline/` — the deterministic stages, run in sequence by `/run`: `extract → greenhouse (optional) → compress → [structure, LLM] → assemble → filter → dedup → rank`. Each stage is explicit-input-file → explicit-output-file (see Writing & changing code). `extract` is `extract.js` (thin orchestrator) + `scripts/pipeline/extract/` (`parse.js`/`state.js`/`filters.js` pure; `cards.js`/`jd.js` browser-driving).
 - `notion/` — `schema.js` (byte-exact select options), `cache.js` (`/reconcile`), `notion_sync.js` (`/sync`), `cleanup.js`.
 - `notify/` — best-effort dispatcher (`notify.js`) + connectors (`telegram.js`).
 - `ops/` — machine/process orchestration: `doctor.js`, `schedule.js` + `run_scheduled.sh`, `release.js` (release mechanics — see Writing & changing code).
@@ -54,7 +54,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 ## Running stages
 
 - **Pass the profile as an env prefix per command** (`JOBBUNNY_PROFILE=<p> node scripts/<x>.js`). Each bash call is a fresh shell — repeat the prefix every time; never rely on `export`. Scripts never take a profile argv.
-- **Chrome for `/extract`:** `/doctor` auto-launches Chrome with `--remote-debugging-port=9222` on the persistent `.chrome-debug/` profile (gitignored). LinkedIn login persists across runs. Never tell the user to launch Chrome manually.
+- **Chrome for `/extract`:** `/doctor` still preflights Chrome (launch + CDP check via `scripts/lib/browser.js`), but `extract.js` now owns the lifecycle end-to-end — it ensures Chrome itself if missing and always kills it on exit (any exit path) unless `JOBBUNNY_KEEP_BROWSER=1`. LinkedIn login persists across runs in the on-disk `.chrome-debug/` profile. Never tell the user to launch Chrome manually.
 - **DOM drift is a config fix, not a code fix.** `extract.js` reads selectors/behavior from `page_inventory/<page>.md` at runtime — repair breakage by editing the inventory (via `/page-analyse`), not by regenerating code.
 - **Scheduled runs never overlap.** `/schedule` installs launchd jobs that fire `claude -p "/run <profile>"` headlessly; profiles sharing a `schedule.time` run strictly sequentially inside `run_scheduled.sh` because they share the one Chrome/CDP session. Never introduce concurrent `/run`s.
 
