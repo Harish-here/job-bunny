@@ -31,7 +31,7 @@ set -m
 # Not using GNU coreutils `timeout`/`gtimeout` — neither ships on stock macOS. Portable
 # bash equivalent: background the claude process, run a watchdog subshell that SIGTERMs
 # (then SIGKILLs) it if it's still alive past the deadline, and `wait` for whichever finishes.
-TIMEOUT_SECONDS="${JOBBUNNY_RUN_TIMEOUT_SECONDS:-2700}"
+TIMEOUT_SECONDS="${JOBBUNNY_RUN_TIMEOUT_SECONDS:-1200}"
 
 # Second, much shorter watchdog: how long to wait for /extract's start marker
 # (extract_started.json, written by extract.js as literally its first action — see
