@@ -8,7 +8,7 @@
 export PATH="$HOME/.local/bin:$HOME/.local/node-v20.18.1/bin:$PATH"
 
 # Resolve repo root reliably.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Strict error handling: -u (error on unset vars), -o pipefail (propagate pipe errors).
 # Deliberately NOT -e, so one profile's failure doesn't abort remaining profiles.
