@@ -3,6 +3,16 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.4.1] — 2026-07-16
+
+### Fixed
+- **`run_scheduled.sh`'s `ROOT` path was off by one directory level** (#22), landing at `scripts/` instead of the repo root — every `$ROOT/scripts/...` reference resolved to nonexistent `scripts/scripts/...` paths, breaking the heartbeat/stall watchdog and all `notify.js` invocations at runtime with `MODULE_NOT_FOUND`. This silenced scheduled-run failure notifications entirely (found via RCA of a production silent-fail).
+- **`extract.js` could die silently mid-run with no error, stack trace, or checkpoint** (#23) — it had no top-level `uncaughtException`/`unhandledRejection` handler, so a throw outside the per-URL try/catch hit Node's default handler and vanished. Added process-level handlers (under `isMain`, matching the existing SIGINT/SIGTERM pattern) that log via the run-log logger, tear down Chrome, and `exit(1)` so the watchdog sees a real failure instead of an ambiguous hang. Also fixed `teardown()` clobbering the crash stage recorded for the failure notification, and lowered the scheduled-run watchdog timeout 45min → 20min for faster failure detection.
+- **Card-field scraping had no bounded timeout**, so a single occluded/virtualized LinkedIn card row could burn through Playwright's 30s default per field — a handful of slow cards was enough to blow `collectCards`' 120s wall-clock budget after only ~4 cards (#24). Added an explicit 2s default field timeout (`EXTRACT_CARD_FIELD_TIMEOUT_MS`-overridable). Scheduled-run watchdog timeout raised 20min → 30min as headroom.
+
+### Notes
+- All three fixes trace back to production incidents (silent scheduled-run failures, a slow manual run) surfaced immediately after the #20 extract rewrite shipped in v1.4.0 — this release is hardening on that new lifecycle/resume/heartbeat path, not new functionality.
+
 ## [1.4.0] — 2026-07-16
 
 ### Added
