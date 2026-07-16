@@ -17,9 +17,12 @@
 // never kills the run).
 //
 // Resume: data/extract_resume.json tracks URLs completed today (post-applyWindowOverride key) —
-// a same-day rerun skips them; JOBBUNNY_FRESH=1 forces a clean run. A URL is only marked done
-// after its incremental results flush succeeds. A same-day reset (fresh-flag/urls-changed/
-// window-changed) only rebuilds that completion tracking — it preserves already-flushed
+// a same-day rerun skips them, UNLESS every URL is already marked done (see "already-complete"
+// in state.js), in which case tracking resets so a later same-day fire (profile.json
+// schedule.times multi-fire profiles) rescans for newly-posted jobs instead of no-op'ing.
+// JOBBUNNY_FRESH=1 also forces a clean run. A URL is only marked done after its incremental
+// results flush succeeds. A same-day reset (fresh-flag/urls-changed/window-changed/
+// already-complete) only rebuilds that completion tracking — it preserves already-flushed
 // jobs_raw_text.json/companies_seen.json, so a crash before this run's first successful URL
 // can't destroy an earlier same-day run's real captures. Only a genuine day rollover discards
 // them outright.
@@ -137,11 +140,16 @@ async function main() {
   const windowHours = parseInt(process.env.JOBBUNNY_WINDOW_HOURS || "0", 10);
   let resume = null;
   try { resume = JSON.parse(await readFile(paths().extractResume, "utf8")); } catch {}
+  // Every URL this run would visit, keyed the same way the per-URL loop below keys them (post
+  // applyWindowOverride) — lets shouldResetResume detect "the prior same-day run finished all
+  // of them," so a later same-day slot (multi-fire schedules) rescans instead of no-op'ing.
+  const allUrls = groups.flatMap((g) => g.urls.map((u) => applyWindowOverride(u.url, windowHours)));
   let { reset, reason, discardOutput } = shouldResetResume(resume, {
     today: today(),
     fresh: FRESH,
     searchUrlsHash,
     windowHours,
+    urls: allUrls,
   });
   let results = [];
   if (!discardOutput) {

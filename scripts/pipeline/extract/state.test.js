@@ -132,6 +132,54 @@ test("shouldResetResume: window_hours compares loosely (0 vs undefined both stri
   assert.deepEqual(r, { reset: false, reason: null, discardOutput: false });
 });
 
+test("shouldResetResume: every URL already completed → reset so a later same-day slot rescans for new postings", () => {
+  const resume = {
+    day: "2026-07-15",
+    search_urls_hash: "h",
+    window_hours: 0,
+    completed: [
+      { page: "p", url: "u1", finished_at: "2026-07-15T09:00:00.000Z" },
+      { page: "p", url: "u2", finished_at: "2026-07-15T09:01:00.000Z" },
+    ],
+  };
+  const r = shouldResetResume(resume, {
+    today: "2026-07-15",
+    fresh: false,
+    searchUrlsHash: "h",
+    windowHours: 0,
+    urls: ["u1", "u2"],
+  });
+  assert.deepEqual(r, { reset: true, reason: "already-complete", discardOutput: false });
+});
+
+test("shouldResetResume: only some URLs completed → no reset (crash/stall-resume continuation is preserved)", () => {
+  const resume = {
+    day: "2026-07-15",
+    search_urls_hash: "h",
+    window_hours: 0,
+    completed: [{ page: "p", url: "u1", finished_at: "2026-07-15T09:00:00.000Z" }],
+  };
+  const r = shouldResetResume(resume, {
+    today: "2026-07-15",
+    fresh: false,
+    searchUrlsHash: "h",
+    windowHours: 0,
+    urls: ["u1", "u2"],
+  });
+  assert.deepEqual(r, { reset: false, reason: null, discardOutput: false });
+});
+
+test("shouldResetResume: omitting urls never triggers already-complete, even if completed looks full", () => {
+  const resume = {
+    day: "2026-07-15",
+    search_urls_hash: "h",
+    window_hours: 0,
+    completed: [{ page: "p", url: "u1", finished_at: "2026-07-15T09:00:00.000Z" }],
+  };
+  const r = shouldResetResume(resume, { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: 0 });
+  assert.deepEqual(r, { reset: false, reason: null, discardOutput: false });
+});
+
 // ---------- newResume / isUrlCompleted / markUrlDone ----------
 
 test("newResume builds a fresh empty-completed resume", () => {
