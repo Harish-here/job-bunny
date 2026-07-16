@@ -51,7 +51,7 @@ export async function collectCards(page, cfg, { maxMs, log = console } = {}) {
   for (let i = 0; i < n; i++) {
     if (budget.expired()) {
       log.warn(
-        `[extract]   ⚠ collectCards: hit ${maxMs}ms cap after ${i}/${n} cards — proceeding with what was collected`
+        `⚠ collectCards: hit ${maxMs}ms cap after ${i}/${n} cards — proceeding with what was collected`
       );
       break;
     }
@@ -120,7 +120,7 @@ export async function collectAllPages(page, url, cfg, { cardCap = 0, collectCard
     const cards = await collectCards(page, cfg, { maxMs: collectCardsMaxMs, log });
     // Warn on page 2+ returning nothing — could be selector drift rather than a real last page.
     if (p > 0 && cards.length === 0) {
-      log.warn(`[extract]   ⚠ page ${p + 1} returned 0 cards — possible selector drift`);
+      log.warn(`⚠ page ${p + 1} returned 0 cards — possible selector drift`);
     }
     // Iterate (not filter+forEach) so seen is updated per-card — prevents same-page duplicates
     // from both passing the filter before the Set is updated.
@@ -130,7 +130,7 @@ export async function collectAllPages(page, url, cfg, { cardCap = 0, collectCard
       seen.add(card.job_id);
       all.push(card);
     }
-    log.log(`[extract]   page ${p + 1}: ${cards.length} cards (${all.length - prevLen} new)`);
+    log.log(`page ${p + 1}: ${cards.length} cards (${all.length - prevLen} new)`);
     if (cards.length === 0 || cards.length < pageSize) break;
     if (cardCap > 0 && all.length >= cardCap) break;
   }

@@ -25,7 +25,7 @@
 // just a never-started process.
 
 import "dotenv/config";
-import { readFile, writeFile, mkdir, access } from "node:fs/promises";
+import { readFile, mkdir, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -34,6 +34,7 @@ import { loadAvoid } from "./avoid.js";
 import { readCache } from "../notion/cache.js";
 import { ROOT, paths, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
+import { writeJson } from "../lib/io.js";
 import { ensureChrome, killChrome, createSession } from "../lib/browser.js";
 import { jitter } from "../lib/page_actions.js";
 import { createRunLog } from "../lib/run_log.js";
@@ -74,7 +75,7 @@ let teardownDone = false;
 async function markStarted() {
   const dataDir = paths().dataDir;
   await mkdir(dataDir, { recursive: true });
-  await writeFile(paths().extractStarted, JSON.stringify({ timestamp: new Date().toISOString() }, null, 2) + "\n");
+  await writeJson(paths().extractStarted, { timestamp: new Date().toISOString() });
 }
 
 // ---------- main ----------
@@ -96,18 +97,14 @@ async function main() {
       cardsCaptured: progressState.cardsCaptured,
       done,
     });
-    await writeFile(paths().extractProgress, JSON.stringify(p, null, 2) + "\n").catch(() => {}); // heartbeat is best-effort, never kills the run
+    await writeJson(paths().extractProgress, p).catch(() => {}); // heartbeat is best-effort, never kills the run
   }
 
   await mkdir(paths().extractLogDir, { recursive: true });
   const logFile = join(paths().extractLogDir, `extract_${runStartedAt.replace(/[:.]/g, "-")}.log`);
   log = createRunLog({ tag: "extract", filePath: logFile, onCheckpoint: (stage) => writeProgress(stage) });
 
-  // filters.js/cards.js/jd.js format messages with an inherited "[extract]  " prefix — strip it
-  // so lines aren't double-tagged once run_log adds its own "[extract]" tag.
-  const stripPrefix = (m) => String(m).replace(/^\[extract\]\s*/, "");
-  const consoleLike = { log: (m) => log.info(stripPrefix(m)), warn: (m) => log.warn(stripPrefix(m)) };
-  const gateLog = (m) => log.info(stripPrefix(m));
+  const consoleLike = { log: (m) => log.info(m), warn: (m) => log.warn(m) };
 
   await log.checkpoint("starting");
   log.info(`profile=${resolveProfileName()}`);
@@ -127,25 +124,49 @@ async function main() {
   const windowHours = parseInt(process.env.JOBBUNNY_WINDOW_HOURS || "0", 10);
   let resume = null;
   try { resume = JSON.parse(await readFile(paths().extractResume, "utf8")); } catch {}
-  const { reset, reason } = shouldResetResume(resume, { today: today(), fresh: FRESH, searchUrlsHash, windowHours });
+  let { reset, reason } = shouldResetResume(resume, { today: today(), fresh: FRESH, searchUrlsHash, windowHours });
+  let results = [];
+  if (!reset) {
+    try {
+      results = mergeResults(JSON.parse(await readFile(OUT, "utf8")), []);
+    } catch {
+      if (resume.completed.length > 0) {
+        // resume claims completed URLs but their flushed output is gone (truncated write,
+        // manual delete) — trusting it would silently drop those records for the day.
+        reset = true;
+        reason = "output-missing";
+      }
+    }
+  }
   if (reset) {
     resume = newResume({ today: today(), searchUrlsHash, windowHours });
+    results = [];
     log.info(`resume: starting fresh (${reason})`);
   } else {
     log.info(`resume: continuing — ${resume.completed.length} URL(s) already completed today`);
-  }
-  let results = [];
-  if (!reset) {
-    try { results = mergeResults(JSON.parse(await readFile(OUT, "utf8")), []); } catch {}
   }
   const seenJobIdsThisRun = new Set(results.map((r) => r.job_id).filter(Boolean));
   // Pre-seeded from prior captures — see extract/filters.js for why companiesSeen is captured
   // ahead of the cache/title gates.
   const companiesSeen = new Set(results.map((r) => r.card_company).filter(Boolean).map((c) => c.trim()));
-  async function flushResume() {
-    await writeFile(paths().extractResume, JSON.stringify(resume, null, 2) + "\n");
+  if (!reset) {
+    // Recover companies whose cards were title/cache-dropped on already-completed URLs —
+    // they're in companies_seen.json from the earlier run but not in the captured results.
+    try {
+      for (const c of JSON.parse(await readFile(paths().companiesSeen, "utf8"))) companiesSeen.add(c);
+    } catch {}
   }
-  if (reset) await flushResume();
+  async function flushResume() {
+    await writeJson(paths().extractResume, resume);
+  }
+  if (reset) {
+    await flushResume();
+    // Truncate yesterday's output NOW — if this run dies before its first per-URL flush, a
+    // same-day rerun (non-reset) would otherwise seed results (and companies) from the prior
+    // day's files.
+    await writeJson(OUT, results);
+    await writeJson(paths().companiesSeen, [...companiesSeen].sort());
+  }
 
   // ---------- Chrome + CDP session ----------
   await log.checkpoint("connect-cdp");
@@ -175,7 +196,7 @@ async function main() {
 
     for (let ui = 0; ui < group.urls.length; ui++) {
       const rawUrl = group.urls[ui].url;
-      const url = applyWindowOverride(rawUrl);
+      const url = applyWindowOverride(rawUrl, windowHours);
 
       // Per-URL resume gate — a same-day rerun skips URLs already completed & flushed.
       if (isUrlCompleted(resume, url)) {
@@ -210,7 +231,7 @@ async function main() {
           debug: DEBUG,
           summary,
           companiesSeen,
-          log: gateLog,
+          log: consoleLike.log,
         });
 
         summary.cards += cards.length; // cards entering JD fetch (post all filters)
@@ -250,7 +271,10 @@ async function main() {
       }
 
       // Incremental flush after each URL — a kill mid-run keeps everything captured so far.
-      await writeFile(OUT, JSON.stringify(results, null, 2) + "\n");
+      await writeJson(OUT, results);
+      // companies_seen must persist at the same cadence as OUT — a killed run must not lose the
+      // set (previously only written once, at the very end of main()).
+      await writeJson(paths().companiesSeen, [...companiesSeen].sort());
       await log.checkpoint("flush", { url });
       // Completion is claimed only after the results flush above has succeeded.
       if (urlSucceeded) {
@@ -262,8 +286,6 @@ async function main() {
     await session.closeTab(page);
     if (jdTab) await session.closeTab(jdTab);
   }
-
-  await writeFile(paths().companiesSeen, JSON.stringify([...companiesSeen].sort(), null, 2) + "\n");
 
   log.info(
     `groups=${summary.groups} skipped=${summary.skipped.length} resumed_skipped=${summary.resumed_skipped} ` +
@@ -299,10 +321,16 @@ async function teardown(reason, error = null) {
   if (teardownDone) return;
   teardownDone = true;
   try { await log?.checkpoint("teardown", { reason }); } catch {}
-  try { await session?.closeAllTabs(); } catch {}
-  try { session?.disconnect(); } catch {}
-  if (!KEEP_BROWSER) { await killChrome({ log: console }); }
-  else console.warn("[extract] JOBBUNNY_KEEP_BROWSER=1 — leaving Chrome running");
+  if (KEEP_BROWSER) {
+    // Leave Chrome running for post-mortem — just tidy our own tabs and detach.
+    try { await session?.closeAllTabs(); } catch {}
+    try { session?.disconnect(); } catch {}
+    console.warn("[extract] JOBBUNNY_KEEP_BROWSER=1 — leaving Chrome running");
+  } else {
+    // killChrome takes every tab with it — no CDP round-trips that could hang on a wedged context.
+    try { session?.disconnect(); } catch {}
+    await killChrome({ log: console });
+  }
   if (error) {
     await notify({
       severity: "blocking",

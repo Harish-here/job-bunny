@@ -30,7 +30,7 @@ export function applyCardGates(
   cards = stageFilter(
     cards,
     (c) => !isAvoided(c.company, avoid),
-    (n) => `[extract]   Stage A: dropped ${n} avoid-list card(s) pre-JD`,
+    (n) => `Stage A: dropped ${n} avoid-list card(s) pre-JD`,
     "avoided",
     summary,
     log
@@ -41,7 +41,7 @@ export function applyCardGates(
   cards = stageFilter(
     cards,
     (c) => !c.job_id || !cachedIds.has(c.job_id),
-    (n) => `[extract]   cache: skipped ${n} already-known card(s)`,
+    (n) => `cache: skipped ${n} already-known card(s)`,
     "cache_skipped",
     summary,
     log
@@ -55,7 +55,7 @@ export function applyCardGates(
       seenIds.add(c.job_id);
       return true;
     },
-    (n) => `[extract]   run-dedup: dropped ${n} duplicate card(s) (already captured from an earlier search URL this run)`,
+    (n) => `run-dedup: dropped ${n} duplicate card(s) (already captured from an earlier search URL this run)`,
     "run_deduped",
     summary,
     log
@@ -68,7 +68,7 @@ export function applyCardGates(
       if (!r.pass && debug) log(`[title-filter] DROP — ${r.reason} — ${c.title}`);
       return r.pass;
     },
-    (n) => `[extract]   title-filter: dropped ${n} card(s) pre-JD`,
+    (n) => `title-filter: dropped ${n} card(s) pre-JD`,
     "title_dropped",
     summary,
     log

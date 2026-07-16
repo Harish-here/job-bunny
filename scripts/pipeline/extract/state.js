@@ -8,6 +8,8 @@
 // URLs as failed; URL-level skips (have a `url` key) count just that one URL. A legitimately
 // quiet day with zero cards found (but URLs that loaded fine) must NOT trigger this — that's
 // exactly the case the "no url key" vs "has url key" distinction protects against.
+// resumed-skipped URLs completed successfully earlier the same day, so they're excluded from
+// the all-failed denominator; a rerun where every *attempted* URL fails still alerts.
 export function computeAggregateFailure(groups, summary) {
   const totalUrls = groups.reduce((sum, g) => sum + g.urls.length, 0);
   let failedUrls = 0;
@@ -19,7 +21,9 @@ export function computeAggregateFailure(groups, summary) {
       failedUrls += summary.skipped.filter((s) => s.page === g.page && "url" in s).length;
     }
   }
-  return { totalUrls, failedUrls, allFailed: totalUrls > 0 && failedUrls === totalUrls };
+  const resumedSkipped = summary.resumed_skipped || 0;
+  const attemptedUrls = totalUrls - resumedSkipped;
+  return { totalUrls, failedUrls, allFailed: attemptedUrls > 0 && failedUrls === attemptedUrls };
 }
 
 // ---------- resume (data/extract_resume.json) ----------

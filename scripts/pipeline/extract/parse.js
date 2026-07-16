@@ -61,8 +61,7 @@ export function parseList(v) {
 // One-off widen of the f_TPR search window (e.g. a missed daily run) without touching
 // search_urls.md — only rewrites relative windows (r<sec>); absolute anchors (a<epoch>) are a
 // different, already-handled case in add_url.js and are left alone.
-export function applyWindowOverride(url) {
-  const hours = parseInt(process.env.JOBBUNNY_WINDOW_HOURS || "0", 10);
+export function applyWindowOverride(url, hours = parseInt(process.env.JOBBUNNY_WINDOW_HOURS || "0", 10)) {
   if (!hours) return url;
   const u = new URL(url);
   if (!/^r\d+/.test(u.searchParams.get("f_TPR") || "")) return url;

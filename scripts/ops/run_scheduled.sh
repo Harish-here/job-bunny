@@ -88,7 +88,9 @@ run_attempt() {
       # Negative PID = signal the whole process group (claude + any children it spawned),
       # not just the top-level PID — see the `set -m` comment above for why this matters.
       kill -TERM -- "-$claude_pid" 2>/dev/null
-      sleep 5
+      # extract's SIGTERM teardown kills Chrome itself (SIGTERM + up-to-5s grace + SIGKILL);
+      # 5s here guillotined it mid-teardown and leaked Chrome outside the process group.
+      sleep 20
       kill -KILL -- "-$claude_pid" 2>/dev/null
     fi
   ) &
@@ -110,7 +112,9 @@ run_attempt() {
         touch "$heartbeat_failed_flag"
         [ "$rc" -eq 2 ] && touch "$stalled_flag"
         kill -TERM -- "-$claude_pid" 2>/dev/null
-        sleep 5
+        # extract's SIGTERM teardown kills Chrome itself (SIGTERM + up-to-5s grace + SIGKILL);
+        # 5s here guillotined it mid-teardown and leaked Chrome outside the process group.
+        sleep 20
         kill -KILL -- "-$claude_pid" 2>/dev/null
         break
       fi

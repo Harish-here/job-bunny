@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import { ROOT, CHROME_BIN } from "./config.js";
 
 export const CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
+export const CDP_PORT = (() => { try { return new URL(CDP_URL).port || "9222"; } catch { return "9222"; } })();
 export const CHROME_DATA_DIR = join(ROOT, ".chrome-debug");
 
 // The debug Chrome instance is never restarted on its own — CDP-reachable used to be the
@@ -29,7 +30,7 @@ export async function cdpReachable({ url = CDP_URL, timeoutMs = 2000 } = {}) {
 
 export function getChromePid() {
   try {
-    const out = execFileSync("lsof", ["-ti", ":9222", "-sTCP:LISTEN"], { encoding: "utf8" }).trim();
+    const out = execFileSync("lsof", ["-ti", `:${CDP_PORT}`, "-sTCP:LISTEN"], { encoding: "utf8" }).trim();
     const pid = out.split("\n")[0];
     return pid ? Number(pid) : null;
   } catch {
@@ -115,37 +116,16 @@ export async function ensureChrome({ recycleIfOld = true, launchTimeoutMs = 10_0
     log.log?.(
       `  … reachable but ${Math.round((ageMs ?? 0) / 3_600_000)}h old — recycling (same profile/session, fresh process)`
     );
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // Already gone (e.g. it crashed/quit in the gap between the age check above and
-      // here) — nothing to signal; fall through to the reachability poll below, which
-      // will find it already unreachable and skip straight to relaunching.
-    }
-    const freeDeadline = Date.now() + 10_000;
-    let stillUp = true;
-    while (Date.now() < freeDeadline) {
-      await new Promise((r) => setTimeout(r, 500));
-      if (!(await cdpReachable())) {
-        stillUp = false;
-        break;
-      }
-    }
-    if (stillUp) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // already gone
-      }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    // killChrome polls the port listener (getChromePid), not CDP HTTP reachability — that's the
+    // correct "port is free to relaunch" signal here, not "CDP stopped responding".
+    await killChrome({ graceMs: 10_000, log });
     recycled = true;
   }
 
   // launch (either action === "launch", or we fell through from a recycle above)
   log.log?.("  … launching Chrome with debug profile");
   const child = spawn(CHROME_BIN, [
-    "--remote-debugging-port=9222",
+    `--remote-debugging-port=${CDP_PORT}`,
     `--user-data-dir=${CHROME_DATA_DIR}`,
   ], { detached: true, stdio: "ignore" });
   child.unref();

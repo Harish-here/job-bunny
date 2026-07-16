@@ -58,6 +58,26 @@ test("computeAggregateFailure: group-level skip counts all of that group's URLs 
   assert.deepEqual(r, { totalUrls: 3, failedUrls: 3, allFailed: true });
 });
 
+test("computeAggregateFailure: resume-skipped URLs are excluded from the denominator — all ATTEMPTED URLs failing still alerts", () => {
+  const groups = [{ page: "a", urls: [{ url: "u1" }, { url: "u2" }, { url: "u3" }] }];
+  const summary = {
+    skipped: [
+      { page: "a", url: "u2", reason: "boom" },
+      { page: "a", url: "u3", reason: "boom" },
+    ],
+    resumed_skipped: 1, // u1 was already completed earlier today — never attempted this run
+  };
+  const r = computeAggregateFailure(groups, summary);
+  assert.deepEqual(r, { totalUrls: 3, failedUrls: 2, allFailed: true });
+});
+
+test("computeAggregateFailure: all URLs resume-skipped, no failures → allFailed false", () => {
+  const groups = [{ page: "a", urls: [{ url: "u1" }, { url: "u2" }, { url: "u3" }] }];
+  const summary = { skipped: [], resumed_skipped: 3 };
+  const r = computeAggregateFailure(groups, summary);
+  assert.deepEqual(r, { totalUrls: 3, failedUrls: 0, allFailed: false });
+});
+
 // ---------- shouldResetResume ----------
 
 test("shouldResetResume: missing resume", () => {
