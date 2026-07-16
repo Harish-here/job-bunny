@@ -50,6 +50,7 @@ Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 - Resolution: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. **`scripts/lib/config.js` is the only module that knows the layout** — resolve every path through it.
 - **Profiles-only layout.** Legacy mode (pre-v0.7 root paths, env Notion ids) was removed in v1.2; no `config.json` and no explicit `JOBBUNNY_PROFILE` fails loud pointing at `/setup`.
 - Shared across profiles: `page_inventory/`, `.chrome-debug/` (one Chrome/LinkedIn session — never copy account-personalized URLs like the *Recommended* collection between profiles), `templates/`, and `NOTION_TOKEN` in `.env`.
+- **`profiles/rajni/` is a committed, synthetic fixture profile** — the standard target for testing filter/dedup/rank and extract's resume logic (see `profiles/rajni/README.md`, `.claude/skills/verify/SKILL.md`). The only profile checked into git; every other profile stays local-only.
 
 ## Running stages
 

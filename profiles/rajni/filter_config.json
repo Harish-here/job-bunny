@@ -1,0 +1,19 @@
+{
+  "title_filter": {
+    "seniority": [
+      "staff", "lead", "principal", "architect",
+      "associate principal", "technical lead", "tech lead"
+    ],
+    "domain": [
+      "frontend", "front-end", "ui", "react",
+      "design systems", "platform", "web"
+    ],
+    "function": {
+      "allow": ["engineer", "developer", "architect"],
+      "block": [
+        "manager", "director", "vp", "vice president",
+        "analyst", "qa", "devops", "data", "recruiter"
+      ]
+    }
+  }
+}
