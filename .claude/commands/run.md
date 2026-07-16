@@ -16,13 +16,14 @@ Stage sequence:
 2. **/reconcile** — `node scripts/notion/cache.js` (rebuild the profile's cache from its Notion DB).
 3. **/extract** — `node scripts/pipeline/extract.js` (browser; Stage A avoid-drop; skip-broken-group-and-continue). Requires `/doctor` green — do not proceed if step 1 was red. Output: `jobs_raw_text.json`, plus `data/companies_seen.json` for the greenhouse lane below.
 4. **/greenhouse** — `node scripts/pipeline/greenhouse.js` (keyless Greenhouse boards API lane; probes new companies from `companies_seen.json`, fetches curated/auto-discovered boards, appends to `jobs_raw_text.json`). **Fail-soft, like a skipped page-group**: an absent watchlist or a whole-lane network failure exits 0 and must NOT stop the run — note it in the Run Summary instead of treating it as a hard failure.
-5. **compress** — `node scripts/pipeline/compress.js` (sanitise raw_text; emit compact markdown table). Output: `structure_input.md` + `structure_passthrough.json`.
-6. **/structure** — invoke the `/structure` skill **for this profile**. Do NOT write custom code. Reads the profile's `structure_input.md`; checkpoints every 25 rows to `jobs_raw_checkpoint.md`; writes `jobs_raw_decisions.md`.
-7. **assemble** — `node scripts/pipeline/assemble.js` (merge LLM decisions with passthrough fields). Output: `jobs_raw.json`.
-8. **/filter** — `node scripts/pipeline/filter.js` (Stage B; home city from the profile's resume_meta).
-9. **/dedup** — `node scripts/pipeline/dedup.js`.
-10. **/rank** — `node scripts/pipeline/rank.js`.
-11. **/sync** — `node scripts/notion/notion_sync.js` (push automated fields to the profile's DB; update cache + last_run).
+5. **/keka** — `node scripts/pipeline/keka.js` (keyless Keka careers API lane — same probe/fetch pattern as `/greenhouse`: probes new companies from `companies_seen.json`, fetches curated/auto-discovered tenant boards, appends to `jobs_raw_text.json` with `kk-` ids). Same fail-soft rule as `/greenhouse`.
+6. **compress** — `node scripts/pipeline/compress.js` (sanitise raw_text; emit compact markdown table). Output: `structure_input.md` + `structure_passthrough.json`.
+7. **/structure** — invoke the `/structure` skill **for this profile**. Do NOT write custom code. Reads the profile's `structure_input.md`; checkpoints every 25 rows to `jobs_raw_checkpoint.md`; writes `jobs_raw_decisions.md`.
+8. **assemble** — `node scripts/pipeline/assemble.js` (merge LLM decisions with passthrough fields). Output: `jobs_raw.json`.
+9. **/filter** — `node scripts/pipeline/filter.js` (Stage B; home city from the profile's resume_meta).
+10. **/dedup** — `node scripts/pipeline/dedup.js`.
+11. **/rank** — `node scripts/pipeline/rank.js`.
+12. **/sync** — `node scripts/notion/notion_sync.js` (push automated fields to the profile's DB; update cache + last_run).
 
 After the run, print a summary in this exact template (fill in real values; omit the Notes line if there's nothing noteworthy):
 
