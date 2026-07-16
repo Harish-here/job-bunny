@@ -91,7 +91,10 @@ export function mapKekaJob(job, board, todayStr = today()) {
 // Try each tenant guess for one candidate against the live API; first confirmed match wins.
 // Every HTTP call (not just every candidate) is politeness-throttled by the caller.
 async function probeCandidate(name, sleepBetween) {
-  const guesses = tokenCandidates(name);
+  // Tenant guesses become the SUBDOMAIN of the probed URL, so unlike the Greenhouse lane
+  // (token is a path segment) any character illegal in a hostname label must be dropped —
+  // normalizeName keeps slashes etc., and "foo/bar" would probe host "foo" instead of failing.
+  const guesses = tokenCandidates(name).filter((t) => /^[a-z0-9-]+$/.test(t));
   for (const token of guesses) {
     await sleepBetween();
     try {
@@ -140,8 +143,7 @@ async function discoverGuid(tenant) {
     }
   }
   const htmlRes = await fetch(`${kekaBase(tenant)}/careers/`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  const html = await htmlRes.text();
-  const guid = extractPortalGuid(html);
+  const guid = htmlRes.ok ? extractPortalGuid(await htmlRes.text()) : null;
   if (!guid) throw new Error("no portal guid found");
   return guid;
 }

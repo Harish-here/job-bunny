@@ -72,6 +72,21 @@ test("extractJobId returns null when the url has no /jobs/view/ segment", () => 
   );
 });
 
+test("extractJobId parses a Keka jobdetails URL as kk-<id>", () => {
+  assert.equal(
+    extractJobId("https://surveysparrow.keka.com/careers/jobdetails/31541"),
+    "kk-31541",
+  );
+  assert.equal(
+    extractJobId("https://acme.keka.com/careers/jobdetails/123?src=x"),
+    "kk-123",
+  );
+});
+
+test("extractJobId returns null for a keka.com URL without a jobdetails id", () => {
+  assert.equal(extractJobId("https://surveysparrow.keka.com/careers/"), null);
+});
+
 test("extractJobId parses a Greenhouse-hosted board URL as gh-<id>", () => {
   assert.equal(
     extractJobId("https://job-boards.greenhouse.io/agoda/jobs/6161339"),

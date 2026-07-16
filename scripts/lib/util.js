@@ -31,6 +31,8 @@ export function normalizeName(raw) {
 //  - Greenhouse (the /greenhouse lane): embedded boards carry ?gh_jid=<id>; hosted boards are
 //    greenhouse.io/<token>/jobs/<id>. Returned as "gh-<id>" — the exact id the lane emits —
 //    so a /reconcile rebuild of the cache round-trips to the same job_id.
+//  - Keka (the /keka lane): <tenant>.keka.com/careers/jobdetails/<id>, returned as "kk-<id>"
+//    for the same round-trip reason.
 export function extractJobId(url) {
   if (!url) return null;
   const s = String(url);
@@ -40,6 +42,8 @@ export function extractJobId(url) {
     s.match(/[?&]gh_jid=(\d+)/) ||
     (s.includes("greenhouse.io/") ? s.match(/\/jobs\/(\d+)(?:[/?#]|$)/) : null);
   if (gh) return `gh-${gh[1]}`;
+  const kk = s.includes(".keka.com/") ? s.match(/\/careers\/jobdetails\/(\d+)(?:[/?#]|$)/) : null;
+  if (kk) return `kk-${kk[1]}`;
   return null;
 }
 
