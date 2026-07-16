@@ -344,7 +344,31 @@ async function teardown(reason, error = null) {
   }
 }
 
+// A throw outside the per-URL try/catch (or a floating rejected promise) would otherwise hit
+// Node's default handler and vanish without a logged root cause — this is what turned prior
+// silent mid-run deaths into a debuggable log line. Logs via the same run log used everywhere
+// else in this file, tears down Chrome (mirrors the main().catch() error path below), and exits
+// non-zero so run_scheduled.sh's watchdog sees a real failure, not an ambiguous hang.
+async function crashHandler(kind, errOrReason) {
+  const error = errOrReason instanceof Error ? errOrReason : new Error(String(errOrReason));
+  const line = `${kind}: ${error.message}\n${error.stack || ""}`;
+  if (log) {
+    await log.error(line, { stage: lastStage }).catch(() => {});
+  } else {
+    // Crash happened before main() built the run log (e.g. during module init) — console is all we have.
+    console.error(`[extract] ${line}`);
+  }
+  await teardown(kind, error).catch(() => {});
+  process.exit(1);
+}
+
 if (isMain(import.meta.url)) {
+  process.on("uncaughtException", (err) => {
+    crashHandler("uncaughtException", err).catch(() => process.exit(1));
+  });
+  process.on("unhandledRejection", (reason) => {
+    crashHandler("unhandledRejection", reason).catch(() => process.exit(1));
+  });
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => {
       if (teardownDone) process.exit(sig === "SIGINT" ? 130 : 143);
