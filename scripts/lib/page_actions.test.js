@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jitterMs, createBudget, gotoWithRetry } from "./page_actions.js";
+import { jitterMs, createBudget, gotoWithRetry, safeText, safeAttr } from "./page_actions.js";
 
 // --- jitterMs ---------------------------------------------------------------
 
@@ -76,4 +76,53 @@ test("gotoWithRetry: succeeds on the second attempt", async () => {
   const result = await gotoWithRetry(page, "https://example.com", { retries: 2, backoffMs: () => 0, log: { warn() {} } });
   assert.equal(calls, 2);
   assert.deepEqual(result, { ok: true, url: "https://example.com" });
+});
+
+// --- safeText / safeAttr -------------------------------------------------------
+
+// Fake Locator chain: scope.locator(sel).first().innerText(opts) / .getAttribute(attr, opts).
+function fakeScope({ innerText = async () => "", getAttribute = async () => null } = {}) {
+  const locator = { innerText, getAttribute, nth: () => locator, first: () => locator };
+  return { locator: () => locator };
+}
+
+test("safeText: defaults to a 2000ms locator timeout when none is given", async () => {
+  let seenOpts;
+  const scope = fakeScope({ innerText: async (opts) => { seenOpts = opts; return "Staff Engineer"; } });
+  const text = await safeText(scope, ".title");
+  assert.equal(text, "Staff Engineer");
+  assert.deepEqual(seenOpts, { timeout: 2000 });
+});
+
+test("safeText: threads a custom timeoutMs through to innerText", async () => {
+  let seenOpts;
+  const scope = fakeScope({ innerText: async (opts) => { seenOpts = opts; return "x"; } });
+  await safeText(scope, ".title", { timeoutMs: 500 });
+  assert.deepEqual(seenOpts, { timeout: 500 });
+});
+
+test("safeText: a timed-out locator resolves empty rather than throwing", async () => {
+  const scope = fakeScope({ innerText: async () => { throw new Error("Timeout 2000ms exceeded"); } });
+  assert.equal(await safeText(scope, ".title"), "");
+});
+
+test("safeAttr: defaults to a 2000ms locator timeout when none is given", async () => {
+  let seenAttr, seenOpts;
+  const scope = fakeScope({ getAttribute: async (attr, opts) => { seenAttr = attr; seenOpts = opts; return "href-value"; } });
+  const href = await safeAttr(scope, "a.link", "href");
+  assert.equal(href, "href-value");
+  assert.equal(seenAttr, "href");
+  assert.deepEqual(seenOpts, { timeout: 2000 });
+});
+
+test("safeAttr: threads a custom timeoutMs through to getAttribute", async () => {
+  let seenOpts;
+  const scope = fakeScope({ getAttribute: async (attr, opts) => { seenOpts = opts; return null; } });
+  await safeAttr(scope, "a.link", "href", { timeoutMs: 500 });
+  assert.deepEqual(seenOpts, { timeout: 500 });
+});
+
+test("safeAttr: a timed-out locator resolves null rather than throwing", async () => {
+  const scope = fakeScope({ getAttribute: async () => { throw new Error("Timeout 2000ms exceeded"); } });
+  assert.equal(await safeAttr(scope, "a.link", "href"), null);
 });

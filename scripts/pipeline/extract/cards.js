@@ -12,6 +12,7 @@ import {
   safeText,
   safeAttr,
   scrollUntilStable,
+  DEFAULT_FIELD_TIMEOUT_MS,
 } from "../../lib/page_actions.js";
 import { parseList } from "./parse.js";
 
@@ -43,7 +44,7 @@ export async function runAssertions(page, cfg) {
 // compound over dozens of cards into a many-minute hang. Once hit, log a warning and return
 // whatever was collected so far rather than throwing — consistent with this file's per-URL/
 // per-page skip-and-continue convention.
-export async function collectCards(page, cfg, { maxMs, log = console } = {}) {
+export async function collectCards(page, cfg, { maxMs, fieldTimeoutMs = DEFAULT_FIELD_TIMEOUT_MS, log = console } = {}) {
   const cards = page.locator(cfg.job_card);
   const n = await cards.count();
   const out = [];
@@ -62,14 +63,17 @@ export async function collectCards(page, cfg, { maxMs, log = console } = {}) {
     // Supports ":nth(N)" suffix for pages where sibling selectors aren't usable (hashed classes).
     // e.g. "p:nth(1)" → card.locator("p").nth(1)
     const [title, company, location, href, idAttr_raw] = await Promise.all([
-      safeText(card, cfg.job_card_title),
-      safeText(card, cfg.job_card_company),
-      safeText(card, cfg.job_card_location),
+      safeText(card, cfg.job_card_title, { timeoutMs: fieldTimeoutMs }),
+      safeText(card, cfg.job_card_company, { timeoutMs: fieldTimeoutMs }),
+      safeText(card, cfg.job_card_location, { timeoutMs: fieldTimeoutMs }),
       cfg.job_card_href
-        ? safeAttr(card, cfg.job_card_href, "href")
+        ? safeAttr(card, cfg.job_card_href, "href", { timeoutMs: fieldTimeoutMs })
         : Promise.resolve(null),
+      // Reads the id attr off `card` itself (not a sub-selector), so safeAttr's
+      // scope.locator(selector) shape doesn't fit — same bounded-timeout/catch-to-null
+      // behavior as safeAttr, just applied directly to the card locator.
       cfg.job_card_id_attr
-        ? card.getAttribute(cfg.job_card_id_attr).catch(() => null)
+        ? card.getAttribute(cfg.job_card_id_attr, { timeout: fieldTimeoutMs }).catch(() => null)
         : Promise.resolve(null),
     ]);
     let idAttr = idAttr_raw;
@@ -88,7 +92,7 @@ export async function collectCards(page, cfg, { maxMs, log = console } = {}) {
 //                      than pagination_page_size (signals last page). Deduplicates by job_id.
 //   "infinite-scroll" (or unset) — existing scroll-and-stabilise behaviour.
 // Runs runAssertions on the first page load only.
-export async function collectAllPages(page, url, cfg, { cardCap = 0, collectCardsMaxMs, log = console } = {}) {
+export async function collectAllPages(page, url, cfg, { cardCap = 0, collectCardsMaxMs, fieldTimeoutMs, log = console } = {}) {
   const pType = (cfg.pagination_type || "infinite-scroll").trim();
 
   if (pType !== "url-pages") {
@@ -100,7 +104,7 @@ export async function collectAllPages(page, url, cfg, { cardCap = 0, collectCard
       endSelector: cfg.end_of_results_signal || null,
     });
     await runAssertions(page, cfg);
-    return collectCards(page, cfg, { maxMs: collectCardsMaxMs, log });
+    return collectCards(page, cfg, { maxMs: collectCardsMaxMs, fieldTimeoutMs, log });
   }
 
   const param    = cfg.pagination_param    || "start";
@@ -117,7 +121,7 @@ export async function collectAllPages(page, url, cfg, { cardCap = 0, collectCard
     await gotoWithRetry(page, u.toString(), { log });
     await jitter();
     if (p === 0) await runAssertions(page, cfg);
-    const cards = await collectCards(page, cfg, { maxMs: collectCardsMaxMs, log });
+    const cards = await collectCards(page, cfg, { maxMs: collectCardsMaxMs, fieldTimeoutMs, log });
     // Warn on page 2+ returning nothing — could be selector drift rather than a real last page.
     if (p > 0 && cards.length === 0) {
       log.warn(`⚠ page ${p + 1} returned 0 cards — possible selector drift`);

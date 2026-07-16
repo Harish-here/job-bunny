@@ -24,14 +24,15 @@ set -m
 # Kill a hung headless run instead of blocking this profile's slot indefinitely — a genuine
 # hang (not a clean stage failure) would otherwise never trigger any of the Telegram/doctor
 # alerts, since those all fire on a stage *completing* with an error, not on the process never
-# finishing. One observed full real run took ~12 minutes; 45 min gives generous headroom for a
-# heavier day while still catching a real hang well before the next scheduled slot. Override
-# with JOBBUNNY_RUN_TIMEOUT_SECONDS if needed.
+# finishing. One observed full real run took ~12 minutes, but a slow-to-render LinkedIn session
+# (card fields timing out at Playwright's 30s default before the CARD_FIELD_TIMEOUT_MS fix) has
+# pushed a real run past 20 min; 30 min gives headroom for that while still catching a genuine
+# hang well before the next scheduled slot. Override with JOBBUNNY_RUN_TIMEOUT_SECONDS if needed.
 #
 # Not using GNU coreutils `timeout`/`gtimeout` — neither ships on stock macOS. Portable
 # bash equivalent: background the claude process, run a watchdog subshell that SIGTERMs
 # (then SIGKILLs) it if it's still alive past the deadline, and `wait` for whichever finishes.
-TIMEOUT_SECONDS="${JOBBUNNY_RUN_TIMEOUT_SECONDS:-1200}"
+TIMEOUT_SECONDS="${JOBBUNNY_RUN_TIMEOUT_SECONDS:-1800}"
 
 # Second, much shorter watchdog: how long to wait for /extract's start marker
 # (extract_started.json, written by extract.js as literally its first action — see

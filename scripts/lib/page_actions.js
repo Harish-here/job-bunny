@@ -4,6 +4,10 @@
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Shared default for safeText/safeAttr and their callers (e.g. extract.js's
+// CARD_FIELD_TIMEOUT_MS env fallback) — one place to bump instead of several drifting copies.
+export const DEFAULT_FIELD_TIMEOUT_MS = 2000;
+
 // PURE — [minMs, maxMs) jitter amount. rand is injectable for deterministic tests.
 export function jitterMs(minMs = 2000, maxMs = 5000, rand = Math.random) {
   return minMs + Math.floor(rand() * (maxMs - minMs));
@@ -47,19 +51,24 @@ export async function gotoWithRetry(
 // where sibling selectors aren't usable (hashed classes), e.g. "p:nth(1)" → locator("p").nth(1).
 // Card fields (title/company/location) are always single-line — takes the first non-empty line
 // so that badge text or a11y duplicate spans embedded in the same element don't pollute the value.
-export async function safeText(scope, selector, {} = {}) {
+//
+// timeoutMs bounds the wait when selector doesn't resolve (e.g. a still-occluded/virtualized
+// card row). Without it, Playwright's own default action timeout (30s) applies per call — on a
+// LinkedIn session that's rendering slowly, that turned a handful of empty fields into minutes
+// of dead time per page and blew through collectCards' wall-clock budget after only a few cards.
+export async function safeText(scope, selector, { timeoutMs = DEFAULT_FIELD_TIMEOUT_MS } = {}) {
   if (!selector) return "";
   const m = selector.match(/:nth\((\d+)\)$/);
   const locator = m
     ? scope.locator(selector.slice(0, -m[0].length)).nth(parseInt(m[1], 10))
     : scope.locator(selector).first();
-  const raw = (await locator.innerText().catch(() => "")) ?? "";
+  const raw = (await locator.innerText({ timeout: timeoutMs }).catch(() => "")) ?? "";
   return raw.trim().split("\n").find((l) => l.trim()) ?? "";
 }
 
-export async function safeAttr(scope, selector, attr) {
+export async function safeAttr(scope, selector, attr, { timeoutMs = DEFAULT_FIELD_TIMEOUT_MS } = {}) {
   if (!selector) return null;
-  return scope.locator(selector).first().getAttribute(attr).catch(() => null);
+  return scope.locator(selector).first().getAttribute(attr, { timeout: timeoutMs }).catch(() => null);
 }
 
 // Generalizes extract.js's scrollToEnd VERBATIM in behavior: each round — bail on an expired
