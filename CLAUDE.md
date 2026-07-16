@@ -9,7 +9,7 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 `scripts/` is organized by domain, not by pipeline stage:
 
 - `lib/` — shared plumbing every stage imports: `config.js` (profile/path resolution — the only module that knows the on-disk layout), `util.js`, `io.js` (JSON read/write), `cli.js` (run-guard + `--flag value` parsing), `env_file.js` / `prompt.js` (readline helpers), `browser.js` (Chrome/CDP lifecycle), `page_actions.js` (humanized page interaction), `run_log.js` (checkpoint logger).
-- `pipeline/` — the deterministic stages, run in sequence by `/run`: `extract → greenhouse (optional) → compress → [structure, LLM] → assemble → filter → dedup → rank`. Each stage is explicit-input-file → explicit-output-file (see Writing & changing code). `extract` is `extract.js` (thin orchestrator) + `scripts/pipeline/extract/` (`parse.js`/`state.js`/`filters.js` pure; `cards.js`/`jd.js` browser-driving).
+- `pipeline/` — the deterministic stages, run in sequence by `/run`: `extract → greenhouse/keka (optional) → compress → [structure, LLM] → assemble → filter → dedup → rank`. Each stage is explicit-input-file → explicit-output-file (see Writing & changing code). `extract` is `extract.js` (thin orchestrator) + `scripts/pipeline/extract/` (`parse.js`/`state.js`/`filters.js` pure; `cards.js`/`jd.js` browser-driving).
 - `notion/` — `schema.js` (byte-exact select options), `cache.js` (`/reconcile`), `notion_sync.js` (`/sync`), `cleanup.js`.
 - `notify/` — best-effort dispatcher (`notify.js`) + connectors (`telegram.js`).
 - `ops/` — machine/process orchestration: `doctor.js`, `schedule.js` + `run_scheduled.sh`, `release.js` (release mechanics — see Writing & changing code).
@@ -28,14 +28,14 @@ Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, 
 ## Commands
 
 - `/run [profile]` — full pipeline, manual. No argument = `config.json` `default_profile`.
-- Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /greenhouse · /structure · /filter · /dedup · /rank · /sync`.
+- Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /greenhouse · /keka · /structure · /filter · /dedup · /rank · /sync`.
 - Setup & maintenance: `/setup <profile> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /schedule · /wrap`. `/schedule` takes no profile argument — it always reads every profile (grouping crosses profile boundaries).
 
 Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
 
 - **`/structure` is a skill, no script** — the agent does the LLM work inline. Bookend scripts flank it: `compress.js` (`jobs_raw_text.json` → `structure_input.md`, a pre-filtered compact markdown table) before; `assemble.js` (LLM output `jobs_raw_decisions.md` + `structure_passthrough.json` → `jobs_raw.json`) after.
 - **`/page-analyse` is browser-driven** (Claude in Chrome), script-less.
-- **`/greenhouse` is a second, optional channel**: keyless Greenhouse boards API, watchlist at the profile's `greenhouse_boards.md`, merges into `jobs_raw_text.json` ahead of `/structure`. Fail-soft — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
+- **`/greenhouse` and `/keka` are optional second channels**: keyless ATS APIs (Greenhouse boards; Keka careers), watchlists at the profile's `greenhouse_boards.md`/`keka_boards.md`, merging into `jobs_raw_text.json` ahead of `/structure`. Fail-soft — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
 
 ## Development
 

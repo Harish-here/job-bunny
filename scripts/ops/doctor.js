@@ -1,6 +1,6 @@
 // scripts/ops/doctor.js — preflight for /run. Checks (no mutations):
 //   1. Secrets present (.env has NOTION_TOKEN; profile.json has notion_db_id)
-//   2. Greenhouse lane's greenhouse_boards.md (optional — absent = lane disabled, still a pass)
+//   2. Keyless ATS lanes' watchlists — greenhouse_boards.md, keka_boards.md (optional — absent = lane disabled, still a pass)
 //   3. Chrome CDP reachable on :9222 (real LinkedIn session lives there)
 //   4. Every page-type referenced in search_urls.md has a page_inventory/<page>.md
 //   5. cache.json present & valid
@@ -64,27 +64,27 @@ async function checkNotifier() {
   else pass("notify.telegram.chat_id set");
 }
 
-// No live Greenhouse Boards API reachability check here (deliberate, same rationale as
-// checkNotifier): a transient API blip must not hard-abort the pipeline over an optional lane.
-// This is a lenient structural check only — every non-blank, non-comment/heading line must
-// match "- <name> - <token>".
-async function checkGreenhouse() {
-  console.log("[doctor] greenhouse lane");
-  if (!(await exists(P.greenhouseBoards))) {
-    pass("optional — greenhouse lane disabled (create greenhouse_boards.md to enable)");
+// No live reachability check here (deliberate, same rationale as checkNotifier): a transient
+// API blip must not hard-abort the pipeline over an optional keyless ATS lane. This is a
+// lenient structural check only — every non-blank, non-comment/heading line must match
+// "- <name> - <token>". Shared by both keyless ATS lanes (greenhouse, keka).
+async function checkAtsWatchlist(lane, filePath, fileName) {
+  console.log(`[doctor] ${lane} lane`);
+  if (!(await exists(filePath))) {
+    pass(`optional — ${lane} lane disabled (create ${fileName} to enable)`);
     return;
   }
-  const text = await readFile(P.greenhouseBoards, "utf8");
+  const text = await readFile(filePath, "utf8");
   let boards = 0;
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     if (!/^-\s+.+\s+-\s+\S+$/.test(line)) {
-      return fail(`greenhouse_boards.md malformed line: "${line}"`);
+      return fail(`${fileName} malformed line: "${line}"`);
     }
     boards++;
   }
-  pass(`greenhouse_boards.md valid (${boards} board(s))`);
+  pass(`${fileName} valid (${boards} board(s))`);
 }
 
 async function checkProfileFiles() {
@@ -145,7 +145,8 @@ async function main() {
   console.log(`[doctor] profile=${resolveProfileName()}`);
   await checkSecrets();
   await checkNotifier();
-  await checkGreenhouse();
+  await checkAtsWatchlist("greenhouse", P.greenhouseBoards, "greenhouse_boards.md");
+  await checkAtsWatchlist("keka", P.kekaBoards, "keka_boards.md");
   await checkProfileFiles();
   await checkCDP();
   await checkInventories();
