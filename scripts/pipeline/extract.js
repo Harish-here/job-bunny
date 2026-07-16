@@ -84,7 +84,10 @@ async function main() {
 
   const runStartedAt = new Date().toISOString();
   const progressState = { group: null, urlIndex: null, urlTotal: null, url: null, cardsCaptured: 0 };
+  let progressFinal = false;
   async function writeProgress(stage, done = false) {
+    if (progressFinal) return; // done:true is terminal — teardown's checkpoint must not clobber it
+    if (done) progressFinal = true;
     lastStage = stage;
     const p = buildProgress({
       pid: process.pid,
@@ -296,7 +299,8 @@ async function main() {
   for (const s of summary.skipped) log.info(`skipped ${s.page}: ${s.reason}`);
 
   await checkAggregateFailure(groups, summary);
-  await writeProgress("done", true);
+  await log.checkpoint("done");        // log line + a progress write at stage "done"
+  await writeProgress("done", true);   // terminal heartbeat state — watchdog treats done:true as healthy forever
 }
 
 // Aggregate "every URL failed" detection (see computeAggregateFailure in extract/state.js for
