@@ -3,6 +3,25 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.4.0] — 2026-07-16
+
+### Added
+- **Extract owns the Chrome lifecycle end-to-end** (#20). New `scripts/lib/browser.js` (shared by `/doctor` and `/extract`) centralizes the Chrome-over-CDP mechanics: `ensureChrome()` (reuse / recycle-past-24h / launch + CDP poll), `killChrome()` (TERM → grace poll → KILL, idempotent), `createSession()` (tab registry with transparent CDP reconnect), `closeStaleTabs()`. `extract.js` now launches Chrome itself if missing and **always kills it on every exit path** — success, error, SIGINT/SIGTERM — so the memory-heavy debug Chrome and stale tabs can no longer outlive a run. `JOBBUNNY_KEEP_BROWSER=1` keeps it open for post-mortem inspection; login persists in the on-disk `.chrome-debug/` profile, so killing is free. `run_scheduled.sh`'s end-of-slot Chrome close is now a backstop only.
+- **Per-URL resume.** `data/extract_resume.json` records which search URLs completed today (keyed on day + a hash of `search_urls.md` + the effective `JOBBUNNY_WINDOW_HOURS`); a same-day rerun skips them and seeds output/dedup/companies state from the previous leg. A URL is marked complete only after its incremental output flush; failed URLs are retried on rerun; `JOBBUNNY_FRESH=1` forces a clean scrape. A killed or stalled run now loses nothing.
+- **Stall-detecting heartbeat.** `data/extract_progress.json` is rewritten at every checkpoint (stage/group/URL/cards) with a terminal `done: true`. `check_extract_started.js` gains a backward-compatible 3-arg mode (exit 0 healthy / 1 never-started / 2 stalled), and `run_scheduled.sh`'s heartbeat watchdog now polls it every 60s — a run whose progress goes stale past `JOBBUNNY_EXTRACT_STALL_SECONDS` (default 600) is killed with its own `stalled` status/notify. Stalls are deliberately not auto-retried (scraping already began); resume makes the next slot cheap.
+- **Structured, checkpointed run logs** at `data/logs/extract_<timestamp>.log` (`scripts/lib/run_log.js`), sharing the same checkpoint hook that writes the heartbeat — logs and progress can't drift apart.
+
+### Changed
+- `extract.js` decomposed from one 544-line file into a thin orchestrator over `scripts/pipeline/extract/{parse,state,filters}.js` (pure, unit-tested) and `{cards,jd}.js` (browser-driving), plus `scripts/lib/{browser,page_actions,run_log}.js`. Moved logic is behavior-identical; one deliberate upgrade: page loads now go through `gotoWithRetry` (2 retries, backoff). All contracts preserved — output record shape, `companies_seen.json`, stage-filter order, group/URL skip granularity, aggregate-failure notify, `{noDefaults:true}`, reused single JD tab, per-URL flush, every env knob.
+- Watchdog TERM→KILL gap widened 5s → 20s so extract's SIGTERM teardown (which kills Chrome itself) isn't guillotined mid-flight.
+
+### Fixed
+- Review/verification of the new resume feature caught and fixed before release: cross-day output contamination (reset now truncates `jobs_raw_text.json` + `companies_seen.json` immediately); a resume file claiming URLs whose output was lost now forces a fresh day instead of silently dropping records; the "every URL failed" logout alert was defeated on resumed runs (resume-skipped URLs now excluded from the denominator); Greenhouse-lane companies from completed URLs were lost on resume (now seeded + flushed per-URL); the CDP port is derived from `CDP_URL` everywhere instead of a half-hardcoded `:9222`; and teardown's final checkpoint clobbered the terminal `done:true` heartbeat state — which would have made the new stall watchdog kill healthy scheduled runs 10 minutes after extract finished.
+
+### Notes
+- ~80 new unit tests over the extracted pure modules (suite 291/291 green). Live-verified end-to-end: tiny capped run, SIGTERM mid-run → resume → all-skipped rerun, KEEP_BROWSER escape, watchdog fixture dry-tests in both arg modes.
+- Interactive behavior change: a manual `/extract` no longer leaves Chrome open afterward — use `JOBBUNNY_KEEP_BROWSER=1` when you want to inspect a page after a failure.
+
 ## [1.3.1] — 2026-07-14
 
 ### Fixed
