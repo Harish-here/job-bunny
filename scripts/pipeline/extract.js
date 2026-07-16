@@ -69,6 +69,9 @@ let session = null;
 let log = null;
 let lastStage = "starting";
 let teardownDone = false;
+// Freezes lastStage once true — set by writeProgress("done", true) on success, and by teardown()
+// itself (see below) so its own "teardown" checkpoint never clobbers the real crash stage.
+let progressFinal = false;
 
 // Written as the very first thing main() does — lets run_scheduled.sh's watchdog confirm
 // extract actually started, instead of only finding out via the full-run timeout.
@@ -84,7 +87,6 @@ async function main() {
 
   const runStartedAt = new Date().toISOString();
   const progressState = { group: null, urlIndex: null, urlTotal: null, url: null, cardsCaptured: 0 };
-  let progressFinal = false;
   async function writeProgress(stage, done = false) {
     if (progressFinal) return; // done:true is terminal — teardown's checkpoint must not clobber it
     if (done) progressFinal = true;
@@ -324,6 +326,11 @@ async function checkAggregateFailure(groups, summary) {
 async function teardown(reason, error = null) {
   if (teardownDone) return;
   teardownDone = true;
+  // Freeze lastStage BEFORE our own checkpoint("teardown") call below — otherwise that
+  // checkpoint's writeProgress("teardown") would overwrite lastStage from the real crash stage
+  // (e.g. "parse-config") to the meaningless "teardown", corrupting the failure notification's
+  // stage field. A no-op on the success path, where writeProgress("done", true) already set it.
+  progressFinal = true;
   try { await log?.checkpoint("teardown", { reason }); } catch {}
   if (KEEP_BROWSER) {
     // Leave Chrome running for post-mortem — just tidy our own tabs and detach.
@@ -344,7 +351,31 @@ async function teardown(reason, error = null) {
   }
 }
 
+// A throw outside the per-URL try/catch (or a floating rejected promise) would otherwise hit
+// Node's default handler and vanish without a logged root cause — this is what turned prior
+// silent mid-run deaths into a debuggable log line. Logs via the same run log used everywhere
+// else in this file, tears down Chrome (mirrors the main().catch() error path below), and exits
+// non-zero so run_scheduled.sh's watchdog sees a real failure, not an ambiguous hang.
+async function crashHandler(kind, errOrReason) {
+  const error = errOrReason instanceof Error ? errOrReason : new Error(String(errOrReason));
+  const line = `${kind}: ${error.message}\n${error.stack || ""}`;
+  if (log) {
+    await log.error(line, { stage: lastStage }).catch(() => {});
+  } else {
+    // Crash happened before main() built the run log (e.g. during module init) — console is all we have.
+    console.error(`[extract] ${line}`);
+  }
+  await teardown(kind, error).catch(() => {});
+  process.exit(1);
+}
+
 if (isMain(import.meta.url)) {
+  process.on("uncaughtException", (err) => {
+    crashHandler("uncaughtException", err).catch(() => process.exit(1));
+  });
+  process.on("unhandledRejection", (reason) => {
+    crashHandler("unhandledRejection", reason).catch(() => process.exit(1));
+  });
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => {
       if (teardownDone) process.exit(sig === "SIGINT" ? 130 : 143);
