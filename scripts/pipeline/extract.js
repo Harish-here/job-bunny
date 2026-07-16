@@ -18,7 +18,11 @@
 //
 // Resume: data/extract_resume.json tracks URLs completed today (post-applyWindowOverride key) —
 // a same-day rerun skips them; JOBBUNNY_FRESH=1 forces a clean run. A URL is only marked done
-// after its incremental results flush succeeds.
+// after its incremental results flush succeeds. A same-day reset (fresh-flag/urls-changed/
+// window-changed) only rebuilds that completion tracking — it preserves already-flushed
+// jobs_raw_text.json/companies_seen.json, so a crash before this run's first successful URL
+// can't destroy an earlier same-day run's real captures. Only a genuine day rollover discards
+// them outright.
 //
 // Heartbeat: data/extract_progress.json is rewritten at every checkpoint (best-effort — a write
 // failure never kills the run) so run_scheduled.sh's watchdog can detect a mid-run stall, not
@@ -133,15 +137,21 @@ async function main() {
   const windowHours = parseInt(process.env.JOBBUNNY_WINDOW_HOURS || "0", 10);
   let resume = null;
   try { resume = JSON.parse(await readFile(paths().extractResume, "utf8")); } catch {}
-  let { reset, reason } = shouldResetResume(resume, { today: today(), fresh: FRESH, searchUrlsHash, windowHours });
+  let { reset, reason, discardOutput } = shouldResetResume(resume, {
+    today: today(),
+    fresh: FRESH,
+    searchUrlsHash,
+    windowHours,
+  });
   let results = [];
-  if (!reset) {
+  if (!discardOutput) {
     try {
       results = mergeResults(JSON.parse(await readFile(OUT, "utf8")), []);
     } catch {
-      if (resume.completed.length > 0) {
+      if (!reset && resume.completed.length > 0) {
         // resume claims completed URLs but their flushed output is gone (truncated write,
-        // manual delete) — trusting it would silently drop those records for the day.
+        // manual delete) — trusting it would silently drop those records for the day. Nothing
+        // to discard on disk (it's already gone), so discardOutput stays false.
         reset = true;
         reason = "output-missing";
       }
@@ -149,7 +159,7 @@ async function main() {
   }
   if (reset) {
     resume = newResume({ today: today(), searchUrlsHash, windowHours });
-    results = [];
+    if (discardOutput) results = [];
     log.info(`resume: starting fresh (${reason})`);
   } else {
     log.info(`resume: continuing — ${resume.completed.length} URL(s) already completed today`);
@@ -158,7 +168,7 @@ async function main() {
   // Pre-seeded from prior captures — see extract/filters.js for why companiesSeen is captured
   // ahead of the cache/title gates.
   const companiesSeen = new Set(results.map((r) => r.card_company).filter(Boolean).map((c) => c.trim()));
-  if (!reset) {
+  if (!discardOutput) {
     // Recover companies whose cards were title/cache-dropped on already-completed URLs —
     // they're in companies_seen.json from the earlier run but not in the captured results.
     try {
@@ -168,11 +178,13 @@ async function main() {
   async function flushResume() {
     await writeJson(paths().extractResume, resume);
   }
-  if (reset) {
+  if (discardOutput) {
     await flushResume();
     // Truncate yesterday's output NOW — if this run dies before its first per-URL flush, a
-    // same-day rerun (non-reset) would otherwise seed results (and companies) from the prior
-    // day's files.
+    // same-day rerun would otherwise seed results (and companies) from yesterday's files. A
+    // same-day reset (discardOutput false) skips this deliberately — resume.json is left
+    // untouched on disk until this run's first real completion, and OUT/companiesSeen already
+    // carry forward today's real captures via the merge above, so a crash here loses nothing.
     await writeJson(OUT, results);
     await writeJson(paths().companiesSeen, [...companiesSeen].sort());
   }

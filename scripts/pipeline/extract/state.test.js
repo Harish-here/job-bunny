@@ -80,50 +80,56 @@ test("computeAggregateFailure: all URLs resume-skipped, no failures → allFaile
 
 // ---------- shouldResetResume ----------
 
-test("shouldResetResume: missing resume", () => {
+test("shouldResetResume: missing resume discards output — nothing to compare a day against", () => {
   const r = shouldResetResume(null, { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: 0 });
-  assert.deepEqual(r, { reset: true, reason: "missing" });
+  assert.deepEqual(r, { reset: true, reason: "missing", discardOutput: true });
 });
 
-test("shouldResetResume: non-object resume", () => {
+test("shouldResetResume: non-object resume discards output", () => {
   const r = shouldResetResume("nope", { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: 0 });
-  assert.deepEqual(r, { reset: true, reason: "missing" });
+  assert.deepEqual(r, { reset: true, reason: "missing", discardOutput: true });
 });
 
-test("shouldResetResume: fresh flag forces reset even if everything else matches", () => {
+test("shouldResetResume: fresh flag forces reset but keeps today's output — same-day forced rescrape", () => {
   const resume = { day: "2026-07-15", search_urls_hash: "h", window_hours: 0, completed: [] };
   const r = shouldResetResume(resume, { today: "2026-07-15", fresh: true, searchUrlsHash: "h", windowHours: 0 });
-  assert.deepEqual(r, { reset: true, reason: "fresh-flag" });
+  assert.deepEqual(r, { reset: true, reason: "fresh-flag", discardOutput: false });
 });
 
-test("shouldResetResume: new day", () => {
+test("shouldResetResume: fresh flag on a new day still discards output — a crash mid-run must not seed from yesterday's file", () => {
+  const resume = { day: "2026-07-14", search_urls_hash: "h", window_hours: 0, completed: [] };
+  const r = shouldResetResume(resume, { today: "2026-07-15", fresh: true, searchUrlsHash: "h", windowHours: 0 });
+  assert.deepEqual(r, { reset: true, reason: "fresh-flag", discardOutput: true });
+});
+
+test("shouldResetResume: new day discards output", () => {
   const resume = { day: "2026-07-14", search_urls_hash: "h", window_hours: 0, completed: [] };
   const r = shouldResetResume(resume, { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: 0 });
-  assert.deepEqual(r, { reset: true, reason: "new-day" });
+  assert.deepEqual(r, { reset: true, reason: "new-day", discardOutput: true });
 });
 
-test("shouldResetResume: search_urls hash changed", () => {
+test("shouldResetResume: search_urls hash changed keeps today's output — a same-day rerun must not lose real captures", () => {
   const resume = { day: "2026-07-15", search_urls_hash: "old", window_hours: 0, completed: [] };
   const r = shouldResetResume(resume, { today: "2026-07-15", fresh: false, searchUrlsHash: "new", windowHours: 0 });
-  assert.deepEqual(r, { reset: true, reason: "urls-changed" });
+  assert.deepEqual(r, { reset: true, reason: "urls-changed", discardOutput: false });
 });
 
-test("shouldResetResume: window_hours changed", () => {
+test("shouldResetResume: window_hours changed keeps today's output", () => {
   const resume = { day: "2026-07-15", search_urls_hash: "h", window_hours: 0, completed: [] };
   const r = shouldResetResume(resume, { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: 72 });
-  assert.deepEqual(r, { reset: true, reason: "window-changed" });
+  assert.deepEqual(r, { reset: true, reason: "window-changed", discardOutput: false });
 });
 
 test("shouldResetResume: everything matches → no reset", () => {
   const resume = { day: "2026-07-15", search_urls_hash: "h", window_hours: 72, completed: [] };
   const r = shouldResetResume(resume, { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: 72 });
-  assert.deepEqual(r, { reset: false, reason: null });
+  assert.deepEqual(r, { reset: false, reason: null, discardOutput: false });
 });
 
 test("shouldResetResume: window_hours compares loosely (0 vs undefined both stringify to '0')", () => {
   const resume = { day: "2026-07-15", search_urls_hash: "h", window_hours: 0, completed: [] };
   const r = shouldResetResume(resume, { today: "2026-07-15", fresh: false, searchUrlsHash: "h", windowHours: undefined });
-  assert.deepEqual(r, { reset: false, reason: null });
+  assert.deepEqual(r, { reset: false, reason: null, discardOutput: false });
 });
 
 // ---------- newResume / isUrlCompleted / markUrlDone ----------
