@@ -36,7 +36,7 @@ import { ROOT, paths, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
 import { writeJson } from "../lib/io.js";
 import { ensureChrome, killChrome, createSession } from "../lib/browser.js";
-import { jitter } from "../lib/page_actions.js";
+import { jitter, DEFAULT_FIELD_TIMEOUT_MS } from "../lib/page_actions.js";
 import { createRunLog } from "../lib/run_log.js";
 import { parseSearchUrls, parseInventory, validateInventory, applyWindowOverride } from "./extract/parse.js";
 import {
@@ -58,6 +58,10 @@ const OUT = paths().jobsRawText;
 const DEBUG = !!process.env.DEBUG;
 const CARD_CAP = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
 const COLLECT_CARDS_MAX_MS = parseInt(process.env.EXTRACT_COLLECT_CARDS_MAX_MS || "120000", 10);
+// Per-field (title/company/location/href/id) locator timeout inside collectCards — without this,
+// Playwright's own default (30s) applies when a card is still occluded/unrendered, which can
+// burn through the whole COLLECT_CARDS_MAX_MS budget after only a handful of cards.
+const CARD_FIELD_TIMEOUT_MS = parseInt(process.env.EXTRACT_CARD_FIELD_TIMEOUT_MS || String(DEFAULT_FIELD_TIMEOUT_MS), 10);
 const KEEP_BROWSER = process.env.JOBBUNNY_KEEP_BROWSER === "1";
 const FRESH = process.env.JOBBUNNY_FRESH === "1";
 
@@ -223,6 +227,7 @@ async function main() {
         let cards = await collectAllPages(page, url, cfg, {
           cardCap: CARD_CAP,
           collectCardsMaxMs: COLLECT_CARDS_MAX_MS,
+          fieldTimeoutMs: CARD_FIELD_TIMEOUT_MS,
           log: consoleLike,
         });
         await log.checkpoint("collect-cards", { cards: cards.length });
