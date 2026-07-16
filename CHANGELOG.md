@@ -3,6 +3,20 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.5.0] — 2026-07-17
+
+### Added
+- **Keka careers API lane** (`/keka`, #29) — a second keyless ATS channel alongside `/greenhouse`, targeting the ATS Chennai startups actually use. Live probing this release found the roadmapped Lever+Ashby plan had zero yield against the Chennai seed set (Kissflow, SurveySparrow, Facilio, Hippo Video, Uniphore, Yubi, Vue.ai, …) — only dead/empty boards. Keka has a keyless public JSON API and is the dominant Indian-startup ATS, so it replaces Lever/Ashby for this release: tenant probe via `careerportalinfo` (name-verified), portal-guid discovery with an HTML fallback, `embedjobs` fetch, `kk-` job ids, `keka_boards.md` watchlist, `KEKA_MAX_NEW` cap (default 40). Fail-soft posture identical to `/greenhouse` — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
+- Shared ATS-lane plumbing extracted into `scripts/pipeline/ats_common.js` (pure helpers + generic probe/fetch phase loops, per-ATS specifics injected) — `/greenhouse` behavior unchanged, and a third lane can now reuse the same scaffolding cheaply.
+- `profiles/rajni/` — a committed fixture/test profile (14-record variation matrix + cache seeds) so `/verify`-style runtime checks have a stable, non-personal target instead of borrowing `harish`/`uvashree` data (#28).
+
+### Fixed
+- **A crashed manual run with `JOBBUNNY_FRESH=1` (or a changed `search_urls.md`) could silently discard an earlier same-day run's already-flushed captures** (#26) — `shouldResetResume()` truncated `jobs_raw_text.json`/`companies_seen.json`/`extract_resume.json` to disk before any URL was re-attempted. It now returns a `discardOutput` flag, true only for a genuine day rollover or an unreadable resume file; same-day forced resets defer the disk write until real progress happens.
+- **Later same-day scheduled fires could skip every URL instead of rescanning for new postings** (#27) — the resume-reset check now triggers once every URL from the full list is already complete, so a multi-fire schedule (e.g. every 2.5h) rescans instead of treating the day as done after the first fire.
+
+### Notes
+- `extractJobId` (`scripts/lib/util.js`) learns the Keka jobdetails URL shape so `/reconcile` cache rebuilds round-trip `kk-` ids, the same contract the `gh-` branch exists for — 331 unit tests green.
+
 ## [1.4.1] — 2026-07-16
 
 ### Fixed
