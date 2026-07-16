@@ -8,7 +8,7 @@ resume.json
 data/cache.json
 
 # Profiles — all profile config/data is local-only; templates/ ships the seeds
-profiles/
+profiles/*
 config.json
 
 # Dependencies
@@ -31,3 +31,11 @@ structure_passthrough.json
 
 # Chrome remote-debug profile (local only)
 .chrome-debug/
+
+# profiles/rajni/ is a committed, synthetic fixture profile for live-testing the
+# deterministic pipeline stages + onboarding reference (see profiles/rajni/README.md).
+# Must come after every blanket rule above that would otherwise re-shadow these paths
+# (gitignore is last-match-wins per path) — do not move these earlier in the file.
+!profiles/rajni/
+!profiles/rajni/resume.json
+!profiles/rajni/data/jobs_raw.json
