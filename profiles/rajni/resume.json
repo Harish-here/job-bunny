@@ -1,0 +1,49 @@
+{
+  "current_yoe": 9,
+  "target_seniority": ["Staff", "Lead"],
+  "core_skills": ["React", "TypeScript", "JavaScript", "UI Architecture", "Design Systems"],
+  "secondary_skills": ["Vue.js", "Redux Toolkit", "Storybook", "Jest", "Node.js"],
+  "preferred_work_type": ["Remote", "Hybrid"],
+  "location": ["Chennai", "Bengaluru"],
+  "domain_experience": ["Enterprise SaaS", "Fintech"],
+  "usp": [
+    "Led the UI platform re-architecture behind a multi-brand storefront rollout.",
+    "Built a shared design-system library adopted across four product teams."
+  ],
+  "full_resume": {
+    "name": "Rajni Test Profile",
+    "title": "Staff Frontend Engineer | React, TypeScript, UI Systems",
+    "contact": {
+      "location": "Chennai, India",
+      "phone": "+00 00000 00000",
+      "email": "rajni.fixture@example.com",
+      "linkedin": "linkedin.com/in/rajni-fixture/"
+    },
+    "summary": "Synthetic fixture profile for Job Bunny's committed test data (profiles/rajni/) — not a real person. Exercises filter/dedup/rank and extract's resume-logic against realistic, versioned data instead of hand-built throwaway fixtures.",
+    "selectedImpact": [
+      "Re-architected a multi-brand storefront's UI platform, cutting duplicate component code by 40%.",
+      "Built a shared design-system library adopted across four product teams."
+    ],
+    "skills": [
+      { "category": "Languages & Frameworks", "items": "TypeScript, JavaScript, React, Vue.js, Redux Toolkit." },
+      { "category": "UI Systems & Architecture", "items": "UI Architecture, Design Systems, Component Architecture, Storybook." },
+      { "category": "Quality & Delivery", "items": "Jest, Node.js, CI/CD Pipeline Design." }
+    ],
+    "experience": [
+      {
+        "company": "Fixture Corp",
+        "location": "Chennai",
+        "title": "Staff Frontend Engineer",
+        "duration": "01/2020 - Present",
+        "responsibilities": [
+          "Fixture responsibility bullet — not a real work history.",
+          "Second fixture responsibility bullet."
+        ]
+      }
+    ],
+    "education": [
+      { "institution": "Fixture University", "location": "Chennai", "degree": "Bachelor of Engineering", "duration": "08/2010 - 05/2014" }
+    ],
+    "languages": ["English, Professional"]
+  }
+}

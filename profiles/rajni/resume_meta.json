@@ -1,0 +1,13 @@
+{
+  "current_yoe": 9,
+  "target_seniority": ["Staff", "Lead"],
+  "core_skills": ["React", "TypeScript", "JavaScript", "UI Architecture", "Design Systems"],
+  "secondary_skills": ["Vue.js", "Redux Toolkit", "Storybook", "Jest", "Node.js"],
+  "preferred_work_type": ["Remote", "Hybrid"],
+  "location": ["Chennai", "Bengaluru"],
+  "domain_experience": ["Enterprise SaaS", "Fintech"],
+  "usp": [
+    "Led the UI platform re-architecture behind a multi-brand storefront rollout.",
+    "Built a shared design-system library adopted across four product teams."
+  ]
+}
