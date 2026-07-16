@@ -325,6 +325,34 @@ test("runFetchPhase prune: a stale id in seen is removed when every board is fet
   assert.ok(!Object.prototype.hasOwnProperty.call(seen, "x-99"));
 });
 
+test("runFetchPhase allFailed: true when every board's fetch throws, false when one succeeds, false for zero boards", async () => {
+  const base = {
+    seen: {},
+    cacheIds: new Set(),
+    avoid: noAvoid,
+    maxNew: 10,
+    capEnvLabel: "X_MAX_NEW",
+    tag: "test",
+    jobIdFor,
+    mapJob,
+    titlePass: alwaysPass,
+  };
+  const otherBoard = { name: "Widget Co", token: "widgetco" };
+
+  const allThrow = await runFetchPhase({ ...base, boards: [board, otherBoard], fetchBoardJobs: makeFetcher({}) });
+  assert.equal(allThrow.allFailed, true);
+
+  const oneSucceeds = await runFetchPhase({
+    ...base,
+    boards: [board, otherBoard],
+    fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Engineer" }] }), // widgetco throws (not in map)
+  });
+  assert.equal(oneSucceeds.allFailed, false);
+
+  const noBoards = await runFetchPhase({ ...base, boards: [], fetchBoardJobs: makeFetcher({}) });
+  assert.equal(noBoards.allFailed, false);
+});
+
 test("runFetchPhase prune: a stale id in seen is retained when one board's fetch throws", async () => {
   const seen = { "x-99": "2026-06-01" };
   const otherBoard = { name: "Widget Co", token: "widgetco" };

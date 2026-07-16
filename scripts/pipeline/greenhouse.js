@@ -21,9 +21,10 @@
 // Shared probe/fetch phase logic and ATS-agnostic helpers live in ats_common.js (also used by
 // the Keka lane); this file keeps only what's genuinely Greenhouse-specific.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isMain } from "../lib/cli.js";
+import { writeJson } from "../lib/io.js";
 import { loadAvoid } from "./avoid.js";
 import { filterByTitle } from "./title_filter.js";
 import { readCache } from "../notion/cache.js";
@@ -37,6 +38,7 @@ import {
   verifyBoardName,
   htmlToText,
   parseWatchlist,
+  loadWatchlistText,
   formatWatchlistAppend,
   mergeByJobId,
   today,
@@ -115,21 +117,12 @@ async function main() {
     return;
   }
 
-  let watchlistText;
-  if (wlExists) {
-    watchlistText = await readFile(P.greenhouseBoards, "utf8");
-    try {
-      parseWatchlist(watchlistText, "greenhouse_boards.md"); // fail loud on a malformed existing file
-    } catch (err) {
-      throw new Error(`Cannot parse ${P.greenhouseBoards}: ${err.message}`);
-    }
-  } else {
-    // No file yet, but the ledger has history — seed from the template so a probe hit this
-    // run has a "## Auto-discovered" heading to land under.
-    watchlistText = await readFile(join(ROOT, "templates", "greenhouse_boards.md"), "utf8").catch(
-      () => "## Curated\n\n## Auto-discovered\n"
-    );
-  }
+  let watchlistText = await loadWatchlistText({
+    wlExists,
+    path: P.greenhouseBoards,
+    fileName: "greenhouse_boards.md",
+    templatePath: join(ROOT, "templates", "greenhouse_boards.md"),
+  });
 
   const avoid = await loadAvoid();
   const companiesSeen = await readJsonOr(P.companiesSeen, [], "greenhouse");
@@ -138,7 +131,7 @@ async function main() {
   const { probed, hits } = await runProbePhase({ companiesSeen, ledger, avoid, probeCandidate });
   const candidatesRun = probed > 0;
   if (candidatesRun) {
-    await writeFile(P.ghProbeLedger, JSON.stringify(ledger, null, 2) + "\n");
+    await writeJson(P.ghProbeLedger, ledger);
   }
   if (hits.length) {
     watchlistText = formatWatchlistAppend(watchlistText, hits);
@@ -170,10 +163,10 @@ async function main() {
     fetchBoardJobs,
     jobIdFor: (job) => `gh-${job.id}`,
     mapJob: mapGhJob,
-    titlePass: (t) => filterByTitle(t || "").pass,
+    titlePass: (t) => filterByTitle(t).pass,
   });
 
-  if (boards.length > 0 && fetchResult.boardsFetched === 0 && fetchResult.boardsFailed === boards.length) {
+  if (fetchResult.allFailed) {
     console.warn(`[greenhouse] all ${boards.length} board(s) failed — lane skipped this run`);
     await notify({
       severity: "info",
@@ -182,11 +175,11 @@ async function main() {
     });
   }
 
-  await writeFile(P.ghSeen, JSON.stringify(ghSeen, null, 2) + "\n");
+  await writeJson(P.ghSeen, ghSeen);
 
   const existingRaw = await readJsonOr(P.jobsRawText, [], "greenhouse");
   const merged = mergeByJobId(existingRaw, fetchResult.emittedRecords);
-  await writeFile(P.jobsRawText, JSON.stringify(merged, null, 2) + "\n");
+  await writeJson(P.jobsRawText, merged);
 
   console.log(
     `[greenhouse] boards_fetched=${fetchResult.boardsFetched} boards_failed=${fetchResult.boardsFailed} ` +

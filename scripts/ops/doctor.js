@@ -12,6 +12,7 @@ import { constants } from "node:fs";
 import { join } from "node:path";
 import { ROOT, paths, loadProfile, resolveProfileName } from "../lib/config.js";
 import { homeLocations } from "../lib/util.js";
+import { parseWatchlist } from "../pipeline/ats_common.js";
 import { ensureChrome, closeStaleTabs } from "../lib/browser.js";
 import { notify } from "../notify/notify.js";
 import { telegramTokenEnvKey } from "../notify/telegram.js";
@@ -65,9 +66,9 @@ async function checkNotifier() {
 }
 
 // No live reachability check here (deliberate, same rationale as checkNotifier): a transient
-// API blip must not hard-abort the pipeline over an optional keyless ATS lane. This is a
-// lenient structural check only — every non-blank, non-comment/heading line must match
-// "- <name> - <token>". Shared by both keyless ATS lanes (greenhouse, keka).
+// API blip must not hard-abort the pipeline over an optional keyless ATS lane. Structural lint
+// only, delegated to the lanes' own parseWatchlist so /doctor and the lanes can never drift
+// apart — a file that passes here never throws in a lane. Shared by both lanes (greenhouse, keka).
 async function checkAtsWatchlist(lane, filePath, fileName) {
   console.log(`[doctor] ${lane} lane`);
   if (!(await exists(filePath))) {
@@ -75,16 +76,12 @@ async function checkAtsWatchlist(lane, filePath, fileName) {
     return;
   }
   const text = await readFile(filePath, "utf8");
-  let boards = 0;
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    if (!/^-\s+.+\s+-\s+\S+$/.test(line)) {
-      return fail(`${fileName} malformed line: "${line}"`);
-    }
-    boards++;
+  try {
+    const boards = parseWatchlist(text, fileName);
+    pass(`${fileName} valid (${boards.length} board(s))`);
+  } catch (err) {
+    fail(err.message);
   }
-  pass(`${fileName} valid (${boards} board(s))`);
 }
 
 async function checkProfileFiles() {

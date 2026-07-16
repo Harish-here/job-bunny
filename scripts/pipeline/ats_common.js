@@ -8,12 +8,12 @@ import { constants } from "node:fs";
 import { normalizeName } from "../lib/util.js";
 import { isAvoided } from "./avoid.js";
 
-export const PROBE_CAP = 25; // candidates probed per run — bounds a single run's HTTP fan-out
-export const PROBE_DELAY_MS = 300; // between probe HTTP calls, politeness toward the public API
+const PROBE_CAP = 25; // candidates probed per run — bounds a single run's HTTP fan-out
+const PROBE_DELAY_MS = 300; // between probe HTTP calls, politeness toward the public API
 export const FETCH_TIMEOUT_MS = 10_000;
 
 export const exists = (p) => access(p, constants.F_OK).then(() => true).catch(() => false);
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const today = () => new Date().toISOString().slice(0, 10);
 
 // Read a JSON file we own (companies_seen.json, a lane's probe ledger, its seen file,
@@ -92,9 +92,9 @@ export function htmlToText(html) {
 // Parse a watchlist file → [{ name, token }], both "## Curated" and "## Auto-discovered"
 // merged (callers don't need to know which section a board came from). Blank lines and any
 // line starting with "#" (comments AND the "##" section headings) are structural. Any other
-// non-conforming line is a hard parse error — mirrors doctor.js's own lenient-file/strict-line
-// check byte-for-byte (same regex) so a file that passes /doctor never throws here. `filename`
-// names the file in the thrown error (e.g. "greenhouse_boards.md").
+// non-conforming line is a hard parse error — doctor.js calls this directly for its preflight
+// lint, so a file that passes /doctor never throws here. `filename` names the file in the
+// thrown error (e.g. "greenhouse_boards.md").
 export function parseWatchlist(text, filename) {
   const boards = [];
   for (const raw of String(text ?? "").split("\n")) {
@@ -107,13 +107,33 @@ export function parseWatchlist(text, filename) {
   return boards;
 }
 
+const AUTO_DISCOVERED_HEADING = "## Auto-discovered";
+
+// Load a lane's watchlist text. When the file exists it is read and validated (fail loud on a
+// malformed line, same error shape the fetch phase would throw). When it doesn't — but the
+// caller decided the lane is still live (ledger has history) — seed from the lane's template so
+// a probe hit this run has a "## Auto-discovered" heading to land under, falling back to a
+// bare skeleton if the template is missing too.
+export async function loadWatchlistText({ wlExists, path, fileName, templatePath }) {
+  if (wlExists) {
+    const text = await readFile(path, "utf8");
+    try {
+      parseWatchlist(text, fileName);
+    } catch (err) {
+      throw new Error(`Cannot parse ${path}: ${err.message}`);
+    }
+    return text;
+  }
+  return readFile(templatePath, "utf8").catch(() => `## Curated\n\n${AUTO_DISCOVERED_HEADING}\n`);
+}
+
 // Insert newly-confirmed board entries under the "## Auto-discovered" heading. If the heading
 // isn't present in `text` (e.g. a hand-rolled file that skipped the template), append one at
 // EOF. Used by the probe phase's auto-add path; also the tool a test round-trips through.
 export function formatWatchlistAppend(text, entries) {
   const base = String(text ?? "");
   const lines = entries.map((e) => `- ${e.name} - ${e.token}`).join("\n") + "\n";
-  const heading = "## Auto-discovered";
+  const heading = AUTO_DISCOVERED_HEADING;
   const idx = base.indexOf(heading);
 
   if (idx === -1) {
@@ -265,5 +285,9 @@ export async function runFetchPhase({
     }
   }
 
-  return { ...counts, emittedRecords };
+  // The whole-lane-outage verdict lives here, next to the counts it's derived from — lanes
+  // just react to it (warn + best-effort notify) instead of re-deriving the condition.
+  const allFailed = boards.length > 0 && counts.boardsFetched === 0 && counts.boardsFailed === boards.length;
+
+  return { ...counts, allFailed, emittedRecords };
 }
