@@ -31,15 +31,25 @@ export function computeAggregateFailure(groups, summary) {
 // Decide whether a loaded resume file should be discarded and a fresh one started. Reset is an
 // optimization decision only — never a hard failure — so callers should soft-fail an
 // unparseable/missing file into `resume: null` and let this function report "missing".
+//
+// `discardOutput` tells the caller whether today's already-flushed jobs_raw_text.json/
+// companies_seen.json are trustworthy. A genuine day rollover (or no resume to compare a day
+// against) means that output belongs to a prior day and must be discarded. Every other reset
+// reason (fresh-flag/urls-changed/window-changed) only means "don't trust which URLs are marked
+// done" — the captures themselves are still today's and must survive a crash before this run's
+// first successful URL, not just get silently overwritten. Computed independently of `reason`'s
+// priority order below so that fresh-flag-on-a-new-day still discards (both are true at once).
 export function shouldResetResume(resume, { today, fresh, searchUrlsHash, windowHours }) {
-  if (!resume || typeof resume !== "object") return { reset: true, reason: "missing" };
-  if (fresh) return { reset: true, reason: "fresh-flag" };
-  if (resume.day !== today) return { reset: true, reason: "new-day" };
-  if (resume.search_urls_hash !== searchUrlsHash) return { reset: true, reason: "urls-changed" };
+  const missing = !resume || typeof resume !== "object";
+  const staleDay = missing || resume.day !== today;
+  if (missing) return { reset: true, reason: "missing", discardOutput: true };
+  if (fresh) return { reset: true, reason: "fresh-flag", discardOutput: staleDay };
+  if (staleDay) return { reset: true, reason: "new-day", discardOutput: true };
+  if (resume.search_urls_hash !== searchUrlsHash) return { reset: true, reason: "urls-changed", discardOutput: false };
   if (String(resume.window_hours ?? 0) !== String(windowHours ?? 0)) {
-    return { reset: true, reason: "window-changed" };
+    return { reset: true, reason: "window-changed", discardOutput: false };
   }
-  return { reset: false, reason: null };
+  return { reset: false, reason: null, discardOutput: false };
 }
 
 export function newResume({ today, searchUrlsHash, windowHours }) {
