@@ -43,7 +43,7 @@ import { ROOT, paths, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
 import { writeJson } from "../lib/io.js";
 import { ensureChrome, killChrome, createSession } from "../lib/browser.js";
-import { jitter, DEFAULT_FIELD_TIMEOUT_MS } from "../lib/page_actions.js";
+import { jitter, DEFAULT_CALL_TIMEOUT_MS } from "../lib/page_actions.js";
 import { createRunLog } from "../lib/run_log.js";
 import { parseSearchUrls, parseInventory, validateInventory, applyWindowOverride } from "./extract/parse.js";
 import {
@@ -65,10 +65,15 @@ const OUT = paths().jobsRawText;
 const DEBUG = !!process.env.DEBUG;
 const CARD_CAP = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
 const COLLECT_CARDS_MAX_MS = parseInt(process.env.EXTRACT_COLLECT_CARDS_MAX_MS || "120000", 10);
-// Per-field (title/company/location/href/id) locator timeout inside collectCards — without this,
-// Playwright's own default (30s) applies when a card is still occluded/unrendered, which can
-// burn through the whole COLLECT_CARDS_MAX_MS budget after only a handful of cards.
-const CARD_FIELD_TIMEOUT_MS = parseInt(process.env.EXTRACT_CARD_FIELD_TIMEOUT_MS || String(DEFAULT_FIELD_TIMEOUT_MS), 10);
+// Deadline on each single CDP round-trip inside collectCards (batch harvest / scroll step) —
+// a wedged tab costs at most this per call before the run moves on and recycles the tab, instead
+// of hanging indefinitely (page.evaluate has no Playwright-side timeout at all).
+const EVAL_TIMEOUT_MS = parseInt(process.env.EXTRACT_EVAL_TIMEOUT_MS || String(DEFAULT_CALL_TIMEOUT_MS), 10);
+
+// Error shapes that mean the TAB (not the page content) is unhealthy — a deadline-exceeded CDP
+// call (withTimeout), a dead target, or a CDP transport error. Only these warrant recycling the
+// tab; an assertion/selector failure on a healthy tab shouldn't pay a close+reopen.
+const isWedgedError = (err) => /exceeded \d+ms deadline|target.*(closed|crashed)|protocol error/i.test(err.message);
 const KEEP_BROWSER = process.env.JOBBUNNY_KEEP_BROWSER === "1";
 const FRESH = process.env.JOBBUNNY_FRESH === "1";
 
@@ -246,8 +251,8 @@ async function main() {
         log.info(`${group.page} ← ${url}`);
         let cards = await collectAllPages(page, url, cfg, {
           cardCap: CARD_CAP,
-          collectCardsMaxMs: COLLECT_CARDS_MAX_MS,
-          fieldTimeoutMs: CARD_FIELD_TIMEOUT_MS,
+          maxMs: COLLECT_CARDS_MAX_MS,
+          evalTimeoutMs: EVAL_TIMEOUT_MS,
           log: consoleLike,
         });
         await log.checkpoint("collect-cards", { cards: cards.length });
@@ -275,6 +280,10 @@ async function main() {
             raw_text = await captureJd(jdTab, page, cfg, card, groupCap, { log: consoleLike });
           } catch (e) {
             log.error(`skip card ${card.job_id} — ${e.message}`);
+            // A wedged JD tab would otherwise burn its deadline on every remaining card of every
+            // remaining URL — recycle it (closeTab is deadline-bounded in the session layer; the
+            // isClosed() check at the top of captureJd reopens it lazily).
+            if (isNewPage && isWedgedError(e)) await session.closeTab(jdTab);
             continue; // one bad JD never aborts the rest
           }
           if (!raw_text) continue;
@@ -298,6 +307,11 @@ async function main() {
       } catch (err) {
         log.error(`SKIP url (${group.page}) — ${err.message}`);
         summary.skipped.push({ page: group.page, url, reason: err.message });
+        // A wedge-shaped failure means the tab/renderer itself is unhealthy — close it so it
+        // can't poison every remaining URL (closeTab is deadline-bounded in the session layer;
+        // the isClosed() check at the top of this loop reopens it lazily, so the group's last
+        // URL doesn't pay for a tab nothing will use).
+        if (isWedgedError(err)) await session.closeTab(page);
       }
 
       // Incremental flush after each URL — a kill mid-run keeps everything captured so far.

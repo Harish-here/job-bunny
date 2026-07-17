@@ -6,6 +6,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { ROOT, CHROME_BIN } from "./config.js";
+import { withTimeout } from "./page_actions.js";
 
 export const CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
 export const CDP_PORT = (() => { try { return new URL(CDP_URL).port || "9222"; } catch { return "9222"; } })();
@@ -211,7 +212,9 @@ export function createSession({ url = CDP_URL, log = console } = {}) {
   }
 
   async function closeTab(page) {
-    await page.close().catch(() => {});
+    // close() itself can hang on a wedged tab/renderer — bound it here so EVERY caller
+    // (per-URL recycle, group-end closes, closeAllTabs in teardown) is covered.
+    await withTimeout(page.close(), 5000, "closeTab").catch(() => {});
     registered.delete(page);
   }
 

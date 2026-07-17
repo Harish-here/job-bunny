@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jitterMs, createBudget, gotoWithRetry, safeText, safeAttr } from "./page_actions.js";
+import { jitterMs, createBudget, gotoWithRetry, withTimeout } from "./page_actions.js";
 
 // --- jitterMs ---------------------------------------------------------------
 
@@ -78,51 +78,22 @@ test("gotoWithRetry: succeeds on the second attempt", async () => {
   assert.deepEqual(result, { ok: true, url: "https://example.com" });
 });
 
-// --- safeText / safeAttr -------------------------------------------------------
+// --- withTimeout ---------------------------------------------------------------
 
-// Fake Locator chain: scope.locator(sel).first().innerText(opts) / .getAttribute(attr, opts).
-function fakeScope({ innerText = async () => "", getAttribute = async () => null } = {}) {
-  const locator = { innerText, getAttribute, nth: () => locator, first: () => locator };
-  return { locator: () => locator };
-}
-
-test("safeText: defaults to a 2000ms locator timeout when none is given", async () => {
-  let seenOpts;
-  const scope = fakeScope({ innerText: async (opts) => { seenOpts = opts; return "Staff Engineer"; } });
-  const text = await safeText(scope, ".title");
-  assert.equal(text, "Staff Engineer");
-  assert.deepEqual(seenOpts, { timeout: 2000 });
+test("withTimeout: passes through a promise that resolves in time", async () => {
+  assert.equal(await withTimeout(Promise.resolve(42), 1000, "fast"), 42);
 });
 
-test("safeText: threads a custom timeoutMs through to innerText", async () => {
-  let seenOpts;
-  const scope = fakeScope({ innerText: async (opts) => { seenOpts = opts; return "x"; } });
-  await safeText(scope, ".title", { timeoutMs: 500 });
-  assert.deepEqual(seenOpts, { timeout: 500 });
+test("withTimeout: passes through a rejection unchanged", async () => {
+  await assert.rejects(() => withTimeout(Promise.reject(new Error("boom")), 1000, "x"), /boom/);
 });
 
-test("safeText: a timed-out locator resolves empty rather than throwing", async () => {
-  const scope = fakeScope({ innerText: async () => { throw new Error("Timeout 2000ms exceeded"); } });
-  assert.equal(await safeText(scope, ".title"), "");
+test("withTimeout: rejects with the label once the deadline passes", async () => {
+  const never = new Promise(() => {});
+  await assert.rejects(() => withTimeout(never, 20, "wedged evaluate"), /wedged evaluate.*20ms/);
 });
 
-test("safeAttr: defaults to a 2000ms locator timeout when none is given", async () => {
-  let seenAttr, seenOpts;
-  const scope = fakeScope({ getAttribute: async (attr, opts) => { seenAttr = attr; seenOpts = opts; return "href-value"; } });
-  const href = await safeAttr(scope, "a.link", "href");
-  assert.equal(href, "href-value");
-  assert.equal(seenAttr, "href");
-  assert.deepEqual(seenOpts, { timeout: 2000 });
-});
-
-test("safeAttr: threads a custom timeoutMs through to getAttribute", async () => {
-  let seenOpts;
-  const scope = fakeScope({ getAttribute: async (attr, opts) => { seenOpts = opts; return null; } });
-  await safeAttr(scope, "a.link", "href", { timeoutMs: 500 });
-  assert.deepEqual(seenOpts, { timeout: 500 });
-});
-
-test("safeAttr: a timed-out locator resolves null rather than throwing", async () => {
-  const scope = fakeScope({ getAttribute: async () => { throw new Error("Timeout 2000ms exceeded"); } });
-  assert.equal(await safeAttr(scope, "a.link", "href"), null);
+test("withTimeout: does not leave the process held open by its timer", async () => {
+  // If the timer isn't unref'd/cleared, `node --test` would hang after a passing race.
+  await withTimeout(Promise.resolve("ok"), 60_000, "long deadline");
 });

@@ -3,7 +3,11 @@
 // See the extract-rewrite task's behavior diff report for the exhaustive list of sanctioned
 // deviations.
 
-import { sleep, gotoWithRetry } from "../../lib/page_actions.js";
+import { sleep, gotoWithRetry, withTimeout, DEFAULT_CALL_TIMEOUT_MS } from "../../lib/page_actions.js";
+
+// Every JD-page CDP call below carries an explicit deadline — Playwright's 30s action default
+// (innerText, click) and unbounded evaluate() are exactly the ceilings that compounded into
+// multi-minute URLs in the collectCards incident; a JD is cheap to skip, so bound tightly.
 
 // ---------- JD capture ----------
 export async function waitSettled(page, cfg) {
@@ -26,12 +30,12 @@ export async function waitSettled(page, cfg) {
 // jd_anchor_text ("About the job"). Anchor text is stable across LinkedIn's CSS churn.
 export async function extractJdText(target, cfg) {
   if (cfg.jd_body) {
-    const t = ((await target.locator(cfg.jd_body).first().innerText().catch(() => "")) || "").trim();
+    const t = ((await target.locator(cfg.jd_body).first().innerText({ timeout: DEFAULT_CALL_TIMEOUT_MS }).catch(() => "")) || "").trim();
     if (t) return t;
   }
   const anchor = cfg.jd_anchor_text || "About the job";
   return (
-    await target
+    await withTimeout(target
       .evaluate((a) => {
         const els = [...document.querySelectorAll("section,div,article,main")];
         // Tightest container that starts with the anchor AND holds real content (>=200 chars) —
@@ -43,7 +47,7 @@ export async function extractJdText(target, cfg) {
           })
           .sort((x, y) => x.innerText.length - y.innerText.length)[0];
         return m ? m.innerText.trim() : "";
-      }, anchor)
+      }, anchor), DEFAULT_CALL_TIMEOUT_MS, "jd anchor evaluate")
       .catch(() => "")
   );
 }
@@ -71,7 +75,7 @@ export async function captureJd(jdTab, page, cfg, card, cap, { log = console } =
     return t.slice(0, cap);
   }
   // inline: clicking the card renders the JD in a side panel on the same page
-  await page.locator(cfg.job_card).nth(card.index).click();
+  await page.locator(cfg.job_card).nth(card.index).click({ timeout: DEFAULT_CALL_TIMEOUT_MS });
   await waitSettled(page, cfg);
   return (await extractJdText(page, cfg)).slice(0, cap);
 }
