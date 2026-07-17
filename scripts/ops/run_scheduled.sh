@@ -62,7 +62,7 @@ STALL_SECONDS="${JOBBUNNY_EXTRACT_STALL_SECONDS:-600}"
 run_attempt() {
   local profile="$1" log_file="$2"
   local timed_out_flag heartbeat_failed_flag stalled_flag run_start_epoch
-  local claude_pid timeout_watchdog_pid heartbeat_watchdog_pid
+  local claude_pid timeout_watchdog_pid heartbeat_watchdog_pid caffeinate_pid
 
   # Flags' presence (not content) is the signal a watchdog fired — avoids inferring "did it
   # fire?" from a magic signal-derived exit code.
@@ -81,6 +81,17 @@ run_attempt() {
   # layers fire and every scheduled run double-notifies (found via live testing).
   JOBBUNNY_HEADLESS=1 claude -p "/run $profile" --dangerously-skip-permissions > >(tee "$log_file") 2>&1 &
   claude_pid=$!
+
+  # Hold the machine awake for the run's duration. launchd does NOT itself prevent system
+  # sleep — a run that starts right before the machine sleeps (lid close, idle timeout) gets
+  # its whole process tree torn down with no error, log line, or exception, since an OS-level
+  # sleep/wake teardown bypasses extract.js's own signal/crash handlers entirely (see the
+  # 2026-07-17 09:00 incident: 24s into the run, the machine slept for ~16 minutes, got a
+  # capped 180s DarkWake window, and the process tree died silently when it slept again).
+  # -i prevents idle sleep, -s prevents sleep while on AC power; -w ties the assertion to
+  # claude_pid's exit so it releases automatically, including on a watchdog SIGKILL below.
+  caffeinate -i -s -w "$claude_pid" &
+  caffeinate_pid=$!
 
   (
     sleep "$TIMEOUT_SECONDS"
@@ -130,6 +141,7 @@ run_attempt() {
   # Run finished (or was killed) — stop whichever watchdog didn't fire rather than leave it ticking.
   kill "$timeout_watchdog_pid" 2>/dev/null; wait "$timeout_watchdog_pid" 2>/dev/null
   kill "$heartbeat_watchdog_pid" 2>/dev/null; wait "$heartbeat_watchdog_pid" 2>/dev/null
+  kill "$caffeinate_pid" 2>/dev/null; wait "$caffeinate_pid" 2>/dev/null
 
   # Brief grace period for the tee process substitution to flush its last lines before anyone greps it.
   sleep 1
