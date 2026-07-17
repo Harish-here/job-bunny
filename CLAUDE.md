@@ -2,93 +2,90 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Job Bunny aggregates LinkedIn jobs daily, filters/ranks them against a profile, and syncs to Notion. The pipeline is driven by **slash commands, not this file** — `/run` owns the canonical stage sequence; treat this file as the invariants those commands operate under.
+## What this is
 
-## Architecture
-
-`scripts/` is organized by domain, not by pipeline stage:
-
-- `lib/` — shared plumbing every stage imports: `config.js` (profile/path resolution — the only module that knows the on-disk layout), `util.js`, `io.js` (JSON read/write), `cli.js` (run-guard + `--flag value` parsing), `env_file.js` / `prompt.js` (readline helpers), `browser.js` (Chrome/CDP lifecycle), `page_actions.js` (humanized page interaction), `run_log.js` (checkpoint logger).
-- `pipeline/` — the deterministic stages, run in sequence by `/run`: `extract → greenhouse/keka (optional) → compress → [structure, LLM] → assemble → filter → dedup → rank`. Each stage is explicit-input-file → explicit-output-file (see Writing & changing code). `extract` is `extract.js` (thin orchestrator) + `scripts/pipeline/extract/` (`parse.js`/`state.js`/`filters.js` pure; `cards.js`/`jd.js` browser-driving).
-- `notion/` — `schema.js` (byte-exact select options), `cache.js` (`/reconcile`), `notion_sync.js` (`/sync`), `cleanup.js`.
-- `notify/` — best-effort dispatcher (`notify.js`) + connectors (`telegram.js`).
-- `ops/` — machine/process orchestration: `doctor.js`, `schedule.js` + `run_scheduled.sh`, `release.js` (release mechanics — see Writing & changing code).
-- `setup/` — onboarding: `init.js`, `notify_setup.js`, `generate_meta.js`, `add_url.js`.
-
-`.claude/commands/*.md` are the slash-command definitions — most are thin one-stage wrappers around a single `scripts/<domain>/<x>.js`; `/run`/`run.md` owns orchestration across the full sequence.
-
-## Ground truths
-
-- **Notion is the source of truth.** The profile's `cache.json` is a perf mirror only, rebuilt from Notion at the start of every run (`/reconcile`). Never treat the cache as authoritative.
-- **The only runtime LLM stage is `/structure`** (raw JD text → structured records). Filtering, dedup, and ranking are pure deterministic JS — never move their logic behind an LLM.
-- **The design doc (design_v0) lives in Notion** and is build-time reference only: fetch it on demand when authoring/changing code, never in the run path.
-- **Surface before implement.** When a spec detail is ambiguous, stop and ask — don't guess a heuristic into existence.
-- **Notifications are best-effort.** `scripts/notify/notify.js` and its connectors (e.g. `scripts/notify/telegram.js`) must never throw in a way that breaks the calling pipeline stage — a notification failure is never a reason to fail `/doctor`, `/extract`, or `/sync`.
+Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls extra postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a user's resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. It runs on macOS only (launchd scheduling, hardcoded Chrome path) and is driven either manually via slash commands or headlessly via launchd.
 
 ## Commands
 
-- `/run [profile]` — full pipeline, manual. No argument = `config.json` `default_profile`.
-- Stage commands (standalone for re-run/debug, same optional profile argument): `/doctor · /reconcile · /extract · /greenhouse · /keka · /structure · /filter · /dedup · /rank · /sync`.
-- Setup & maintenance: `/setup <profile> · /page-analyse · /add-url · /cleanup · /update-resume · /notify-setup · /schedule · /wrap`. `/schedule` takes no profile argument — it always reads every profile (grouping crosses profile boundaries).
+```bash
+npm test                                          # all unit tests (node --test scripts/)
+node --test scripts/pipeline/filter.test.js       # single test file
+JOBBUNNY_PROFILE=<name> node scripts/pipeline/<stage>.js   # run one pipeline stage
+node scripts/ops/doctor.js                        # preflight (secrets, CDP, inventories, cache)
+node scripts/ops/release.js <X.Y.Z> [--dry-run]   # release spine (used by /wrap ship)
+```
 
-Most stages are thin `node scripts/<x>.js` wrappers. Special cases:
+There is no build or lint step. Tests never launch a browser (CI sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`).
 
-- **`/structure` is a skill, no script** — the agent does the LLM work inline. Bookend scripts flank it: `compress.js` (`jobs_raw_text.json` → `structure_input.md`, a pre-filtered compact markdown table) before; `assemble.js` (LLM output `jobs_raw_decisions.md` + `structure_passthrough.json` → `jobs_raw.json`) after.
-- **`/page-analyse` is browser-driven** (Claude in Chrome), script-less.
-- **`/greenhouse` and `/keka` are optional second channels**: keyless ATS APIs (Greenhouse boards; Keka careers), watchlists at the profile's `greenhouse_boards.md`/`keka_boards.md`, merging into `jobs_raw_text.json` ahead of `/structure`. Fail-soft — an absent watchlist or a whole-lane outage exits 0, never stops `/run`.
+**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data, schedule disabled, no Notion IDs) — see the `/verify` skill. Never run test/experimental stages against `profiles/harish/` or `profiles/uvashree/`; those hold real user data.
 
-## Development
+## Profile resolution
 
-- `npm test` — the full suite (`node --test scripts/`, Node's built-in test runner, recursive).
-- Run a single test file: `node --test scripts/ops/release.test.js` (or any other `*.test.js`).
-- Tests are colocated next to the module they cover (e.g. `dedup.js` → `dedup.test.js`). Pure/exported functions are unit-tested; `main()` orchestration (file I/O, `execFileSync` shell-outs) is deliberately not — see any `pipeline/*.js` or `ops/release.js` for the pattern.
-- No lint or build step is configured.
+Everything is multi-profile. `scripts/lib/config.js` is the **only** place that knows the filesystem layout — all scripts get paths from its `paths()` and profile config from `loadProfile()`. Selection precedence: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. Each Bash call is a fresh shell, so prefix `JOBBUNNY_PROFILE=<name>` on **every** command rather than relying on `export`.
 
-## Profiles & paths
+Per profile (`profiles/<name>/`): `profile.json` (Notion IDs, schedule times, Telegram chat_id), `resume.json` → `resume_meta.json` (generated by `npm run meta`), `search_urls.md` (LinkedIn saved searches, one page-type per group), `filter_config.json`, `avoid.md`, `greenhouse_boards.md` / `keka_boards.md` (ATS watchlists). Per-run intermediates live in `profiles/<name>/data/` and are gitignored.
 
-- Each persona lives in `profiles/<name>/`: resume, resume_meta, `avoid.md`, `filter_config.json`, `search_urls.md`, `profile.json` (its own Notion page + DB ids), and `data/` (cache + per-run intermediates).
-- Resolution: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. **`scripts/lib/config.js` is the only module that knows the layout** — resolve every path through it.
-- **Profiles-only layout.** Legacy mode (pre-v0.7 root paths, env Notion ids) was removed in v1.2; no `config.json` and no explicit `JOBBUNNY_PROFILE` fails loud pointing at `/setup`.
-- Shared across profiles: `page_inventory/`, `.chrome-debug/` (one Chrome/LinkedIn session — never copy account-personalized URLs like the *Recommended* collection between profiles), `templates/`, and `NOTION_TOKEN` in `.env`.
-- **`profiles/rajni/` is a committed, synthetic fixture profile** — the standard target for testing filter/dedup/rank and extract's resume logic (see `profiles/rajni/README.md`, `.claude/skills/verify/SKILL.md`). The only profile checked into git; every other profile stays local-only.
+Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env` (gitignored, template in `.env.example`); Notion DB/page IDs live in `profile.json`, never in `.env`.
 
-## Running stages
+## Pipeline architecture
 
-- **Pass the profile as an env prefix per command** (`JOBBUNNY_PROFILE=<p> node scripts/<x>.js`). Each bash call is a fresh shell — repeat the prefix every time; never rely on `export`. Scripts never take a profile argv.
-- **Chrome for `/extract`:** `/doctor` still preflights Chrome (launch + CDP check via `scripts/lib/browser.js`), but `extract.js` now owns the lifecycle end-to-end — it ensures Chrome itself if missing and always kills it on exit (any exit path) unless `JOBBUNNY_KEEP_BROWSER=1`. LinkedIn login persists across runs in the on-disk `.chrome-debug/` profile. Never tell the user to launch Chrome manually.
-- **DOM drift is a config fix, not a code fix.** `extract.js` reads selectors/behavior from `page_inventory/<page>.md` at runtime — repair breakage by editing the inventory (via `/page-analyse`), not by regenerating code.
-- **Scheduled runs never overlap.** `/schedule` installs launchd jobs that fire `claude -p "/run <profile>"` headlessly; profiles sharing a `schedule.time` run strictly sequentially inside `run_scheduled.sh` because they share the one Chrome/CDP session. Never introduce concurrent `/run`s.
+The `/run` slash command orchestrates the stages in order; each stage is a plain Node CLI reading explicit input files and writing explicit output files under `profiles/<name>/data/`:
 
-## Code quality principles
+```
+doctor → reconcile → extract → greenhouse → keka → compress → structure → assemble → filter → dedup → rank → sync
+```
 
-Consult these before writing or architecting anything — they apply to every line of code, not just the repo-specific rules below. This codebase is read and edited by other people; optimizing for "it works" alone is not acceptable.
+| Stage | Script | Output |
+|---|---|---|
+| doctor | `scripts/ops/doctor.js` | preflight only — red aborts the run |
+| reconcile | `scripts/notion/cache.js` | `cache.json` rebuilt from the live Notion DB |
+| extract | `scripts/pipeline/extract.js` | `jobs_raw_text.json`, `companies_seen.json` |
+| greenhouse / keka | `scripts/pipeline/{greenhouse,keka}.js` | appends to `jobs_raw_text.json` (`gh-`/`kk-` ids) |
+| compress | `scripts/pipeline/compress.js` | `structure_input.md` + `structure_passthrough.json` |
+| **structure** | **no script — LLM stage done inline by Claude** (see `.claude/commands/structure.md`) | `jobs_raw_decisions.md` (checkpoints every 25 rows) |
+| assemble | `scripts/pipeline/assemble.js` | `jobs_raw.json` (decisions + passthrough merged) |
+| filter / dedup / rank | `scripts/pipeline/{filter,dedup,rank}.js` | `filtered_jobs.json` → `new_jobs.json` (+ scores) |
+| sync | `scripts/notion/notion_sync.js` | pushes to Notion, updates `cache.json` + `last_run` |
 
-- **Design before typing.** Before writing code, read the neighboring code and `scripts/lib/` for existing utilities; state (to yourself or the user) the shape of the change — inputs, outputs, where it lives — before implementing it. Reuse beats reimplementation, always.
-- **Simplest complete solution.** The smallest design that fully solves the problem wins. No speculative generality, no config knobs "for later", no abstraction until a second concrete caller exists (YAGNI). If a function needs a comment to explain *what* it does, restructure it instead.
-- **One home per concern.** Follow the domain layout (`lib/` shared, `pipeline/` stages, `notion/`, `notify/`, `ops/`, `setup/`). New logic goes where a future reader would look for it — never inline a second copy of something `lib/` already owns.
-- **Write for the next editor, not this ticket.** Names say what things are; functions are small and single-purpose; pure logic is separated from I/O orchestration (this is also what makes it testable — see the existing `main()`-vs-exported-functions pattern). Assume the next person editing this has no memory of this conversation.
-- **Think beyond one point of view.** Before settling on a design, check it against: other callers of the touched code, other profiles, the scheduled/headless path, and failure modes (missing file, empty input, network down). A fix that works only for the case at hand is not done.
-- **Consistency over preference.** Match the file's existing idioms — naming, error style, CLI parsing via `lib/cli.js`, JSON I/O via `lib/io.js` — even when you'd personally choose differently.
-- **Markdown is code here — write it with surgical precision.** This repo's `.md` files (`CLAUDE.md`, `.claude/commands/*.md`, `page_inventory/*.md`, profile docs) are LLM instructions loaded into context: every line costs tokens and dilutes attention. State each rule once, in the fewest words that remove ambiguity — no filler, no hedging, no restating what code or another doc already says. When editing, prefer tightening an existing line over adding a new one; bloat compounds.
+Key invariants:
 
-**After coding — mandatory before any PR that touches product code:** run `npm test`, then `/simplify` (reuse/simplification/efficiency pass on the changed code), then `/verify` (exercise the change end-to-end). For larger changes, also run `/code-review`. Do not open the PR until all pass clean. Doc-only and `release.js` version-sync PRs need only `npm test`.
+- **Notion is the source of truth.** `cache.json` is always rebuildable from the live DB (`/reconcile` is read-only on Notion). `sync` writes only automated fields, never user-edited ones.
+- **Fail-soft where breadth matters, fail-loud everywhere else.** In extract, a broken page-group or URL is skipped and recorded — one stale selector must never kill a run. The Greenhouse/Keka lanes exit 0 on a missing watchlist or whole-lane outage. Everything else fails loudly with a non-zero exit.
+- **Extract is config-driven, not code-driven.** Selectors and page behavior come from `page_inventory/<page>.md`, read at runtime. DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing `extract.js`. `search_urls.md` maps each URL group to its inventory.
+- **Extract owns Chrome.** `scripts/lib/browser.js` launches Chrome with `--remote-debugging-port=9222` against the `.chrome-debug/` user-data-dir (persistent LinkedIn login) and always kills it on exit unless `JOBBUNNY_KEEP_BROWSER=1`.
+- **Extract is resumable.** `extract_resume.json` tracks per-URL same-day completion (a rerun skips done URLs; all-done triggers a rescan reset for multi-fire schedules; `JOBBUNNY_FRESH=1` forces clean). `extract_progress.json` is a heartbeat rewritten at every checkpoint so the scheduled-run watchdog can detect stalls. Same-day resets must never discard already-flushed captures.
+- **The two ATS lanes share scaffolding.** `scripts/pipeline/ats_common.js` holds the generic probe/fetch loops; per-ATS specifics are injected. A third lane should reuse it.
+- **Never background a pipeline stage** (no `run_in_background`), especially extract. Headless runs execute via a single-shot `claude -p "/run <profile>"` — a backgrounded stage's completion notification can never arrive and silently truncates the run.
 
-## Writing & changing code
+## Scheduling and notifications
 
-- **`main` is protected — branch + PR, no exceptions.** All work (features and the `/wrap ship` version-sync chore alike) branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`, …) and lands via a pull request with the `test` check green. Nothing pushes to `main` directly — enforced for admins too; only tags are pushed straight (`git push origin vX.Y.Z`).
-- **`/wrap ship`'s mechanics are owned by `scripts/ops/release.js`**, not freeform `git`/`gh` commands: preflight (clean tree, tag doesn't already exist, `CHANGELOG.md` has a dated block for the target version) → version-sync → release branch/PR → checks → a merge-confirmation pause (never unconditional auto-merge) → tag only after confirming the merged commit is reachable from `origin/main` (avoids tagging a pre-squash orphan commit). Idempotent — re-running after any failure resumes from wherever it left off. Its merge-confirmation prompt needs live stdin, so never run it backgrounded/detached.
-- **Every script:** explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
-- **Token efficiency is a design constraint on the `/structure` path.** Stage A drops avoid-list companies on card data before JDs are opened; `compress.js` pre-filters by card title and emits a compact markdown table; `/structure` outputs a markdown table too (`jobs_raw_decisions.md`), not JSON. Preserve this shape — it roughly halves the stage's token cost.
-- **Avoid-list matching** normalizes both sides: lowercase, strip legal suffixes, apply the alias map (see the profile's `avoid.md`).
-- **`resume_meta.json`'s `location`** is a string (one home city) or an array of strings (multiple home cities) — never assume a bare string. Use `homeLocations()`/`isHomeCity()` from `scripts/lib/util.js` for any home-city check; don't re-implement the comparison.
-- **`/add-url` cleans URLs** before filing them under their Channel → page node: strips ephemeral tracking/pagination params, drops stale absolute `f_TPR=a<epoch>-` anchors (keeps relative `r<sec>`), keeps stable filter params, preserves the path as-is. Exact param list: `add-url.md`.
+`scripts/ops/schedule.js` reads each profile's `schedule.times` from `profile.json` and installs one launchd job per distinct time. Each job runs `scripts/ops/run_scheduled.sh`, which runs profiles strictly sequentially (they share one Chrome/CDP session), invokes `claude -p "/run <profile>" --dangerously-skip-permissions` with `JOBBUNNY_HEADLESS=1`, and races watchdogs against it (extract-started heartbeat, progress-stall, full-run timeout).
 
-## Notion writes
+Run outcome is communicated by file, not by parsing output: `/run` must always end with `scripts/ops/mark_run_result.js --status success|failed`, which `run_scheduled.sh` reads via `check_run_result.js`. Telegram digests are sent by `run_scheduled.sh` for headless runs and by `/run` itself only when `JOBBUNNY_HEADLESS` is unset — never both.
 
-- **Select option strings are byte-exact** (`scripts/notion/schema.js`). Changing one without updating the existing Notion options makes sync throw.
-- `notion_sync` writes **automated fields only** — manual tracking fields (Status, Notes, …) are never touched. Inserts/anchored updates only; never whole-page overwrite or delete.
-- Design docs in Notion: append or anchored-replace only; never blind-overwrite.
+## Slash commands and skills
 
-## Hard guardrails
+The workflow surface is the slash commands in `.claude/commands/` (mirrored as skills): `/setup` (onboarding wizard), `/run` (full pipeline), `/doctor`, per-stage commands, `/page-analyse` (rebuild a page inventory via browser DOM analysis), `/schedule`, `/notify-setup`, `/reconcile`, `/cleanup` (Notion archival, not part of `/run`), `/wrap` (session close-out / release). Read the command file before modifying any stage — the command docs carry the operational contracts (fail-soft rules, summary templates, headless checks) that the scripts assume.
 
-- No PDF parsing in the daily path — `resume.json` is the hand-maintained source of truth; PDF→JSON is a one-time `/setup` seed only.
+## Before any PR
+
+`main` is protected — all work branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`) and lands via a PR with the `test` check green; only tags are pushed straight. Gate for product-code PRs: `npm test` → `/simplify` → `/verify` (exercise the change end-to-end); larger changes also `/code-review`. Run `/simplify` and `/code-review` at **medium effort only** — never higher; the extra effort levels burn tokens without paying for themselves here. Doc-only and version-sync PRs need only `npm test`.
+
+## Hard rules
+
+- **Notion select option strings are byte-exact** (`scripts/notion/schema.js`) — changing one without updating the live Notion options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or delete.
+- **`resume_meta.json`'s `location`** is a string or an array of strings — use `homeLocations()`/`isHomeCity()` from `scripts/lib/util.js` for any home-city check; don't re-implement the comparison.
+- **Token efficiency is a design constraint on the `/structure` path.** Avoid-list companies drop on card data before JDs open; `compress.js` emits a compact markdown table; `/structure` outputs a markdown table, not JSON. Preserve this shape — it roughly halves the stage's token cost.
+- **No PDF parsing in the daily path** — `resume.json` is the hand-maintained source of truth; PDF→JSON is a one-time `/setup` seed only.
+- **`release.js`'s merge-confirmation prompt needs live stdin** — never run it backgrounded or detached.
+- **Markdown is code here.** `.claude/commands/*.md`, `page_inventory/*.md`, and this file are LLM instructions loaded into context — state each rule once; prefer tightening an existing line over adding a new one.
+
+## Conventions
+
+- ESM throughout (`"type": "module"`), Node >= 20, minimal dependencies (`@notionhq/client`, `dotenv`, `playwright`).
+- Reuse `scripts/lib/` before writing anything new; no abstraction until a second concrete caller exists; match the file's existing idioms (CLI parsing via `lib/cli.js`, JSON I/O via `lib/io.js`).
+- Every script: explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
+- Unit tests are colocated (`foo.js` + `foo.test.js`) and use the built-in `node:test` runner. Scripts guard CLI entry with `isMain` (`scripts/lib/cli.js`) so tests can import them.
+- Every script has a comment header stating its contract (inputs, outputs, invariants) — keep these accurate when changing behavior.
+- Releases: `/wrap ship` — CHANGELOG.md gets a dated `## [X.Y.Z] — YYYY-MM-DD` block first (human judgment), then `release.js` handles branch/PR/checks/tag. PRs are squash-merged; the tag goes on merged main HEAD.
