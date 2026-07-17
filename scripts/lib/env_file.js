@@ -27,3 +27,14 @@ export async function writeEnvKey(key, value, path = ENV_PATH) {
   else text = text.replace(/\n*$/, "\n") + line + "\n";
   await writeFile(path, text);
 }
+
+// Read-modify-write: strips an existing KEY=... line (and its trailing newline) if
+// present, else no-ops. Mirrors writeEnvKey's regex-based line-replace approach.
+export async function removeEnvKey(key, path = ENV_PATH) {
+  if (!(await exists(path))) return;
+  let text = await readFile(path, "utf8");
+  const re = new RegExp(`^${key}=.*\\n?`, "m");
+  if (!re.test(text)) return;
+  text = text.replace(re, "");
+  await writeFile(path, text);
+}
