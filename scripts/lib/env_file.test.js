@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readEnvFile, writeEnvKey } from "./env_file.js";
+import { readEnvFile, writeEnvKey, removeEnvKey } from "./env_file.js";
 
 const DIR = await mkdtemp(join(tmpdir(), "jobbunny-env-"));
 
@@ -33,6 +33,39 @@ test("writeEnvKey replaces an existing key in place rather than duplicating it",
   assert.equal(env.TELEGRAM_BOT_TOKEN, "shared");
   const raw = await readFile(p, "utf8");
   assert.equal((raw.match(/^NOTION_TOKEN=/gm) || []).length, 1);
+});
+
+test("removeEnvKey removes an existing key", async () => {
+  const p = join(DIR, "remove.env");
+  await writeEnvKey("TELEGRAM_BOT_TOKEN_HARISH", "abc123", p);
+  await removeEnvKey("TELEGRAM_BOT_TOKEN_HARISH", p);
+  const env = await readEnvFile(p);
+  assert.equal(env.TELEGRAM_BOT_TOKEN_HARISH, undefined);
+});
+
+test("removeEnvKey leaves other keys untouched", async () => {
+  const p = join(DIR, "remove-others.env");
+  await writeEnvKey("NOTION_TOKEN", "shared", p);
+  await writeEnvKey("TELEGRAM_BOT_TOKEN_HARISH", "abc123", p);
+  await writeEnvKey("TELEGRAM_BOT_TOKEN_UVASHREE", "def456", p);
+  await removeEnvKey("TELEGRAM_BOT_TOKEN_HARISH", p);
+  const env = await readEnvFile(p);
+  assert.equal(env.NOTION_TOKEN, "shared");
+  assert.equal(env.TELEGRAM_BOT_TOKEN_UVASHREE, "def456");
+  assert.equal(env.TELEGRAM_BOT_TOKEN_HARISH, undefined);
+});
+
+test("removeEnvKey no-ops silently when the file doesn't exist", async () => {
+  const p = join(DIR, "missing-remove.env");
+  await assert.doesNotReject(removeEnvKey("NOTION_TOKEN", p));
+});
+
+test("removeEnvKey no-ops silently when the key doesn't exist in an existing file", async () => {
+  const p = join(DIR, "no-such-key.env");
+  await writeEnvKey("NOTION_TOKEN", "shared", p);
+  await assert.doesNotReject(removeEnvKey("TELEGRAM_BOT_TOKEN_HARISH", p));
+  const env = await readEnvFile(p);
+  assert.equal(env.NOTION_TOKEN, "shared");
 });
 
 test.after(async () => {

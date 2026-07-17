@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { ROOT, paths, loadProfile, resolveProfileName } from "../lib/config.js";
 import { homeLocations } from "../lib/util.js";
 import { parseWatchlist } from "../pipeline/ats_common.js";
-import { ensureChrome, closeStaleTabs } from "../lib/browser.js";
+import { ensureChrome, closeExistingTabs } from "../lib/browser.js";
 import { notify } from "../notify/notify.js";
 import { telegramTokenEnvKey } from "../notify/telegram.js";
 
@@ -109,7 +109,7 @@ async function checkCDP() {
       `reachable (${version?.Browser || "Chrome"})` +
         (launched ? " — just launched" : recycled ? " — recycled (stale >24h)" : "")
     );
-    await closeStaleTabs();
+    await closeExistingTabs();
   } catch (err) {
     fail(`Chrome did not start in time — open it manually and retry (${err.message})`);
   }
@@ -159,7 +159,7 @@ async function main() {
     process.exit(1);
   }
   console.log("[doctor] all green — ready to /run.");
-  // checkCDP()'s closeStaleTabs() may leave an open CDP/WebSocket handle behind — exit
+  // checkCDP()'s closeExistingTabs() may leave an open CDP/WebSocket handle behind — exit
   // explicitly rather than let the process hang on it (same rationale as extract.js's own
   // "never browser.close(), just process.exit()" note: this attaches to the user's real,
   // persistent Chrome, so we drop the connection without touching the browser itself).

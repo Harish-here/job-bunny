@@ -71,28 +71,22 @@ export function decideChromeAction({ reachable, ageMs, maxAgeMs = CHROME_MAX_AGE
   return "reuse";
 }
 
-// Chrome opens its default "New Tab Page" whenever it's launched with no URL argument;
-// extract.js never touches it (it only ever opens its own new pages), so it just sits there
-// indefinitely. Closed over the same CDP attach path extract.js uses, following its documented
-// rule: never browser.close() here — this attaches to the user's real, persistent Chrome, and
-// closing the Browser object over CDP would take the whole process down with it.
-export async function closeStaleTabs({ url = CDP_URL } = {}) {
+// A reused Chrome process (the normal, CDP-reachable-and-fresh path) may still be carrying tabs
+// left open by a run that never tore down cleanly — a watchdog SIGKILL after its grace period,
+// or a silent OS-sleep process-tree kill (both already documented above and in run_scheduled.sh).
+// createSession()'s tab registry is scoped to one process, so a prior run's leftover tabs are
+// invisible to the next run's session and would otherwise just accumulate forever. Closed over
+// the same CDP attach path extract.js uses, following its documented rule: never browser.close()
+// here — this attaches to the user's real, persistent Chrome, and closing the Browser object over
+// CDP would take the whole process down with it. Closing every tab (not just blank/new-tab ones)
+// is safe — the persistent LinkedIn login lives in the .chrome-debug/ user-data-dir's
+// cookies/local-storage, not in any open tab.
+export async function closeExistingTabs({ url = CDP_URL } = {}) {
   try {
     const browser = await chromium.connectOverCDP(url, { noDefaults: true });
     const context = browser.contexts()[0];
     if (!context) return;
-    for (const page of context.pages()) {
-      // "chrome://newtab/" is what this Chrome version (verified live against a fresh
-      // profile) actually reports for its default New Tab Page; "chrome://new-tab-page/"
-      // is included defensively for other/future Chrome versions that resolve it there.
-      if (
-        page.url() === "about:blank" ||
-        page.url() === "chrome://newtab/" ||
-        page.url() === "chrome://new-tab-page/"
-      ) {
-        await page.close().catch(() => {});
-      }
-    }
+    await Promise.all(context.pages().map((page) => page.close().catch(() => {})));
   } catch {
     // best-effort cleanup only — never fail the caller over it
   }
@@ -105,6 +99,7 @@ export async function ensureChrome({ recycleIfOld = true, launchTimeoutMs = 10_0
   const action = decideChromeAction({ reachable: !!v, ageMs });
 
   if (action === "reuse") {
+    await closeExistingTabs();
     return { launched: false, recycled: false, version: v };
   }
 
@@ -135,7 +130,7 @@ export async function ensureChrome({ recycleIfOld = true, launchTimeoutMs = 10_0
     await new Promise((r) => setTimeout(r, 1000));
     const nv = await cdpReachable();
     if (nv) {
-      await closeStaleTabs();
+      await closeExistingTabs();
       return { launched: true, recycled, version: nv };
     }
   }
