@@ -68,32 +68,23 @@ Run outcome is communicated by file, not by parsing output: `/run` must always e
 
 The workflow surface is the slash commands in `.claude/commands/` (mirrored as skills): `/setup` (onboarding wizard), `/run` (full pipeline), `/doctor`, per-stage commands, `/page-analyse` (rebuild a page inventory via browser DOM analysis), `/schedule`, `/notify-setup`, `/reconcile`, `/cleanup` (Notion archival, not part of `/run`), `/wrap` (session close-out / release). Read the command file before modifying any stage — the command docs carry the operational contracts (fail-soft rules, summary templates, headless checks) that the scripts assume.
 
-## Code quality principles
-
-- **Reuse before writing.** Check neighboring code and `scripts/lib/` for an existing utility first; never inline a second copy of something `lib/` owns. New logic goes in the domain directory a future reader would search (`lib/` shared, `pipeline/` stages, `notion/`, `notify/`, `ops/`, `setup/`).
-- **Smallest complete design wins.** No speculative generality, no config knobs "for later", no abstraction until a second concrete caller exists.
-- **Match the file's existing idioms** — naming, error style, CLI parsing via `lib/cli.js`, JSON I/O via `lib/io.js` — even when you'd personally choose differently. Keep pure logic separate from I/O orchestration (the existing `main()`-vs-exported-functions pattern is what makes stages testable).
-- **Check the design against more than the case at hand:** other callers of the touched code, other profiles, the scheduled/headless path, and failure modes (missing file, empty input, network down).
-- **Markdown is code here.** `CLAUDE.md`, `.claude/commands/*.md`, `page_inventory/*.md`, and profile docs are LLM instructions loaded into context — every line costs tokens and dilutes attention. State each rule once; prefer tightening an existing line over adding a new one.
-
 ## Before any PR
 
-`main` is protected — all work branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`) and lands via a PR with the `test` check green. Nothing pushes to `main` directly (enforced for admins too); only tags are pushed straight (`git push origin vX.Y.Z`).
-
-Mandatory gate for PRs touching product code: `npm test` → `/simplify` (reuse/simplification pass on the changed code) → `/verify` (exercise the change end-to-end). Larger changes also get `/code-review`. Doc-only and `release.js` version-sync PRs need only `npm test`.
+`main` is protected — all work branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`) and lands via a PR with the `test` check green; only tags are pushed straight. Gate for product-code PRs: `npm test` → `/simplify` → `/verify` (exercise the change end-to-end); larger changes also `/code-review`. Doc-only and version-sync PRs need only `npm test`.
 
 ## Hard rules
 
-- **Notion select option strings are byte-exact** (`scripts/notion/schema.js`) — changing one without updating the live Notion options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or delete. Notion design docs: append or anchored-replace, never blind-overwrite.
-- **`resume_meta.json`'s `location`** is a string (one home city) or an array of strings — never assume a bare string. Use `homeLocations()`/`isHomeCity()` from `scripts/lib/util.js` for any home-city check; don't re-implement the comparison.
-- **Avoid-list matching normalizes both sides:** lowercase, strip legal suffixes, apply the alias map from the profile's `avoid.md`.
-- **Token efficiency is a design constraint on the `/structure` path.** Stage A drops avoid-list companies on card data before JDs are opened; `compress.js` pre-filters by card title and emits a compact markdown table; `/structure` outputs a markdown table (`jobs_raw_decisions.md`), not JSON. Preserve this shape — it roughly halves the stage's token cost.
+- **Notion select option strings are byte-exact** (`scripts/notion/schema.js`) — changing one without updating the live Notion options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or delete.
+- **`resume_meta.json`'s `location`** is a string or an array of strings — use `homeLocations()`/`isHomeCity()` from `scripts/lib/util.js` for any home-city check; don't re-implement the comparison.
+- **Token efficiency is a design constraint on the `/structure` path.** Avoid-list companies drop on card data before JDs open; `compress.js` emits a compact markdown table; `/structure` outputs a markdown table, not JSON. Preserve this shape — it roughly halves the stage's token cost.
 - **No PDF parsing in the daily path** — `resume.json` is the hand-maintained source of truth; PDF→JSON is a one-time `/setup` seed only.
 - **`release.js`'s merge-confirmation prompt needs live stdin** — never run it backgrounded or detached.
+- **Markdown is code here.** `.claude/commands/*.md`, `page_inventory/*.md`, and this file are LLM instructions loaded into context — state each rule once; prefer tightening an existing line over adding a new one.
 
 ## Conventions
 
 - ESM throughout (`"type": "module"`), Node >= 20, minimal dependencies (`@notionhq/client`, `dotenv`, `playwright`).
+- Reuse `scripts/lib/` before writing anything new; no abstraction until a second concrete caller exists; match the file's existing idioms (CLI parsing via `lib/cli.js`, JSON I/O via `lib/io.js`).
 - Every script: explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
 - Unit tests are colocated (`foo.js` + `foo.test.js`) and use the built-in `node:test` runner. Scripts guard CLI entry with `isMain` (`scripts/lib/cli.js`) so tests can import them.
 - Every script has a comment header stating its contract (inputs, outputs, invariants) — keep these accurate when changing behavior.
