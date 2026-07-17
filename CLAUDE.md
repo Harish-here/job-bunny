@@ -70,7 +70,7 @@ The workflow surface is the slash commands in `.claude/commands/` (mirrored as s
 
 ## Before any PR
 
-`main` is protected — all work branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`) and lands via a PR with the `test` check green; only tags are pushed straight. Gate for product-code PRs: `npm test` → `/simplify` → `/verify` (exercise the change end-to-end); larger changes also `/code-review`. Doc-only and version-sync PRs need only `npm test`.
+`main` is protected — all work branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`) and lands via a PR with the `test` check green; only tags are pushed straight. Gate for product-code PRs: `npm test` → `/simplify` → `/verify` (exercise the change end-to-end); larger changes also `/code-review`. Run `/simplify` and `/code-review` at **medium effort only** — never higher; the extra effort levels burn tokens without paying for themselves here. Doc-only and version-sync PRs need only `npm test`.
 
 ## Hard rules
 
