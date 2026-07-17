@@ -261,7 +261,7 @@ for profile in "$@"; do
     JOBBUNNY_PROFILE="$profile" node "$ROOT/scripts/notify/notify.js" --severity blocking --title "Run failed" --body "$MESSAGE"
   fi
 
-  echo "[run_scheduled.sh] Finished profile: $profile (status: $STATUS)" >&2
+  echo "[run_scheduled.sh] Finished profile: $profile (status: $STATUS, reason: $REASON)" >&2
 done
 
 # All scheduled profiles for this invocation are done — close the debug Chrome instead of
