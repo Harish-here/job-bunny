@@ -199,20 +199,22 @@ export async function runProbePhase({ companiesSeen, ledger, avoid, probeCandida
 // Fetches every board on a lane's watchlist and gates each job through the same seen/cache/
 // avoid/title checks as the LinkedIn lane. Per-ATS behavior is injected: `fetchBoardJobs(board)`
 // pulls a board's raw job list; `jobIdFor(job)` computes its prefixed id; `mapJob(job, board)`
-// maps it into the extract.js record shape; `titlePass(title)` is the title gate. `tag` and
-// `capEnvLabel` only affect log prefixes/messages.
+// maps it into the extract.js record shape; `dropAvoid(model)`/`dropTitle(model)` are the
+// avoid/title drop predicates (the caller wires these to jd_filter.js's evaluate(), scoped via
+// `only`, so the decision stays in sync with the shared filter engine — this module itself stays
+// engine-agnostic). `tag` and `capEnvLabel` only affect log prefixes/messages.
 export async function runFetchPhase({
   boards,
   seen,
   cacheIds,
-  avoid,
   maxNew,
   capEnvLabel,
   tag,
   fetchBoardJobs,
   jobIdFor,
   mapJob,
-  titlePass,
+  dropAvoid,
+  dropTitle,
 }) {
   const counts = {
     boardsFetched: 0,
@@ -254,11 +256,11 @@ export async function runFetchPhase({
         counts.cacheSkipped++;
         continue;
       }
-      if (isAvoided(board.name, avoid)) {
+      if (dropAvoid({ company: board.name })) {
         counts.avoidDropped++;
         continue;
       }
-      if (!titlePass(job.title || "")) {
+      if (dropTitle({ title: job.title || "" })) {
         counts.titleDropped++;
         continue;
       }

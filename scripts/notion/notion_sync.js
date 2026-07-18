@@ -14,7 +14,7 @@ import { dedupKey } from "../lib/util.js";
 import { readCache, writeCache } from "./cache.js";
 import { paths, loadProfile, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
-import { PROP } from "./schema.js";
+import { PROP, DB_PROPERTIES } from "./schema.js";
 
 const IN = paths().newJobs;
 
@@ -29,6 +29,7 @@ function buildProperties(job) {
     [PROP.KEY_SKILLS]: { rich_text: rt((job.key_skills || []).join(", ")) },
     [PROP.YOE_IS_MINIMUM]: { checkbox: !!job.yoe_is_minimum },
     [PROP.MATCH_REASONS]: { rich_text: rt((job.match_reasons || []).join("\n")) },
+    [PROP.REVIEW_FLAGS]: { rich_text: rt((job.filter_flags || []).join("; ")) },
   };
   if (typeof job.years_of_experience === "number") props[PROP.YOE] = { number: job.years_of_experience };
   if (job.job_url) props[PROP.JOB_URL] = { url: job.job_url };
@@ -41,6 +42,22 @@ function buildProperties(job) {
   return props;
 }
 
+// Fail-soft migration: DBs created before a DB_PROPERTIES entry existed (e.g. "Review Flags")
+// won't have it live. Add any missing properties to the live DB; never throws on its own —
+// a failure here just means the normal Notion write error will surface later on pages.create.
+async function ensureSchema(notion, dbId) {
+  try {
+    const db = await notion.databases.retrieve({ database_id: dbId });
+    const missing = Object.keys(DB_PROPERTIES).filter((name) => !db.properties[name]);
+    if (missing.length === 0) return;
+    const properties = Object.fromEntries(missing.map((name) => [name, DB_PROPERTIES[name]]));
+    await notion.databases.update({ database_id: dbId, properties });
+    console.log(`[sync] added missing DB propert${missing.length === 1 ? "y" : "ies"}: ${missing.join(", ")}`);
+  } catch (err) {
+    console.warn(`[sync] WARN: could not ensure DB schema (${err.message}) — continuing`);
+  }
+}
+
 async function main() {
   console.log(`[sync] profile=${resolveProfileName()}`);
   const dbId = loadProfile().notion_db_id;
@@ -50,6 +67,7 @@ async function main() {
   if (!Array.isArray(jobs)) throw new Error(`${IN} must be a JSON array`);
 
   const notion = createClient();
+  await ensureSchema(notion, dbId);
   const cache = await readCache();
   const seen = new Set(cache.jobs.map(dedupKey));
 

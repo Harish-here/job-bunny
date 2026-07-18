@@ -1,9 +1,12 @@
 // scripts/pipeline/extract/filters.js — pure pre-JD card filter pipeline. Applies, in order,
 // the avoid-list drop, cache-skip, run-dedup, and title-filter gates, plus the CARD_CAP slice.
-// Log lines are injected (not console.log directly) so the pipeline is unit-testable.
+// The avoid/title drop decisions are delegated to the shared filter engine (jd_filter.js)'s
+// evaluate(), scoped via `only` to just the one rule each gate needs — this keeps both gates in
+// sync with the engine used everywhere else (filter.js, the ATS lanes) without collapsing their
+// distinct pipeline positions (a companiesSeen capture step sits between them). Log lines are
+// injected (not console.log directly) so the pipeline is unit-testable.
 
-import { isAvoided } from "../avoid.js";
-import { filterByTitle } from "../title_filter.js";
+import { evaluate } from "../jd_filter.js";
 
 // Applies a predicate, logs the drop count via msgFn(n), and accumulates into summary[summaryKey].
 export function stageFilter(cards, pred, msgFn, summaryKey, summary, log = console.log) {
@@ -16,20 +19,20 @@ export function stageFilter(cards, pred, msgFn, summaryKey, summary, log = conso
 }
 
 // Applies, in this exact order, the pre-JD card gates (mirrors extract.js main()):
-//   1. avoid-drop     — drop cards whose company is on the avoid list
+//   1. avoid-drop     — drop cards whose company is on the avoid list (engine, only:['avoid'])
 //   2. companiesSeen capture — BEFORE the cache/title gates: a title-dropped company is still
 //      Greenhouse-probe-worthy, so it must be captured ahead of those filters, not after them.
 //   3. cache-skip     — drop cards whose job_id is already known (Notion cache)
 //   4. run-dedup      — drop cards whose job_id was already captured earlier this run
-//   5. title-filter   — drop cards whose title doesn't pass filterByTitle
+//   5. title-filter   — drop cards whose title doesn't pass the engine (only:['title'])
 //   6. CARD_CAP slice — applied last, after all filters, so it caps genuinely-new candidates
 export function applyCardGates(
   cards,
-  { avoid, cachedIds, seenIds, cardCap = 0, debug = false, summary, companiesSeen, log = console.log }
+  { ctx, cachedIds, seenIds, cardCap = 0, debug = false, summary, companiesSeen, log = console.log }
 ) {
   cards = stageFilter(
     cards,
-    (c) => !isAvoided(c.company, avoid),
+    (c) => !evaluate({ company: c.company }, ctx, { severity: "lenient", only: ["avoid"] }).drop,
     (n) => `Stage A: dropped ${n} avoid-list card(s) pre-JD`,
     "avoided",
     summary,
@@ -64,9 +67,9 @@ export function applyCardGates(
   cards = stageFilter(
     cards,
     (c) => {
-      const r = filterByTitle(c.title || "");
-      if (!r.pass && debug) log(`[title-filter] DROP — ${r.reason} — ${c.title}`);
-      return r.pass;
+      const result = evaluate({ title: c.title }, ctx, { severity: "lenient", only: ["title"] });
+      if (result.drop && debug) log(`[title-filter] DROP — ${result.reasons.join(", ")} — ${c.title}`);
+      return !result.drop;
     },
     (n) => `title-filter: dropped ${n} card(s) pre-JD`,
     "title_dropped",
