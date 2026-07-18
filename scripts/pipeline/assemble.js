@@ -1,9 +1,9 @@
 // scripts/pipeline/assemble.js — merges LLM decisions (markdown table) with passthrough fields → jobs_raw.json.
 // Reads jobs_raw_decisions.md + structure_passthrough.json, merges on job_id.
 //
-// Decisions markdown — 11 fixed columns, header row required:
-//   | job_id | title | company | seniority | city | work_type | yoe | yoe_min | skills | tz | tz_bad |
-//   |--------|-------|---------|-----------|------|-----------|-----|---------|--------|-----|--------|
+// Decisions markdown — 12 fixed columns, header row required:
+//   | job_id | title | company | seniority | city | country | work_type | yoe | yoe_min | skills | tz | tz_bad |
+//   |--------|-------|---------|-----------|------|---------|-----------|-----|---------|--------|-----|--------|
 //   empty cell = null · booleans: true/false · skills: semicolon-separated · pipe in value: ｜
 
 import { readFile, unlink } from "node:fs/promises";
@@ -33,8 +33,8 @@ function parseDecisionsMd(md) {
   return dataLines.map((line, i) => {
     const rowNum = i + 1;
     const cells = line.split("|").slice(1, -1).map((c) => c.trim());
-    if (cells.length !== 11)
-      throw new Error(`row ${rowNum}: expected 11 cells, got ${cells.length} — escape pipes in values with ｜`);
+    if (cells.length !== 12)
+      throw new Error(`row ${rowNum}: expected 12 cells, got ${cells.length} — escape pipes in values with ｜`);
 
     const str  = (n) => cells[n] === "" ? null : cells[n].replace(/｜/g, "|");
     const num  = (n) => {
@@ -55,12 +55,13 @@ function parseDecisionsMd(md) {
       company_name:           str(2),
       seniority_level:        str(3),
       location_city:          str(4),
-      work_type:              str(5),
-      years_of_experience:    num(6),
-      yoe_is_minimum:         bool(7),
-      key_skills:             arr(8),
-      timezone_compatibility: str(9),
-      timezone_incompatible:  bool(10),
+      country:                str(5),
+      work_type:              str(6),
+      years_of_experience:    num(7),
+      yoe_is_minimum:         bool(8),
+      key_skills:             arr(9),
+      timezone_compatibility: str(10),
+      timezone_incompatible:  bool(11),
     };
   });
 }
