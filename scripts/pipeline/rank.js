@@ -1,8 +1,11 @@
 // scripts/pipeline/rank.js — deterministic 100-pt scorer. NO LLM, NO network.
 // Merges excitement_level + match_reasons[] into each job. Skill-synonym normalization is
 // done upstream in the structuring step; here key_skills are matched as-is (case-insensitive).
+// Jobs with zero matched core (primary) skills — including jobs with no key_skills at all —
+// are DROPPED from the output entirely, not merely down-scored.
 //
-// new_jobs.json (+ resume_meta.json, filter_config.json) → new_jobs.json (in place, fields added).
+// new_jobs.json (+ resume_meta.json, filter_config.json) → new_jobs.json (in place, zero-core-
+// match jobs removed, surviving jobs get fields added).
 //
 // Scoring (100 pts) — relevance 70, logistics 30:
 //   Skills overlap     40  weighted matches (core ×1.0, secondary ×0.5) ÷ clamp(|jd|, 3, 8), max 1.0
@@ -13,7 +16,8 @@
 //                          home-city (meta.location) hybrid/on-site = full · else 0
 //                          (tz is a soft-signal, never a drop)
 //   YoE fit            10  at/above = full · within -2 = partial · below 0 · null = neutral partial
-// Hard cap: 0 core-skill matches → score capped at 50 (can never reach Kandipa podu).
+// Hard drop: 0 core-skill matches (including empty/missing key_skills) → job is removed from
+// the output entirely in main(), not merely down-scored.
 // Bands: >=85 Vera level · 65-84 Kandipa podu · <65 Try panalam
 
 import { readFile } from "node:fs/promises";
@@ -30,7 +34,6 @@ const WORKTYPE_MAX = 20;
 const WORKTYPE_PARTIAL = 10;
 const YOE_MAX = 10;
 const YOE_PARTIAL = 5;
-const ZERO_CORE_CAP = 50;
 const SKILLS_DENOM_MIN = 3;
 const SKILLS_DENOM_MAX = 8;
 
@@ -155,16 +158,14 @@ export function scoreJob(job, meta, opts = {}) {
     reasons.push(`YoE ${candidate} below ${required} (+0)`);
   }
 
-  let score = skills + titlePts + seniority + wt + yoe;
+  const score = skills + titlePts + seniority + wt + yoe;
 
-  // Hard cap — no core-skill match means the role isn't ours no matter how convenient the
-  // logistics are (the architect-title over-credit fix).
-  if (coreMatched.length === 0 && score > ZERO_CORE_CAP) {
-    reasons.push(`No core skill match — capped at ${ZERO_CORE_CAP} (was ${score})`);
-    score = ZERO_CORE_CAP;
-  }
+  // No core-skill match means the role isn't ours no matter how convenient the logistics are
+  // (the architect-title over-credit fix) — flagged here, dropped by main() before the write.
+  const dropped = coreMatched.length === 0;
+  if (dropped) reasons.push(`No core skill match — dropped (score was ${score})`);
 
-  return { score, excitement_level: excitementFor(score), match_reasons: reasons };
+  return { score, excitement_level: excitementFor(score), match_reasons: reasons, dropped };
 }
 
 // Best-effort load of the profile's domain keywords — a missing/unparsable filter_config
@@ -193,14 +194,19 @@ async function main() {
   const domainKeywords = await loadDomainKeywords();
   if (domainKeywords.length === 0) console.log(`[rank] no domain keywords — title axis neutral`);
 
-  const ranked = jobs.map((job) => {
-    const { score, excitement_level, match_reasons } = scoreJob(job, meta, { domainKeywords });
-    return { ...job, score, excitement_level, match_reasons };
+  const scored = jobs.map((job) => {
+    const { score, excitement_level, match_reasons, dropped } = scoreJob(job, meta, { domainKeywords });
+    return { ...job, score, excitement_level, match_reasons, dropped };
   });
+
+  const ranked = scored
+    .filter((j) => !j.dropped)
+    .map(({ dropped, ...rest }) => rest);
+  const droppedCount = scored.length - ranked.length;
 
   await writeJson(JOBS, ranked);
   for (const j of ranked) console.log(`[rank] ${j.score}  ${j.excitement_level}  — ${j.job_title} @ ${j.company_name}`);
-  console.log(`[rank] scored ${ranked.length} job(s) → new_jobs.json`);
+  console.log(`[rank] Dropped ${droppedCount}/${scored.length} jobs with no core skill match → ${ranked.length} kept → new_jobs.json`);
 }
 
 // Run directly → /rank

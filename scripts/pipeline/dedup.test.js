@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dedupJobs } from "./dedup.js";
+import { dedupJobs, stripPrincipalFromTitle } from "./dedup.js";
 
 const job = (over = {}) => ({
   job_id: "100",
@@ -87,4 +87,50 @@ test("dedupJobs counts a mixed batch correctly", () => {
   const r = dedupJobs(batch, cache, noLog);
   assert.equal(r.kept.length, 2);
   assert.deepEqual([r.dupCache, r.dupBatch, r.reposts], [1, 1, 1]);
+});
+
+test("stripPrincipalFromTitle strips 'Principal' from the start", () => {
+  assert.equal(stripPrincipalFromTitle("Principal Software Engineer"), "Software Engineer");
+});
+
+test("stripPrincipalFromTitle strips 'Principal' from the end with trailing punctuation", () => {
+  assert.equal(stripPrincipalFromTitle("Software Engineer, Principal"), "Software Engineer");
+});
+
+test("stripPrincipalFromTitle strips 'Principal' from the middle with trimming", () => {
+  assert.equal(stripPrincipalFromTitle("Principal - Software Engineer"), "Software Engineer");
+});
+
+test("stripPrincipalFromTitle is case-insensitive", () => {
+  assert.equal(stripPrincipalFromTitle("software engineer, PRINCIPAL"), "software engineer");
+});
+
+test("stripPrincipalFromTitle leaves titles without 'Principal' unchanged", () => {
+  assert.equal(stripPrincipalFromTitle("Software Engineer"), "Software Engineer");
+});
+
+test("stripPrincipalFromTitle does not remove 'Principal' as a substring", () => {
+  // "Principal" as a word boundary should be removed, but as part of another word should not
+  // (no realistic test case, but this ensures /\bprincipal\b/gi works correctly)
+  assert.equal(stripPrincipalFromTitle("Principality Manager"), "Principality Manager");
+});
+
+test("stripPrincipalFromTitle handles null and undefined gracefully", () => {
+  assert.equal(stripPrincipalFromTitle(null), null);
+  assert.equal(stripPrincipalFromTitle(undefined), undefined);
+});
+
+test("stripPrincipalFromTitle collapses multiple spaces", () => {
+  assert.equal(stripPrincipalFromTitle("Principal   Software   Engineer"), "Software Engineer");
+});
+
+test("dedupJobs normalizes titles before building the dedup key", () => {
+  // Two jobs with different Principal prefixes should deduplicate as the same job
+  const batch = [
+    job({ job_id: "100", job_title: "Principal Software Engineer" }),
+    job({ job_id: "100", job_title: "Software Engineer" }),
+  ];
+  const r = dedupJobs(batch, [], noLog);
+  assert.equal(r.kept.length, 1);
+  assert.equal(r.dupBatch, 1);
 });

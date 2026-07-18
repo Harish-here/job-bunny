@@ -12,6 +12,16 @@ import { dedupKey, repostKey } from "../lib/util.js";
 import { readCache } from "../notion/cache.js";
 import { paths, resolveProfileName } from "../lib/config.js";
 
+// Strip the standalone word "Principal" from a job title, collapse spaces, trim dangling punctuation.
+export function stripPrincipalFromTitle(title) {
+  if (!title) return title;
+  return title
+    .replace(/\bprincipal\b/gi, "")           // Remove standalone "Principal" case-insensitively
+    .replace(/\s+/g, " ")                     // Collapse multiple spaces
+    .replace(/^[\s,\-|]+|[\s,\-|]+$/g, "")   // Trim dangling punctuation and spaces
+    .trim();
+}
+
 // Pure core: dedup `jobs` against `cacheJobs` + earlier entries in the batch.
 // Returns { kept, dupCache, dupBatch, reposts } — logs each drop with its reason.
 export function dedupJobs(jobs, cacheJobs, log = console.log) {
@@ -24,6 +34,7 @@ export function dedupJobs(jobs, cacheJobs, log = console.log) {
   let dupBatch = 0;
   let reposts = 0;
   for (const job of jobs) {
+    job.job_title = stripPrincipalFromTitle(job.job_title);
     const key = dedupKey(job);
     if (seen.has(key)) {
       // already in cache OR earlier in this batch
