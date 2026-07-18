@@ -15,5 +15,17 @@
         "analyst", "qa", "devops", "data", "recruiter"
       ]
     }
+  },
+  "locations": [
+    { "city": "Chennai", "country": "India", "accept": ["On-site", "Hybrid"] },
+    { "city": "Bengaluru", "country": "India", "accept": ["On-site", "Hybrid"] }
+  ],
+  "home_country": "India",
+  "remote": {
+    "eligible_countries": ["India"],
+    "timezones": {
+      "acceptable": ["APAC"],
+      "borderline": ["EMEA"]
+    }
   }
 }

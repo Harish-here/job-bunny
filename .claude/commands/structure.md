@@ -17,13 +17,14 @@ This stage is **LLM-driven and runs inline — you (Claude Code) do it directly,
 ## Output format — markdown table (`jobs_raw_decisions.md`)
 
 ```
-| job_id | title | company | seniority | city | work_type | yoe | yoe_min | skills | tz | tz_bad |
-|--------|-------|---------|-----------|------|-----------|-----|---------|--------|-----|--------|
-| 4432229889 | Frontend Architect | Recrew AI | Staff | Bengaluru | On-site | | false | Frontend Architecture | | false |
+| job_id | title | company | seniority | city | country | work_type | yoe | yoe_min | skills | tz | tz_bad |
+|--------|-------|---------|-----------|------|---------|-----------|-----|---------|--------|-----|--------|
+| 4432229889 | Frontend Architect | Recrew AI | Staff | Bengaluru | India | On-site | | false | Frontend Architecture | | false |
 ```
 
 **Column rules:**
 - `seniority` — one of `Staff`, `Lead`, `Mid`, `Manager`, `Senior` (byte-exact — these are the Notion select options), or empty
+- `country` — the country the role is in (e.g. `India`), derived from the location/JD text; empty when unknown
 - `yoe` — number or empty (= null)
 - `yoe_min` — `true` or `false`
 - `skills` — semicolon-separated list: `React; TypeScript; Node.js`
