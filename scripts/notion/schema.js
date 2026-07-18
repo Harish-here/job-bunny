@@ -43,6 +43,7 @@ export const DB_PROPERTIES = {
   "Source URL": { url: {} },
   Excitement: select(EXCITEMENT_OPTIONS),
   "Match Reasons": { rich_text: {} },
+  "Review Flags": { rich_text: {} },
   // --- Manual fields (post-application tracking; Job Bunny never overwrites these) ---
   Status: select(STATUS_OPTIONS),
   "Comp Range": { rich_text: {} },
@@ -69,6 +70,7 @@ export const AUTOMATED_FIELDS = [
   "Source URL",
   "Excitement",
   "Match Reasons",
+  "Review Flags",
 ];
 
 // Property-name constants for the reader (cache.js) and writer (notion_sync.js) sides —
@@ -88,5 +90,6 @@ export const PROP = Object.freeze({
   SOURCE_URL: "Source URL",
   EXCITEMENT: "Excitement",
   MATCH_REASONS: "Match Reasons",
+  REVIEW_FLAGS: "Review Flags",
   STATUS: "Status",
 });
