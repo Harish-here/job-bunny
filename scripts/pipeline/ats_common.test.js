@@ -190,13 +190,15 @@ test("mergeByJobId is idempotent on a re-merge of the same incoming batch", () =
 
 // --- runFetchPhase ---------------------------------------------------------
 
-// Shared fakes for runFetchPhase tests: one board, injected fetchBoardJobs/jobIdFor/mapJob.
+// Shared fakes for runFetchPhase tests: one board, injected fetchBoardJobs/jobIdFor/mapJob plus
+// simple inline dropAvoid/dropTitle predicates (production wires these to jd_filter.js's
+// evaluate(), but runFetchPhase itself is engine-agnostic — it just calls whatever predicate
+// it's handed).
 const board = { name: "Acme Robotics", token: "acme" };
 const jobIdFor = (job) => `x-${job.id}`;
 const mapJob = (job, b) => ({ job_id: `x-${job.id}`, card_title: job.title, card_company: b.name });
-const alwaysPass = () => true;
-const noAvoid = { companies: new Set(), aliases: new Map() };
-const avoidBoard = { companies: new Set([normalizeName("Acme Robotics")]), aliases: new Map() };
+const neverDrop = () => false;
+const dropAvoidedAcme = (m) => normalizeName(m.company) === normalizeName("Acme Robotics");
 
 function makeFetcher(jobsByToken) {
   return async (b) => {
@@ -213,14 +215,14 @@ test("runFetchPhase gate: a job already in seen is skipped", async () => {
     boards: [board],
     seen,
     cacheIds: new Set(),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Engineer" }] }),
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   });
   assert.equal(result.seenSkipped, 1);
   assert.equal(result.emitted, 0);
@@ -232,14 +234,14 @@ test("runFetchPhase gate: a job whose id is in cacheIds is skipped", async () =>
     boards: [board],
     seen: {},
     cacheIds: new Set(["x-1"]),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Engineer" }] }),
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   });
   assert.equal(result.cacheSkipped, 1);
   assert.equal(result.emitted, 0);
@@ -250,32 +252,32 @@ test("runFetchPhase gate: jobs from an avoided board are counted avoidDropped", 
     boards: [board],
     seen: {},
     cacheIds: new Set(),
-    avoid: avoidBoard,
+    dropAvoid: dropAvoidedAcme,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Engineer" }] }),
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   });
   assert.equal(result.avoidDropped, 1);
   assert.equal(result.emitted, 0);
 });
 
-test("runFetchPhase gate: titlePass=false is counted titleDropped", async () => {
+test("runFetchPhase gate: dropTitle=true is counted titleDropped", async () => {
   const result = await runFetchPhase({
     boards: [board],
     seen: {},
     cacheIds: new Set(),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Intern" }] }),
     jobIdFor,
     mapJob,
-    titlePass: () => false,
+    dropTitle: () => true,
   });
   assert.equal(result.titleDropped, 1);
   assert.equal(result.emitted, 0);
@@ -287,7 +289,7 @@ test("runFetchPhase cap: with maxNew=1 and 2 fresh jobs, emitted=1, capHit=true,
     boards: [board],
     seen,
     cacheIds: new Set(),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 1,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
@@ -299,7 +301,7 @@ test("runFetchPhase cap: with maxNew=1 and 2 fresh jobs, emitted=1, capHit=true,
     }),
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   });
   assert.equal(result.emitted, 1);
   assert.equal(result.capHit, true);
@@ -313,14 +315,14 @@ test("runFetchPhase prune: a stale id in seen is removed when every board is fet
     boards: [board],
     seen,
     cacheIds: new Set(),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Engineer" }] }),
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   });
   assert.ok(!Object.prototype.hasOwnProperty.call(seen, "x-99"));
 });
@@ -329,13 +331,13 @@ test("runFetchPhase allFailed: true when every board's fetch throws, false when 
   const base = {
     seen: {},
     cacheIds: new Set(),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   };
   const otherBoard = { name: "Widget Co", token: "widgetco" };
 
@@ -360,14 +362,14 @@ test("runFetchPhase prune: a stale id in seen is retained when one board's fetch
     boards: [board, otherBoard],
     seen,
     cacheIds: new Set(),
-    avoid: noAvoid,
+    dropAvoid: neverDrop,
     maxNew: 10,
     capEnvLabel: "X_MAX_NEW",
     tag: "test",
     fetchBoardJobs: makeFetcher({ acme: [{ id: 1, title: "Engineer" }] }), // widgetco throws (not in map)
     jobIdFor,
     mapJob,
-    titlePass: alwaysPass,
+    dropTitle: neverDrop,
   });
   assert.ok(Object.prototype.hasOwnProperty.call(seen, "x-99"));
 });

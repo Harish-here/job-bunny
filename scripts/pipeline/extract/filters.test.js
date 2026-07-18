@@ -1,6 +1,7 @@
 // scripts/pipeline/extract/filters.test.js — node:test unit tests for the pure pre-JD card
-// filter pipeline (stageFilter, applyCardGates). Uses the REAL isAvoided/filterByTitle against a
-// fixture profile (filter_config.json) so gate behavior matches production, not a fake stand-in.
+// filter pipeline (stageFilter, applyCardGates). Uses the REAL jd_filter.js evaluate() (and, via
+// the title rule, filterByTitle) against a fixture profile (filter_config.json) so gate behavior
+// matches production, not a fake stand-in.
 // Run with: node --test scripts/pipeline/extract/filters.test.js
 
 import { test } from "node:test";
@@ -36,7 +37,9 @@ const GOOD_TITLE = "Senior Backend Engineer";
 // A title missing a seniority term — dropped at the title-filter gate.
 const BAD_TITLE = "Backend Manager";
 
-const avoid = parseAvoid(["- AvoidCo"].join("\n"));
+// Shaped like loadFilterContext()'s output — only `avoid` is exercised by these gates (the
+// title rule reads filter_config.json directly via filterByTitle, not through ctx).
+const ctx = { avoid: parseAvoid(["- AvoidCo"].join("\n")) };
 
 function freshSummary() {
   return { avoided: 0, cache_skipped: 0, run_deduped: 0, title_dropped: 0 };
@@ -77,7 +80,7 @@ test("applyCardGates: gate order — avoided company never reaches companiesSeen
   const seenIds = new Set();
 
   const result = applyCardGates(cards, {
-    avoid,
+    ctx,
     cachedIds,
     seenIds,
     cardCap: 0,
@@ -106,7 +109,7 @@ test("applyCardGates: run-dedup drops the second occurrence of a job_id; cards w
   const seenIds = new Set();
 
   const result = applyCardGates(cards, {
-    avoid,
+    ctx,
     cachedIds,
     seenIds,
     cardCap: 0,
@@ -125,7 +128,7 @@ test("applyCardGates: DEBUG mode logs a drop line per title-filter rejection wit
   const cards = [{ job_id: "c1", title: BAD_TITLE, company: "GoodCo" }];
   const lines = [];
   applyCardGates(cards, {
-    avoid,
+    ctx,
     cachedIds: new Set(),
     seenIds: new Set(),
     cardCap: 0,
@@ -146,7 +149,7 @@ test("applyCardGates: cardCap slices AFTER all filters — the avoided card does
   ];
   const summary = freshSummary();
   const result = applyCardGates(cards, {
-    avoid,
+    ctx,
     cachedIds: new Set(),
     seenIds: new Set(),
     cardCap: 2,

@@ -11,9 +11,9 @@ A worked `raw_text` → `jobs_raw_decisions.md` row, demonstrating every normali
 
 ## Output — `jobs_raw_decisions.md`
 
-| job_id | title | company | seniority | city | work_type | yoe | yoe_min | skills | tz | tz_bad |
-|--------|-------|---------|-----------|------|-----------|-----|---------|--------|-----|--------|
-| 3901234567 | Staff Frontend Engineer | Globex | Staff | Remote | Remote | 8 | true | React; TypeScript; Design Systems; Micro Frontends; JavaScript; GraphQL; Node.js | APAC | false |
+| job_id | title | company | seniority | city | country | work_type | yoe | yoe_min | skills | tz | tz_bad |
+|--------|-------|---------|-----------|------|---------|-----------|-----|---------|--------|-----|--------|
+| 3901234567 | Staff Frontend Engineer | Globex | Staff | Remote | India | Remote | 8 | true | React; TypeScript; Design Systems; Micro Frontends; JavaScript; GraphQL; Node.js | APAC | false |
 
 ## Rules demonstrated
 
@@ -23,5 +23,6 @@ A worked `raw_text` → `jobs_raw_decisions.md` row, demonstrating every normali
 - **`tz_bad`:** `true` ONLY when the JD explicitly mandates incompatible hours (e.g. "must overlap US Pacific 9–5"). Absent = `false`. This is the only signal `filter.js` uses to hard-drop a Remote role.
 - **`job_id`:** the `/jobs/view/<id>/` segment of the job URL.
 - **`seniority`:** map to `Staff | Lead | Mid`. "Senior"/"Sr." → `Mid`.
+- **`country`:** the country the role is in, derived from the location/JD text — "India / APAC time zones" → `country: India`. Empty when unknown.
 - **Skills as semicolons:** `React; TypeScript; Design Systems; ...` — `assemble.js` splits on `;`.
 - **Pipe in value:** use `｜` (fullwidth) if a skill or title contains a literal `|`.
