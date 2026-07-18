@@ -4,9 +4,9 @@
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Shared default for safeText/safeAttr and their callers (e.g. extract.js's
-// CARD_FIELD_TIMEOUT_MS env fallback) — one place to bump instead of several drifting copies.
-export const DEFAULT_FIELD_TIMEOUT_MS = 2000;
+// Shared default deadline for a single CDP round-trip (withTimeout below, and every caller's
+// per-call bound) — one place to bump instead of several drifting copies.
+export const DEFAULT_CALL_TIMEOUT_MS = 10_000;
 
 // PURE — [minMs, maxMs) jitter amount. rand is injectable for deterministic tests.
 export function jitterMs(minMs = 2000, maxMs = 5000, rand = Math.random) {
@@ -15,6 +15,23 @@ export function jitterMs(minMs = 2000, maxMs = 5000, rand = Math.random) {
 
 export async function jitter(minMs, maxMs) {
   return sleep(jitterMs(minMs, maxMs));
+}
+
+// Hard wall-clock bound on any CDP-backed promise. Playwright bounds *locator actions* with its
+// default 30s action timeout, but page.evaluate()/locator.count() have NO deadline at all — on a
+// wedged tab/renderer they hang forever (observed: a scheduled run frozen >30min at load-url).
+// The underlying call isn't cancelled (CDP can't), but the caller gets control back and can
+// recycle the tab. The timer is cleared on settle so it never holds the event loop open.
+export function withTimeout(promise, ms = DEFAULT_CALL_TIMEOUT_MS, label = "call") {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${label} exceeded ${ms}ms deadline`);
+      err.name = "DeadlineError"; // stable marker for callers (message wording is free to change)
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
 // Generalizes extract.js's COLLECT_CARDS_MAX_MS wall-clock cap pattern into a reusable budget.
@@ -45,58 +62,4 @@ export async function gotoWithRetry(
     }
   }
   throw lastErr;
-}
-
-// Generalizes extract.js card text(): supports a ":nth(N)" suffix on the selector for pages
-// where sibling selectors aren't usable (hashed classes), e.g. "p:nth(1)" → locator("p").nth(1).
-// Card fields (title/company/location) are always single-line — takes the first non-empty line
-// so that badge text or a11y duplicate spans embedded in the same element don't pollute the value.
-//
-// timeoutMs bounds the wait when selector doesn't resolve (e.g. a still-occluded/virtualized
-// card row). Without it, Playwright's own default action timeout (30s) applies per call — on a
-// LinkedIn session that's rendering slowly, that turned a handful of empty fields into minutes
-// of dead time per page and blew through collectCards' wall-clock budget after only a few cards.
-export async function safeText(scope, selector, { timeoutMs = DEFAULT_FIELD_TIMEOUT_MS } = {}) {
-  if (!selector) return "";
-  const m = selector.match(/:nth\((\d+)\)$/);
-  const locator = m
-    ? scope.locator(selector.slice(0, -m[0].length)).nth(parseInt(m[1], 10))
-    : scope.locator(selector).first();
-  const raw = (await locator.innerText({ timeout: timeoutMs }).catch(() => "")) ?? "";
-  return raw.trim().split("\n").find((l) => l.trim()) ?? "";
-}
-
-export async function safeAttr(scope, selector, attr, { timeoutMs = DEFAULT_FIELD_TIMEOUT_MS } = {}) {
-  if (!selector) return null;
-  return scope.locator(selector).first().getAttribute(attr, { timeout: timeoutMs }).catch(() => null);
-}
-
-// Generalizes extract.js's scrollToEnd VERBATIM in behavior: each round — bail on an expired
-// budget, bail if endSelector is already present, scroll the container (or the page's own
-// scrollingElement) to the bottom, wait, and recount itemSelector; stop once the count has held
-// steady for stableRounds consecutive rounds.
-export async function scrollUntilStable(
-  page,
-  { itemSelector, scrollContainer = null, endSelector = null, maxRounds = 40, stableRounds = 3, roundDelayMs = 800, budget = null } = {}
-) {
-  let stable = 0;
-  let lastCount = -1;
-  let count = 0;
-  for (let i = 0; i < maxRounds; i++) {
-    if (budget?.expired()) break;
-    if (endSelector && (await page.locator(endSelector).count())) break;
-    await page.evaluate((sel) => {
-      const el = sel ? document.querySelector(sel) : null;
-      (el || document.scrollingElement || document.body).scrollBy(0, 100000);
-    }, scrollContainer || null);
-    await sleep(roundDelayMs);
-    count = await page.locator(itemSelector).count();
-    if (count === lastCount) {
-      if (++stable >= stableRounds) break; // no growth for stableRounds rounds → done
-    } else {
-      stable = 0;
-      lastCount = count;
-    }
-  }
-  return count;
 }

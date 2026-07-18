@@ -43,7 +43,7 @@ import { ROOT, paths, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
 import { writeJson } from "../lib/io.js";
 import { ensureChrome, killChrome, createSession } from "../lib/browser.js";
-import { jitter, DEFAULT_FIELD_TIMEOUT_MS } from "../lib/page_actions.js";
+import { jitter, DEFAULT_CALL_TIMEOUT_MS } from "../lib/page_actions.js";
 import { createRunLog } from "../lib/run_log.js";
 import { parseSearchUrls, parseInventory, validateInventory, applyWindowOverride } from "./extract/parse.js";
 import {
@@ -65,10 +65,21 @@ const OUT = paths().jobsRawText;
 const DEBUG = !!process.env.DEBUG;
 const CARD_CAP = parseInt(process.env.EXTRACT_MAX_CARDS || "0", 10);
 const COLLECT_CARDS_MAX_MS = parseInt(process.env.EXTRACT_COLLECT_CARDS_MAX_MS || "120000", 10);
-// Per-field (title/company/location/href/id) locator timeout inside collectCards — without this,
-// Playwright's own default (30s) applies when a card is still occluded/unrendered, which can
-// burn through the whole COLLECT_CARDS_MAX_MS budget after only a handful of cards.
-const CARD_FIELD_TIMEOUT_MS = parseInt(process.env.EXTRACT_CARD_FIELD_TIMEOUT_MS || String(DEFAULT_FIELD_TIMEOUT_MS), 10);
+// Deadline on each single CDP round-trip inside collectCards (batch harvest / scroll step) —
+// a wedged tab costs at most this per call before the run moves on and recycles the tab, instead
+// of hanging indefinitely (page.evaluate has no Playwright-side timeout at all).
+const EVAL_TIMEOUT_MS = parseInt(process.env.EXTRACT_EVAL_TIMEOUT_MS || String(DEFAULT_CALL_TIMEOUT_MS), 10);
+if (process.env.EXTRACT_CARD_FIELD_TIMEOUT_MS) {
+  // Removed with the per-card field reads (batch harvest has no per-field locator waits) — an
+  // operator still setting it per the old advice should know it's now a no-op.
+  console.warn("[extract] EXTRACT_CARD_FIELD_TIMEOUT_MS is no longer used — see EXTRACT_EVAL_TIMEOUT_MS");
+}
+
+// Error shapes that mean the TAB (not the page content) is unhealthy — a deadline-exceeded CDP
+// call (withTimeout's DeadlineError marker), a dead target, or a CDP transport error. Used only
+// to gate JD-tab recycling, where recycling on every skipped card would reintroduce the tab
+// churn jd.js's reused-tab design exists to avoid.
+const isWedgedError = (err) => err.name === "DeadlineError" || /target.*(closed|crashed)|protocol error/i.test(err.message);
 const KEEP_BROWSER = process.env.JOBBUNNY_KEEP_BROWSER === "1";
 const FRESH = process.env.JOBBUNNY_FRESH === "1";
 
@@ -246,8 +257,8 @@ async function main() {
         log.info(`${group.page} ← ${url}`);
         let cards = await collectAllPages(page, url, cfg, {
           cardCap: CARD_CAP,
-          collectCardsMaxMs: COLLECT_CARDS_MAX_MS,
-          fieldTimeoutMs: CARD_FIELD_TIMEOUT_MS,
+          maxMs: COLLECT_CARDS_MAX_MS,
+          evalTimeoutMs: EVAL_TIMEOUT_MS,
           log: consoleLike,
         });
         await log.checkpoint("collect-cards", { cards: cards.length });
@@ -275,6 +286,13 @@ async function main() {
             raw_text = await captureJd(jdTab, page, cfg, card, groupCap, { log: consoleLike });
           } catch (e) {
             log.error(`skip card ${card.job_id} — ${e.message}`);
+            // A wedged JD tab would otherwise burn its deadline on every remaining card of every
+            // remaining URL — recycle it (closeTab is deadline-bounded in the session layer;
+            // reopen eagerly, since isClosed() stays false when a wedged close times out).
+            if (isNewPage && isWedgedError(e)) {
+              await session.closeTab(jdTab);
+              jdTab = await session.openTab();
+            }
             continue; // one bad JD never aborts the rest
           }
           if (!raw_text) continue;
@@ -298,6 +316,13 @@ async function main() {
       } catch (err) {
         log.error(`SKIP url (${group.page}) — ${err.message}`);
         summary.skipped.push({ page: group.page, url, reason: err.message });
+        // Recycle the tab on ANY URL failure: a wedged renderer must not poison the remaining
+        // URLs, and collectCards deliberately swallows its own deadline errors (partial results
+        // beat losing captures), so the error shape here can't distinguish wedged from healthy.
+        // closeTab is deadline-bounded in the session layer; the eager reopen (not isClosed(),
+        // which stays false when a wedged close times out) guarantees a fresh target.
+        await session.closeTab(page);
+        page = await session.openTab();
       }
 
       // Incremental flush after each URL — a kill mid-run keeps everything captured so far.
