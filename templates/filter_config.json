@@ -16,5 +16,14 @@
         "infrastructure", "scrum", "product owner", "recruiter"
       ]
     }
+  },
+  "locations": [],
+  "home_country": "",
+  "remote": {
+    "eligible_countries": [],
+    "timezones": {
+      "acceptable": [],
+      "borderline": []
+    }
   }
 }
