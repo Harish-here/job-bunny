@@ -37,7 +37,7 @@ import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { isMain } from "../lib/cli.js";
-import { loadAvoid } from "./avoid.js";
+import { loadFilterContext } from "./jd_filter.js";
 import { readCache } from "../notion/cache.js";
 import { ROOT, paths, resolveProfileName } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
@@ -142,7 +142,7 @@ async function main() {
   if (!groups.length) throw new Error("No search URLs found in search_urls.md (run /add-url).");
   await log.checkpoint("parse-config", { groups: groups.length });
 
-  const [avoid, cache] = await Promise.all([loadAvoid(), readCache()]);
+  const [ctx, cache] = await Promise.all([loadFilterContext(), readCache()]);
   const cachedIds = new Set((cache.jobs || []).map((j) => j.job_id).filter(Boolean));
   log.info(`cache: ${cachedIds.size} known job IDs (last_run: ${cache.last_run ?? "never"}) — will skip`);
 
@@ -265,7 +265,7 @@ async function main() {
 
         await log.checkpoint("filter");
         cards = applyCardGates(cards, {
-          avoid,
+          ctx,
           cachedIds,
           seenIds: seenJobIdsThisRun,
           cardCap: CARD_CAP,

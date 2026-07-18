@@ -296,6 +296,24 @@ test("evaluate collects reasons from multiple independently-firing hard rules", 
   assert.equal(reasons.length, 3);
 });
 
+// --- only: rule-name allowlist -----------------------------------------------------------
+
+test("only:['avoid'] runs only the avoid rule — a title-failing jd does NOT drop", () => {
+  const jd = { title: "Engineering Manager", company: "Shady Corp" }; // fails both avoid and title
+  const { drop, reasons } = evaluate(jd, baseCtx(), { only: ["avoid"] });
+  assert.equal(drop, true);
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /avoid-listed company/);
+});
+
+test("only:['title'] runs only the title rule — an avoid-listed company does NOT drop", () => {
+  const jd = { title: "Engineering Manager", company: "Shady Corp" }; // fails both avoid and title
+  const { drop, reasons } = evaluate(jd, baseCtx(), { only: ["title"] });
+  assert.equal(drop, true);
+  assert.equal(reasons.length, 1);
+  assert.equal(reasons[0], "blocked function: manager");
+});
+
 test.after(async () => {
   delete process.env.JOBBUNNY_PROFILE;
   await rm(FIXTURE_DIR, { recursive: true, force: true });
