@@ -1,23 +1,22 @@
 // scripts/pipeline/rank.js — deterministic 100-pt scorer. NO LLM, NO network.
 // Merges excitement_level + match_reasons[] into each job. Skill-synonym normalization is
 // done upstream in the structuring step; here key_skills are matched as-is (case-insensitive).
-// Jobs with zero matched core (primary) skills — including jobs with no key_skills at all —
-// are DROPPED from the output entirely, not merely down-scored.
+// Pure scorer — every job passed in is scored and returned; nothing is dropped here (the
+// zero-core-skill drop lives in the Stage B filter engine, before dedup/rank run).
 //
-// new_jobs.json (+ resume_meta.json, filter_config.json) → new_jobs.json (in place, zero-core-
-// match jobs removed, surviving jobs get fields added).
+// new_jobs.json (+ resume_meta.json, filter_config.json) → new_jobs.json (in place, every job
+// gets score/excitement_level/match_reasons fields added).
 //
 // Scoring (100 pts) — relevance 70, logistics 30:
 //   Skills overlap     40  weighted matches (core ×1.0, secondary ×0.5) ÷ clamp(|jd|, 3, 8), max 1.0
 //   Title relevance    15  job_title contains a filter_config title_filter.domain keyword = full ·
 //                          no keywords configured (legacy) = neutral 8 · miss = 0
 //   Seniority match    15  in target_seniority = full, else 0 (no partial tier)
-//   Work type + tz     20  Remote APAC = full · Remote EMEA/unknown = partial ·
+//   Work type + tz     20  Remote + timezone in filter_config remote.timezones.acceptable = full ·
+//                          borderline/unknown = partial ·
 //                          home-city (meta.location) hybrid/on-site = full · else 0
 //                          (tz is a soft-signal, never a drop)
 //   YoE fit            10  at/above = full · within -2 = partial · below 0 · null = neutral partial
-// Hard drop: 0 core-skill matches (including empty/missing key_skills) → job is removed from
-// the output entirely in main(), not merely down-scored.
 // Bands: >=85 Vera level · 65-84 Kandipa podu · <65 Try panalam
 
 import { readFile } from "node:fs/promises";
@@ -47,6 +46,8 @@ function excitementFor(score) {
 
 // Pure scorer — exported for unit-style verification. opts.domainKeywords: the profile's
 // filter_config title_filter.domain list; undefined/empty → neutral title credit.
+// opts.timezones: { acceptable: [], borderline: [] } from filter_config remote.timezones;
+// undefined/empty → neutral partial credit for any Remote timezone.
 export function scoreJob(job, meta, opts = {}) {
   const reasons = [];
 
@@ -107,10 +108,13 @@ export function scoreJob(job, meta, opts = {}) {
     reasons.push(`${job.seniority_level || "Unknown"} below target seniority (+0)`);
   }
 
-  // 4. Work type + timezone (20) — tz is a soft-signal here, never a drop. A missing/invalid
-  // meta.location degrades to "not home city" here (never throws) — main() validates the
-  // shape up front for the real pipeline run; scoreJob() itself stays tolerant so axis-
-  // isolation callers can omit location entirely when it's irrelevant to what they're testing.
+  // 4. Work type + timezone (20) — tz is a soft-signal here, never a drop. Bands come from
+  // opts.timezones (filter_config.json remote.timezones); absent/empty opts.timezones (legacy
+  // callers, axis-isolation tests) falls back to neutral partial for any Remote timezone. A
+  // missing/invalid meta.location degrades to "not home city" here (never throws) — main()
+  // validates the shape up front for the real pipeline run; scoreJob() itself stays tolerant
+  // so axis-isolation callers can omit location entirely when it's irrelevant to what they're
+  // testing.
   let wt = 0;
   let wtReason;
   let inHomeCity = false;
@@ -119,13 +123,16 @@ export function scoreJob(job, meta, opts = {}) {
   } catch {
     // invalid/missing location — treated as "no home city match", not an error, here.
   }
+  const tzAcceptable = (opts.timezones?.acceptable || []).map(normSkill);
+  const tzBorderline = (opts.timezones?.borderline || []).map(normSkill);
+  const tzNorm = normSkill(job.timezone_compatibility || "");
   if (job.work_type === "Remote") {
-    if (job.timezone_compatibility === "APAC") {
+    if (tzAcceptable.length && tzAcceptable.includes(tzNorm)) {
       wt = WORKTYPE_MAX;
-      wtReason = `Remote APAC timezone compatible (+${WORKTYPE_MAX})`;
-    } else if (job.timezone_compatibility === "EMEA") {
+      wtReason = `Remote ${job.timezone_compatibility} timezone acceptable (+${WORKTYPE_MAX})`;
+    } else if (tzBorderline.length && tzBorderline.includes(tzNorm)) {
       wt = WORKTYPE_PARTIAL;
-      wtReason = `Remote EMEA timezone partial (+${WORKTYPE_PARTIAL})`;
+      wtReason = `Remote ${job.timezone_compatibility} timezone borderline (+${WORKTYPE_PARTIAL})`;
     } else {
       wt = WORKTYPE_PARTIAL;
       wtReason = `Remote, timezone unknown (+${WORKTYPE_PARTIAL})`;
@@ -160,22 +167,25 @@ export function scoreJob(job, meta, opts = {}) {
 
   const score = skills + titlePts + seniority + wt + yoe;
 
-  // No core-skill match means the role isn't ours no matter how convenient the logistics are
-  // (the architect-title over-credit fix) — flagged here, dropped by main() before the write.
-  const dropped = coreMatched.length === 0;
-  if (dropped) reasons.push(`No core skill match — dropped (score was ${score})`);
-
-  return { score, excitement_level: excitementFor(score), match_reasons: reasons, dropped };
+  return { score, excitement_level: excitementFor(score), match_reasons: reasons };
 }
 
-// Best-effort load of the profile's domain keywords — a missing/unparsable filter_config
-// (legacy mode) must degrade to neutral title scoring, never fail the stage.
-async function loadDomainKeywords() {
+// Best-effort load of the profile's domain keywords + timezone bands — a missing/unparsable
+// filter_config (legacy mode) must degrade to neutral title/timezone scoring, never fail the
+// stage. Rank keeps its own lightweight read here rather than loadFilterContext() (the filter
+// engine's loader) so a config shape the filter engine hard-fails on never takes rank down too.
+async function loadRankConfig() {
   try {
     const cfg = JSON.parse(await readFile(paths().filterConfig, "utf8"));
-    return cfg?.title_filter?.domain || [];
+    return {
+      domainKeywords: cfg?.title_filter?.domain || [],
+      timezones: {
+        acceptable: cfg?.remote?.timezones?.acceptable || [],
+        borderline: cfg?.remote?.timezones?.borderline || [],
+      },
+    };
   } catch {
-    return [];
+    return { domainKeywords: [], timezones: { acceptable: [], borderline: [] } };
   }
 }
 
@@ -191,22 +201,17 @@ async function main() {
     throw new Error(`${META} "location" is invalid — required for the work-type/home-city axis: ${err.message}`);
   }
 
-  const domainKeywords = await loadDomainKeywords();
+  const { domainKeywords, timezones } = await loadRankConfig();
   if (domainKeywords.length === 0) console.log(`[rank] no domain keywords — title axis neutral`);
 
-  const scored = jobs.map((job) => {
-    const { score, excitement_level, match_reasons, dropped } = scoreJob(job, meta, { domainKeywords });
-    return { ...job, score, excitement_level, match_reasons, dropped };
+  const ranked = jobs.map((job) => {
+    const { score, excitement_level, match_reasons } = scoreJob(job, meta, { domainKeywords, timezones });
+    return { ...job, score, excitement_level, match_reasons };
   });
-
-  const ranked = scored
-    .filter((j) => !j.dropped)
-    .map(({ dropped, ...rest }) => rest);
-  const droppedCount = scored.length - ranked.length;
 
   await writeJson(JOBS, ranked);
   for (const j of ranked) console.log(`[rank] ${j.score}  ${j.excitement_level}  — ${j.job_title} @ ${j.company_name}`);
-  console.log(`[rank] Dropped ${droppedCount}/${scored.length} jobs with no core skill match → ${ranked.length} kept → new_jobs.json`);
+  console.log(`[rank] scored ${ranked.length} jobs → new_jobs.json`);
 }
 
 // Run directly → /rank

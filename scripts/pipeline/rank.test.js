@@ -148,25 +148,52 @@ test("scoreJob: missing seniority_level renders as 'Unknown' in the no-match rea
 
 // ---- 4. Work type + timezone (20 pts) ----
 
-test("scoreJob: Remote + APAC → +20", () => {
+const TZ_BANDS = { acceptable: ["APAC"], borderline: ["EMEA"] };
+
+test("scoreJob: Remote + timezone in acceptable band → +20", () => {
   const job = { ...zeroed, work_type: "Remote", timezone_compatibility: "APAC" };
-  const { score, match_reasons } = scoreJob(job, {}, MISS_TITLE);
+  const { score, match_reasons } = scoreJob(job, {}, { ...MISS_TITLE, timezones: TZ_BANDS });
   assert.equal(score, 20);
-  assert.ok(match_reasons.some((r) => r === "Remote APAC timezone compatible (+20)"));
+  assert.ok(match_reasons.some((r) => r === "Remote APAC timezone acceptable (+20)"));
 });
 
-test("scoreJob: Remote + EMEA → +10 (partial)", () => {
+test("scoreJob: Remote + timezone in acceptable band matches case-insensitively", () => {
+  const job = { ...zeroed, work_type: "Remote", timezone_compatibility: "apac" };
+  const { score } = scoreJob(job, {}, {
+    ...MISS_TITLE,
+    timezones: { acceptable: ["APAC"], borderline: [] },
+  });
+  assert.equal(score, 20);
+});
+
+test("scoreJob: Remote + timezone in borderline band → +10 (partial)", () => {
   const job = { ...zeroed, work_type: "Remote", timezone_compatibility: "EMEA" };
-  const { score, match_reasons } = scoreJob(job, {}, MISS_TITLE);
+  const { score, match_reasons } = scoreJob(job, {}, { ...MISS_TITLE, timezones: TZ_BANDS });
   assert.equal(score, 10);
-  assert.ok(match_reasons.some((r) => r === "Remote EMEA timezone partial (+10)"));
+  assert.ok(match_reasons.some((r) => r === "Remote EMEA timezone borderline (+10)"));
+});
+
+test("scoreJob: Remote + timezone in neither band → +10 (partial, unknown)", () => {
+  const job = { ...zeroed, work_type: "Remote", timezone_compatibility: "Americas" };
+  const { score, match_reasons } = scoreJob(job, {}, { ...MISS_TITLE, timezones: TZ_BANDS });
+  assert.equal(score, 10);
+  assert.ok(match_reasons.some((r) => r === "Remote, timezone unknown (+10)"));
 });
 
 test("scoreJob: Remote with unrecognized/missing timezone_compatibility → +10 (partial)", () => {
   const job = { ...zeroed, work_type: "Remote" };
-  const { score, match_reasons } = scoreJob(job, {}, MISS_TITLE);
+  const { score, match_reasons } = scoreJob(job, {}, { ...MISS_TITLE, timezones: TZ_BANDS });
   assert.equal(score, 10);
   assert.ok(match_reasons.some((r) => r === "Remote, timezone unknown (+10)"));
+});
+
+test("scoreJob: missing opts.timezones (legacy/axis-isolation caller) → any Remote tz is neutral partial", () => {
+  const job = { ...zeroed, work_type: "Remote", timezone_compatibility: "APAC" };
+  for (const opts of [MISS_TITLE, { ...MISS_TITLE, timezones: {} }, { ...MISS_TITLE, timezones: { acceptable: [], borderline: [] } }]) {
+    const { score, match_reasons } = scoreJob(job, {}, opts);
+    assert.equal(score, 10);
+    assert.ok(match_reasons.some((r) => r === "Remote, timezone unknown (+10)"));
+  }
 });
 
 test("scoreJob: Hybrid in home city (case/whitespace-insensitive) → +20", () => {
@@ -257,9 +284,10 @@ test("scoreJob: candidate more than 2 below required → +0", () => {
   assert.ok(match_reasons.some((r) => r === "YoE 3 below 8 (+0)"));
 });
 
-// ---- 6. Zero-core-skill hard drop ----
+// ---- 6. Zero-core-skill jobs are scored, not dropped (the drop lives in the Stage B filter
+//         engine now — rank is a pure scorer over whatever jobs it's handed) ----
 
-test("scoreJob: zero core matches with high logistics → dropped: true, 'Try panalam'", () => {
+test("scoreJob: zero core matches with high logistics → still scored and returned, no 'dropped' field", () => {
   // No core match, everything else maxed: skills 0 + title 15 + seniority 15 + wt 20 + yoe 10 = 60
   const job = {
     job_title: "Frontend Architect",
@@ -270,16 +298,14 @@ test("scoreJob: zero core matches with high logistics → dropped: true, 'Try pa
     years_of_experience: 5,
   };
   const meta = { target_seniority: ["Staff"], core_skills: ["React"], current_yoe: 9 };
-  const { score, excitement_level, match_reasons, dropped } = scoreJob(job, meta, {
-    domainKeywords: ["frontend"],
-  });
-  assert.equal(score, 60);
-  assert.equal(excitement_level, "Try panalam");
-  assert.equal(dropped, true);
-  assert.ok(match_reasons.some((r) => r === "No core skill match — dropped (score was 60)"));
+  const result = scoreJob(job, meta, { domainKeywords: ["frontend"], timezones: TZ_BANDS });
+  assert.equal(result.score, 60);
+  assert.equal(result.excitement_level, "Try panalam");
+  assert.equal("dropped" in result, false);
+  assert.ok(!result.match_reasons.some((r) => r.includes("dropped")));
 });
 
-test("scoreJob: secondary-only skill match is still dropped (core is the gate)", () => {
+test("scoreJob: secondary-only skill match is scored on the secondary weight, not zeroed out", () => {
   const job = {
     job_title: "Frontend Architect",
     seniority_level: "Staff",
@@ -294,36 +320,36 @@ test("scoreJob: secondary-only skill match is still dropped (core is the gate)",
     secondary_skills: ["Vue.js", "Storybook", "Webpack"],
     current_yoe: 9,
   };
-  const { dropped } = scoreJob(job, meta, { domainKeywords: ["frontend"] });
-  assert.equal(dropped, true);
+  const { score, match_reasons } = scoreJob(job, meta, { domainKeywords: ["frontend"], timezones: TZ_BANDS });
+  // weight 1.5 / denom 3 * 40 = 20; 20 + 15 + 15 + 20 + 10 = 80
+  assert.equal(score, 80);
+  assert.ok(match_reasons.some((r) => r.includes("secondary:")));
 });
 
-test("scoreJob: zero core matches with a low score is still flagged dropped", () => {
-  const job = { ...zeroed, key_skills: ["Python"], work_type: "Remote" }; // skills 0 + wt 10
+test("scoreJob: zero core matches with a low score is still returned (not dropped)", () => {
+  const job = { ...zeroed, key_skills: ["Python"], work_type: "Remote" }; // skills 0 + wt 10 (unknown tz, no bands)
   const meta = { core_skills: ["React"] };
-  const { score, match_reasons, dropped } = scoreJob(job, meta, MISS_TITLE);
+  const { score, match_reasons } = scoreJob(job, meta, MISS_TITLE);
   assert.equal(score, 10);
-  assert.equal(dropped, true);
-  assert.ok(match_reasons.some((r) => r.includes("dropped")));
+  assert.ok(!match_reasons.some((r) => r.includes("dropped")));
 });
 
-test("scoreJob: empty key_skills (structuring gap) is also dropped", () => {
+test("scoreJob: empty key_skills (structuring gap) is scored, not dropped", () => {
   const job = { ...zeroed, key_skills: [], work_type: "Remote" };
   const meta = { core_skills: ["React"] };
-  const { dropped, match_reasons } = scoreJob(job, meta, MISS_TITLE);
-  assert.equal(dropped, true);
+  const { match_reasons } = scoreJob(job, meta, MISS_TITLE);
   assert.ok(match_reasons.some((r) => r === "No JD skills listed (+0)"));
-  assert.ok(match_reasons.some((r) => r.includes("dropped")));
+  assert.ok(!match_reasons.some((r) => r.includes("dropped")));
 });
 
-test("scoreJob: missing key_skills entirely is also dropped", () => {
+test("scoreJob: missing key_skills entirely is scored, not dropped", () => {
   const job = { ...zeroed, work_type: "Remote" };
   const meta = { core_skills: ["React"] };
-  const { dropped } = scoreJob(job, meta, MISS_TITLE);
-  assert.equal(dropped, true);
+  const result = scoreJob(job, meta, MISS_TITLE);
+  assert.equal("dropped" in result, false);
 });
 
-test("scoreJob: a single core match → dropped: false", () => {
+test("scoreJob: a single core match scores as before", () => {
   // skills: 1/3*40 = 13 + title 15 + seniority 15 + wt 20 + yoe 10 = 73
   const job = {
     job_title: "Staff Frontend Engineer",
@@ -334,9 +360,8 @@ test("scoreJob: a single core match → dropped: false", () => {
     years_of_experience: 5,
   };
   const meta = { target_seniority: ["Staff"], core_skills: ["React"], current_yoe: 9 };
-  const { score, dropped } = scoreJob(job, meta, { domainKeywords: ["frontend"] });
+  const { score } = scoreJob(job, meta, { domainKeywords: ["frontend"], timezones: TZ_BANDS });
   assert.equal(score, 73);
-  assert.equal(dropped, false);
 });
 
 // ---- 7. Excitement bands (3 bands, boundaries) ----
@@ -349,7 +374,7 @@ const bandJob = {
   timezone_compatibility: "APAC",
 };
 const bandMeta = { target_seniority: ["Staff"], current_yoe: 5 };
-const bandOpts = { domainKeywords: ["frontend"] };
+const bandOpts = { domainKeywords: ["frontend"], timezones: TZ_BANDS };
 
 test("scoreJob: total 85 → 'Vera level' (>=85 boundary)", () => {
   // skills 5/8*40 = 25; 25 + 15 + 15 + 20 + 10 = 85
@@ -396,10 +421,10 @@ test("scoreJob: total 64 → 'Try panalam' (just below 65 boundary)", () => {
 
 // ---- 8. Degenerate input ----
 
-test("scoreJob: empty job + empty meta → neutral floors only (title 8 + YoE 5), dropped (no skills)", () => {
-  const { score, excitement_level, match_reasons, dropped } = scoreJob({}, {});
-  assert.equal(score, 13);
-  assert.equal(excitement_level, "Try panalam");
-  assert.equal(dropped, true);
-  assert.equal(match_reasons.length, 6);
+test("scoreJob: empty job + empty meta → neutral floors only (title 8 + YoE 5), no drop field", () => {
+  const result = scoreJob({}, {});
+  assert.equal(result.score, 13);
+  assert.equal(result.excitement_level, "Try panalam");
+  assert.equal("dropped" in result, false);
+  assert.equal(result.match_reasons.length, 5);
 });
