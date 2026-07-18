@@ -257,9 +257,9 @@ test("scoreJob: candidate more than 2 below required → +0", () => {
   assert.ok(match_reasons.some((r) => r === "YoE 3 below 8 (+0)"));
 });
 
-// ---- 6. Zero-core-skill hard cap (50) ----
+// ---- 6. Zero-core-skill hard drop ----
 
-test("scoreJob: zero core matches with high logistics → capped at 50, 'Try panalam'", () => {
+test("scoreJob: zero core matches with high logistics → dropped: true, 'Try panalam'", () => {
   // No core match, everything else maxed: skills 0 + title 15 + seniority 15 + wt 20 + yoe 10 = 60
   const job = {
     job_title: "Frontend Architect",
@@ -270,16 +270,16 @@ test("scoreJob: zero core matches with high logistics → capped at 50, 'Try pan
     years_of_experience: 5,
   };
   const meta = { target_seniority: ["Staff"], core_skills: ["React"], current_yoe: 9 };
-  const { score, excitement_level, match_reasons } = scoreJob(job, meta, {
+  const { score, excitement_level, match_reasons, dropped } = scoreJob(job, meta, {
     domainKeywords: ["frontend"],
   });
-  assert.equal(score, 50);
+  assert.equal(score, 60);
   assert.equal(excitement_level, "Try panalam");
-  assert.ok(match_reasons.some((r) => r === "No core skill match — capped at 50 (was 60)"));
+  assert.equal(dropped, true);
+  assert.ok(match_reasons.some((r) => r === "No core skill match — dropped (score was 60)"));
 });
 
-test("scoreJob: secondary-only skill match is still capped (core is the gate)", () => {
-  // skills: 1.5/3*40 = 20; + title 15 + seniority 15 + wt 20 + yoe 10 = 80 → 50
+test("scoreJob: secondary-only skill match is still dropped (core is the gate)", () => {
   const job = {
     job_title: "Frontend Architect",
     seniority_level: "Staff",
@@ -294,21 +294,37 @@ test("scoreJob: secondary-only skill match is still capped (core is the gate)", 
     secondary_skills: ["Vue.js", "Storybook", "Webpack"],
     current_yoe: 9,
   };
-  const { score, excitement_level } = scoreJob(job, meta, { domainKeywords: ["frontend"] });
-  assert.equal(score, 50);
-  assert.equal(excitement_level, "Try panalam");
+  const { dropped } = scoreJob(job, meta, { domainKeywords: ["frontend"] });
+  assert.equal(dropped, true);
 });
 
-test("scoreJob: zero core matches below the cap → score unchanged, no cap reason", () => {
+test("scoreJob: zero core matches with a low score is still flagged dropped", () => {
   const job = { ...zeroed, key_skills: ["Python"], work_type: "Remote" }; // skills 0 + wt 10
   const meta = { core_skills: ["React"] };
-  const { score, match_reasons } = scoreJob(job, meta, MISS_TITLE);
+  const { score, match_reasons, dropped } = scoreJob(job, meta, MISS_TITLE);
   assert.equal(score, 10);
-  assert.ok(!match_reasons.some((r) => r.includes("capped")));
+  assert.equal(dropped, true);
+  assert.ok(match_reasons.some((r) => r.includes("dropped")));
 });
 
-test("scoreJob: a single core match disables the cap", () => {
-  // skills: 1/3*40 = 13 + title 15 + seniority 15 + wt 20 + yoe 10 = 73 — above 50, kept
+test("scoreJob: empty key_skills (structuring gap) is also dropped", () => {
+  const job = { ...zeroed, key_skills: [], work_type: "Remote" };
+  const meta = { core_skills: ["React"] };
+  const { dropped, match_reasons } = scoreJob(job, meta, MISS_TITLE);
+  assert.equal(dropped, true);
+  assert.ok(match_reasons.some((r) => r === "No JD skills listed (+0)"));
+  assert.ok(match_reasons.some((r) => r.includes("dropped")));
+});
+
+test("scoreJob: missing key_skills entirely is also dropped", () => {
+  const job = { ...zeroed, work_type: "Remote" };
+  const meta = { core_skills: ["React"] };
+  const { dropped } = scoreJob(job, meta, MISS_TITLE);
+  assert.equal(dropped, true);
+});
+
+test("scoreJob: a single core match → dropped: false", () => {
+  // skills: 1/3*40 = 13 + title 15 + seniority 15 + wt 20 + yoe 10 = 73
   const job = {
     job_title: "Staff Frontend Engineer",
     seniority_level: "Staff",
@@ -318,8 +334,9 @@ test("scoreJob: a single core match disables the cap", () => {
     years_of_experience: 5,
   };
   const meta = { target_seniority: ["Staff"], core_skills: ["React"], current_yoe: 9 };
-  const { score } = scoreJob(job, meta, { domainKeywords: ["frontend"] });
+  const { score, dropped } = scoreJob(job, meta, { domainKeywords: ["frontend"] });
   assert.equal(score, 73);
+  assert.equal(dropped, false);
 });
 
 // ---- 7. Excitement bands (3 bands, boundaries) ----
@@ -379,9 +396,10 @@ test("scoreJob: total 64 → 'Try panalam' (just below 65 boundary)", () => {
 
 // ---- 8. Degenerate input ----
 
-test("scoreJob: empty job + empty meta → neutral floors only (title 8 + YoE 5)", () => {
-  const { score, excitement_level, match_reasons } = scoreJob({}, {});
+test("scoreJob: empty job + empty meta → neutral floors only (title 8 + YoE 5), dropped (no skills)", () => {
+  const { score, excitement_level, match_reasons, dropped } = scoreJob({}, {});
   assert.equal(score, 13);
   assert.equal(excitement_level, "Try panalam");
-  assert.equal(match_reasons.length, 5);
+  assert.equal(dropped, true);
+  assert.equal(match_reasons.length, 6);
 });
