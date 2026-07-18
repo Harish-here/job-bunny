@@ -1,8 +1,16 @@
-// scripts/pipeline/jd_filter.js — config-driven filter engine (Packet 1: engine core only,
-// NOT wired into any caller yet). Two exports:
+// scripts/pipeline/jd_filter.js — config-driven filter engine, wired into extract.js's Stage A
+// card gates and the Greenhouse/Keka ATS lanes (see extract/filters.js, ats_common.js). Two
+// exports:
 //
-//   evaluate(jd, ctx, { severity })   — pure. jd → { drop, reasons, flags }.
+//   evaluate(jd, ctx, { severity, only }) — pure. jd → { drop, reasons, flags }.
 //   loadFilterContext(profile)       — async. Reads config files → the `ctx` evaluate() needs.
+//
+// `only`: optional array of rule names. When provided (non-empty), ONLY those rules run —
+// everything else is skipped, same as if the required fields were absent. Lets a caller that
+// needs to run the avoid gate and the title gate at DIFFERENT points in its own pipeline (e.g.
+// a company-capture step in between, as extract.js's Stage A does) call evaluate() twice with
+// `only: ['avoid']` then `only: ['title']` instead of duplicating rule logic. Omitted/empty →
+// all rules run (unchanged default behavior).
 //
 // Canonical JD model (callers adapt their own record shape into this before calling evaluate):
 //   { title, company, skills:[], work_type, city, country, timezone, tz_bad }
@@ -119,14 +127,16 @@ const RULES = [
   { name: "core_skill", requires: ["skills"], confidence: "hard", check: checkCoreSkill },
 ];
 
-// Pure evaluator. severity: 'lenient' | 'normal' (default) | 'strict'.
-export function evaluate(jd, ctx, { severity } = {}) {
+// Pure evaluator. severity: 'lenient' | 'normal' (default) | 'strict'. `only`: optional rule-name
+// allowlist — see header comment.
+export function evaluate(jd, ctx, { severity, only } = {}) {
   const sev = severity || "normal";
   const reasons = [];
   const flags = [];
   let hardHit = false;
 
   for (const rule of RULES) {
+    if (only && !only.includes(rule.name)) continue;
     // tz_bad is its own guard — it must fire even when `timezone` is absent, so the
     // remote_timezone rule is force-run when tz_bad === true regardless of requires-gating.
     const forceCheck = rule.name === "remote_timezone" && jd.tz_bad === true;

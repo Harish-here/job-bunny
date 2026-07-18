@@ -25,8 +25,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isMain } from "../lib/cli.js";
 import { writeJson } from "../lib/io.js";
-import { loadAvoid } from "./avoid.js";
-import { filterByTitle } from "./title_filter.js";
+import { loadFilterContext, evaluate } from "./jd_filter.js";
 import { readCache } from "../notion/cache.js";
 import { paths, resolveProfileName, ROOT } from "../lib/config.js";
 import { notify } from "../notify/notify.js";
@@ -124,11 +123,14 @@ async function main() {
     templatePath: join(ROOT, "templates", "greenhouse_boards.md"),
   });
 
-  const avoid = await loadAvoid();
+  // ctx.avoid is the same parseAvoid() shape loadAvoid() returns — loading it once here (via
+  // loadFilterContext) covers both the probe phase's avoid-skip and the fetch phase's avoid/
+  // title drop predicates below, instead of loading avoid.md twice.
+  const ctx = await loadFilterContext();
   const companiesSeen = await readJsonOr(P.companiesSeen, [], "greenhouse");
 
   // --- probe phase ---
-  const { probed, hits } = await runProbePhase({ companiesSeen, ledger, avoid, probeCandidate });
+  const { probed, hits } = await runProbePhase({ companiesSeen, ledger, avoid: ctx.avoid, probeCandidate });
   const candidatesRun = probed > 0;
   if (candidatesRun) {
     await writeJson(P.ghProbeLedger, ledger);
@@ -156,14 +158,14 @@ async function main() {
     boards,
     seen: ghSeen,
     cacheIds,
-    avoid,
     maxNew,
     capEnvLabel: "GH_MAX_NEW",
     tag: "greenhouse",
     fetchBoardJobs,
     jobIdFor: (job) => `gh-${job.id}`,
     mapJob: mapGhJob,
-    titlePass: (t) => filterByTitle(t).pass,
+    dropAvoid: (m) => evaluate(m, ctx, { severity: "lenient", only: ["avoid"] }).drop,
+    dropTitle: (m) => evaluate(m, ctx, { severity: "lenient", only: ["title"] }).drop,
   });
 
   if (fetchResult.allFailed) {
