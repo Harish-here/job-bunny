@@ -30,14 +30,17 @@ export function canonicalUrl(cfg, id, href, base) {
 }
 
 // ---------- assertions ----------
+// Runs right after the page load, before any scrolling — so each check WAITS (bounded) for its
+// selector to attach rather than counting a still-hydrating SPA DOM and failing a healthy page.
 export async function runAssertions(page, cfg) {
-  const mustExist = parseList(cfg.must_exist);
-  for (const sel of mustExist) {
-    if (!(await withTimeout(page.locator(sel).count(), DEFAULT_CALL_TIMEOUT_MS, "must_exist count"))) {
-      throw new Error(`assertion failed: must_exist selector not found: ${sel}`);
-    }
+  const appeared = (sel) =>
+    page.locator(sel).first().waitFor({ state: "attached", timeout: DEFAULT_CALL_TIMEOUT_MS }).then(() => true, () => false);
+  for (const sel of parseList(cfg.must_exist)) {
+    if (!(await appeared(sel))) throw new Error(`assertion failed: must_exist selector not found: ${sel}`);
   }
   const minCards = parseInt(cfg.min_job_cards || "1", 10);
+  if (minCards <= 0) return;
+  await appeared(cfg.job_card);
   const count = await withTimeout(page.locator(cfg.job_card).count(), DEFAULT_CALL_TIMEOUT_MS, "job_card count");
   if (count < minCards) throw new Error(`assertion failed: ${count} cards < min_job_cards ${minCards}`);
 }
@@ -93,7 +96,9 @@ export function scrollStepInPage(sel) {
 export function mergeCardRows(byKey, rows) {
   let grew = 0;
   for (const row of rows) {
-    const key = row.idAttr || row.href || `idx:${row.index}`;
+    // href keys use only the path — LinkedIn re-renders can vary tracking params per round,
+    // which would make the same card look new every harvest and defeat the stable-rounds exit.
+    const key = row.idAttr || (row.href && row.href.split("?")[0]) || `idx:${row.index}`;
     if (key !== `idx:${row.index}`) byKey.delete(`idx:${row.index}`); // placeholder hydrated
     const prev = byKey.get(key);
     if (prev && (prev.title || !row.title)) continue; // known and not an upgrade
@@ -103,19 +108,28 @@ export function mergeCardRows(byKey, rows) {
   return grew;
 }
 
-// Scroll-and-harvest rounds under one wall-clock budget (maxMs). Each round: harvest all cards in
-// one evaluate, merge, then scroll one step. Stops on: budget expiry (warn + return partial —
-// same skip-and-continue convention as the rest of this file), no growth for stableRounds rounds
-// (one stale round suffices once the bottom/end signal is reached), maxRounds, or a
-// wedged/deadline-exceeded CDP call.
+// Scroll-and-harvest rounds under one wall-clock budget (maxMs; omitted → uncapped). Each round:
+// harvest all cards in one evaluate, merge, then scroll one step. Stops on: budget expiry (warn +
+// return partial — same skip-and-continue convention as the rest of this file), end signal seen
+// with nothing new, bottom reached with no growth for stableRounds rounds (scrolling continues
+// until the bottom even through stale mid-list rounds, so append-on-bottom loaders still fire and
+// a growing scrollHeight un-sets the bottom), maxRounds, or a wedged/deadline-exceeded CDP call.
 export async function collectCards(page, cfg, { maxMs, evalTimeoutMs = DEFAULT_CALL_TIMEOUT_MS, maxRounds = 30, stableRounds = 3, roundDelayMs = 400, log = console } = {}) {
-  const budget = createBudget(maxMs);
+  const budget = createBudget(maxMs ?? Infinity);
   const byKey = new Map();
   let stale = 0;
   let atBottom = false;
+  let endSeen = false;
+  let lastDomCount = 0;
   for (let round = 0; round < maxRounds; round++) {
-    // Round 0 always gets the full deadline so an expired budget still yields one harvest.
-    const deadline = round === 0 ? evalTimeoutMs : Math.max(1, Math.min(evalTimeoutMs, budget.remaining()));
+    // Expiry is checked before rounds > 0 (round 0 always harvests, so an expired budget still
+    // yields whatever is on screen); the per-call deadline keeps a ≥1s floor so a nearly-spent
+    // budget doesn't dispatch a doomed harvest.
+    if (round > 0 && budget.expired()) {
+      log.warn(`⚠ collectCards: hit ${maxMs}ms cap after ${byKey.size}/${lastDomCount} cards — proceeding with what was collected`);
+      break;
+    }
+    const deadline = Math.min(evalTimeoutMs, Math.max(1000, budget.remaining()));
     let harvest;
     try {
       harvest = await withTimeout(page.evaluate(collectCardsInPage, cfg), deadline, "collectCards harvest");
@@ -124,16 +138,14 @@ export async function collectCards(page, cfg, { maxMs, evalTimeoutMs = DEFAULT_C
       break;
     }
     const grew = mergeCardRows(byKey, harvest.rows) > 0;
-    if (harvest.end) atBottom = true;
-    if (budget.expired()) {
-      log.warn(`⚠ collectCards: hit ${maxMs}ms cap after ${byKey.size}/${harvest.rows.length} cards — proceeding with what was collected`);
-      break;
-    }
+    endSeen = endSeen || harvest.end;
+    lastDomCount = harvest.rows.length;
     stale = grew ? 0 : stale + 1;
-    if ((atBottom && stale >= 1) || stale >= stableRounds) break;
+    if (endSeen && stale >= 1) break;
+    if (atBottom && stale >= stableRounds) break;
     try {
       const s = await withTimeout(page.evaluate(scrollStepInPage, cfg.scroll_container || null), deadline, "collectCards scroll");
-      atBottom = atBottom || s.top + s.client >= s.height - 2;
+      atBottom = s.top + s.client >= s.height - 2;
     } catch (e) {
       log.warn(`⚠ collectCards: scroll failed (${e.message}) — proceeding with ${byKey.size} card(s)`);
       break;

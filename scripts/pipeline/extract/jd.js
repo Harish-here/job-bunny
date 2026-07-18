@@ -74,8 +74,15 @@ export async function captureJd(jdTab, page, cfg, card, cap, { log = console } =
     }
     return t.slice(0, cap);
   }
-  // inline: clicking the card renders the JD in a side panel on the same page
-  await page.locator(cfg.job_card).nth(card.index).click({ timeout: DEFAULT_CALL_TIMEOUT_MS });
+  // inline: clicking the card renders the JD in a side panel on the same page. Prefer clicking
+  // by id — card.index is a snapshot from whichever harvest round produced the row, and the
+  // virtualized list has been scrolled since, so positional nth() may resolve to a different
+  // card. Falls back to nth() only when the inventory has no usable id attr.
+  const idValue = cfg.job_card_id_attr && card.job_id ? `${cfg.job_card_id_attr_prefix || ""}${card.job_id}` : null;
+  const target = idValue && /^[\w:.-]+$/.test(idValue)
+    ? page.locator(`${cfg.job_card}[${cfg.job_card_id_attr}="${idValue}"]`).first()
+    : page.locator(cfg.job_card).nth(card.index);
+  await target.click({ timeout: DEFAULT_CALL_TIMEOUT_MS });
   await waitSettled(page, cfg);
   return (await extractJdText(page, cfg)).slice(0, cap);
 }

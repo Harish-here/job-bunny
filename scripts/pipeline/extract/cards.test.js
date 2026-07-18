@@ -126,6 +126,14 @@ test("mergeCardRows: a row hydrating (empty → real title) replaces its placeho
   assert.equal(values[0].idAttr, "9");
 });
 
+test("mergeCardRows: id-less rows keyed by href ignore querystring churn between rounds", () => {
+  const byKey = new Map();
+  mergeCardRows(byKey, [{ index: 0, title: "A", idAttr: null, href: "/jobs/view/1/?trackingId=aaa" }]);
+  const grew = mergeCardRows(byKey, [{ index: 0, title: "A", idAttr: null, href: "/jobs/view/1/?trackingId=bbb" }]);
+  assert.equal(grew, 0); // same card, different tracking param — not growth
+  assert.equal(byKey.size, 1);
+});
+
 // --- collectCards (fake page) --------------------------------------------------
 
 const CFG = {
@@ -231,13 +239,40 @@ test("collectCards: a wedged evaluate is bounded and returns what was collected"
   assert.ok(warns.length >= 1, "expected a warn about the wedged call");
 });
 
-test("collectCards: never scrolls again after reaching the bottom with no growth", async () => {
+test("collectCards: stops at the bottom once growth stalls for stableRounds", async () => {
   const page = fakePage({
     harvests: [[row(0, "11")], [row(0, "11")]],
     scrolls: [{ top: 1000, height: 2000, client: 1000 }], // top+client === height → bottom
   });
-  await collectCards(page, CFG, { ...fastOpts, stableRounds: 3 });
-  assert.equal(page.scrollCalls, 1); // bottom + stale round ends the loop without stableRounds more scrolls
+  await collectCards(page, CFG, { ...fastOpts, stableRounds: 1 });
+  assert.equal(page.scrollCalls, 1);
+});
+
+test("collectCards: keeps scrolling through stale mid-list rounds until the bottom is reached", async () => {
+  // Non-virtualized page: every card is in the DOM from round 0, so no round ever "grows" —
+  // the loop must still scroll all the way down (append-on-bottom loaders fire there), not
+  // bail after stableRounds mid-list.
+  const page = fakePage({
+    harvests: [[row(0, "11")]],
+    scrolls: [
+      { top: 500, height: 5000, client: 500 },
+      { top: 1000, height: 5000, client: 500 },
+      { top: 4500, height: 5000, client: 500 }, // bottom on the third step
+    ],
+  });
+  await collectCards(page, CFG, { ...fastOpts, stableRounds: 1 });
+  assert.equal(page.scrollCalls, 3); // scrolled to the bottom despite zero growth after round 0
+});
+
+test("collectCards: an omitted maxMs means uncapped, not instant expiry", async () => {
+  const warns = [];
+  const page = fakePage({
+    harvests: [[row(0, "11")], [row(0, "11"), row(1, "22")], [row(0, "11"), row(1, "22")]],
+    scrolls: [{ top: 1000, height: 2000, client: 1000 }],
+  });
+  const cards = await collectCards(page, CFG, { roundDelayMs: 1, stableRounds: 1, log: { warn: (m) => warns.push(m), log() {} } });
+  assert.equal(cards.length, 2); // later rounds ran and merged — no NaN-deadline bailout
+  assert.deepEqual(warns, []);
 });
 
 test("collectCards: an end_of_results_signal in the harvest ends the loop after one stale round", async () => {
@@ -276,7 +311,7 @@ test("collectAllPages url-pages: paginates, dedupes by job_id, stops on a short 
           ? [row(0, "11"), row(1, "22")]
           : [row(0, "22"), row(1, "33")].slice(0, 1); // short raw page (1 < pageSize) ends pagination
     },
-    locator: () => ({ count: async () => 2 }),
+    locator: () => ({ count: async () => 2, first: () => ({ waitFor: async () => {} }) }),
     evaluate: async (fn) =>
       fn === collectCardsInPage ? { rows: currentHarvest, end: false } : { top: 0, height: 500, client: 500 },
   };

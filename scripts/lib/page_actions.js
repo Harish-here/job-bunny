@@ -25,7 +25,11 @@ export async function jitter(minMs, maxMs) {
 export function withTimeout(promise, ms = DEFAULT_CALL_TIMEOUT_MS, label = "call") {
   let timer;
   const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms deadline`)), ms);
+    timer = setTimeout(() => {
+      const err = new Error(`${label} exceeded ${ms}ms deadline`);
+      err.name = "DeadlineError"; // stable marker for callers (message wording is free to change)
+      reject(err);
+    }, ms);
   });
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
