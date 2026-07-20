@@ -1,51 +1,27 @@
 ---
-description: Run the full v0 pipeline end-to-end for a profile, manually. Hard-aborts on red /doctor; skips a broken page-group and continues.
+description: Run the full v0 pipeline end-to-end for a profile. Thin wrapper over scripts/ops/orchestrate.js, which spawns every stage (doctor → sync) as a blocking child and owns watchdog/retry/failure-capture.
 ---
 
-Orchestrate the daily pipeline in order. Triggered manually, or headlessly by launchd via `/schedule` (`scripts/ops/run_scheduled.sh` → `claude -p "/run <profile>" --dangerously-skip-permissions`) — same stage sequence either way. `run_scheduled.sh` sets `JOBBUNNY_HEADLESS=1` when invoking `claude`, and forwards its own Telegram digest after this process exits — check for that variable before forwarding yourself (see the summary/failure sections below) so headless runs don't get double-notified.
+Run the daily pipeline for a profile. This command is a thin wrapper: the whole pipeline —
+doctor, reconcile, extract, greenhouse, keka, compress, structure, assemble, filter, dedup,
+rank, sync — is run by `scripts/ops/orchestrate.js`, a single node process that spawns each stage
+as a foreground child and owns the watchdog, retry, stall-detection, and failure-capture.
+`/structure` is spawned by orchestrate as `claude -p`, not invoked inline here.
 
-**Step 0 — resolve the profile.** If `$ARGUMENTS` has a profile name, use it. Otherwise read `default_profile` from `config.json` (no `config.json` = not set up yet — stop and point at `/setup`). State which profile the run is for before starting. When a profile was given, prefix **every** `node` command below with `JOBBUNNY_PROFILE=<profile>` — each bash call is a fresh shell, so repeat the prefix every time; never rely on `export`.
+**Step 0 — resolve the profile.** If `$ARGUMENTS` names a profile, use it. Otherwise read
+`default_profile` from `config.json` (no `config.json` = not set up — stop and point at
+`/setup`). State which profile the run is for before starting.
 
-Run each stage; on a **page-group assertion failure during extract, skip that group and continue** — one stale selector must never kill the whole run. Collect a run summary at the end. Stage files live in `profiles/<profile>/data/`.
+**Step 1 — run the orchestrator in the FOREGROUND.** One blocking process — do NOT background it
+(no `run_in_background`), do not wrap it, do not re-implement any stage:
 
-**Never background a stage command (no `run_in_background`), even if it's slow.** Every `node scripts/*.js` call below must run in the foreground and be waited on before moving to the next stage. This matters most for headless/scheduled runs: `run_scheduled.sh` invokes this command via `claude -p ... --dangerously-skip-permissions`, a single-shot non-interactive call — if a stage is backgrounded on the promise of "I'll be notified when it finishes," that notification can never arrive because the process exits at the end of this one turn, silently truncating the whole run right after the backgrounded stage starts (with no error, no summary, no `mark_run_result.js` call). Extract is the slowest stage and the one most tempting to background — run it synchronously regardless.
+    JOBBUNNY_PROFILE=<profile> node scripts/ops/orchestrate.js --profile <profile>
 
-Stage sequence:
+orchestrate writes `profiles/<profile>/data/last_run_result.json`, and on success prints a
+`## Run Summary — profile: <profile>` block on stdout. Its exit code is the outcome (0 = passed,
+non-zero = failed).
 
-1. **/doctor** — `node scripts/ops/doctor.js`. Stop the run if any check is red.
-2. **/reconcile** — `node scripts/notion/cache.js` (rebuild the profile's cache from its Notion DB).
-3. **/extract** — `node scripts/pipeline/extract.js` (browser; Stage A avoid-drop; skip-broken-group-and-continue). Requires `/doctor` green — do not proceed if step 1 was red. Output: `jobs_raw_text.json`, plus `data/companies_seen.json` for the greenhouse lane below.
-4. **/greenhouse** — `node scripts/pipeline/greenhouse.js` (keyless Greenhouse boards API lane; probes new companies from `companies_seen.json`, fetches curated/auto-discovered boards, appends to `jobs_raw_text.json`). **Fail-soft, like a skipped page-group**: an absent watchlist or a whole-lane network failure exits 0 and must NOT stop the run — note it in the Run Summary instead of treating it as a hard failure.
-5. **/keka** — `node scripts/pipeline/keka.js` (keyless Keka careers API lane — same probe/fetch pattern as `/greenhouse`: probes new companies from `companies_seen.json`, fetches curated/auto-discovered tenant boards, appends to `jobs_raw_text.json` with `kk-` ids). Same fail-soft rule as `/greenhouse`.
-6. **compress** — `node scripts/pipeline/compress.js` (sanitise raw_text; emit compact markdown table). Output: `structure_input.md` + `structure_passthrough.json`.
-7. **/structure** — invoke the `/structure` skill **for this profile**. Do NOT write custom code. Reads the profile's `structure_input.md`; checkpoints every 25 rows to `jobs_raw_checkpoint.md`; writes `jobs_raw_decisions.md`.
-8. **assemble** — `node scripts/pipeline/assemble.js` (merge LLM decisions with passthrough fields). Output: `jobs_raw.json`.
-9. **/filter** — `node scripts/pipeline/filter.js` (Stage B; home city from the profile's resume_meta).
-10. **/dedup** — `node scripts/pipeline/dedup.js`.
-11. **/rank** — `node scripts/pipeline/rank.js`.
-12. **/sync** — `node scripts/notion/notion_sync.js` (push automated fields to the profile's DB; update cache + last_run).
-
-After the run, print a summary in this exact template (fill in real values; omit the Notes line if there's nothing noteworthy):
-
-```
-## Run Summary — profile: <profile>
-
-- **URLs processed:** <n> (<breakdown by page-group type>)
-- **Page-groups skipped:** <n> (with reason, or 0)
-- **Jobs extracted → structured → filtered → new → synced:** <a> → <b> → <c> → <d> → <e>
-
-**Top excitement bands (ranked):**
-| Score | Title | Company |
-|---|---|---|
-| <score> | <title> | <company> |
-...
-
-Notes:
-- <anything noteworthy: cache size swings, heavy dedup collapse, filter drops with reasons, etc.>
-```
-
-After printing the summary, **always** mark the run's outcome explicitly, regardless of headless vs. interactive — `run_scheduled.sh` reads this file to decide PASSED/FAILED, rather than inferring it from this summary's wording, so it must be a literal command, not paraphrased: `JOBBUNNY_PROFILE=<profile> node scripts/ops/mark_run_result.js --status success`.
-
-Then decide whether to forward the digest to Telegram yourself: check `echo "${JOBBUNNY_HEADLESS:-}"` — if it printed `1`, this is a headless/scheduled run and `run_scheduled.sh` will send its own Telegram digest after this process exits, so **skip forwarding** (sending it here too would double-notify). If it printed nothing (interactive `/run`, no wrapper watching), forward it yourself: shell out with `JOBBUNNY_PROFILE=<profile> node scripts/notify/notify.js --severity success --body "<the exact summary text just printed>"`. No `--title` — the Run Summary body already opens with its own bold heading, and the Telegram formatter's banner already carries the profile name, so a separate title would just be a redundant second headline.
-
-If any single stage fails hard (not a skippable page-group), stop and surface the error rather than pushing partial data — skip the summary template in that case and report the failure directly. Mark the outcome the same way (always, headless or not): `JOBBUNNY_PROFILE=<profile> node scripts/ops/mark_run_result.js --status failed --message "<short failure reason>"`. Then apply the same `JOBBUNNY_HEADLESS` check before forwarding a failure digest: `JOBBUNNY_PROFILE=<profile> node scripts/notify/notify.js --severity blocking --title "Run failed" --body "<the failure just reported>"` — only if not headless. These two mark/forward pairs are mutually exclusive per run (success xor failure) — never send both.
+**Step 2 — relay the result.** Relay orchestrate's `## Run Summary` block verbatim on success. On
+a non-zero exit, report the failure line orchestrate printed (`[orchestrate] FAILED — …`) rather
+than inventing a summary. Do not call `mark_run_result.js` and do not send Telegram from here —
+orchestrate owns the result file and sends the Telegram digest itself (success and failure).
