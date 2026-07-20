@@ -4,6 +4,10 @@
 
 # Job Bunny 🐇
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.6.0-blue" alt="version" />
+</p>
+
 A personal job-search companion that runs on your own Mac. Several times a day it scrapes your saved LinkedIn job searches, pulls fresh postings from company career APIs (Greenhouse, Keka), filters and ranks everything against your resume, and syncs the survivors to a Notion board — with an optional Telegram digest so you know what landed.
 
 Built to be driven by [Claude Code](https://claude.com/claude-code): the pipeline's orchestration and one LLM stage (structuring raw job descriptions into clean fields) run as Claude Code slash commands; everything else is plain Node.

@@ -3,6 +3,26 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [1.6.0] — 2026-07-20
+
+### Added
+- **Unified config-driven filter engine** (`scripts/pipeline/jd_filter.js`, #38) — a single `evaluate(jd, ctx, { severity, only }) → { drop, reasons, flags }` that owns **every** job-drop decision across the pipeline (avoid-list, title gate, on-site/hybrid location, remote-country eligibility, timezone, core-skill). **Zero preference literals in code**: all preferences (home cities+countries, eligible remote countries, timezone bands, avoid list, title keywords) live as data in `filter_config.json`. Severity (`lenient`/`normal`/`strict`) lets card-altitude callers run only the satisfiable gates, and turns soft violations into `filter_flags` (borderline capture) instead of silent drops.
+- **Geo data model** in `filter_config.json` — per-city `locations[]` (city + country + accepted work types), `home_country`, and `remote.{eligible_countries, timezones.{acceptable,borderline}}`. `/structure` now emits a `country` column; `/setup` gathers the geo block.
+- **Notion "Review Flags"** rich_text property surfacing borderline `filter_flags` for human review, with a fail-soft `ensureSchema()` that adds the property to pre-existing DBs on sync.
+- **Title normalization + core-skill gate** (#36) — strip a standalone "Principal" from job titles, and drop JDs with no core-skill match (the latter now owned by the filter engine).
+
+### Changed
+- **`rank.js` is now a pure scorer** — its hidden 0-core-skill drop moved into the filter engine, and its hardcoded `APAC`/`EMEA` timezone scoring now reads `acceptable`/`borderline` bands from config.
+- All drop touch points — Stage A extract cards, the Greenhouse/Keka ATS lanes, and Stage B `filter.js` — routed through the shared engine. Removing the top-level `title_filter` import also makes the ATS lanes' "disabled" early-return genuinely fail-soft on `filter_config`.
+
+### Fixed
+- Batch the in-page card harvest and deadline-bound every CDP call in extract (#35).
+- Close all leftover Chrome tabs on reuse; add `/remove-profile` (#34).
+- Hold the machine awake during scheduled runs via `caffeinate` (#32); log the failure reason alongside status in `run_scheduled.sh` (#31).
+
+### Notes
+- 393 unit tests green; verified end-to-end on the `profiles/rajni/` fixture — hard drops fire (on-site outside home, ineligible remote country, zero core-skill) and a borderline EMEA remote is kept + flagged, with the flag surviving `filter → dedup → rank → new_jobs.json`.
+
 ## [1.5.0] — 2026-07-17
 
 ### Added
