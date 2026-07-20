@@ -56,13 +56,13 @@ Key invariants:
 - **Extract owns Chrome.** `scripts/lib/browser.js` launches Chrome with `--remote-debugging-port=9222` against the `.chrome-debug/` user-data-dir (persistent LinkedIn login) and always kills it on exit unless `JOBBUNNY_KEEP_BROWSER=1`.
 - **Extract is resumable.** `extract_resume.json` tracks per-URL same-day completion (a rerun skips done URLs; all-done triggers a rescan reset for multi-fire schedules; `JOBBUNNY_FRESH=1` forces clean). `extract_progress.json` is a heartbeat rewritten at every checkpoint so the scheduled-run watchdog can detect stalls. Same-day resets must never discard already-flushed captures.
 - **The two ATS lanes share scaffolding.** `scripts/pipeline/ats_common.js` holds the generic probe/fetch loops; per-ATS specifics are injected. A third lane should reuse it.
-- **Never background a pipeline stage** (no `run_in_background`), especially extract. Headless runs execute via a single-shot `claude -p "/run <profile>"` — a backgrounded stage's completion notification can never arrive and silently truncates the run.
+- **The pipeline runs as one orchestrator process.** `scripts/ops/orchestrate.js` spawns every stage (doctor → sync) as a blocking foreground child and owns retry/stall/timeout/failure-capture; `/structure` is spawned as `claude -p`. Headless and interactive `/run` share this one code path — no stage is ever backgrounded.
 
 ## Scheduling and notifications
 
-`scripts/ops/schedule.js` reads each profile's `schedule.times` from `profile.json` and installs one launchd job per distinct time. Each job runs `scripts/ops/run_scheduled.sh`, which runs profiles strictly sequentially (they share one Chrome/CDP session), invokes `claude -p "/run <profile>" --dangerously-skip-permissions` with `JOBBUNNY_HEADLESS=1`, and races watchdogs against it (extract-started heartbeat, progress-stall, full-run timeout).
+`scripts/ops/schedule.js` reads each profile's `schedule.times` from `profile.json` and installs one launchd job per distinct time. Each job runs `scripts/ops/run_scheduled.sh`, which runs profiles strictly sequentially (they share one Chrome/CDP session) and invokes `node scripts/ops/orchestrate.js --profile <profile>` per profile. The per-stage watchdog (extract stall, per-stage timeout, run cap) lives inside orchestrate.js; the shell keeps only a coarse backstop timeout above that cap.
 
-Run outcome is communicated by file, not by parsing output: `/run` must always end with `scripts/ops/mark_run_result.js --status success|failed`, which `run_scheduled.sh` reads via `check_run_result.js`. Telegram digests are sent by `run_scheduled.sh` for headless runs and by `/run` itself only when `JOBBUNNY_HEADLESS` is unset — never both.
+Run outcome is orchestrate.js's exit code (0 = passed, non-zero = failed); orchestrate also writes `profiles/<profile>/data/last_run_result.json` and sends the Telegram digest itself (success and failure) via `notify()` — the single sender, so there is no double-notify and no `JOBBUNNY_HEADLESS` guard. `run_scheduled.sh` only reads the exit code (and keeps its local osascript ping).
 
 ## Slash commands and skills
 
