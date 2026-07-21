@@ -1,0 +1,39 @@
+{
+  "page": "linkedin__jobs-search-results",
+  "pageType": "details-page",
+  "generatedAt": "2026-06-30",
+  "selectors": {
+    "cardList": "body",
+    "card": "div[componentkey^=\"job-card-component-ref-\"]",
+    "cardTitle": "p",
+    "cardCompany": "p:nth(1)",
+    "cardLocation": "p:nth(2)",
+    "cardLink": "div[componentkey^=\"job-card-component-ref-\"]",
+    "jdRoot": "#job-details"
+  },
+  "behaviors": {
+    "interactionModel": "new-page",
+    "jobListTrigger": "job ID extracted from componentkey attr; URL built via urlPatternOfJob",
+    "paginationType": "url-pages",
+    "paginationParam": "start",
+    "paginationPageSize": "25",
+    "maxPages": "4",
+    "jdSettledSignal": "selector-visible",
+    "urlPatternOfJob": "https://www.linkedin.com/jobs/view/<id>/",
+    "jdAnchorText": "About the job",
+    "maxRawTextChars": "2500",
+    "jobCardIdAttr": "componentkey",
+    "jobCardIdAttrPrefix": "job-card-component-ref-",
+    "jdContainer": ".jobs-search__job-details--container",
+    "jdTitle": ".job-details-jobs-unified-top-card__job-title",
+    "jdCompany": ".job-details-jobs-unified-top-card__company-name",
+    "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
+    "mustExist": "[componentkey=\"JobsSearchFilters\"]",
+    "minJobCards": "0",
+    "hashedClassNamesWarning": "this route uses hashed/obfuscated CSS class names (unstable); card identity comes from the stable componentkey attribute",
+    "cardListNote": "v0 inventory did not capture a distinct list-container selector for this page (job_list_container/scroll_container both blank in the .md); using document body as scope until /page-analyse regenerates this page for v2",
+    "cardLinkNote": "no href on the card; job id is parsed from the componentkey attribute (see jobCardIdAttr/jobCardIdAttrPrefix) and the JD url is built via urlPatternOfJob rather than read from an anchor — cardLink duplicates the card selector as the element carrying the id",
+    "selectorsVerifiedAt": "2026-06-24 (per .md section 2 header; page-level generatedAt above uses the .md's top banner date of 2026-06-30)",
+    "sourceInventory": "page_inventory/linkedin__jobs-search-results.md (v0, verified 2026-06-30 against https://www.linkedin.com/jobs/search-results/)"
+  }
+}

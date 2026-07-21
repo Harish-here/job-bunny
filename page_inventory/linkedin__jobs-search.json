@@ -1,0 +1,35 @@
+{
+  "page": "linkedin__jobs-search",
+  "pageType": "details-page",
+  "generatedAt": "2026-06-18",
+  "selectors": {
+    "cardList": ".scaffold-layout__list",
+    "card": "li[data-occludable-job-id]",
+    "cardTitle": ".artdeco-entity-lockup__title",
+    "cardCompany": ".artdeco-entity-lockup__subtitle",
+    "cardLocation": ".artdeco-entity-lockup__caption",
+    "cardLink": "a.job-card-container__link",
+    "jdRoot": "#job-details"
+  },
+  "behaviors": {
+    "interactionModel": "new-page",
+    "jobListTrigger": "open the job's /jobs/view/<id>/ URL directly in a fresh tab (robust; avoids fragile list-clicks)",
+    "paginationType": "url-pages",
+    "paginationParam": "start",
+    "paginationPageSize": "25",
+    "maxPages": "4",
+    "jdSettledSignal": "selector-visible",
+    "urlPatternOfJob": "https://www.linkedin.com/jobs/view/<id>/",
+    "jdAnchorText": "About the job",
+    "maxRawTextChars": "2500",
+    "jobCardIdAttr": "data-occludable-job-id",
+    "scrollContainer": ".scaffold-layout__list",
+    "jdContainer": ".jobs-search__job-details--container",
+    "jdTitle": ".job-details-jobs-unified-top-card__job-title",
+    "jdCompany": ".job-details-jobs-unified-top-card__company-name",
+    "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
+    "mustExist": ".scaffold-layout__list",
+    "minJobCards": "1",
+    "sourceInventory": "page_inventory/linkedin__jobs-search.md (v0, verified live DOM 2026-06-18, Chrome 149, logged-in session, https://www.linkedin.com/jobs/search/)"
+  }
+}
