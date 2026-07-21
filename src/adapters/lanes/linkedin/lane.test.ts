@@ -344,6 +344,32 @@ test('resume: a url already marked done in ResumeState is skipped entirely — i
   assert.equal(provider.handle?.pages.length, 1); // only url2's page was ever opened
 });
 
+test('same-day second fire: when ResumeState already has ALL urls marked done, source() rescan-resets and re-opens/harvests every url instead of skipping them', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const today = new Date().toISOString().slice(0, 10);
+  storage.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 3, [URL_2]: 2 } });
+  const ctx = fakeCtx();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+
+  // Both urls' pages were opened (not skipped) and jobs came back from both.
+  assert.equal(provider.handle?.pages.length, 2);
+  const ids = jobs.map((jd) => jd.identity.id).sort();
+  assert.deepEqual(ids, ['li-1001', 'li-1003', 'li-2001', 'li-2002']);
+});
+
 test('browser.launch throwing is a loud lane failure: source() rejects', async () => {
   const inv = await realInventory();
   const script = newScript();

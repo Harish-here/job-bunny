@@ -108,6 +108,19 @@ export class LinkedInLane implements FarmingLane {
     this.errors.length = 0;
     const resumeState = await ResumeState.load(this.storage, todayIso());
 
+    // Multi-fire same-day schedules: if every url across all groups was
+    // already captured by an earlier fire today, a later fire should
+    // rescan everything rather than skip every url and return nothing.
+    // (An empty url list is vacuously "all done" — rescanReset() on an
+    // already-empty done-map is a harmless no-op, and the loop below does
+    // nothing either way.) A partial done-set (some, not all, urls done)
+    // leaves the done-map intact so this run still skips what it already
+    // finished.
+    const allUrls = this.urls.flatMap((group) => group.urls);
+    if (resumeState.allDone(allUrls)) {
+      resumeState.rescanReset();
+    }
+
     const jobs: JD[] = [];
     const companiesSeen = new Set<string>();
 
