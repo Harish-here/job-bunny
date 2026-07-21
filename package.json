@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
+    "@swc/core": "^1.15.46",
     "@types/node": "^24.13.3",
     "dependency-cruiser": "^18.1.0",
     "typescript": "^7.0.2"
