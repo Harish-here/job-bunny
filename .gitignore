@@ -39,3 +39,8 @@ structure_passthrough.json
 !profiles/rajni/
 !profiles/rajni/resume.json
 !profiles/rajni/data/jobs_raw.json
+
+# P3 runner: per-run observability artifacts (checkpoints, result.json,
+# heartbeat, logs) are regenerated every run — never committed, even for
+# the rajni fixture.
+profiles/rajni/data/runs/

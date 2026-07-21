@@ -210,4 +210,5 @@ Brainstorm complete — full consolidated spec:
   `tsConfig` option omitted — dependency-cruiser 18.x caps at typescript <7.0.0
   and cruises 0 modules if `tsConfig` is set (see .dependency-cruiser.cjs header).
 - ✅ P2 filter engine — core/filter: config schema, five rules (title/company/location/timezone/skills), engine (evaluate/evaluateCard/decide), replay parity vs v0 rajni fixture (13/14 decisions match; 1 expected divergence: rajni-1004, v0 tz_bad flag removed in v2).
-- ⏳ P3 runner + observability — next.
+- ✅ P3 runner + observability — pipeline/runner (StageDef/StagePayload/PipelineCtx, FsStorage, guard: timeout+stall+retry, runPipeline: checkpoints/resume/failure-capture) + ops/observability (RunFolder, JsonlLogger, RunResult+funnel) + DoctorCheck port. Rajni fixture verify: 2-stage run produces run-folder artifacts + schema-valid result.json. Unblocks P4 (browser+LinkedIn), P5 (registry+API), P6 (LLM+structure); P5∥P6 parallelizable after P4.
+- ⏳ P4 browser + LinkedIn lane — next (highest risk).
