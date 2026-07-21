@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls extra postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a user's resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. It runs on macOS only (launchd scheduling, hardcoded Chrome path) and is driven either manually via slash commands or headlessly via launchd.
 
+## v2 rewrite in progress (branch main-v2)
+
+A clean-room TypeScript rewrite lives under `src/` — decision log in
+`main-v2.md` (read it before any v2 work), spec in
+`docs/superpowers/specs/2026-07-21-main-v2-architecture-design.md`.
+v0 under `scripts/` remains the running pipeline until parity cutover —
+don't mix the trees. Gate for v2 changes: `npm run check`
+(typecheck + biome + depcruise + all tests).
+
 ## Commands
 
 ```bash

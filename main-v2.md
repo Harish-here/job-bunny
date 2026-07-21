@@ -197,3 +197,16 @@ Status: brainstorming in progress. Sections marked ⏳ are not yet designed.
 
 Brainstorm complete — full consolidated spec:
 `docs/superpowers/specs/2026-07-21-main-v2-architecture-design.md`
+
+## Phase status
+
+- ✅ P1 skeleton + contracts — toolchain (Node 24, TS7 via typescript@7.0.2,
+  biome, depcruise), core/errors, core/jd (schema + normalizer), core/config,
+  core/profile, all seven ports, boundary rules, CI. `npm run check` is the gate.
+  Deviations from the P1 plan (all forced by the Node-24 / TS7 environment):
+  (1) the `test` npm script uses glob form (`node --test "scripts/**/*.test.js"
+  "src/**/*.test.ts"`) — bare-directory args throw MODULE_NOT_FOUND on Node 24;
+  (2) boundary enforcement parses via `@swc/core` (dev dep) with the
+  `tsConfig` option omitted — dependency-cruiser 18.x caps at typescript <7.0.0
+  and cruises 0 modules if `tsConfig` is set (see .dependency-cruiser.cjs header).
+- ⏳ P2 filter engine — next.
