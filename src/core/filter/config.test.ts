@@ -7,7 +7,11 @@ test('spec §6 example config parses with defaults', () => {
     title: {
       domain: { match: ['ui', 'frontend', 'front-end', 'full-stack'] },
       function: { match: ['engineer', 'developer', 'architect'] },
-      seniority: { match: ['senior', 'lead', 'staff'], reject: ['intern', 'junior', 'principal'], severity: 'soft' },
+      seniority: {
+        match: ['senior', 'lead', 'staff'],
+        reject: ['intern', 'junior', 'principal'],
+        severity: 'soft',
+      },
     },
     companies: { avoid: ['Evil Corp'] },
     locations: [
@@ -29,6 +33,8 @@ test('empty config is valid — every rule optional', () => {
 });
 
 test('rejects bad workType and minMatch < 1', () => {
-  assert.throws(() => FilterConfigSchema.parse({ locations: [{ city: 'x', workTypes: ['office'] }] }));
+  assert.throws(() =>
+    FilterConfigSchema.parse({ locations: [{ city: 'x', workTypes: ['office'] }] }),
+  );
   assert.throws(() => FilterConfigSchema.parse({ skills: { core: ['a'], minMatch: 0 } }));
 });

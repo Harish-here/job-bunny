@@ -32,7 +32,10 @@ export const FilterConfigSchema = z.object({
     )
     .optional(),
   timezones: z
-    .object({ accept: z.array(z.string().min(1)), severity: SeveritySchema.default('hard') })
+    .object({
+      accept: z.array(z.string().min(1)),
+      severity: SeveritySchema.default('hard'),
+    })
     .optional(),
   skills: z
     .object({
