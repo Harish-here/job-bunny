@@ -74,3 +74,21 @@ test('buildFunnel groups drops by the FIRST failing verdict rule, counting occur
   const funnel = buildFunnel(payloadIn, payloadOut);
   assert.deepEqual(funnel.dropsByRule, { 'title.domain': 2, location: 1 });
 });
+
+test('buildFunnel counts only NEW drops — prior cumulative drops are excluded', () => {
+  const priorDrop = {
+    jd: fakeJD('old'),
+    reasons: [{ rule: 'company.avoid', severity: 'hard' as const, pass: false }],
+  };
+  const newDrop = {
+    jd: fakeJD('new'),
+    reasons: [{ rule: 'location', severity: 'hard' as const, pass: false }],
+  };
+  const payloadIn: StagePayload = { jobs: [fakeJD('x')], dropped: [priorDrop] };
+  const payloadOut: StagePayload = { jobs: [], dropped: [priorDrop, newDrop] };
+  const funnel = buildFunnel(payloadIn, payloadOut);
+  // company.avoid was dropped by a PRIOR stage — it must NOT be recounted here.
+  assert.deepEqual(funnel.dropsByRule, { location: 1 });
+  assert.equal(funnel.jobsIn, 1);
+  assert.equal(funnel.jobsOut, 0);
+});
