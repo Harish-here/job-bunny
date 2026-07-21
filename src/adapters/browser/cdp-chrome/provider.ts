@@ -68,6 +68,15 @@ export interface CdpChromeProviderDeps {
   candidates?: readonly string[];
   launcherFsDeps?: LauncherDeps;
   killEnv?: NodeJS.ProcessEnv;
+  /** Delay between connectOverCDP retry attempts, in ms. Injectable so tests
+   * run with no real waits. Default 250ms. */
+  connectRetryMs?: number;
+  /** Total time budget for connect retries, in ms, starting from the first
+   * attempt. Injectable so tests run with no real waits. Default 10000ms —
+   * mirrors scripts/lib/browser.js's cdpReachable() poll cap: Chrome needs a
+   * moment to bind its debug port after spawn, so connectOverCDP racing the
+   * spawn without a retry fails intermittently. */
+  connectMaxWaitMs?: number;
 }
 
 export class CdpChromeProvider implements BrowserProvider {
@@ -81,6 +90,8 @@ export class CdpChromeProvider implements BrowserProvider {
   private readonly candidates: readonly string[] | undefined;
   private readonly launcherFsDeps: LauncherDeps | undefined;
   private readonly killEnv: NodeJS.ProcessEnv | undefined;
+  private readonly connectRetryMs: number;
+  private readonly connectMaxWaitMs: number;
 
   constructor(deps: CdpChromeProviderDeps = {}) {
     this.connect = deps.connect ?? defaultConnect;
@@ -91,6 +102,8 @@ export class CdpChromeProvider implements BrowserProvider {
     this.candidates = deps.candidates;
     this.launcherFsDeps = deps.launcherFsDeps;
     this.killEnv = deps.killEnv;
+    this.connectRetryMs = deps.connectRetryMs ?? 250;
+    this.connectMaxWaitMs = deps.connectMaxWaitMs ?? 10_000;
   }
 
   async launch(ctx: RunContext): Promise<BrowserHandle> {
@@ -99,7 +112,15 @@ export class CdpChromeProvider implements BrowserProvider {
       this.launcherFsDeps,
     );
     const cdpUrl = `http://127.0.0.1:${this.port}`;
-    const browser = await this.connect(cdpUrl);
+    let browser: CdpBrowser;
+    try {
+      browser = await this.connectWithRetry(cdpUrl, ctx);
+    } catch (err) {
+      // Connect never succeeded within the cap — don't leak the spawned
+      // Chrome process, kill it before propagating the failure.
+      this.killChromeFn(proc.pid, { env: this.killEnv });
+      throw err;
+    }
     return new CdpChromeBrowserHandle(
       cdpUrl,
       browser,
@@ -109,6 +130,58 @@ export class CdpChromeProvider implements BrowserProvider {
       this.killEnv,
     );
   }
+
+  /**
+   * Chrome needs a moment to bind its debug port after spawn (v0's
+   * scripts/lib/browser.js polls cdpReachable() for up to ~10s before
+   * connecting) — connectOverCDP called immediately after spawn races that
+   * and fails intermittently. Retries connect() on failure, delayed by
+   * connectRetryMs between attempts, bounded by BOTH connectMaxWaitMs and
+   * ctx.signal.
+   */
+  private async connectWithRetry(cdpUrl: string, ctx: RunContext): Promise<CdpBrowser> {
+    const deadline = Date.now() + this.connectMaxWaitMs;
+    let lastError: unknown;
+    while (true) {
+      if (ctx.signal.aborted) {
+        throw new Error(`connect to Chrome CDP at ${cdpUrl} aborted`, {
+          cause: ctx.signal.reason ?? lastError,
+        });
+      }
+      try {
+        return await this.connect(cdpUrl);
+      } catch (err) {
+        lastError = err;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `gave up connecting to Chrome CDP at ${cdpUrl} after ${this.connectMaxWaitMs}ms`,
+          { cause: lastError },
+        );
+      }
+      await sleep(this.connectRetryMs, ctx.signal).catch(() => {
+        // Swallow here — the loop re-checks ctx.signal.aborted on its next
+        // pass and throws the abort-specific error above.
+      });
+    }
+  }
+}
+
+/** Resolves after ms, or rejects immediately with signal.reason if the
+ * signal is already aborted / aborts during the wait. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error('aborted'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 class CdpChromeBrowserHandle implements BrowserHandle {

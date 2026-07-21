@@ -283,6 +283,119 @@ test('PageHandle.close() closes the underlying playwright page directly (no dead
   assert.equal(closed, true);
 });
 
+test('launch() retries connect on failure and resolves once it succeeds', async () => {
+  let attempts = 0;
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    connectRetryMs: 1,
+    connectMaxWaitMs: 1000,
+    connect: async () => {
+      attempts += 1;
+      if (attempts < 3) throw new Error(`connect refused (attempt ${attempts})`);
+      return { newPage: async () => fakePage() } satisfies CdpBrowser;
+    },
+  });
+
+  const handle = await provider.launch(fakeCtx());
+
+  assert.equal(attempts, 3);
+  assert.equal(handle.cdpUrl, 'http://127.0.0.1:9222');
+});
+
+test('launch() connects on the first try with no retry when connect succeeds immediately', async () => {
+  let attempts = 0;
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    connectRetryMs: 1,
+    connectMaxWaitMs: 1000,
+    connect: async () => {
+      attempts += 1;
+      return { newPage: async () => fakePage() } satisfies CdpBrowser;
+    },
+  });
+
+  await provider.launch(fakeCtx());
+
+  assert.equal(attempts, 1);
+});
+
+test('launch() rejects after connectMaxWaitMs when connect always fails, naming the cdpUrl and the last error as cause', async () => {
+  let attempts = 0;
+  const lastError = new Error('ECONNREFUSED');
+  const provider = new CdpChromeProvider({
+    port: 9222,
+    launchChrome: fakeLauncher().launchChrome,
+    connectRetryMs: 1,
+    connectMaxWaitMs: 20,
+    connect: async () => {
+      attempts += 1;
+      throw lastError;
+    },
+  });
+
+  const start = Date.now();
+  await assert.rejects(
+    () => provider.launch(fakeCtx()),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /http:\/\/127\.0\.0\.1:9222/);
+      assert.equal(err.cause, lastError);
+      return true;
+    },
+  );
+  const elapsed = Date.now() - start;
+
+  assert.ok(attempts > 1, `expected more than one connect attempt, got ${attempts}`);
+  assert.ok(elapsed < 500, `expected rejection near the 20ms cap, took ${elapsed}ms`);
+});
+
+test('launch() kills the spawned Chrome pid when connect gives up (no leak)', async () => {
+  const killCalls: Array<{ pid: number | undefined; deps: KillDeps | undefined }> = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher(4242).launchChrome,
+    connectRetryMs: 1,
+    connectMaxWaitMs: 10,
+    connect: async () => {
+      throw new Error('connect refused');
+    },
+    killChrome: (pid, deps) => {
+      killCalls.push({ pid, deps });
+      return true;
+    },
+    killEnv: {},
+  });
+
+  await assert.rejects(() => provider.launch(fakeCtx()));
+
+  assert.equal(killCalls.length, 1);
+  assert.equal(killCalls[0]?.pid, 4242);
+  assert.deepEqual(killCalls[0]?.deps, { env: {} });
+});
+
+test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    connectRetryMs: 5,
+    connectMaxWaitMs: 60_000,
+    connect: async () => {
+      attempts += 1;
+      if (attempts === 1) controller.abort(new Error('run cancelled'));
+      throw new Error('connect refused');
+    },
+  });
+
+  const start = Date.now();
+  await assert.rejects(() => provider.launch(fakeCtx(controller.signal)), /aborted/);
+  const elapsed = Date.now() - start;
+
+  assert.ok(
+    elapsed < 500,
+    `expected near-immediate rejection on abort, took ${elapsed}ms`,
+  );
+});
+
 test('name is "cdp-chrome"', () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
