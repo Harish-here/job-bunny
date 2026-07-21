@@ -83,6 +83,45 @@ test('probe: 404 for every candidate → not-found', async () => {
   assert.deepEqual(result, { status: 'not-found' });
 });
 
+test('probe: 410 for every candidate → not-found', async () => {
+  globalThis.fetch = (async () => new Response('gone', { status: 410 })) as typeof fetch;
+  const lane = new KekaLane();
+  const result = await lane.probe('Totally Unlisted Co', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('probe: 429 for every candidate → error, not not-found (rate-limited, not absent)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('slow down', { status: 429 })) as typeof fetch;
+  const lane = new KekaLane();
+  const result = await lane.probe('Nimble Labs', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /HTTP 429/);
+});
+
+test('probe: 503 for every candidate → error, not not-found (server trouble, not absent)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('unavailable', { status: 503 })) as typeof fetch;
+  const lane = new KekaLane();
+  const result = await lane.probe('Nimble Labs', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /HTTP 503/);
+});
+
+test('probe: aborted ctx.signal propagates instead of being folded into an error/not-found probe result', async () => {
+  const controller = new AbortController();
+  globalThis.fetch = (async () => {
+    controller.abort(new Error('run cancelled'));
+    const err = new Error('The operation was aborted');
+    err.name = 'AbortError';
+    throw err;
+  }) as typeof fetch;
+
+  const lane = new KekaLane();
+  const ctx: RunContext = { ...fakeCtx(), signal: controller.signal };
+  await assert.rejects(() => lane.probe('Nimble Labs', ctx));
+});
+
 test('probe: not valid JSON ("not a Keka tenant") for every candidate → not-found', async () => {
   globalThis.fetch = (async () =>
     new Response('<html></html>', { status: 200 })) as typeof fetch;

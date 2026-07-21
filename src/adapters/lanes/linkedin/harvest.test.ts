@@ -28,6 +28,34 @@ function fixtureInventory(overrides: Partial<Inventory> = {}): Inventory {
   };
 }
 
+/** Real selectors from page_inventory/linkedin__jobs-search-results.json —
+ * cardLink duplicates the card selector (no href anywhere on the card);
+ * the id lives in the componentkey attribute, per jobCardIdAttr /
+ * jobCardIdAttrPrefix, and the job url is built from urlPatternOfJob. */
+function componentkeyInventory(overrides: Partial<Inventory> = {}): Inventory {
+  const cardSel = 'div[componentkey^="job-card-component-ref-"]';
+  return {
+    page: 'linkedin__jobs-search-results',
+    pageType: 'details-page',
+    generatedAt: '2026-06-30',
+    selectors: {
+      cardList: 'body',
+      card: cardSel,
+      cardTitle: 'p',
+      cardCompany: 'p:nth(1)',
+      cardLocation: 'p:nth(2)',
+      cardLink: cardSel,
+      jdRoot: '#job-details',
+    },
+    behaviors: {
+      jobCardIdAttr: 'componentkey',
+      jobCardIdAttrPrefix: 'job-card-component-ref-',
+      urlPatternOfJob: 'https://www.linkedin.com/jobs/view/<id>/',
+    },
+    ...overrides,
+  };
+}
+
 const noopLogger: Logger = {
   debug() {},
   info() {},
@@ -52,6 +80,9 @@ interface FakeElSpec {
   company?: string;
   location?: string;
   href?: string | null;
+  /** Value returned for the inventory's behaviors.jobCardIdAttr, read
+   * directly off the card element (mirrors real componentkey reads). */
+  idAttr?: string | null;
 }
 
 /** Minimal DOM element stub: textContent for text reads, getAttribute for
@@ -68,19 +99,35 @@ function fakeElement(props: Record<string, string | null | undefined> = {}): unk
 }
 
 /** Builds a fake `document` whose card-list -> card -> sub-selector chain
- * mirrors the real inventory selectors, backed by a fixture list of cards. */
+ * mirrors the real inventory selectors, backed by a fixture list of cards.
+ * When cardLink === card (linkedin__jobs-search-results' shape: no href on
+ * any descendant), the card element's own getAttribute('href') is used
+ * instead of a sub-element lookup — mirrors buildHarvestScript's
+ * `el.matches(linkSel) ? el : el.querySelector(linkSel)` fallback. */
 function fakeDocument(inv: Inventory, cards: FakeElSpec[]): unknown {
   const sel = inv.selectors;
+  const selfLinksToCard = sel.cardLink === sel.card;
+  const idAttrName = inv.behaviors.jobCardIdAttr;
   const cardEls = cards.map((c) => {
     const subEls: Record<string, unknown> = {
       [sel.cardTitle]: fakeElement({ textContent: c.title }),
       [sel.cardCompany]: fakeElement({ textContent: c.company }),
       [sel.cardLocation]: fakeElement({ textContent: c.location }),
-      [sel.cardLink]: c.href === null ? null : fakeElement({ href: c.href ?? '' }),
     };
+    if (!selfLinksToCard) {
+      subEls[sel.cardLink] = c.href === null ? null : fakeElement({ href: c.href ?? '' });
+    }
     return {
       querySelector(s: string) {
         return subEls[s] ?? null;
+      },
+      matches(s: string) {
+        return s === sel.card;
+      },
+      getAttribute(name: string) {
+        if (selfLinksToCard && name === 'href') return c.href ?? null;
+        if (idAttrName && name === idAttrName) return c.idAttr ?? null;
+        return null;
       },
     };
   });
@@ -125,12 +172,40 @@ test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read vi
       company: 'Acme Corp',
       location: 'Remote',
       href: '/jobs/view/4021337/',
+      idAttr: null,
     },
     {
       title: 'Staff Engineer',
       company: 'Widgets Inc',
       location: 'Bengaluru, India',
       href: '/jobs/view/9988776/?refId=abc',
+      idAttr: null,
+    },
+  ]);
+});
+
+test('buildHarvestScript, evaluated against the componentkey inventory shape, reads the id off the card element itself (no descendant href)', () => {
+  const inv = componentkeyInventory();
+  const cards: FakeElSpec[] = [
+    {
+      title: 'Senior Backend Engineer',
+      company: 'Acme Corp',
+      location: 'Remote',
+      href: null,
+      idAttr: 'job-card-component-ref-4021337',
+    },
+  ];
+  const document = fakeDocument(inv, cards);
+  const script = buildHarvestScript(inv);
+  const result = structuredClone(vm.runInNewContext(script, { document }));
+
+  assert.deepEqual(result, [
+    {
+      title: 'Senior Backend Engineer',
+      company: 'Acme Corp',
+      location: 'Remote',
+      href: '',
+      idAttr: 'job-card-component-ref-4021337',
     },
   ]);
 });
@@ -232,6 +307,120 @@ test('harvestCards passes a timeoutMs through to page.evaluate opts', async () =
   });
   await harvestCards(page, inv, fakeCtx(), { timeoutMs: 5000 });
   assert.equal(seenTimeout, 5000);
+});
+
+test('harvestCards, for the componentkey inventory shape (no href), derives the id from the idAttr and builds the url from urlPatternOfJob', async () => {
+  const inv = componentkeyInventory();
+  const page = fakePage({
+    evaluate: async () =>
+      [
+        {
+          title: 'Senior Backend Engineer',
+          company: 'Acme Corp',
+          location: 'Remote',
+          href: '',
+          idAttr: 'job-card-component-ref-4021337',
+        },
+      ] as never,
+  });
+
+  const cards = await harvestCards(page, inv, fakeCtx());
+
+  assert.deepEqual(cards, [
+    {
+      title: 'Senior Backend Engineer',
+      company: 'Acme Corp',
+      location: 'Remote',
+      url: 'https://www.linkedin.com/jobs/view/4021337/',
+      id: 'li-4021337',
+    },
+  ]);
+});
+
+test('harvestCards skips a card with neither a parseable href nor an idAttr, warning', async () => {
+  const inv = componentkeyInventory();
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn(msg, data) {
+        warnings.push({ msg, data });
+      },
+    },
+  });
+  const page = fakePage({
+    evaluate: async () =>
+      [
+        {
+          title: 'No Id Card',
+          company: 'Foo',
+          location: '',
+          href: '',
+          idAttr: null,
+        },
+      ] as never,
+  });
+
+  const cards = await harvestCards(page, inv, ctx);
+
+  assert.deepEqual(cards, []);
+  assert.equal(warnings.length, 1);
+});
+
+test('harvestCards skips a card with an idAttr but no url pattern and no href, warning (id resolved, url not)', async () => {
+  const inv = componentkeyInventory({
+    behaviors: {
+      jobCardIdAttr: 'componentkey',
+      jobCardIdAttrPrefix: 'job-card-component-ref-',
+    },
+  });
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn(msg, data) {
+        warnings.push({ msg, data });
+      },
+    },
+  });
+  const page = fakePage({
+    evaluate: async () =>
+      [
+        {
+          title: 'No Pattern Card',
+          company: 'Foo',
+          location: '',
+          href: '',
+          idAttr: 'job-card-component-ref-777',
+        },
+      ] as never,
+  });
+
+  const cards = await harvestCards(page, inv, ctx);
+
+  assert.deepEqual(cards, []);
+  assert.equal(warnings.length, 1);
+});
+
+test('harvestCards prefers an href-derived id over the idAttr when both are present', async () => {
+  const inv = componentkeyInventory();
+  const page = fakePage({
+    evaluate: async () =>
+      [
+        {
+          title: 'Both Present',
+          company: 'Acme Corp',
+          location: 'Remote',
+          href: '/jobs/view/999/',
+          idAttr: 'job-card-component-ref-4021337',
+        },
+      ] as never,
+  });
+
+  const cards = await harvestCards(page, inv, fakeCtx());
+
+  assert.equal(cards[0]?.id, 'li-999');
+  assert.equal(cards[0]?.url, 'https://www.linkedin.com/jobs/view/999/');
 });
 
 // --- gateCards: real FilterConfig, pass/dropped partition ---

@@ -68,7 +68,7 @@ test('markDone + shouldSkip + allDone correctness', async () => {
   assert.equal(state.allDone(urls), true);
 });
 
-test('persist writes the current date + done-map to registry/extract_resume.json', async () => {
+test('persist writes the current date + done-map to lanes/linkedin/extract_resume.json', async () => {
   const storage = new FakeStorage();
   const state = await ResumeState.load(storage, '2026-07-21');
   state.markDone('https://example.com/a', 7);

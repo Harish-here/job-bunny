@@ -1,10 +1,11 @@
 import { isSoftError, SoftError } from '../../../core/errors/index.ts';
 import type { FilterConfig } from '../../../core/filter/config.ts';
-import { type JD, JDSchema } from '../../../core/jd/index.ts';
-import type { BrowserProvider } from '../../../ports/browser.ts';
+import { type DroppedRecord, type JD, JDSchema } from '../../../core/jd/index.ts';
+import type { BrowserProvider, PageHandle } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { FarmingLane } from '../../../ports/lane.ts';
 import type { Storage } from '../../../ports/storage.ts';
+import { CaptureStore } from './capture_store.ts';
 import { gateCards, harvestCards } from './harvest.ts';
 import type { Inventory } from './inventory.ts';
 import { openJd } from './jd_open.ts';
@@ -14,10 +15,13 @@ import { ResumeState } from './resume_state.ts';
  * LinkedIn farming lane (P4 Task 7): composes inventory + harvest/gate +
  * jd_open + resume_state into a FarmingLane. Owns fail-soft granularity
  * (spec §7): one URL group with no matching inventory, one URL whose
- * goto/harvest fails, or one card whose JD open fails are each recorded as
- * a SoftError and the lane continues — only the lane's OWN failure
- * (browser.launch rejecting, e.g. Chrome won't launch / login dead) is
- * thrown loud out of source().
+ * newPage/goto/harvest fails, or one card whose JD open fails are each
+ * logged and the lane continues past them — but if EVERY attempted URL
+ * fails, that's not "one flaky selector", it's shaped like an expired
+ * LinkedIn session (logout wall), so source() throws loud in that case
+ * (mirrors v0 extract.js's checkAggregateFailure). The lane's OWN failure
+ * (browser.launch rejecting, e.g. Chrome won't launch) is always thrown
+ * loud out of source().
  */
 
 export interface SearchUrlGroup {
@@ -79,11 +83,6 @@ export class LinkedInLane implements FarmingLane {
   readonly kind = 'farming' as const;
   readonly name = 'linkedin';
 
-  /** In-lane SoftError report (spec §7) — the runner/orchestrator may
-   * inspect this after source() resolves; every entry here was also
-   * logged via ctx.logger.warn at the point it occurred. */
-  readonly errors: SoftError[] = [];
-
   private readonly browser: BrowserProvider;
   private readonly inventories: Inventory[];
   private readonly urls: SearchUrlGroup[];
@@ -104,9 +103,11 @@ export class LinkedInLane implements FarmingLane {
     this.storage = storage;
   }
 
-  async source(ctx: RunContext): Promise<{ jobs: JD[]; companiesSeen: string[] }> {
-    this.errors.length = 0;
+  async source(
+    ctx: RunContext,
+  ): Promise<{ jobs: JD[]; dropped: DroppedRecord[]; companiesSeen: string[] }> {
     const resumeState = await ResumeState.load(this.storage, todayIso());
+    const captureStore = await CaptureStore.load(this.storage);
 
     // Multi-fire same-day schedules: if every url across all groups was
     // already captured by an earlier fire today, a later fire should
@@ -115,28 +116,33 @@ export class LinkedInLane implements FarmingLane {
     // already-empty done-map is a harmless no-op, and the loop below does
     // nothing either way.) A partial done-set (some, not all, urls done)
     // leaves the done-map intact so this run still skips what it already
-    // finished.
+    // finished. CaptureStore is reset in lockstep — the captures behind
+    // the done-map being cleared must go with it (see capture_store.ts).
     const allUrls = this.urls.flatMap((group) => group.urls);
     if (resumeState.allDone(allUrls)) {
       resumeState.rescanReset();
+      await captureStore.reset(this.storage);
     }
 
-    const jobs: JD[] = [];
+    const dropped: DroppedRecord[] = [];
     const companiesSeen = new Set<string>();
 
-    // Lane's own failure (Chrome won't launch / login dead) is loud —
-    // deliberately NOT caught here.
+    // Aggregate-failure detection (spec §7 fail-soft granularity, but a
+    // whole-run "every attempted url died" is not one flaky selector —
+    // see the loud check after the loop).
+    let attemptedUrls = 0;
+    let failedUrls = 0;
+
+    // Lane's own failure (Chrome won't launch) is loud — deliberately NOT
+    // caught here.
     const handle = await this.browser.launch(ctx);
     try {
       for (const group of this.urls) {
         const inv = this.inventories.find((candidate) => candidate.page === group.page);
         if (!inv) {
-          this.recordError(
-            ctx,
-            'group',
-            group.page,
-            `no inventory found for page "${group.page}"`,
-          );
+          ctx.logger.warn('linkedin lane: no inventory found for page', {
+            page: group.page,
+          });
           continue;
         }
 
@@ -146,12 +152,19 @@ export class LinkedInLane implements FarmingLane {
             continue;
           }
 
+          attemptedUrls += 1;
           let capturedCount = 0;
-          const page = await handle.newPage();
+          let urlFailed = false;
+          let page: PageHandle | undefined;
           try {
+            // newPage() lives INSIDE this try: a dead CDP context (e.g.
+            // LinkedIn killing a tab) is this url's failure alone, not a
+            // whole-lane crash.
+            page = await handle.newPage();
             await page.goto(url, { timeoutMs: DEFAULT_GOTO_TIMEOUT_MS });
             const cards = await harvestCards(page, inv, ctx);
-            const { pass } = gateCards(cards, this.filterCfg);
+            const { pass, dropped: gateDropped } = gateCards(cards, this.filterCfg);
+            dropped.push(...gateDropped);
 
             // companiesSeen = post-gate (passing) card companies, deduped
             // — recorded regardless of whether this card's JD open below
@@ -174,11 +187,10 @@ export class LinkedInLane implements FarmingLane {
                   },
                   content: { rawText },
                 });
-                jobs.push(jd);
+                await captureStore.append(this.storage, jd);
                 capturedCount += 1;
               } catch (err) {
                 const soft = toSoftError('url', card.url, err);
-                this.errors.push(soft);
                 ctx.logger.warn('linkedin lane: card JD open failed', {
                   url: card.url,
                   message: soft.message,
@@ -186,33 +198,39 @@ export class LinkedInLane implements FarmingLane {
               }
             }
           } catch (err) {
+            urlFailed = true;
+            failedUrls += 1;
             const soft = toSoftError('url', url, err);
-            this.errors.push(soft);
             ctx.logger.warn('linkedin lane: url failed', { url, message: soft.message });
           } finally {
-            await page.close();
+            if (page) await page.close();
           }
 
-          resumeState.markDone(url, capturedCount);
+          // markDone only on success — a url whose goto/harvest/newPage
+          // threw must be retried on the next fire, not skipped as done.
+          if (!urlFailed) {
+            resumeState.markDone(url, capturedCount);
+          }
+          // Persisted after EVERY url (success or failure), not once at
+          // the end — a mid-run SIGKILL must lose at most the in-flight
+          // url's mark, never every mark made so far this run.
+          await resumeState.persist(this.storage);
         }
       }
     } finally {
       await handle.close();
     }
 
-    await resumeState.persist(this.storage);
+    // Every attempted url failed: this is not one broken selector, it's
+    // shaped like an expired LinkedIn session (logout wall) — fail loud
+    // rather than a silently-green zero-job run (v0 checkAggregateFailure).
+    if (attemptedUrls > 0 && failedUrls === attemptedUrls) {
+      throw new Error(
+        `linkedin lane: all ${attemptedUrls} attempted url(s) failed this run — ` +
+          'looks like an expired LinkedIn session (logout wall); check .chrome-debug/ session',
+      );
+    }
 
-    return { jobs, companiesSeen: [...companiesSeen] };
-  }
-
-  private recordError(
-    ctx: RunContext,
-    scope: string,
-    target: string,
-    message: string,
-  ): void {
-    const soft = new SoftError(scope, `${target}: ${message}`);
-    this.errors.push(soft);
-    ctx.logger.warn('linkedin lane: soft error', { scope, target, message });
+    return { jobs: captureStore.all(), dropped, companiesSeen: [...companiesSeen] };
   }
 }

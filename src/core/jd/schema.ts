@@ -77,6 +77,16 @@ export type WorkType = z.infer<typeof WorkTypeSchema>;
 export type Verdict = z.infer<typeof VerdictSchema>;
 export type JD = z.infer<typeof JDSchema>;
 
+/** Canonical shape for a card or JD that failed a filter gate, paired with
+ * the verdicts that explain why — shared by every gate (card-gate in the
+ * farming lanes, the structured-JD filter stage) so the funnel and
+ * checkpoints can always answer "why did this job disappear?" (spec §4).
+ * Single definition: gates must import this rather than redeclare it. */
+export interface DroppedRecord {
+  jd: JD;
+  reasons: Verdict[];
+}
+
 /** Staged shapes — stage signatures require their inputs at compile time. */
 export type SourcedJD = JD & { content: z.infer<typeof ContentSchema> };
 export type StructuredJD = JD & { structured: z.infer<typeof StructuredSchema> };

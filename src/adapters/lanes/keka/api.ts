@@ -47,9 +47,12 @@ export interface PortalInfo {
 
 /** GET /careers/api/organization/default/careerportalinfo — the single
  * keyless endpoint v0 uses both to confirm a tenant guess (probe, by name
- * match) and to source the portal guid (fetch phase). A non-2xx or a body
- * that doesn't parse as JSON both mean "not a Keka tenant" here, same as
- * v0's probeCandidate/discoverGuid treatment. */
+ * match) and to source the portal guid (fetch phase). `ok:false` alone is
+ * NOT "not a Keka tenant" — a 429/5xx `status` means the server didn't
+ * give a conclusive answer, same as a thrown error; only a 404/410
+ * `status`, or a 200 body that fails name verification, is real evidence
+ * of absence. Callers (lane.ts) own that classification via the returned
+ * `status`. */
 export async function getPortalInfo(
   tenant: string,
   ctx: RunContext,

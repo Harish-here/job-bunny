@@ -41,7 +41,7 @@ test('a farming lane and an api lane both satisfy Lane', async () => {
     kind: 'farming',
     name: 'fake-farm',
     async source() {
-      return { jobs: [fakeJD('f-1')], companiesSeen: ['Acme'] };
+      return { jobs: [fakeJD('f-1')], dropped: [], companiesSeen: ['Acme'] };
     },
   };
   const api: ApiLane = {
@@ -57,8 +57,9 @@ test('a farming lane and an api lane both satisfy Lane', async () => {
     },
   };
   const lanes: Lane[] = [farming, api];
-  const { jobs, companiesSeen } = await farming.source(fakeCtx());
+  const { jobs, dropped, companiesSeen } = await farming.source(fakeCtx());
   assert.equal(jobs.length, 1);
+  assert.deepEqual(dropped, []);
   assert.deepEqual(companiesSeen, ['Acme']);
   const probed = await api.probe('Acme', fakeCtx());
   assert.equal(probed.status, 'found');

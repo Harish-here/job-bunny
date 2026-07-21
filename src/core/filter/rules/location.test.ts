@@ -63,3 +63,28 @@ test('absent locations config ⇒ undefined', () => {
   const verdicts = locationRule.eval(jd([{ city: 'Chennai' }], 'remote'), {});
   assert.equal(verdicts, undefined);
 });
+
+test('empty locations + remote workType ⇒ passes via wildcard config entry (no city evidence, workType alone decides)', () => {
+  const verdicts = locationRule.eval(jd([], 'remote'), cfg);
+  assert.equal(verdicts?.[0]?.pass, true);
+  assert.equal(verdicts?.[0]?.severity, 'hard');
+});
+
+test('empty locations + remote workType with onsite-only config ⇒ hard-fails (no entry accepts remote at any city)', () => {
+  const onsiteOnlyCfg: FilterConfig = {
+    locations: [{ city: 'chennai', country: 'IN', workTypes: ['onsite', 'hybrid'] }],
+  };
+  const verdicts = locationRule.eval(jd([], 'remote'), onsiteOnlyCfg);
+  assert.equal(verdicts?.[0]?.pass, false);
+  assert.equal(verdicts?.[0]?.severity, 'hard');
+  assert.equal(
+    verdicts?.[0]?.detail,
+    'no config entry accepts this workType (location unknown)',
+  );
+});
+
+test('empty locations + workType absent ⇒ passes with "workType unknown" (pure missing data)', () => {
+  const verdicts = locationRule.eval(jd([], undefined), cfg);
+  assert.equal(verdicts?.[0]?.pass, true);
+  assert.equal(verdicts?.[0]?.detail, 'workType unknown');
+});

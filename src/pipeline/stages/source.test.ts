@@ -28,14 +28,17 @@ function fakeStorage(): Storage & { store: Map<string, unknown>; writeCalls: str
   };
 }
 
-function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
+function fakeCtx(
+  storage: ReturnType<typeof fakeStorage>,
+  overrides?: { signal?: AbortSignal; warn?: (msg: string, data?: unknown) => void },
+): StageContext {
   return {
     profile: 'rajni',
-    signal: AbortSignal.timeout(30_000),
+    signal: overrides?.signal ?? AbortSignal.timeout(30_000),
     logger: {
       debug() {},
       info() {},
-      warn() {},
+      warn: overrides?.warn ?? (() => {}),
       error() {},
     },
     beat() {},
@@ -269,4 +272,117 @@ test('registry written exactly once; dropped passed through unchanged; jobsIn pr
   assert.ok(out.jobs.some((j) => j.identity.id === 'pre-existing'));
   assert.ok(out.jobs.some((j) => j.identity.id === 'gh-5'));
   assert.equal(out.jobs.length, 2);
+});
+
+test('run-level abort mid-probe propagates loud, records nothing, and never writes the registry', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', {
+    linkedin: ['C1', 'C2', 'C3'],
+  });
+
+  const controller = new AbortController();
+  const probeCalls: string[] = [];
+
+  // A well-behaved ApiLane (like GreenhouseLane/KekaLane post-fix): once its
+  // ctx.signal is aborted, it rethrows rather than swallowing the abort into
+  // a recordable probe result.
+  const lane: ApiLane = {
+    kind: 'api',
+    name: 'greenhouse',
+    async probe(company, ctx) {
+      probeCalls.push(company);
+      controller.abort(new Error('run cancelled'));
+      if (ctx.signal.aborted) throw new Error('aborted mid-probe');
+      return { status: 'not-found' };
+    },
+    async fetchBoard() {
+      throw new Error('fetchBoard should not be reached after a run-level abort');
+    },
+  };
+
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage, { signal: controller.signal });
+
+  await assert.rejects(() => stage.run(emptyPayload(), ctx));
+
+  // Only the first candidate was attempted — the abort must stop the loop,
+  // not just fail to record it.
+  assert.equal(probeCalls.length, 1);
+
+  // No registry write at all — an aborted run must not durably lock out a
+  // healthy company via a stray failCount/staleness bump.
+  assert.equal(
+    storage.writeCalls.filter((p) => p === 'registry/companies.json').length,
+    0,
+  );
+  assert.equal(storage.store.has('registry/companies.json'), false);
+});
+
+test('a lane exceeding its budget is a soft per-lane event: warn logged, other lane still returns jobs, run does not fail', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', {
+    linkedin: ['Slow Co', 'Fast Co'],
+  });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+
+  // Simulates a blackholed ATS: never settles on its own, only when its
+  // ctx.signal (composed with the lane budget) fires.
+  const hangingLane: ApiLane = {
+    kind: 'api',
+    name: 'keka',
+    async probe(_company, ctx) {
+      await new Promise((_resolve, reject) => {
+        ctx.signal.addEventListener('abort', () => reject(new Error('aborted')), {
+          once: true,
+        });
+      });
+      throw new Error('unreachable');
+    },
+    async fetchBoard() {
+      throw new Error('fetchBoard should not be reached once the lane budget expires');
+    },
+  };
+
+  const fastLane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: {
+      'Slow Co': { status: 'found', boardRef: 'slow-gh' },
+      'Fast Co': { status: 'found', boardRef: 'fast-gh' },
+    },
+    boardJobs: {
+      'slow-gh': [fakeJob('gh-20', 'greenhouse', 'Slow Co')],
+      'fast-gh': [fakeJob('gh-21', 'greenhouse', 'Fast Co')],
+    },
+  });
+
+  const stage = makeSourceStage([hangingLane, fastLane], POLICY, {
+    maxProbesPerRun: 25,
+    laneBudgetMs: 20,
+  });
+  const ctx = fakeCtx(storage, {
+    warn: (msg, data) => warnings.push({ msg, data }),
+  });
+
+  const out = await stage.run(emptyPayload(), ctx);
+
+  // The other lane's jobs are still returned — the run itself succeeds.
+  assert.deepEqual(out.jobs.map((j) => j.identity.id).sort(), ['gh-20', 'gh-21']);
+
+  assert.ok(warnings.some((w) => w.msg === 'lane exceeded its budget'));
+
+  // Nothing recorded for the budget-aborted keka probe.
+  const reg = storage.store.get('registry/companies.json') as Array<{
+    normalizedKey: string;
+    probes: Record<string, unknown>;
+  }>;
+  const slow = reg.find((r) => r.normalizedKey === companyKey('Slow Co'));
+  const fast = reg.find((r) => r.normalizedKey === companyKey('Fast Co'));
+  assert.equal(slow?.probes.keka, undefined);
+  assert.equal(fast?.probes.keka, undefined);
+  // The other lane's probes were recorded normally.
+  assert.equal(
+    (slow?.probes.greenhouse as { status?: string } | undefined)?.status,
+    'found',
+  );
 });

@@ -97,7 +97,8 @@ Status: brainstorming in progress. Sections marked ⏳ are not yet designed.
     curated boards flag but never auto-expire). All probe/fetch responses
     zod-parsed; fail-soft per company/board.
 15. **Lane port has two flavors.**
-    `FarmingLane.source(ctx) → { jobs, companiesSeen }` and
+    `FarmingLane.source(ctx) → { jobs, dropped, companiesSeen }` (dropped
+    carries card-gate DroppedRecords so the funnel never loses drops) and
     `ApiLane.probe(company) / fetchBoard(ref)`. A third ATS = one new ApiLane
     adapter; the shared loop does the rest. Curated watchlists fold into the
     registry (`curated: true`) — no parallel board files.
@@ -213,4 +214,19 @@ Brainstorm complete — full consolidated spec:
 - ✅ P3 runner + observability — pipeline/runner (StageDef/StagePayload/PipelineCtx, FsStorage, guard: timeout+stall+retry, runPipeline: checkpoints/resume/failure-capture) + ops/observability (RunFolder, JsonlLogger, RunResult+funnel) + DoctorCheck port. Rajni fixture verify: 2-stage run produces run-folder artifacts + schema-valid result.json. Unblocks P4 (browser+LinkedIn), P5 (registry+API), P6 (LLM+structure); P5∥P6 parallelizable after P4.
 - ✅ P4 browser + LinkedIn lane — ports/browser (PageHandle surface), adapters/browser/cdp-chrome (CdpChromeProvider: Chrome path probe, .chrome-debug user-data-dir, CDP-readiness bounded retry, deadline-bound PageHandle, kill-on-close unless JOBBUNNY_KEEP_BROWSER), adapters/lanes/linkedin (InventorySchema + freshness DoctorCheck, batch in-page harvest + card gate via P2 evaluateCard, JD open popup/details-page with per-URL SoftError, per-URL resume state with all-done rescan for multi-fire schedules, LinkedInLane implements FarmingLane + search_urls parser). 574 unit tests green. **Live verify partial:** cdp-chrome smoke passed on real Chrome (launch→example.com→kill); LinkedIn navigation/close verified live; but the authenticated-UI **card-harvest live verify is PENDING re-login** — the .chrome-debug LinkedIn session is currently expired (feed→login), so the live run hit the guest UI (base-search-card) instead of the authenticated UI (scaffold-layout/data-occludable-job-id) the committed inventory targets. Once re-logged-in, rerun the harvest verify; if the authenticated UI has genuinely drifted, regenerate page_inventory/linkedin__jobs-search.json via /page-analyse. Also: page_inventory/linkedin__jobs-search-results.json has incomplete v0-carried selectors (cardList placeholder, Playwright-only p:nth()) — needs /page-analyse regen before that page-type ships (not on the rajni path).
 - ✅ P5 company registry + API lanes — core/company (CompanyRecordSchema/RegistrySchema + pure transitions: upsertSeen, probeCandidates with not-found TTL re-probe + error failCount cap, recordProbe, boardsToFetch, recordFetchFailure→stale for auto/flag-only for curated; core stays pure via a local ProbeResult type), pipeline/stages/source (makeSourceStage: reads companies_seen.json side-write [Record<farmLane,names>], upsert→capped probes→fetch, whole-lane fail-soft, registry persisted once), adapters/lanes/greenhouse + adapters/lanes/keka (ApiLane: probe via board-info/portal-info name-match, fetchBoard→JD{identity,content} with gh-/kk- ids, zod ingress, offline fixtures). 661 unit tests. **Live verify: Greenhouse PASSED** (probe Stripe→found, fetchBoard→522 real jobs all JDSchema-valid); Keka probe-path verified live (not-found handled, no live tenant to fetch); source-stage rajni verify PASSED (registry transitions persisted + jobs appended). NOTE: rawText is NOT truncated per-lane (v0 capped at 2500) — do this once in P6 compress for token economy.
+- ✅ Review-fix pass (post-P5 /code-review of PRs #41–#45) — 10 confirmed findings fixed:
+  linkedin harvest reads job id from `behaviors.jobCardIdAttr`/`urlPatternOfJob` when
+  cardLink carries no href (self-matching cardLink supported); LinkedInLane persists
+  resume state per-URL, flushes captures durably via new `capture_store.ts`
+  (`lanes/linkedin/captures.json`; resume-state moved to `lanes/linkedin/extract_resume.json`),
+  marks done only on success, opens pages inside the per-URL fail-soft, and throws loud
+  when every attempted URL failed (logout shape); `FarmingLane.source` now returns
+  `dropped` (canonical `DroppedRecord` hoisted to core/jd) so card-gate drops reach the
+  funnel; cdp-chrome ports v0 ensureChrome semantics (reuse-if-reachable, 24h recycle,
+  close-time listener-pid resolution via lsof, SIGTERM→poll→SIGKILL); ATS probes count
+  only 200/404/410 as definitive absence (429/5xx → retryable error); source stage
+  rethrows run aborts before recording/persisting registry state and gives each API lane
+  a 90s budget under a 300s stage timeout (budget expiry = whole-lane warn, never a run
+  failure); location rule treats empty `locations[]` as missing data (decides on
+  workType alone). All fixes test-covered; gate green (710 tests).
 - ⏳ P6 LLM + compress/structure/assemble — next.

@@ -1,10 +1,10 @@
-import type { JD, Verdict } from '../../core/jd/index.ts';
+import type { DroppedRecord, JD } from '../../core/jd/index.ts';
 import type { RunContext, Storage } from '../../ports/index.ts';
 
-export interface DroppedRecord {
-  jd: JD;
-  reasons: Verdict[];
-}
+/** Re-exported for existing callers (runner/index.ts, run.test.ts) — the
+ * canonical definition now lives in core/jd, next to Verdict, so every
+ * gate (card-gate, filter stage) shares one shape. */
+export type { DroppedRecord };
 
 /** Standard payload flowing between job-flow stages. Dropped records ride
  * along so the funnel and checkpoints can always answer "why did this

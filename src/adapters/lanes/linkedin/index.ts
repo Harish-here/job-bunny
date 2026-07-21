@@ -1,3 +1,4 @@
+export { CAPTURE_PATH, CaptureStore } from './capture_store.ts';
 export type { DroppedRecord, HarvestedCard } from './harvest.ts';
 export { buildHarvestScript, gateCards, harvestCards } from './harvest.ts';
 export type { Inventory } from './inventory.ts';

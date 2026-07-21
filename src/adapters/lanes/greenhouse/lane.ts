@@ -66,11 +66,29 @@ export class GreenhouseLane implements ApiLane {
     for (const token of candidates) {
       try {
         const info = await getBoardInfo(token, ctx);
-        sawDefiniteResponse = true;
-        if (info.ok && verifyBoardName(company, info.name)) {
-          return { status: 'found', boardRef: token };
+        if (info.status === 200) {
+          if (info.ok && verifyBoardName(company, info.name)) {
+            return { status: 'found', boardRef: token };
+          }
+          // A real HTTP 200 that isn't a match — wrong company, or a body
+          // that doesn't even parse as JSON (info.ok false) — is still
+          // definitive evidence this token isn't ours, not a hiccup.
+          sawDefiniteResponse = true;
+          continue;
         }
+        if (info.status === 404 || info.status === 410) {
+          // Resource definitively absent — real evidence of no board.
+          sawDefiniteResponse = true;
+          continue;
+        }
+        // 429 (rate-limited) or 5xx (server trouble), or any other
+        // non-definitive status: we got an answer but not a conclusive
+        // one — treat like a network error so the registry retries
+        // instead of caching a false 'not-found' for
+        // reprobeNotFoundAfterDays (~30 days).
+        lastErrorMessage = `HTTP ${info.status}`;
       } catch (err) {
+        if (ctx.signal.aborted) throw err; // run/lane-budget abort — propagate, not evidence
         lastErrorMessage = err instanceof Error ? err.message : String(err);
         ctx.logger.warn('greenhouse probe candidate failed', {
           company,
@@ -80,11 +98,12 @@ export class GreenhouseLane implements ApiLane {
       }
     }
 
-    // Every candidate errored at the network level (couldn't even ask) —
-    // report 'error' so the registry retries rather than treating this
-    // as a confirmed absence. If at least one candidate got a definite
-    // HTTP response (200-but-mismatched or 4xx/5xx), that's real evidence
-    // the company has no board under any guessed token: 'not-found'.
+    // Only report 'error' when every candidate failed to give a
+    // conclusive answer (thrown network error, or a 429/5xx status) — the
+    // registry retries those rather than treating them as absence. A
+    // 200-with-wrong-name or a definitive 404/410 for at least one
+    // candidate is real evidence the company has no board under any
+    // guessed token: 'not-found'.
     if (!sawDefiniteResponse && lastErrorMessage) {
       return { status: 'error', message: lastErrorMessage };
     }
@@ -99,6 +118,7 @@ export class GreenhouseLane implements ApiLane {
       const info = await getBoardInfo(boardRef, ctx);
       if (info.ok && info.name) companyName = info.name;
     } catch (err) {
+      if (ctx.signal.aborted) throw err; // run/lane-budget abort — propagate, don't paper over it
       // Board-info lookup is a display-name nicety, not the source of
       // truth for this fetch — fall back to the boardRef itself rather
       // than fail the whole board over it.
