@@ -1,0 +1,21 @@
+[
+  {
+    "id": 8891,
+    "title": "Product Designer",
+    "description": "&lt;p&gt;Design delightful experiences for our core product.&lt;/p&gt;",
+    "experience": "3-5 years",
+    "jobLocations": [{ "city": "Bengaluru" }]
+  },
+  {
+    "id": 8905,
+    "title": "Growth Marketing Manager",
+    "description": "&lt;p&gt;Own paid acquisition and lifecycle campaigns end to end.&lt;/p&gt;",
+    "jobLocations": [{ "city": "Remote" }]
+  },
+  {
+    "id": 8912,
+    "title": "",
+    "description": "&lt;p&gt;Malformed entry: empty title should be dropped.&lt;/p&gt;",
+    "jobLocations": []
+  }
+]
