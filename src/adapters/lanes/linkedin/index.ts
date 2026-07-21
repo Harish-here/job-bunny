@@ -4,3 +4,7 @@ export type { Inventory } from './inventory.ts';
 export { InventorySchema, inventoryFreshnessCheck, loadInventory } from './inventory.ts';
 export type { OpenJdCard, OpenJdOpts } from './jd_open.ts';
 export { openJd } from './jd_open.ts';
+export type { SearchUrlGroup } from './lane.ts';
+export { LinkedInLane, parseSearchUrls } from './lane.ts';
+export type { ResumeStateShape } from './resume_state.ts';
+export { RESUME_STATE_PATH, ResumeState, ResumeStateSchema } from './resume_state.ts';
