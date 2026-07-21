@@ -44,3 +44,7 @@ structure_passthrough.json
 # heartbeat, logs) are regenerated every run — never committed, even for
 # the rajni fixture.
 profiles/rajni/data/runs/
+
+# P5 company registry: companies.json + companies_seen.json are generated
+# per run (probe/fetch state, farm-stage side-write) — never committed.
+profiles/rajni/data/registry/
