@@ -1,0 +1,335 @@
+[
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1001",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1001/",
+        "company": "Atlas Retail Technologies",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Chennai"
+          }
+        ],
+        "workType": "onsite",
+        "skills": ["React", "TypeScript", "Design Systems"]
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1002",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1002/",
+        "company": "Vertex Systems Pvt Ltd",
+        "title": "Lead Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Mumbai"
+          }
+        ],
+        "workType": "onsite",
+        "skills": ["React", "TypeScript"]
+      }
+    },
+    "v0Decision": "drop",
+    "v0Reason": "On-site Mumbai not accepted"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1003",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1003/",
+        "company": "Meridian Cloud Labs",
+        "title": "Staff UI Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Bengaluru"
+          }
+        ],
+        "workType": "onsite",
+        "skills": ["React", "Design Systems", "UI Architecture"]
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1004",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1004/",
+        "company": "NorthPeak Software",
+        "title": "Lead React Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Remote"
+          }
+        ],
+        "workType": "remote",
+        "skills": ["React", "JavaScript"]
+      }
+    },
+    "v0Decision": "drop",
+    "v0Reason": "tz_bad"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1005",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1005/",
+        "company": "Bluewave Fintech",
+        "title": "Principal Frontend Architect",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Remote"
+          }
+        ],
+        "workType": "remote",
+        "skills": ["React", "TypeScript", "UI Architecture"],
+        "timezone": "APAC"
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1006",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1006/",
+        "company": "Solace Data Systems",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Remote"
+          }
+        ],
+        "workType": "remote",
+        "skills": ["React", "JavaScript"],
+        "timezone": "EMEA"
+      }
+    },
+    "v0Decision": "keep",
+    "v0Reason": "EMEA borderline, kept at normal severity"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1007",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1007/",
+        "company": "Ferrovia Robotics",
+        "title": "Lead UI Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Pune"
+          }
+        ],
+        "workType": "hybrid",
+        "skills": ["React", "Design Systems"]
+      }
+    },
+    "v0Decision": "drop",
+    "v0Reason": "Hybrid Pune not accepted"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1008",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1008/",
+        "company": "Coral Reef Analytics",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Chennai"
+          }
+        ],
+        "workType": "hybrid",
+        "skills": ["React", "TypeScript"]
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1009",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1009/",
+        "company": "Palisade Systems",
+        "title": "Software Engineer II, Frontend",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Remote"
+          }
+        ],
+        "workType": "remote",
+        "skills": ["React", "JavaScript"],
+        "timezone": "APAC"
+      }
+    },
+    "v0Decision": "drop",
+    "v0Reason": "no seniority"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1010",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1010/",
+        "company": "Vantage Analytics Group",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Remote"
+          }
+        ],
+        "workType": "remote",
+        "skills": ["Storybook", "Jest"],
+        "timezone": "APAC"
+      }
+    },
+    "v0Decision": "drop",
+    "v0Reason": "no core skill"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1011",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1011/",
+        "company": "Hollow Peak Studio",
+        "title": "Lead Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Remote"
+          }
+        ],
+        "workType": "remote",
+        "skills": ["React", "TypeScript"],
+        "timezone": "APAC"
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1012",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1012/",
+        "company": "Ironclad Payments",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Chennai"
+          }
+        ],
+        "workType": "onsite",
+        "skills": ["React", "TypeScript"]
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-0099",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni0099/",
+        "company": "Solstice Ventures",
+        "title": "Lead Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Bengaluru"
+          }
+        ],
+        "workType": "onsite",
+        "skills": ["React", "Design Systems"]
+      }
+    },
+    "v0Decision": "keep"
+  },
+  {
+    "input": {
+      "identity": {
+        "id": "rajni-1014",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rajni1014/",
+        "company": "Ironclad Payments",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": {},
+        "locations": [
+          {
+            "city": "Bengaluru"
+          }
+        ],
+        "workType": "onsite",
+        "skills": ["React", "TypeScript"]
+      }
+    },
+    "v0Decision": "keep"
+  }
+]

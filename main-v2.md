@@ -209,4 +209,5 @@ Brainstorm complete — full consolidated spec:
   (2) boundary enforcement parses via `@swc/core` (dev dep) with the
   `tsConfig` option omitted — dependency-cruiser 18.x caps at typescript <7.0.0
   and cruises 0 modules if `tsConfig` is set (see .dependency-cruiser.cjs header).
-- ⏳ P2 filter engine — next.
+- ✅ P2 filter engine — core/filter: config schema, five rules (title/company/location/timezone/skills), engine (evaluate/evaluateCard/decide), replay parity vs v0 rajni fixture (13/14 decisions match; 1 expected divergence: rajni-1004, v0 tz_bad flag removed in v2).
+- ⏳ P3 runner + observability — next.
