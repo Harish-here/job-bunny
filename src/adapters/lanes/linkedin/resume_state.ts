@@ -3,18 +3,24 @@ import type { Storage } from '../../../ports/storage.ts';
 
 /**
  * Per-URL same-day extract resumability (P4 Task 6). Persisted via the
- * Storage port at `registry/extract_resume.json` as `{ date, done }` where
- * `done` maps url -> captured-JD count. A run that dies partway through
- * (or a later same-day fire) resumes without re-hitting URLs it already
- * finished today (v0 `data/extract_resume.json` crash-recovery lesson). A
- * new calendar day (or a missing/corrupt file) starts fresh.
+ * Storage port at `lanes/linkedin/extract_resume.json` as `{ date, done }`
+ * where `done` maps url -> captured-JD count. A run that dies partway
+ * through (or a later same-day fire) resumes without re-hitting URLs it
+ * already finished today (v0 `data/extract_resume.json` crash-recovery
+ * lesson). A new calendar day (or a missing/corrupt file) starts fresh.
+ * The lane persists this after EVERY url (success or failure), not once
+ * at the very end, so a mid-run crash loses at most the in-flight url.
  *
  * v0 invariant this class must preserve: a same-day reset (`rescanReset`,
  * used for multi-fire schedules once every URL is done) NEVER discards
  * already-flushed captures. ResumeState only ever tracks per-URL
- * done-counts — the captured/flushed JDs themselves live in the run's own
- * checkpoint/output, entirely outside this class. Clearing `done` here
- * cannot touch that data because this class never holds a reference to it.
+ * done-counts — captured JDs are durably flushed by the sibling
+ * CaptureStore (capture_store.ts) to its own file, entirely outside this
+ * class. Clearing `done` here cannot touch that data because this class
+ * never holds a reference to it; the caller (LinkedInLane) is responsible
+ * for calling CaptureStore.reset() alongside rescanReset() so the two
+ * stay in lockstep on a rescan — ResumeState intentionally doesn't know
+ * CaptureStore exists.
  */
 
 export const ResumeStateSchema = z.object({
@@ -24,7 +30,7 @@ export const ResumeStateSchema = z.object({
 
 export type ResumeStateShape = z.infer<typeof ResumeStateSchema>;
 
-export const RESUME_STATE_PATH = 'registry/extract_resume.json';
+export const RESUME_STATE_PATH = 'lanes/linkedin/extract_resume.json';
 
 export class ResumeState {
   private readonly date: string;

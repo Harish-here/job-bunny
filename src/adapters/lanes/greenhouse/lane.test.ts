@@ -70,6 +70,62 @@ test('probe: 404 for every candidate → not-found', async () => {
   assert.deepEqual(result, { status: 'not-found' });
 });
 
+test('probe: 410 for every candidate → not-found', async () => {
+  globalThis.fetch = (async () => new Response('gone', { status: 410 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Totally Unlisted Co', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('probe: 429 for every candidate → error, not not-found (rate-limited, not absent)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('slow down', { status: 429 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /HTTP 429/);
+});
+
+test('probe: 503 for every candidate → error, not not-found (server trouble, not absent)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('unavailable', { status: 503 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /HTTP 503/);
+});
+
+test('probe: 429 on one candidate then a definitive 404 on another → not-found (real evidence wins)', async () => {
+  let call = 0;
+  globalThis.fetch = (async () => {
+    call += 1;
+    return call === 1
+      ? new Response('slow down', { status: 429 })
+      : new Response('nope', { status: 404 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('probe: aborted ctx.signal propagates instead of being folded into an error/not-found probe result', async () => {
+  const controller = new AbortController();
+  globalThis.fetch = (async () => {
+    controller.abort(new Error('run cancelled'));
+    const err = new Error('The operation was aborted');
+    err.name = 'AbortError';
+    throw err;
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const ctx: RunContext = { ...fakeCtx(), signal: controller.signal };
+  await assert.rejects(() => lane.probe('Acme Robotics', ctx));
+});
+
 test('probe: fetch throws for every candidate → error', async () => {
   globalThis.fetch = (async () => {
     throw new Error('network down');

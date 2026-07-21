@@ -87,11 +87,29 @@ export class KekaLane implements ApiLane {
     for (const token of candidates) {
       try {
         const info = await getPortalInfo(token, ctx);
-        sawDefiniteResponse = true;
-        if (info.ok && verifyBoardName(company, info.name)) {
-          return { status: 'found', boardRef: token };
+        if (info.status === 200) {
+          if (info.ok && verifyBoardName(company, info.name)) {
+            return { status: 'found', boardRef: token };
+          }
+          // A real HTTP 200 that isn't a match — wrong company, or a body
+          // that doesn't even parse as JSON (info.ok false) — is still
+          // definitive evidence this tenant isn't ours, not a hiccup.
+          sawDefiniteResponse = true;
+          continue;
         }
+        if (info.status === 404 || info.status === 410) {
+          // Resource definitively absent — real evidence of no tenant.
+          sawDefiniteResponse = true;
+          continue;
+        }
+        // 429 (rate-limited) or 5xx (server trouble), or any other
+        // non-definitive status: we got an answer but not a conclusive
+        // one — treat like a network error so the registry retries
+        // instead of caching a false 'not-found' for
+        // reprobeNotFoundAfterDays (~30 days).
+        lastErrorMessage = `HTTP ${info.status}`;
       } catch (err) {
+        if (ctx.signal.aborted) throw err; // run/lane-budget abort — propagate, not evidence
         lastErrorMessage = err instanceof Error ? err.message : String(err);
         ctx.logger.warn('keka probe candidate failed', {
           company,
@@ -101,10 +119,11 @@ export class KekaLane implements ApiLane {
       }
     }
 
-    // Same 'error' vs 'not-found' distinction as the Greenhouse lane: only
-    // report 'error' when every candidate failed at the network level
-    // (no signal at all); a definite HTTP response (ok-but-mismatched or
-    // non-2xx) for at least one candidate is real evidence of absence.
+    // Same distinction as the Greenhouse lane: only report 'error' when
+    // every candidate failed to give a conclusive answer (thrown network
+    // error, or a 429/5xx status) — the registry retries those rather
+    // than treating them as absence. A 200-with-wrong-name or a definitive
+    // 404/410 for at least one candidate is real evidence of absence.
     if (!sawDefiniteResponse && lastErrorMessage) {
       return { status: 'error', message: lastErrorMessage };
     }

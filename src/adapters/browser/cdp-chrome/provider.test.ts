@@ -62,6 +62,7 @@ test('launch() spawns Chrome via the injected launcher and connects to http://12
   const provider = new CdpChromeProvider({
     port: 9333,
     launchChrome: launcher.launchChrome,
+    cdpReachable: async () => null,
     connect: async (url) => {
       connectUrls.push(url);
       return { newPage: async () => fakePage() } satisfies CdpBrowser;
@@ -84,6 +85,7 @@ test('newPage() wraps the connected browser page in a PageHandle that passes cal
   const goneUrls: string[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({
         newPage: async () =>
@@ -107,6 +109,10 @@ test('close() kills the spawned Chrome pid by default (JOBBUNNY_KEEP_BROWSER uns
   const killCalls: Array<{ pid: number | undefined; deps: KillDeps | undefined }> = [];
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher(4242).launchChrome,
+    cdpReachable: async () => null,
+    // Nothing resolves on the port in this test — close() falls back to the
+    // spawned pid, which is what's asserted below.
+    resolveListenerPid: () => undefined,
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
     killChrome: (pid, deps) => {
       killCalls.push({ pid, deps });
@@ -123,10 +129,37 @@ test('close() kills the spawned Chrome pid by default (JOBBUNNY_KEEP_BROWSER uns
   assert.deepEqual(killCalls[0]?.deps, { env: {} });
 });
 
+test('close() kills the ACTUAL pid listening on the port, not the spawned hand-off-stub pid', async () => {
+  // Regression test for the live-incident failure mode: a Chrome already
+  // listening on the port (same user-data-dir) makes a fresh spawn hand off
+  // and exit immediately, so the spawned pid (999, "stub") is already dead
+  // while the real Chrome (424242) keeps running. close() must resolve and
+  // kill the real listener pid, never trust the spawned pid.
+  const killCalls: Array<number | undefined> = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher(999).launchChrome,
+    cdpReachable: async () => null,
+    resolveListenerPid: () => 424242,
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    killEnv: {},
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.close();
+
+  assert.deepEqual(killCalls, [424242]);
+});
+
 test('close() respects JOBBUNNY_KEEP_BROWSER=1 by delegating the decision to killChrome', async () => {
   const killCalls: number[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher(4242).launchChrome,
+    cdpReachable: async () => null,
+    resolveListenerPid: () => undefined,
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
     killEnv: { JOBBUNNY_KEEP_BROWSER: '1' },
     // real killChrome honors JOBBUNNY_KEEP_BROWSER itself — assert it's the
@@ -157,6 +190,8 @@ test('close() never calls a browser.close()-style API — only the OS-level pid 
   };
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
+    resolveListenerPid: () => undefined,
     connect: async () => browser,
     killChrome: () => true,
   });
@@ -170,6 +205,7 @@ test('close() never calls a browser.close()-style API — only the OS-level pid 
 test('PageHandle.evaluate rejects at ~timeoutMs when the underlying playwright call hangs forever', async () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({
         newPage: async () => fakePage({ evaluate: hangEvaluate }),
@@ -187,6 +223,7 @@ test('PageHandle.evaluate rejects at ~timeoutMs when the underlying playwright c
 test('PageHandle.goto passes through a resolving playwright call without waiting for the deadline', async () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
   });
   const handle = await provider.launch(fakeCtx());
@@ -201,6 +238,7 @@ test('PageHandle.goto passes through a resolving playwright call without waiting
 test('PageHandle.click rejects at ~timeoutMs when the underlying playwright call hangs forever', async () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({ newPage: async () => fakePage({ click: hang() }) }) satisfies CdpBrowser,
   });
@@ -216,6 +254,7 @@ test('PageHandle.click rejects at ~timeoutMs when the underlying playwright call
 test('PageHandle.waitFor rejects at ~timeoutMs when the underlying playwright call hangs forever', async () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({
         newPage: async () => fakePage({ waitForSelector: hang() }),
@@ -233,6 +272,7 @@ test('PageHandle.waitFor rejects at ~timeoutMs when the underlying playwright ca
 test('PageHandle.content rejects at ~timeoutMs when the underlying playwright call hangs forever', async () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({ newPage: async () => fakePage({ content: hang() }) }) satisfies CdpBrowser,
   });
@@ -246,6 +286,7 @@ test('PageHandle deadline also fires when ctx.signal aborts before opts.timeoutM
   const controller = new AbortController();
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({
         newPage: async () => fakePage({ evaluate: hangEvaluate }),
@@ -266,6 +307,7 @@ test('PageHandle.close() closes the underlying playwright page directly (no dead
   let closed = false;
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () =>
       ({
         newPage: async () =>
@@ -287,6 +329,7 @@ test('launch() retries connect on failure and resolves once it succeeds', async 
   let attempts = 0;
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connectRetryMs: 1,
     connectMaxWaitMs: 1000,
     connect: async () => {
@@ -306,6 +349,7 @@ test('launch() connects on the first try with no retry when connect succeeds imm
   let attempts = 0;
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connectRetryMs: 1,
     connectMaxWaitMs: 1000,
     connect: async () => {
@@ -325,6 +369,7 @@ test('launch() rejects after connectMaxWaitMs when connect always fails, naming 
   const provider = new CdpChromeProvider({
     port: 9222,
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connectRetryMs: 1,
     connectMaxWaitMs: 20,
     connect: async () => {
@@ -353,6 +398,10 @@ test('launch() kills the spawned Chrome pid when connect gives up (no leak)', as
   const killCalls: Array<{ pid: number | undefined; deps: KillDeps | undefined }> = [];
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher(4242).launchChrome,
+    cdpReachable: async () => null,
+    // Nothing resolves on the port (connect never succeeded, so nothing
+    // ever bound it) — falls back to the spawned pid.
+    resolveListenerPid: () => undefined,
     connectRetryMs: 1,
     connectMaxWaitMs: 10,
     connect: async () => {
@@ -377,6 +426,7 @@ test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', asy
   let attempts = 0;
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connectRetryMs: 5,
     connectMaxWaitMs: 60_000,
     connect: async () => {
@@ -396,9 +446,118 @@ test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', asy
   );
 });
 
+test('launch() reuses an already-reachable, fresh Chrome instead of spawning', async () => {
+  const launcher = fakeLauncher(4242);
+  const connectUrls: string[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555,
+    getProcessAgeMs: () => 60_000, // 1 minute old — well under maxAgeMs
+    connect: async (url) => {
+      connectUrls.push(url);
+      return { newPage: async () => fakePage() } satisfies CdpBrowser;
+    },
+  });
+
+  const handle = await provider.launch(fakeCtx());
+
+  assert.equal(
+    launcher.calls.length,
+    0,
+    'expected no spawn when Chrome is already reachable',
+  );
+  assert.deepEqual(connectUrls, ['http://127.0.0.1:9222']);
+  assert.equal(handle.cdpUrl, 'http://127.0.0.1:9222');
+});
+
+test('launch() spawns Chrome when the port is not reachable', async () => {
+  const launcher = fakeLauncher(4242);
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => null,
+    resolveListenerPid: () => {
+      throw new Error('should not be called when unreachable');
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  await provider.launch(fakeCtx());
+
+  assert.equal(launcher.calls.length, 1, 'expected a spawn when nothing is reachable');
+});
+
+test('launch() recycles (kills, then spawns) a reachable Chrome older than maxAgeMs', async () => {
+  const launcher = fakeLauncher(7777);
+  const killCalls: Array<number | undefined> = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555,
+    getProcessAgeMs: () => 25 * 60 * 60 * 1000, // 25h — over the 24h default
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+
+  assert.deepEqual(killCalls, [5555]);
+  assert.equal(launcher.calls.length, 1, 'expected a fresh spawn after recycling');
+  assert.equal(handle.cdpUrl, 'http://127.0.0.1:9222');
+});
+
+test('launch() reuses a stale Chrome without recycling when recycleIfOld is false', async () => {
+  const launcher = fakeLauncher(7777);
+  const killCalls: Array<number | undefined> = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555,
+    getProcessAgeMs: () => 25 * 60 * 60 * 1000,
+    recycleIfOld: false,
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  await provider.launch(fakeCtx());
+
+  assert.deepEqual(killCalls, []);
+  assert.equal(launcher.calls.length, 0, 'expected no spawn when recycling is disabled');
+});
+
+test('launch() treats an unresolvable age (resolveListenerPid returns undefined) as fresh — reuse, not recycle', async () => {
+  const launcher = fakeLauncher(4242);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => undefined,
+    getProcessAgeMs: () => {
+      throw new Error('should not be called when no pid resolved');
+    },
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  await provider.launch(fakeCtx());
+
+  assert.deepEqual(killCalls, []);
+  assert.equal(launcher.calls.length, 0);
+});
+
 test('name is "cdp-chrome"', () => {
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
   });
   assert.equal(provider.name, 'cdp-chrome');

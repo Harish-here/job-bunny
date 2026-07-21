@@ -62,8 +62,11 @@ export interface BoardInfoResult {
 }
 
 /** Raw fetch of a board's metadata. Network-level failures (DNS, abort,
- * connection reset) reject — callers distinguish "definitely not this
- * board" (ok:false) from "couldn't even ask" (thrown). */
+ * connection reset) reject. `ok:false` alone is NOT "definitely not this
+ * board" — a 429/5xx `status` means the server didn't give a conclusive
+ * answer, same as a thrown error; only a 404/410 `status`, or a 200 body
+ * that fails name verification, is real evidence of absence. Callers
+ * (lane.ts) own that classification via the returned `status`. */
 export async function getBoardInfo(
   boardToken: string,
   ctx: RunContext,
