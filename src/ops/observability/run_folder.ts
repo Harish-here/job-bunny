@@ -10,9 +10,11 @@ const CHECKPOINT_RE = /^(\d{2})-(.+)\.json$/;
  * so a killed process never leaves a truncated file. */
 export class RunFolder {
   readonly dir: string;
+  readonly date: string;
 
   constructor(profileDataDir: string, date: string) {
     this.dir = join(profileDataDir, 'runs', date);
+    this.date = date;
   }
 
   checkpointPath(index: number, stage: string): string {
