@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { LlmProvider, Storage } from '../../ports/index.ts';
+import type { LlmProvider, LogData, Logger, Storage } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { TABLE_PATH } from './compress.ts';
 import {
@@ -24,14 +24,42 @@ function fakeStorage(): Storage & { store: Map<string, unknown> } {
   };
 }
 
+interface LogCall {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  msg: string;
+  data?: LogData;
+}
+
+/** Minimal capturing logger double — records every call so tests can assert
+ * on what the stage logged (no existing stage test does this yet; this is
+ * the first, added for the missing-id warning below). */
+function fakeLogger(): Logger & { calls: LogCall[] } {
+  const calls: LogCall[] = [];
+  return {
+    calls,
+    debug(msg, data) {
+      calls.push({ level: 'debug', msg, data });
+    },
+    info(msg, data) {
+      calls.push({ level: 'info', msg, data });
+    },
+    warn(msg, data) {
+      calls.push({ level: 'warn', msg, data });
+    },
+    error(msg, data) {
+      calls.push({ level: 'error', msg, data });
+    },
+  };
+}
+
 function fakeCtx(
   storage: ReturnType<typeof fakeStorage>,
-  overrides?: { signal?: AbortSignal; beat?: () => void },
+  overrides?: { signal?: AbortSignal; beat?: () => void; logger?: Logger },
 ): StageContext {
   return {
     profile: 'rajni',
     signal: overrides?.signal ?? AbortSignal.timeout(30_000),
-    logger: {
+    logger: overrides?.logger ?? {
       debug() {},
       info() {},
       warn() {},
@@ -322,4 +350,50 @@ test('heartbeat: ctx.beat() is called after each batch', async () => {
   await stage.run(emptyPayload(), ctx);
 
   assert.equal(beats, 2); // 2 batches (25 + 5)
+});
+
+test('an LLM response that omits an id it was sent is logged as a warn naming that id (not silently dropped)', async () => {
+  const ids = ['li-1', 'li-2', 'li-3'];
+  const storage = fakeStorage();
+  storage.store.set(TABLE_PATH, inputTableFor(ids));
+
+  // A provider that behaves like makeFakeLlm's canned response, except it
+  // drops 'li-2' from the returned table — simulating an LLM that silently
+  // omits a row for a batch it was given.
+  const llm: LlmProvider = {
+    name: 'fake-omitting',
+    async complete(prompt: string) {
+      const promptIds = [...prompt.matchAll(/^\| (\S+) \| Frontend Engineer \|/gm)].map(
+        (m) => m[1] as string,
+      );
+      const returnedIds = promptIds.filter((id) => id !== 'li-2');
+      const rows = returnedIds.map((id) => decisionRow(id));
+      return `| id | domain | seniority | func | city | country | workType | timezone | skills | salary |\n|---|---|---|---|---|---|---|---|---|---|\n${rows.join('\n')}`;
+    },
+  };
+
+  const logger = fakeLogger();
+  const stage = makeStructureStage(llm);
+  const ctx = fakeCtx(storage, { logger });
+
+  await stage.run(emptyPayload(), ctx);
+
+  const warns = logger.calls.filter((c) => c.level === 'warn');
+  assert.equal(warns.length, 1);
+  assert.match(warns[0]?.msg ?? '', /omit/i);
+  assert.equal(warns[0]?.data?.missingCount, 1);
+  assert.deepEqual(warns[0]?.data?.missingIds, ['li-2']);
+
+  // Progress logging is present too (start/done at info, per-batch at debug).
+  assert.ok(logger.calls.some((c) => c.level === 'info' && /starting/.test(c.msg)));
+  assert.ok(logger.calls.some((c) => c.level === 'info' && /done/.test(c.msg)));
+  assert.ok(logger.calls.some((c) => c.level === 'debug' && /batch/.test(c.msg)));
+
+  // Within-stage behavior is unchanged: li-2 is genuinely absent from
+  // decisions.json (assemble is the net that catches this downstream) — the
+  // fix here is the warn, not recovering the row.
+  const final = storage.store.get(DECISIONS_PATH) as string;
+  assert.ok(!final.includes('li-2'));
+  assert.ok(final.includes('li-1'));
+  assert.ok(final.includes('li-3'));
 });

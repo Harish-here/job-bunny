@@ -162,12 +162,47 @@ export function makeStructureStage(
       const doneIds = new Set(accumulated.map((r) => r.id));
 
       const remaining = inputRows.filter((r) => !doneIds.has(r.id));
+      const totalBatches = Math.ceil(remaining.length / BATCH_SIZE);
+
+      ctx.logger.info('structure: starting', {
+        totalRows: inputRows.length,
+        alreadyDone: accumulated.length,
+        remaining: remaining.length,
+        totalBatches,
+      });
 
       for (let i = 0; i < remaining.length; i += BATCH_SIZE) {
         const batch = remaining.slice(i, i + BATCH_SIZE);
+        const batchIndex = i / BATCH_SIZE + 1;
+
+        ctx.logger.debug('structure: sending batch', {
+          batchIndex,
+          totalBatches,
+          rows: batch.length,
+        });
+
         const prompt = buildPrompt(inputHeaderLine, batch);
         const response = await llm.complete(prompt, { signal: ctx.signal });
-        accumulated.push(...extractRows(response));
+        const parsedRows = extractRows(response);
+
+        // The stage's own contract with the assemble stage is "every id sent
+        // to the LLM shows up in decisions.json" — assemble is the net that
+        // catches a genuinely missing id, but a batch dropping ids at the
+        // LLM-response-parsing step here would otherwise be totally silent.
+        // Compute what was sent vs. what came back and warn loudly (without
+        // changing control flow — assemble remains the source of truth for
+        // the drop itself).
+        const parsedIds = new Set(parsedRows.map((r) => r.id));
+        const missingIds = batch.map((r) => r.id).filter((id) => !parsedIds.has(id));
+        if (missingIds.length > 0) {
+          ctx.logger.warn('structure: LLM response omitted ids sent in this batch', {
+            batchIndex,
+            missingCount: missingIds.length,
+            missingIds,
+          });
+        }
+
+        accumulated.push(...parsedRows);
         ctx.beat();
         await ctx.storage.writeJson(
           DECISIONS_PARTIAL_PATH,
@@ -181,6 +216,11 @@ export function makeStructureStage(
       // optional per the P6 plan, done here so a stale partial from a
       // finished run can never shadow a later run's resume logic.
       await ctx.storage.writeJson(DECISIONS_PARTIAL_PATH, buildDecisionsTable([]));
+
+      ctx.logger.info('structure: done', {
+        totalRows: inputRows.length,
+        decisions: accumulated.length,
+      });
 
       return input;
     },
