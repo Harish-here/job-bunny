@@ -8,6 +8,8 @@ const ECHO_STDIN = `${FIXTURES}echo-stdin.sh`;
 const PRINT_ARGS = `${FIXTURES}print-args.sh`;
 const FAIL = `${FIXTURES}fail.sh`;
 const HANG = `${FIXTURES}hang.sh`;
+const CLOSE_STDIN = `${FIXTURES}close-stdin.sh`;
+const IGNORE_SIGTERM = `${FIXTURES}ignore-sigterm.sh`;
 
 test('name is exactly "claude-cli"', () => {
   const provider = new ClaudeCliProvider();
@@ -62,7 +64,49 @@ test('already-aborted signal rejects without spawning', async () => {
   const provider = new ClaudeCliProvider({ command: HANG, timeoutMs: 10_000 });
   const controller = new AbortController();
   controller.abort(new Error('already gone'));
+  const start = Date.now();
   await assert.rejects(() => provider.complete('Say OK', { signal: controller.signal }));
+  const elapsedMs = Date.now() - start;
+  // No child should ever be spawned for an already-aborted signal — this
+  // should reject near-instantly, not wait on hang.sh's 30s sleep. Bounds a
+  // regression that drops the early `if (signal.aborted)` guard.
+  assert.ok(elapsedMs < 1_000, `expected near-instant rejection, took ${elapsedMs}ms`);
+});
+
+test('stdin write failure (EPIPE) rejects complete() instead of crashing the process', async () => {
+  const provider = new ClaudeCliProvider({ command: CLOSE_STDIN, timeoutMs: 5_000 });
+  // close-stdin.sh exits immediately without reading stdin. A prompt bigger
+  // than the OS pipe buffer (64KB) forces the write to span more than one
+  // internal flush, so it reliably lands after the child has already closed
+  // its read end — reproducing EPIPE instead of racing a still-open fd.
+  const bigPrompt = 'x'.repeat(10 * 1024 * 1024);
+  await assert.rejects(() =>
+    provider.complete(bigPrompt, { signal: new AbortController().signal }),
+  );
+});
+
+test('abort escalates to SIGKILL when the child ignores SIGTERM, and complete() still settles', async () => {
+  // Short killGraceMs so the test doesn't wait out the real default —
+  // proves the escalation path fires without needing a long sleep.
+  const provider = new ClaudeCliProvider({
+    command: IGNORE_SIGTERM,
+    timeoutMs: 10_000,
+    killGraceMs: 200,
+  });
+  const controller = new AbortController();
+  const start = Date.now();
+  const pending = provider.complete('Say OK', { signal: controller.signal });
+  setTimeout(() => controller.abort(new Error('test abort')), 50);
+
+  await assert.rejects(() => pending);
+  const elapsedMs = Date.now() - start;
+  // ignore-sigterm.sh traps SIGTERM and sleeps 30s; without SIGKILL
+  // escalation this would hang for the full 30s (or forever). A bounded
+  // grace period followed by SIGKILL should settle well under that.
+  assert.ok(
+    elapsedMs < 5_000,
+    `expected SIGKILL-escalated rejection, took ${elapsedMs}ms`,
+  );
 });
 
 test('ctor timeoutMs enforces a deadline independent of the passed signal', async () => {
