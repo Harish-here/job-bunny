@@ -26,6 +26,15 @@ export const BATCH_SIZE = 25;
 
 /**
  * Per-attempt ceiling for the WHOLE stage (every batch, not one LLM call).
+ *
+ * **WIRING CONSTRAINT (runPipeline integration):** This stage declares
+ * `heartbeat: true` but calls `ctx.beat()` only BETWEEN batches, not during
+ * `llm.complete()`. A single 25-row batch can legitimately block for up to the
+ * LlmProvider's per-call timeout—ClaudeCliProvider's default is 300_000ms
+ * (5 min). When wiring this stage into runPipeline, the guard's `stallMs`
+ * MUST be set greater than the provider's per-call `timeoutMs`, or the stall
+ * watchdog will false-kill a healthy in-progress batch.
+ *
  * Sized against ClaudeCliProvider's own per-call default (300_000ms):
  * a run with several hundred queued jobs can need a couple dozen batches,
  * so the stage timeout is set generously above what even a slow multi-batch
