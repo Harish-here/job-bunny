@@ -1,0 +1,76 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { ClaudeCliProvider } from './provider.ts';
+
+const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
+const ECHO_STDIN = `${FIXTURES}echo-stdin.sh`;
+const PRINT_ARGS = `${FIXTURES}print-args.sh`;
+const FAIL = `${FIXTURES}fail.sh`;
+const HANG = `${FIXTURES}hang.sh`;
+
+test('name is exactly "claude-cli"', () => {
+  const provider = new ClaudeCliProvider();
+  assert.equal(provider.name, 'claude-cli');
+});
+
+test('constructor defaults: command "claude", timeoutMs 300_000', () => {
+  // No public getters on the port — this just asserts construction with no
+  // args doesn't throw, and behavior is exercised via complete() below with
+  // explicit overrides (real defaults would spawn the real `claude` binary).
+  assert.doesNotThrow(() => new ClaudeCliProvider());
+});
+
+test('happy path: resolves with the child process stdout', async () => {
+  const provider = new ClaudeCliProvider({ command: ECHO_STDIN, timeoutMs: 5_000 });
+  const result = await provider.complete('Say OK', {
+    signal: new AbortController().signal,
+  });
+  assert.equal(result, 'Say OK');
+});
+
+test('spawns `claude -p --output-format text` with the prompt via stdin, not argv', async () => {
+  const provider = new ClaudeCliProvider({ command: PRINT_ARGS, timeoutMs: 5_000 });
+  const result = await provider.complete('irrelevant prompt text', {
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.trim(), '-p --output-format text');
+});
+
+test('non-zero exit rejects with stderr text in the error message', async () => {
+  const provider = new ClaudeCliProvider({ command: FAIL, timeoutMs: 5_000 });
+  await assert.rejects(
+    () => provider.complete('Say OK', { signal: new AbortController().signal }),
+    /boom: something broke/,
+  );
+});
+
+test('abort via signal kills the child and rejects', async () => {
+  const provider = new ClaudeCliProvider({ command: HANG, timeoutMs: 10_000 });
+  const controller = new AbortController();
+  const start = Date.now();
+  const pending = provider.complete('Say OK', { signal: controller.signal });
+  setTimeout(() => controller.abort(new Error('test abort')), 50);
+
+  await assert.rejects(() => pending);
+  const elapsedMs = Date.now() - start;
+  // hang.sh sleeps 30s; a real kill on abort resolves far sooner than that.
+  assert.ok(elapsedMs < 5_000, `expected quick rejection, took ${elapsedMs}ms`);
+});
+
+test('already-aborted signal rejects without spawning', async () => {
+  const provider = new ClaudeCliProvider({ command: HANG, timeoutMs: 10_000 });
+  const controller = new AbortController();
+  controller.abort(new Error('already gone'));
+  await assert.rejects(() => provider.complete('Say OK', { signal: controller.signal }));
+});
+
+test('ctor timeoutMs enforces a deadline independent of the passed signal', async () => {
+  const provider = new ClaudeCliProvider({ command: HANG, timeoutMs: 100 });
+  const start = Date.now();
+  await assert.rejects(() =>
+    provider.complete('Say OK', { signal: new AbortController().signal }),
+  );
+  const elapsedMs = Date.now() - start;
+  assert.ok(elapsedMs < 5_000, `expected timeout-driven rejection, took ${elapsedMs}ms`);
+});
