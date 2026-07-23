@@ -54,7 +54,7 @@ const FULL_JOB: JD = {
     titleParts: { seniority: 'Staff' },
     locations: [{ city: 'Chennai' }],
     workType: 'remote',
-    timezone: 'IST',
+    timezone: 'APAC',
     skills: ['TypeScript', 'React'],
   },
   evaluation: {
@@ -100,7 +100,7 @@ test('buildAutomatedProperties: exact key-by-key payload for a fully-structured/
     },
     [PROPERTIES.seniorityLevel.name]: { select: { name: 'Staff' } },
     [PROPERTIES.workType.name]: { select: { name: 'Remote' } },
-    [PROPERTIES.timezone.name]: { select: { name: 'IST' } },
+    [PROPERTIES.timezone.name]: { select: { name: 'APAC' } },
     [PROPERTIES.keySkills.name]: {
       rich_text: [{ type: 'text', text: { content: 'TypeScript, React' } }],
     },
@@ -112,6 +112,49 @@ test('buildAutomatedProperties: exact key-by-key payload for a fully-structured/
       rich_text: [{ type: 'text', text: { content: 'soft-fail detail' } }],
     },
   });
+});
+
+test('buildAutomatedProperties: an invalid free-form select value (seniority "Senior Staff", timezone "IST") is omitted from the payload, not written; valid values still pass through', () => {
+  const invalidJob: JD = {
+    ...FULL_JOB,
+    structured: {
+      titleParts: { seniority: 'Senior Staff' },
+      locations: [{ city: 'Chennai' }],
+      workType: 'remote',
+      timezone: 'IST',
+      skills: ['TypeScript', 'React'],
+    },
+  };
+
+  const invalidProps = buildAutomatedProperties(invalidJob);
+  assert.ok(
+    !(PROPERTIES.seniorityLevel.name in invalidProps),
+    'an invalid seniority value must not be written as a select property',
+  );
+  assert.ok(
+    !(PROPERTIES.timezone.name in invalidProps),
+    'an invalid timezone value must not be written as a select property',
+  );
+
+  const validProps = buildAutomatedProperties(FULL_JOB);
+  assert.deepEqual(validProps[PROPERTIES.seniorityLevel.name], {
+    select: { name: 'Staff' },
+  });
+  assert.deepEqual(validProps[PROPERTIES.timezone.name], { select: { name: 'APAC' } });
+});
+
+test('buildAutomatedProperties: an invalid excitement value is likewise omitted', () => {
+  const invalidJob: JD = {
+    ...FULL_JOB,
+    evaluation: {
+      verdicts: [],
+      score: 80,
+      excitement: 'Somewhat excited',
+      matchReasons: ['skills match'],
+    },
+  };
+  const props = buildAutomatedProperties(invalidJob);
+  assert.ok(!(PROPERTIES.excitement.name in props));
 });
 
 test('buildAutomatedProperties: a bare identity-only job writes only the always-present fields', () => {

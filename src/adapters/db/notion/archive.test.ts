@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ArchivePolicy } from '../../../ports/connector.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
-import { archiveStale } from './archive.ts';
+import { archiveStale, cutoffISO } from './archive.ts';
 import { NotionApi, type NotionSdkClientLike } from './client.ts';
 import { PROPERTIES } from './schema.ts';
 
@@ -27,10 +27,17 @@ function fakeCtx(overrides: Partial<RunContext> = {}): RunContext {
   };
 }
 
+// Mirrors cutoffISO's own local-date-component construction (not
+// `toISOString()`, which serializes in UTC and would drift a day off from
+// production's cutoff in any timezone ahead of UTC — see the dedicated
+// regression tests below for that exact bug).
 function isoDaysAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function page(id: string, status: string | undefined, dateFound: string | undefined) {
@@ -212,4 +219,38 @@ test('archiveStale: no rows to archive returns 0 and performs zero writes', asyn
   const count = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
   assert.equal(count, 0);
   assert.equal(updateCalls.length, 0);
+});
+
+test('cutoffISO: exact date string from local components, pinned against a frozen `now`', () => {
+  const now = new Date(2026, 6, 23, 10, 0, 0); // 2026-07-23T10:00 local, daytime (unambiguous)
+  assert.equal(cutoffISO(7, now), '2026-07-16');
+  assert.equal(cutoffISO(30, now), '2026-06-23');
+});
+
+test('cutoffISO: local-date correctness at an early-morning boundary — regression for the UTC-round-trip off-by-one', () => {
+  // 00:15 local time in a timezone ahead of UTC (this suite runs in
+  // Asia/Calcutta, UTC+5:30) is still the PREVIOUS day in UTC. The old
+  // implementation (`new Date(); setDate(); toISOString().slice(0, 10)`)
+  // would serialize this instant's UTC date, landing the cutoff one day
+  // early ('2026-07-15' instead of the correct local '2026-07-16').
+  const now = new Date(2026, 6, 23, 0, 15, 0); // 2026-07-23T00:15 local
+  assert.equal(cutoffISO(7, now), '2026-07-16');
+});
+
+test('archiveStale: honors an injected `now` and is correct at the early-morning boundary (regression for the timezone off-by-one)', async () => {
+  // With the buggy UTC-serialized cutoff this would have computed
+  // '2026-07-15' as the passed-cutoff, and 'just-stale' (Date Found
+  // 2026-07-15) would NOT have been < that cutoff — i.e. it would have been
+  // wrongly kept instead of archived.
+  const now = new Date(2026, 6, 23, 0, 15, 0); // 2026-07-23T00:15 local
+  const pages = [page('just-stale', 'Passed', '2026-07-15')];
+  const api = new NotionApi({ client: stubWithPages(pages) });
+
+  const count = await archiveStale(api, 'db1', POLICY, true, fakeCtx(), now);
+
+  assert.equal(
+    count,
+    1,
+    'a page one day before the correct local cutoff must be counted as stale',
+  );
 });
