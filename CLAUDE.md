@@ -83,7 +83,7 @@ The workflow surface is the slash commands in `.claude/commands/` (mirrored as s
 
 ## Hard rules
 
-- **Notion select option strings are byte-exact** (`scripts/notion/schema.js`) — changing one without updating the live Notion options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or delete.
+- **Notion select option strings are byte-exact** (`scripts/notion/schema.js`) — changing one without updating the live Notion options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or hard delete — archiving sets Notion's own recoverable `archived: true` trash flag (30-day undo), gated behind an explicit `--apply`/`CLEANUP_APPLY=1` opt-in, dry-run by default.
 - **Home geo is authoritative in `filter_config.json`'s `locations[]`** (city + country + accepted work types), consumed via `scripts/pipeline/jd_filter.js`'s `loadFilterContext` — `resume_meta.json`'s `location` (string or array of strings) and the `homeLocations()`/`isHomeCity()` helpers in `scripts/lib/util.js` still exist but are due to be refactored onto this model in the wiring packet.
 - **Token efficiency is a design constraint on the `/structure` path.** Avoid-list companies drop on card data before JDs open; `compress.js` emits a compact markdown table; `/structure` outputs a markdown table, not JSON. Preserve this shape — it roughly halves the stage's token cost.
 - **No PDF parsing in the daily path** — `resume.json` is the hand-maintained source of truth; PDF→JSON is a one-time `/setup` seed only.

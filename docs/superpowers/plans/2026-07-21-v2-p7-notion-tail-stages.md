@@ -12,7 +12,7 @@
 - Branch `feat/v2-p7-notion-tail` off `main-v2`. All P1 constraints apply.
 - **Notion is the source of truth**; cache always rebuildable; reconcile read-only on Notion.
 - **Byte-exact option strings** — every option string in the adapter carries a test asserting equality with the value pinned from v0 `schema.js`.
-- Sync writes automated fields only; inserts + anchored updates; never whole-page overwrite or delete (archive = status change, not deletion).
+- Sync writes automated fields only; inserts + anchored updates; never whole-page overwrite or hard delete (archive = Notion's own recoverable `archived: true` trash flag, not deletion).
 - `core/dedup` and `core/rank` are pure (no I/O); replay parity vs v0 outputs gates this phase like P2.
 
 ## File Structure
