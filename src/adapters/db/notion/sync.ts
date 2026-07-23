@@ -27,7 +27,25 @@ import { isSoftError, type SoftError } from '../../../core/errors/soft_error.ts'
 import type { JD, SyncedJD, WorkType } from '../../../core/jd/index.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { NotionApi } from './client.ts';
-import { PROPERTIES } from './schema.ts';
+import {
+  EXCITEMENT_OPTIONS,
+  PROPERTIES,
+  SENIORITY_OPTIONS,
+  TIMEZONE_OPTIONS,
+} from './schema.ts';
+
+/** True iff `value` is an exact member of `options` — used to guard every
+ * free-form LLM-derived select value (`titleParts.seniority`,
+ * `structured.timezone`, `evaluation.excitement`) before it's written as a
+ * Notion select property. An invalid select name is a non-retryable Notion
+ * 400 (`isSoftError` is false for it) that would abort the whole
+ * `syncJobs` batch — omitting the property is strictly safer than risking
+ * that, and matches this function's existing "omit rather than write a
+ * false placeholder" posture for missing data. `workType` doesn't need this
+ * — it's already mapped through the fixed `WORK_TYPE_LABELS` lookup below. */
+function isValidOption(value: string, options: readonly string[]): boolean {
+  return options.includes(value);
+}
 
 const richText = (content: string) => [{ type: 'text', text: { content } }];
 
@@ -54,7 +72,12 @@ const WORK_TYPE_LABELS: Record<WorkType, string> = {
  * one of `schema.ts`'s `AUTOMATED_FIELDS` by construction — a field the v2
  * `JD` has no data for (no v0 counterpart yet, e.g. YoE, Source URL) is
  * simply omitted rather than written as a false/empty placeholder, so an
- * omission never looks like "explicitly cleared". */
+ * omission never looks like "explicitly cleared". The three select-backed
+ * fields sourced from free-form LLM output (`seniority`/`timezone`/
+ * `excitement`) are additionally validated against their `schema.ts` option
+ * lists (`isValidOption` above) and omitted — not written — when the LLM's
+ * value isn't an exact match, since an invalid select name is a
+ * non-retryable Notion 400 that would otherwise abort the whole batch. */
 export function buildAutomatedProperties(job: JD): Record<string, unknown> {
   const props: Record<string, unknown> = {
     [PROPERTIES.jobTitle.name]: titleProp(job.identity.title),
@@ -71,19 +94,22 @@ export function buildAutomatedProperties(job: JD): Record<string, unknown> {
   if (city) props[PROPERTIES.locationCity.name] = richTextProp(city);
 
   const seniority = job.structured?.titleParts.seniority;
-  if (seniority) props[PROPERTIES.seniorityLevel.name] = selectProp(seniority);
+  if (seniority && isValidOption(seniority, SENIORITY_OPTIONS))
+    props[PROPERTIES.seniorityLevel.name] = selectProp(seniority);
 
   const workType = job.structured?.workType;
   if (workType) props[PROPERTIES.workType.name] = selectProp(WORK_TYPE_LABELS[workType]);
 
   const timezone = job.structured?.timezone;
-  if (timezone) props[PROPERTIES.timezone.name] = selectProp(timezone);
+  if (timezone && isValidOption(timezone, TIMEZONE_OPTIONS))
+    props[PROPERTIES.timezone.name] = selectProp(timezone);
 
   if (job.structured)
     props[PROPERTIES.keySkills.name] = richTextProp(job.structured.skills.join(', '));
 
   const excitement = job.evaluation?.excitement;
-  if (excitement) props[PROPERTIES.excitement.name] = selectProp(excitement);
+  if (excitement && isValidOption(excitement, EXCITEMENT_OPTIONS))
+    props[PROPERTIES.excitement.name] = selectProp(excitement);
 
   if (job.evaluation) {
     props[PROPERTIES.matchReasons.name] = richTextProp(

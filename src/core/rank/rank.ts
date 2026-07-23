@@ -393,7 +393,6 @@ export function scoreJob(
 export function rank(jobs: readonly StructuredJD[], cfg: RankConfig): EvaluatedJD[] {
   return jobs.map((jd) => {
     const { score, excitement, matchReasons } = scoreJob(jd, cfg);
-    const priorMatchReasons = jd.evaluation?.matchReasons ?? [];
     return {
       ...jd,
       evaluation: {
@@ -401,7 +400,7 @@ export function rank(jobs: readonly StructuredJD[], cfg: RankConfig): EvaluatedJ
         duplicateOf: jd.evaluation?.duplicateOf,
         score,
         excitement,
-        matchReasons: [...priorMatchReasons, ...matchReasons],
+        matchReasons,
       },
     };
   });
