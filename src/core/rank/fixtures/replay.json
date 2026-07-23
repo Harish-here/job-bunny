@@ -1,0 +1,238 @@
+[
+  {
+    "name": "full-house-max-vera-level",
+    "input": {
+      "identity": {
+        "id": "rank-1",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank1/",
+        "company": "Fixture Co",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Staff" },
+        "locations": [],
+        "skills": ["React", "TypeScript", "Design Systems"],
+        "workType": "remote",
+        "timezone": "APAC"
+      }
+    },
+    "v0FullScore": 95,
+    "v0Reasons": [
+      "3/3 skills match (core: React, TypeScript, Design Systems) (+40)",
+      "Title matches domain \"frontend\" (+15)",
+      "Staff matches target seniority (+15)",
+      "Remote APAC timezone acceptable (+20)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "zero-everything-floor",
+    "input": {
+      "identity": {
+        "id": "rank-2",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank2/",
+        "company": "Fixture Co",
+        "title": "Data Analyst",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Intern" },
+        "locations": [],
+        "skills": []
+      }
+    },
+    "v0FullScore": 5,
+    "v0Reasons": [
+      "No JD skills listed (+0)",
+      "Title has no domain keyword (+0)",
+      "Intern below target seniority (+0)",
+      "Contract location fit (+0)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "boundary-65-kandipa-podu-lower-edge",
+    "input": {
+      "identity": {
+        "id": "rank-3",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank3/",
+        "company": "Fixture Co",
+        "title": "Data Analyst",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Intern" },
+        "locations": [{ "city": "Chennai" }],
+        "skills": ["React", "TypeScript", "Design Systems"],
+        "workType": "hybrid"
+      }
+    },
+    "v0FullScore": 65,
+    "v0Reasons": [
+      "3/3 skills match (core: React, TypeScript, Design Systems) (+40)",
+      "Title has no domain keyword (+0)",
+      "Intern below target seniority (+0)",
+      "Hybrid in Chennai (+20)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "mid-82-title-and-seniority-hit",
+    "input": {
+      "identity": {
+        "id": "rank-4",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank4/",
+        "company": "Fixture Co",
+        "title": "Senior Frontend Developer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Senior" },
+        "locations": [{ "city": "Chennai" }],
+        "skills": ["React", "Design Systems"],
+        "workType": "hybrid"
+      }
+    },
+    "v0FullScore": 82,
+    "v0Reasons": [
+      "2/2 skills match (core: React, Design Systems) (+27)",
+      "Title matches domain \"frontend\" (+15)",
+      "Senior matches target seniority (+15)",
+      "Hybrid in Chennai (+20)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "low-22-secondary-skill-remote-unknown-tz",
+    "input": {
+      "identity": {
+        "id": "rank-5",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank5/",
+        "company": "Fixture Co",
+        "title": "Platform Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Lead" },
+        "locations": [],
+        "skills": ["Node.js"],
+        "workType": "remote",
+        "timezone": "US"
+      }
+    },
+    "v0FullScore": 22,
+    "v0Reasons": [
+      "1/1 skills match (secondary: Node.js) (+7)",
+      "Title has no domain keyword (+0)",
+      "Lead below target seniority (+0)",
+      "Remote, timezone unknown (+10)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "low-33-core-skill-onsite-non-home",
+    "input": {
+      "identity": {
+        "id": "rank-6",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank6/",
+        "company": "Fixture Co",
+        "title": "Backend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Manager" },
+        "locations": [{ "city": "Mumbai" }],
+        "skills": ["TypeScript"],
+        "workType": "onsite"
+      }
+    },
+    "v0FullScore": 33,
+    "v0Reasons": [
+      "1/1 skills match (core: TypeScript) (+13)",
+      "Title matches domain \"backend\" (+15)",
+      "Manager below target seniority (+0)",
+      "On-site location fit (+0)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "mid-78-title-seniority-hit-partial-skills",
+    "input": {
+      "identity": {
+        "id": "rank-7",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank7/",
+        "company": "Fixture Co",
+        "title": "Backend Lead",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Senior" },
+        "locations": [],
+        "skills": [
+          "React",
+          "TypeScript",
+          "Design Systems",
+          "GraphQL",
+          "Node.js",
+          "Vue",
+          "Svelte"
+        ],
+        "workType": "remote",
+        "timezone": "APAC"
+      }
+    },
+    "v0FullScore": 78,
+    "v0Reasons": [
+      "5/7 skills match (core: React, TypeScript, Design Systems; secondary: GraphQL, Node.js) (+23)",
+      "Title matches domain \"backend\" (+15)",
+      "Senior matches target seniority (+15)",
+      "Remote APAC timezone acceptable (+20)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  },
+  {
+    "name": "low-50-title-hit-half-skills-borderline-tz",
+    "input": {
+      "identity": {
+        "id": "rank-8",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/rank8/",
+        "company": "Fixture Co",
+        "title": "Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      },
+      "structured": {
+        "titleParts": { "seniority": "Mid" },
+        "locations": [],
+        "skills": [
+          "React",
+          "TypeScript",
+          "Design Systems",
+          "GraphQL",
+          "Node.js",
+          "Vue",
+          "Svelte",
+          "Angular"
+        ],
+        "workType": "remote",
+        "timezone": "EMEA"
+      }
+    },
+    "v0FullScore": 50,
+    "v0Reasons": [
+      "5/8 skills match (core: React, TypeScript, Design Systems; secondary: GraphQL, Node.js) (+20)",
+      "Title matches domain \"frontend\" (+15)",
+      "Mid below target seniority (+0)",
+      "Remote EMEA timezone borderline (+10)",
+      "No YoE requirement, neutral (+5)"
+    ]
+  }
+]

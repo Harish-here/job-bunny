@@ -94,3 +94,21 @@ export type EvaluatedJD = StructuredJD & {
   evaluation: z.infer<typeof EvaluationSchema>;
 };
 export type SyncedJD = JD & { sync: z.infer<typeof SyncStateSchema> };
+
+/** One reconciled-Notion-mirror row (spec §3) — a plain data shape, not port
+ * behavior, so it lives here rather than in ports/connector.ts (core-is-pure:
+ * src/core/** may not import src/ports/**). ports/connector.ts re-exports
+ * this so every existing importer (adapters/db/notion/*, core/dedup) keeps
+ * compiling unchanged. */
+export const CacheEntrySchema = z.object({
+  id: z.string(),
+  company: z.string(),
+  title: z.string(),
+  pageId: z.string(),
+  /** Location city (v0 repostKey's third component) — optional so existing
+   * callers/fixtures built before this field existed keep compiling. Absent
+   * when the live row has no Location City value, or for older cache
+   * snapshots that predate this field. */
+  city: z.string().optional(),
+});
+export type CacheEntry = z.infer<typeof CacheEntrySchema>;

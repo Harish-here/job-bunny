@@ -1,12 +1,10 @@
-import type { JD, SyncedJD } from '../core/jd/index.ts';
+import type { CacheEntry, JD, SyncedJD } from '../core/jd/index.ts';
 import type { RunContext } from './context.ts';
 
-export interface CacheEntry {
-  id: string;
-  company: string;
-  title: string;
-  pageId: string;
-}
+/** Canonical definition now lives in core/jd (a plain data shape, not port
+ * behavior) — re-exported here so every existing importer keeps compiling
+ * unchanged. */
+export type { CacheEntry };
 
 /** Archive policy consumed by the cleanup routine (spec §3). */
 export interface ArchivePolicy {
