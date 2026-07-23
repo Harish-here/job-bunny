@@ -21,7 +21,7 @@ test('full config parses; adapter settings pass through opaquely', () => {
     settings: { notion: { dbId: 'abc' }, telegram: { chatId: 42 } },
   });
   assert.equal(cfg.lanes.length, 3);
-  assert.deepEqual(cfg.settings['notion'], { dbId: 'abc' });
+  assert.deepEqual(cfg.settings.notion, { dbId: 'abc' });
 });
 
 test('rejects missing connector and malformed schedule times', () => {

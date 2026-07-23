@@ -7,6 +7,19 @@
 
 **Pin at phase start:** Telegram digest format from `scripts/notify/telegram_format.js`; launchd plist shape from `scripts/ops/schedule.js`; v0 profile file formats from `scripts/lib/config.js`.
 
+## Carry-in from P6/P7 (detail in `main-v2.md`'s P6/P7 entries — do not re-derive, just act)
+
+- Runner `stallMs` MUST exceed structure's per-call provider `timeoutMs` (structure only beats between batches; a tighter stall watchdog false-kills a live batch).
+- `sync` has `retries: 1`; a hard mid-batch failure after partial inserts can double-insert on retry (per-page failures are already `SoftError` and don't trigger it) — make `syncJobs` retry-idempotent or set `retries: 0` when wiring.
+- `FilterConfig`/`RankConfig` reach their stages via factory injection (`makeFilterStage(cfg)` / `makeRankStage(cfg)`); composing them from `profile.json`/`filter_config.json` into `wire.ts` is this phase's job.
+- Cleanup routine's `ArchivePolicy` comes from `ctx.config.settings.cleanup` (`{ passedOlderThanDays: 7, untouchedOlderThanDays: 30 }` defaults); dry-run is owned by the connector (`NotionConnectorSettings.dryRun`, defaults `true`) — wiring must not silently flip it on.
+- Tail order `reconcile → … → filter → dedup → rank → sync`; `dedup` fails loud without reconcile's cache file, so `reconcile` must wire ahead of it.
+- **Non-blocking, be aware:** depcruise's `includeOnly: '^src'` leaves `src/`→`scripts/` mechanically unenforced; dedup's cache index keys on title+company only (city collisions overwrite); rank's YoE axis is neutral-defaulted (ceiling 95/100); compress's id-keyed passthrough collapses duplicate ids last-wins with no `DroppedRecord`.
+
+**Before the parity cutover run (Task 7), run this deferred live-verify batch once — not blocking earlier tasks:**
+- P4 LinkedIn authenticated harvest: `.chrome-debug` session was expired at P7 handoff — re-login, rerun the harvest verify, regenerate `page_inventory/linkedin__jobs-search.json` via `/page-analyse` only if the authenticated UI genuinely drifted.
+- P7 Notion adapter: every test to date is stub-driven, never hit the real API. Needs a scratch Notion DB + `NOTION_TOKEN` — never a real profile DB (`profiles/harish/`, `profiles/uvashree/`); use `profiles/rajni/` fixture conventions. Watch for byte-exact select-option strings live Notion rejects that stubs can't catch.
+
 ## Global Constraints
 
 - Branch `feat/v2-p8-surface` off `main-v2` (cutover steps get their own `chore/v2-cutover` PR). All P1 constraints apply.

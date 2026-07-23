@@ -75,5 +75,5 @@ test('.tmp file is never left behind after a successful write', async () => {
   await storage.writeJson(relPath, { hello: 'clean' });
   const entries = await readdir(join(root, dir));
   assert.deepEqual(entries, ['clean.json']);
-  await assert.rejects(() => stat(join(root, relPath) + '.tmp'));
+  await assert.rejects(() => stat(`${join(root, relPath)}.tmp`));
 });

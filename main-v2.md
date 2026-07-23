@@ -233,3 +233,35 @@ Brainstorm complete — full consolidated spec:
   - **WIRING (P8):** the pipeline guard's stallMs MUST exceed structure's provider per-call timeoutMs, because structure beats (ctx.beat) only between batches — else the stall watchdog false-kills a healthy batch. (Documented in structure.ts.)
   - **FUNNEL (dedup/wiring):** compress builds passthrough as Record keyed by id; two SourcedJDs sharing an id silently collapse (last-wins) with no DroppedRecord — small funnel-integrity edge, revisit at dedup.
   - **DEFERRED MINORS (non-blocking):** shared decisions-table md parser could be extracted if it grows (only isSeparatorLine is verbatim-duplicated today); compress test's FakeSourcedJD should import SourcedJD; provider ctor-defaults test asserts only no-throw.
+- ✅ P7 Notion connector + dedup/rank/cleanup routine — pipeline complete end-to-end.
+  **Shipped:** core/dedup (3 hard verdict rules + intra-run dupes, replay parity vs v0);
+  core/rank (100-pt scale, 5 axes, excitement banding, replay parity vs v0, plus v2's new
+  soft-verdict penalty surfacing verdict details into matchReasons); adapters/db/notion
+  (byte-exact schema pinned by a test that reads v0's schema.js at test time, retrying/
+  abortable client, cache rebuild, automated-fields-only sync, dry-run-by-default archive,
+  NotionConnector); routines/types.ts + routines/cleanup; tail stages reconcile/filter/
+  dedup/rank/sync, composed end-to-end in tail_e2e.test.ts (fixture StructuredJDs → real
+  FsStorage reconcile→dedup cache handoff → stubbed-Connector filter/dedup/rank/sync, no
+  network). **Deviations from the P7 plan (each with its one-line reason):** (1) added
+  pipeline/stages/reconcile.ts, not in the plan's file list — dedup needs a cache and
+  nothing else produced one; (2) CacheEntry moved from ports/connector.ts into core/jd
+  (ports now re-exports it), and dedupe() returns a local DedupResult instead of
+  StagePayload — the plan's signature would have forced core/** to import from ports/**
+  and pipeline/**, violating the core-is-pure depcruise rule; (3) CacheEntry gained
+  city? — v0's repost key is title+company+city; without city, same-title/same-company
+  jobs in different cities were wrongly collapsed as reposts; (4) rank's years-of-
+  experience axis is neutral-defaulted because no YoE field exists anywhere on
+  StructuredJD — the nominal scale is 100 but the realistic ceiling is 95, all three
+  excitement bands remain reachable. **Open items carried into P8:** live Notion smoke
+  test deferred (no scratch DB or token provisioned — every Notion test is stub-driven,
+  the adapter has never spoken to the real API); sync stage has retries: 1 — a hard
+  mid-batch failure after partial inserts could double-insert on retry (per-page
+  failures are already SoftError and don't trigger it), make syncJobs retry-idempotent
+  or set retries: 0 when wiring; depcruise's includeOnly: '^src' drops non-src modules
+  from the graph before rules evaluate, so the src/→scripts/ boundary is not
+  mechanically enforced (this is what lets the byte-exact schema test import v0 at test
+  time; it also means nothing else is stopped from doing so); dedup's cache index is a
+  Map keyed on title+company, so two cache entries sharing a title+company but differing
+  in city overwrite each other; FilterConfig/RankConfig reach their stages by factory
+  injection — composing them from profile.json/filter_config.json is P8's job (no
+  wire.ts exists yet).
