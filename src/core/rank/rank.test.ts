@@ -431,3 +431,11 @@ test('rank(): every job gets a numeric score, excitement label, and matchReasons
   assert.equal(typeof out?.evaluation.excitement, 'string');
   assert.ok(Array.isArray(out?.evaluation.matchReasons));
 });
+
+test('rank(): idempotent — re-ranking an already-ranked batch does not duplicate matchReasons', () => {
+  const cfg = RankConfigSchema.parse({ skills: { primary: ['React'] } });
+  const input = [jd({ skills: ['React'] })];
+  const once = rank(input, cfg);
+  const twice = rank(once, cfg);
+  assert.deepEqual(twice[0]?.evaluation.matchReasons, once[0]?.evaluation.matchReasons);
+});

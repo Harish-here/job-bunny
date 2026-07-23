@@ -219,9 +219,15 @@ export function dedupe(jobs: JD[], cache: CacheEntry[]): DedupResult {
     }
 
     kept.push(job);
-    idIndex.set(id, { source: 'run', jd: job });
-    exactIndex.set(eKey, { source: 'run', jd: job });
-    fuzzyIndex.set(fKey, { source: 'run', jd: job });
+    // Never overwrite an existing index entry (cache- or run-sourced): a job
+    // kept only because `citiesConflict` rejected an otherwise-matching
+    // candidate must not replace that candidate's index slot, or a later
+    // genuinely-matching job (e.g. same title+company, matching city) would
+    // compare itself against THIS job instead of the original and wrongly
+    // escape dedup too (see dedup.test.ts's "does not clobber" case).
+    if (!idIndex.has(id)) idIndex.set(id, { source: 'run', jd: job });
+    if (!exactIndex.has(eKey)) exactIndex.set(eKey, { source: 'run', jd: job });
+    if (!fuzzyIndex.has(fKey)) fuzzyIndex.set(fKey, { source: 'run', jd: job });
   }
 
   return { jobs: kept, dropped };

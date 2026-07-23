@@ -129,6 +129,35 @@ test('dedup amendment: same title + same company + DIFFERENT city is NOT a repos
   assert.equal(jobs[0]?.identity.id, '222');
 });
 
+test('does not clobber a cache-sourced index entry: a job kept only via citiesConflict must not let a later genuine repost escape', () => {
+  const cache = [
+    cacheEntry({
+      id: 'cache-1',
+      title: 'SWE',
+      company: 'Acme',
+      city: 'Bangalore',
+      pageId: 'page-1',
+    }),
+  ];
+  const jobA = jd({ id: 'fresh-a', title: 'SWE', company: 'Acme', city: 'Chennai' });
+  const jobB = jd({ id: 'fresh-b', title: 'SWE', company: 'Acme', city: 'Bangalore' });
+
+  const { jobs, dropped } = dedupe([jobA, jobB], cache);
+
+  // jobA is kept (different city — citiesConflict rejects the cache match).
+  assert.deepEqual(
+    jobs.map((j) => j.identity.id),
+    ['fresh-a'],
+  );
+  // jobB (same city as the cache entry) must still be recognized as a
+  // repost of the CACHE entry, not compared against jobA's now-stale index
+  // slot.
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]?.jd.identity.id, 'fresh-b');
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'dedup.repost');
+  assert.match(dropped[0]?.reasons[0]?.detail ?? '', /page-1/);
+});
+
 test('dedup.role-company: drops a job that only matches a cache entry after aggressive (legal-suffix/token) normalization', () => {
   // "Widget Ltd" vs "Widget Private Limited" only line up once companyKey
   // folds legal suffixes — light exactKey normalization keeps them distinct,
