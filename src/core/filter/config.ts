@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { WorkTypeSchema } from '../jd/index.ts';
 
-/** Filter config (spec §6): values live in profiles/<p>/filter.json —
+/** Filter config (spec §6): values live in profiles/<p>/filter_config.json —
  * this module owns only the shape and defaults. Severity is per-rule:
  * hard ⇒ drop (recorded), soft ⇒ keep + rank penalty. */
 

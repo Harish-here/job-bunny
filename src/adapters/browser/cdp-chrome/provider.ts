@@ -86,8 +86,10 @@ export type CdpReachableFn = (
 /** Bounded probe of Chrome's CDP HTTP endpoint — ported from
  * scripts/lib/browser.js's cdpReachable(). Returns the parsed
  * `/json/version` body when Chrome answers, or null on any failure
- * (connection refused, non-2xx, timeout) — never throws. */
-const defaultCdpReachable: CdpReachableFn = async (cdpUrl, opts = {}) => {
+ * (connection refused, non-2xx, timeout) — never throws. Exported (P8) so
+ * `cli/wire.ts` can reuse the exact same probe for `cdpReachableCheck`
+ * instead of reimplementing it. */
+export const defaultCdpReachable: CdpReachableFn = async (cdpUrl, opts = {}) => {
   try {
     const res = await fetch(`${cdpUrl}/json/version`, {
       signal: AbortSignal.timeout(opts.timeoutMs ?? 2000),

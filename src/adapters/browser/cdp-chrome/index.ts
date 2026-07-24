@@ -1,3 +1,4 @@
+export { type CdpReachableCheckDeps, cdpReachableCheck } from './check.ts';
 export type {
   ChromeProcessHandle,
   FsDeps,
@@ -29,4 +30,8 @@ export type {
   ChromeLaunchAction,
   ConnectFn,
 } from './provider.ts';
-export { CdpChromeProvider, decideChromeAction } from './provider.ts';
+export {
+  CdpChromeProvider,
+  decideChromeAction,
+  defaultCdpReachable,
+} from './provider.ts';
