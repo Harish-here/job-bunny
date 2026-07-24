@@ -4,12 +4,13 @@
  * I/O, no env — `telegram.ts` owns "how to send," this module owns "what
  * the text looks like."
  *
- * Mirrors the v0 house style (`scripts/notify/telegram_format.js`): the
- * `🐰 Job Bunny <profile>` banner, the `────────────────` separator, and
- * ✅/🔴 status icons. Unlike v0 (which reformats pre-composed markdown from
- * an LLM), this builds plaintext directly from the funnel data
- * (`jobsIn`/`jobsOut`/`dropsByRule`) — no markdown-table parsing needed
- * since the input is already structured.
+ * Mirrors the v0 house style (`scripts/notify/telegram_format.js`): a single-line
+ * `<statusIcon> Job Bunny — <profile>` banner (or `<statusIcon> Job Bunny` if
+ * profile empty), the `────────────────` separator, and per-stage funnel lines.
+ * Status icons: ✅ for passed, 🔴 for failed. Unlike v0 (which reformats
+ * pre-composed markdown from an LLM), this builds plaintext directly from the
+ * funnel data (`jobsIn`/`jobsOut`/`dropsByRule`) — no markdown-table parsing
+ * needed since the input is already structured.
  *
  * `DigestInput` deliberately mirrors `RunResult`'s shape rather than
  * importing it: `RunResult` lives under `src/ops/`, which transitively
@@ -51,10 +52,9 @@ function funnelLine(stage: DigestInput['stages'][number]): string {
 export function formatDigest(result: DigestInput): string {
   const passed = result.outcome === 'passed';
   const icon = passed ? '✅' : '🔴';
-  const banner = `🐰 Job Bunny — ${result.profile}`;
-  const statusLine = `${icon} ${result.date} — ${result.outcome}`;
+  const banner = `${icon} Job Bunny${result.profile ? ` — ${result.profile}` : ''}`;
 
-  const lines = [banner, SEPARATOR, statusLine];
+  const lines = [banner, SEPARATOR];
 
   if (!passed && result.failedStage) {
     lines.push(`Failed at stage: ${result.failedStage}`);

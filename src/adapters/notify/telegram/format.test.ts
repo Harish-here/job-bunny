@@ -43,8 +43,7 @@ function passedResult(overrides: Partial<RunResultFixture> = {}): RunResultFixtu
 
 test('formatDigest: includes the Job Bunny banner with the profile name', () => {
   const text = formatDigest(passedResult());
-  assert.match(text, /🐰 Job Bunny/);
-  assert.match(text, /rajni/);
+  assert.match(text, /✅ Job Bunny — rajni/);
 });
 
 test('formatDigest: includes the separator line', () => {
@@ -52,17 +51,15 @@ test('formatDigest: includes the separator line', () => {
   assert.match(text, /────────────────/);
 });
 
-test('formatDigest: a passed outcome shows the ✅ status icon and "passed"', () => {
+test('formatDigest: a passed outcome shows the ✅ status icon in the banner', () => {
   const text = formatDigest(passedResult());
-  assert.match(text, /✅/);
-  assert.match(text, /passed/i);
+  assert.match(text, /✅ Job Bunny — rajni/);
 });
 
-test('formatDigest: a failed outcome shows the 🔴 status icon and the failing stage', () => {
+test('formatDigest: a failed outcome shows the 🔴 status icon in the banner and the failing stage', () => {
   const text = formatDigest(passedResult({ outcome: 'failed', failedStage: 'filter' }));
-  assert.match(text, /🔴/);
-  assert.match(text, /failed/i);
-  assert.match(text, /filter/);
+  assert.match(text, /🔴 Job Bunny — rajni/);
+  assert.match(text, /Failed at stage: filter/);
 });
 
 test('formatDigest: includes a per-stage funnel line with jobsIn -> jobsOut', () => {
@@ -90,5 +87,5 @@ test('formatDigest: a stage with no drops does not print an empty breakdown', ()
 
 test('formatDigest: handles zero stages without throwing', () => {
   const text = formatDigest(passedResult({ stages: [] }));
-  assert.match(text, /🐰 Job Bunny/);
+  assert.match(text, /✅ Job Bunny — rajni/);
 });
