@@ -13,8 +13,10 @@ const COMPANIES_SEEN_PATH = 'registry/companies_seen.json';
  * several search-URL groups is slower than an API probe/fetch loop
  * (source.ts's 300s), and each FarmingLane already owns its own bounded
  * per-URL/per-card timeouts internally (see adapters/lanes/linkedin), so
- * this is a ceiling on the whole stage, not a per-URL budget. */
-const TIMEOUT_MS = 600_000;
+ * this is a ceiling on the whole stage, not a per-URL budget. Sized to allow
+ * multiple LinkedIn search groups with multiple cards per group to farm within
+ * the stage timeout. */
+const TIMEOUT_MS = 1_800_000;
 
 /**
  * Farming-lane source stage (spec §5, sibling to source.ts's ApiLane
@@ -39,6 +41,17 @@ const TIMEOUT_MS = 600_000;
  * lane-failure warn) and, as with source.ts, nothing is written for a
  * run-level abort (an aborted run must not durably clobber a healthy
  * companies_seen.json with a partial run's view).
+ *
+ * **WIRING CONSTRAINT (runPipeline integration):** This stage declares
+ * `heartbeat: true` and calls `ctx.beat()` from within each FarmingLane's
+ * source() loop (LinkedInLane.source() calls ctx.beat() per card). When
+ * wiring this stage into runPipeline, the guard's `stallMs` MUST be set
+ * greater than the largest per-unit blocking window within a farming lane
+ * (LinkedIn's per-card work: goto ~30s + jd_open per-call timeouts), or the
+ * stall watchdog will false-kill a healthy in-progress card. In practice,
+ * structure's own constraint (stallMs > 300_000ms LLM per-call timeout) is
+ * the larger bound and already covers farm's window, but document farm's
+ * requirement explicitly to ensure any future lane implementation respects it.
  */
 export function makeFarmStage(
   farmingLanes: FarmingLane[],
@@ -47,6 +60,7 @@ export function makeFarmStage(
     name: 'farm',
     timeoutMs: TIMEOUT_MS,
     retries: 0,
+    heartbeat: true,
     async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
       const farmedJobs: JD[] = [];
       const farmedDropped: DroppedRecord[] = [];

@@ -219,3 +219,9 @@ test('run-level abort mid-lane propagates loud and never writes companies_seen.j
   );
   assert.equal(storage.store.has('registry/companies_seen.json'), false);
 });
+
+test('stage definition has heartbeat armed and correct timeout', () => {
+  const stage = makeFarmStage([]);
+  assert.equal(stage.heartbeat, true, 'heartbeat must be true');
+  assert.equal(stage.timeoutMs, 1_800_000, 'timeoutMs must be 1_800_000 (30 min)');
+});
