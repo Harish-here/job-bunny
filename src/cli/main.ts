@@ -16,7 +16,16 @@
  * Functions RETURN their exit code; only the bin-entry guard at the bottom
  * ever touches `process.exitCode`, so `main` itself is safe to call from a
  * test without side effects on the real process.
+ *
+ * `dotenv/config` is imported FIRST, for its side effect only: `NOTION_TOKEN`
+ * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and launchd hands a
+ * scheduled run a minimal environment that does not include them. Without this
+ * a scheduled run would wire a throwing-stub connector, die at sync, and then
+ * fail to send the digest that would have reported it — a silent daily
+ * failure. v0 does the same thing per entry point (`scripts/notion/client.js`,
+ * `scripts/notify/notify.js`); v2 has one bin, so it loads here and only here.
  */
+import 'dotenv/config';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
