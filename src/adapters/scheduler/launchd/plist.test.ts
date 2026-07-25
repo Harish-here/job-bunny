@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ScheduledJob } from '../../../ports/scheduler.ts';
-import { buildPlists, DEFAULT_RUN_CAP_MS } from './plist.ts';
+import { buildPlists } from './plist.ts';
 
 const ROOT = '/repo';
 const HOME = '/Users/tester';
@@ -99,18 +99,16 @@ test('buildPlists: default backstopSeconds is runCapMs(16_200_000)/1000 + 300 = 
   assert.match(xml, /\b16500\b/);
 });
 
-test('buildPlists: default run cap exceeds the production run-level cap (13_012_500ms — see plist.ts DEFAULT_RUN_CAP_MS doc)', () => {
-  // Mirrors `cli/commands/run.ts`'s `computeRunCapMs` measured against the
-  // real production stage set (P8/P9). Not import-linked (adapters may not
-  // import cli — `.dependency-cruiser.cjs`'s `nothing-imports-cli`), so this
-  // is a manual tripwire: if the production run cap is ever remeasured above
-  // this literal, `DEFAULT_RUN_CAP_MS` must be bumped by hand alongside it.
-  const PRODUCTION_RUN_CAP_MS = 13_012_500;
-  assert.ok(
-    DEFAULT_RUN_CAP_MS > PRODUCTION_RUN_CAP_MS,
-    `DEFAULT_RUN_CAP_MS (${DEFAULT_RUN_CAP_MS}) must exceed the production run cap (${PRODUCTION_RUN_CAP_MS})`,
-  );
-});
+// The DEFAULT_RUN_CAP_MS-vs-derived-run-cap invariant used to be guarded
+// here with a hand-copied literal (`PRODUCTION_RUN_CAP_MS = 13_012_500`)
+// that nothing re-derived when a stage's `timeoutMs`/`retries` changed —
+// adapters may not import `cli` (`nothing-imports-cli`), so this file
+// could never check the real value, only a stale copy of it. The live
+// invariant — computed from the real wired stage table via `wire()` +
+// `computeRunCapMs`, not a literal — now lives in
+// `test/invariants/run_cap_backstop.test.ts` (outside `src/`, the one
+// place a test may legally import both `cli` and `adapters`; see that
+// file's header for why `.dependency-cruiser.cjs` permits it).
 
 test('buildPlists: custom runCapMs changes the backstopSeconds value (ceil + 300)', () => {
   const result = buildPlists(jobs(['rajni', '09:00']), {
