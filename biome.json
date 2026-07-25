@@ -1,12 +1,26 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.1.0/schema.json",
-  "files": { "includes": ["src/**"] },
+  "files": {
+    "includes": [
+      "src/**",
+      "scripts-v2-migrate/**"
+    ]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 90
   },
-  "linter": { "enabled": true, "rules": { "recommended": true } },
-  "javascript": { "formatter": { "quoteStyle": "single" } }
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  }
 }

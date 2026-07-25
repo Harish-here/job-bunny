@@ -5,6 +5,11 @@
 export { archiveStale } from './archive.ts';
 export { rebuildCache } from './cache.ts';
 export {
+  type DbReachableCheckDeps,
+  dbReachableCheck,
+  type NotionApiLike,
+} from './check.ts';
+export {
   type CallContext,
   NotionApi,
   type NotionApiOptions,

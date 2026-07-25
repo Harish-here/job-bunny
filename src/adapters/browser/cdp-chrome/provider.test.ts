@@ -391,7 +391,9 @@ test('launch() rejects after connectMaxWaitMs when connect always fails, naming 
   const elapsed = Date.now() - start;
 
   assert.ok(attempts > 1, `expected more than one connect attempt, got ${attempts}`);
-  assert.ok(elapsed < 500, `expected rejection near the 20ms cap, took ${elapsed}ms`);
+  // The original tight bound (~20ms) was flaky under load (observed ~800ms on a loaded machine).
+  // 2000ms still fails if a real multi-second wait or retry backoff is introduced, which is the property under test.
+  assert.ok(elapsed < 2000, `expected rejection near the 20ms cap, took ${elapsed}ms`);
 });
 
 test('launch() kills the spawned Chrome pid when connect gives up (no leak)', async () => {
@@ -561,4 +563,70 @@ test('name is "cdp-chrome"', () => {
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
   });
   assert.equal(provider.name, 'cdp-chrome');
+});
+
+// --- newPage() must use the persistent (logged-in) browser context ---
+//
+// Regression tests, 2026-07-25. playwright's `browser.newPage()` is shorthand
+// for `newContext()` + `newPage()` — a FRESH, cookie-less context. Over
+// connectOverCDP the logged-in profile lives in `browser.contexts()[0]`, so
+// calling `browser.newPage()` opened every pipeline page logged OUT while the
+// real Chrome profile was logged in. Observed as LinkedIn's logout wall on
+// every url despite a valid li_at cookie. v0 never had this bug:
+// scripts/lib/browser.js:180 does `browser.contexts()[0] || newContext()`.
+
+test('newPage() opens the page in the existing persistent context, not a fresh one', async () => {
+  let usedPersistentContext = false;
+  let usedBrowserNewPage = false;
+  const browser: CdpBrowser = {
+    newPage: async () => {
+      usedBrowserNewPage = true;
+      return fakePage();
+    },
+    contexts: () => [
+      {
+        newPage: async () => {
+          usedPersistentContext = true;
+          return fakePage();
+        },
+      },
+    ],
+  };
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
+    resolveListenerPid: () => undefined,
+    connect: async () => browser,
+    killChrome: () => true,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.newPage();
+
+  assert.equal(usedPersistentContext, true);
+  assert.equal(usedBrowserNewPage, false);
+});
+
+test('newPage() falls back to newContext() when the browser reports no contexts', async () => {
+  let createdContext = false;
+  const browser: CdpBrowser = {
+    newPage: async () => fakePage(),
+    contexts: () => [],
+    newContext: async () => {
+      createdContext = true;
+      return { newPage: async () => fakePage() };
+    },
+  };
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
+    resolveListenerPid: () => undefined,
+    connect: async () => browser,
+    killChrome: () => true,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.newPage();
+
+  assert.equal(createdContext, true);
 });

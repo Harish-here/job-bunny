@@ -1,6 +1,7 @@
 export * from './assemble.ts';
 export * from './compress.ts';
 export * from './dedup.ts';
+export * from './farm.ts';
 export * from './filter.ts';
 export * from './rank.ts';
 export * from './reconcile.ts';

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { companyKey } from '../../core/jd/index.ts';
 import type { ApiLane, ProbeResult, Storage } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
+import { CACHE_PATH } from './reconcile.ts';
 import { makeSourceStage } from './source.ts';
 
 const POLICY = {
@@ -385,4 +386,114 @@ test('a lane exceeding its budget is a soft per-lane event: warn logged, other l
     (slow?.probes.greenhouse as { status?: string } | undefined)?.status,
     'found',
   );
+});
+
+function fakeCacheEntry(id: string) {
+  return { id, company: 'Acme Corp', title: 'Frontend Engineer', pageId: `page-${id}` };
+}
+
+test('cache gate: a job whose id is in the cache is skipped entirely — not in out.jobs, out.dropped unchanged', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+  storage.store.set(CACHE_PATH, [fakeCacheEntry('gh-1')]);
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: { 'acme-corp': [fakeJob('gh-1', 'greenhouse', 'Acme Corp')] },
+  });
+
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage);
+  const input = emptyPayload();
+  const out = await stage.run(input, ctx);
+
+  assert.equal(out.jobs.length, 0);
+  assert.equal(out.dropped, input.dropped);
+});
+
+test('cache gate: a job whose id is NOT in the cache passes through', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+  storage.store.set(CACHE_PATH, [fakeCacheEntry('gh-999')]);
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: { 'acme-corp': [fakeJob('gh-1', 'greenhouse', 'Acme Corp')] },
+  });
+
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage);
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.equal(out.jobs.length, 1);
+  assert.equal(out.jobs[0]?.identity.id, 'gh-1');
+});
+
+test('cache gate: mixed board of 3 jobs with 2 cached -> exactly 1 emitted, the right one', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+  storage.store.set(CACHE_PATH, [fakeCacheEntry('gh-1'), fakeCacheEntry('gh-2')]);
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: {
+      'acme-corp': [
+        fakeJob('gh-1', 'greenhouse', 'Acme Corp'),
+        fakeJob('gh-2', 'greenhouse', 'Acme Corp'),
+        fakeJob('gh-3', 'greenhouse', 'Acme Corp'),
+      ],
+    },
+  });
+
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage);
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.equal(out.jobs.length, 1);
+  assert.equal(out.jobs[0]?.identity.id, 'gh-3');
+});
+
+test('cache gate: cache key entirely absent from storage -> gate disabled, all jobs pass, and a warn is logged', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+  // CACHE_PATH deliberately not set in storage.
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: { 'acme-corp': [fakeJob('gh-1', 'greenhouse', 'Acme Corp')] },
+  });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage, { warn: (msg, data) => warnings.push({ msg, data }) });
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.equal(out.jobs.length, 1);
+  assert.equal(out.jobs[0]?.identity.id, 'gh-1');
+  assert.ok(warnings.some((w) => w.msg.toLowerCase().includes('cache')));
+});
+
+test('cache gate: cache present but empty array -> all jobs pass, no cache-absent warn emitted', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+  storage.store.set(CACHE_PATH, []);
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: { 'acme-corp': [fakeJob('gh-1', 'greenhouse', 'Acme Corp')] },
+  });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage, { warn: (msg, data) => warnings.push({ msg, data }) });
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.equal(out.jobs.length, 1);
+  assert.equal(out.jobs[0]?.identity.id, 'gh-1');
+  assert.ok(!warnings.some((w) => w.msg.toLowerCase().includes('cache')));
 });
