@@ -10,9 +10,12 @@ import {
   upsertSeen,
 } from '../../core/company/index.ts';
 import { isSoftError, SoftError } from '../../core/errors/index.ts';
-import { type JD, JDSchema } from '../../core/jd/index.ts';
+import { CacheEntrySchema, type JD, JDSchema } from '../../core/jd/index.ts';
 import type { ApiLane } from '../../ports/index.ts';
 import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
+import { CACHE_PATH } from './reconcile.ts';
+
+const CacheSchema = z.array(CacheEntrySchema);
 
 /**
  * Side-write from farming lanes: map of farming-lane-name → company names
@@ -44,6 +47,17 @@ const LANE_BUDGET_MS = 90_000;
  * probe/fetch failure is a narrow SoftError — a whole-lane outage yields
  * zero jobs from that lane plus a warn, never a thrown stage failure
  * (v0 invariant: API lanes are optional breadth).
+ *
+ * Notion-cache gate (parity with v0's greenhouse.js/ats_common.js): every
+ * fetched job whose id already appears in the reconciled Notion cache
+ * (`reconcile.ts`'s CACHE_PATH) is dropped silently at fetch time — no
+ * per-job log, no DroppedRecord, just an aggregate skip counter logged once
+ * per run. A real run can fetch thousands of already-known jobs from these
+ * ATS lanes; without this gate they flood the downstream LLM `structure`
+ * stage and blow its timeout. Missing cache (e.g. `jobbunny stage source`
+ * run standalone, without a preceding `reconcile`) disables the gate rather
+ * than throwing — unlike dedup.ts's cache read, this stage's contract is
+ * fail-soft on breadth, and the full pipeline always runs reconcile first.
  *
  * timeoutMs (300s) is sized against LANE_BUDGET_MS (90s): with the two
  * lanes currently wired (greenhouse, keka) that's 2 × 90s = 180s of
@@ -93,8 +107,25 @@ export function makeSourceStage(
         reg = upsertSeen(reg, names, farmLane, now);
       }
 
+      // Missing-cache policy — deliberate divergence from dedup.ts, which
+      // throws on a missing cache. The full pipeline runs reconcile before
+      // source, so the cache is always present there; but
+      // `jobbunny stage source` can run this stage standalone, and this
+      // stage's contract is fail-soft on breadth — a missing cache must not
+      // kill a run. So an absent cache just disables the gate (empty set)
+      // plus one warn, rather than throwing.
+      const cache = await ctx.storage.readJson(CACHE_PATH, CacheSchema);
+      if (cache === undefined) {
+        ctx.logger.warn(
+          'source: no Notion cache found — cache gate disabled, known jobs may reach the LLM stage',
+          { path: CACHE_PATH },
+        );
+      }
+      const cacheIds = new Set<string>((cache ?? []).map((c) => c.id).filter(Boolean));
+
       const fetchedJobs: JD[] = [];
       let probesIssued = 0;
+      let cacheSkipped = 0;
 
       for (const apiLane of apiLanes) {
         throwIfAborted(ctx.signal);
@@ -168,6 +199,16 @@ export function makeSourceStage(
                 for (const job of jobs) {
                   const parsed = JDSchema.safeParse(job);
                   if (parsed.success) {
+                    // Cache hit: this job was never a candidate that got
+                    // judged, so unlike a real drop it gets no
+                    // DroppedRecord (which carries the full `jd` payload —
+                    // retaining ~3000 of them is exactly the bloat this
+                    // gate exists to remove) and no per-job log, only the
+                    // aggregate counter below.
+                    if (cacheIds.has(parsed.data.identity.id)) {
+                      cacheSkipped++;
+                      continue;
+                    }
                     fetchedJobs.push(parsed.data);
                   } else {
                     ctx.logger.warn('dropped invalid JD from board fetch', {
@@ -219,6 +260,11 @@ export function makeSourceStage(
       }
 
       await ctx.storage.writeJson(REGISTRY_PATH, reg);
+
+      ctx.logger.info('source: cache gate summary', {
+        fetched: fetchedJobs.length,
+        cacheSkipped,
+      });
 
       return { jobs: [...input.jobs, ...fetchedJobs], dropped: input.dropped };
     },
