@@ -24,10 +24,27 @@ import type { ScheduledJob } from '../../../ports/scheduler.ts';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-/** v0's `JOBBUNNY_RUN_TIMEOUT_SECONDS` default (`run_scheduled.sh`), in ms —
- * the runner's own internal run cap. The backstop watchdog here sits above
- * it (`ceil(runCapMs / 1000) + 300`, mirroring v0's `+300`). */
-export const DEFAULT_RUN_CAP_MS = 1_800_000;
+/** Fallback runner-side run cap used ONLY when a caller doesn't supply
+ * `runCapMs` (`wireScheduler()` in `cli/wire.ts` is the one production
+ * caller, and currently doesn't). This is a REAL hard-kill input, not
+ * informational: `buildCommand`'s embedded watchdog SIGTERMs (then
+ * SIGKILLs) the whole `jobbunny run` process group at
+ * `ceil(runCapMs / 1000) + 300` seconds — see `buildCommand` below.
+ *
+ * v0's `run_scheduled.sh` default was 30 min (`JOBBUNNY_RUN_TIMEOUT_SECONDS`),
+ * back when a run was LinkedIn-card-bound and short. v2's own derived run
+ * cap (`computeRunCapMs` in `cli/commands/run.ts`, driven by the wired
+ * stages' `timeoutMs * (retries + 1)` sums) is now measured at 13_012_500ms
+ * (~3h37m) against the real production stage set (farm's 90-minute
+ * LinkedIn-jitter ceiling dominates) — a 30-minute backstop here would kill
+ * every legitimate scheduled run. Set with ~25% headroom above that
+ * measured figure (same margin `computeRunCapMs` itself uses) so it isn't
+ * a hair-trigger the next time a stage timeout grows; it is NOT
+ * automatically re-derived (this module is intentionally pure/no-I/O and
+ * `wireScheduler()` is deliberately decoupled from per-profile `wire()` —
+ * see `cli/wire.ts`'s file header) — bump it by hand if `computeRunCapMs`
+ * against the real stage list ever exceeds it. */
+export const DEFAULT_RUN_CAP_MS = 16_200_000;
 
 /** Seconds the watchdog waits after SIGTERM before escalating to SIGKILL —
  * mirrors `run_scheduled.sh`'s `sleep 20` between the two signals. */

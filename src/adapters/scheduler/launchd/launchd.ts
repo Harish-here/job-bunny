@@ -87,7 +87,8 @@ export interface LaunchdSchedulerDeps {
   home?: string;
   /** `launchctl`'s `gui/<uid>` target. Default: `process.getuid()`. */
   uid?: number;
-  /** Forwarded to `buildPlists` — see `plist.ts`. Default: 30 minutes. */
+  /** Forwarded to `buildPlists` — see `plist.ts`'s `DEFAULT_RUN_CAP_MS` doc
+   * comment for why the default is 4.5h, not v0's 30 minutes. */
   runCapMs?: number;
 }
 

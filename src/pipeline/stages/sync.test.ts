@@ -45,8 +45,8 @@ function fakeConnector(overrides?: Partial<Connector>): Connector {
         sync: { pageId: `page-${jd.identity.id}`, syncedAt: 'now' },
       }));
     },
-    async archiveStale(_policy: ArchivePolicy): Promise<number> {
-      return 0;
+    async archiveStale(_policy: ArchivePolicy) {
+      return { archived: 0, dropped: [] };
     },
     ...overrides,
   };
@@ -61,6 +61,10 @@ test('makeSyncStage: name/timeout/retries', () => {
     'whole-stage retry is unsafe until syncJobs is retry-idempotent',
   );
   assert.ok(stage.timeoutMs > 0);
+  assert.ok(
+    stage.timeoutMs >= 900_000,
+    'sync timeout must be generous enough for real write volume (Notion client retries per call)',
+  );
 });
 
 test('delegates the payload jobs to connector.syncJobs and returns the SyncedJD[] as the payload', async () => {

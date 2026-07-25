@@ -52,7 +52,14 @@ export function makeSyncStage(
 ): StageDef<StagePayload, StagePayload> {
   return {
     name: 'sync',
-    timeoutMs: 180_000,
+    // 15 min (was 3 min, too tight for real write volume): `syncJobs` calls
+    // the Notion client once per job, and the client itself does up to 3
+    // attempts with exponential backoff PER CALL on transient failures
+    // (`adapters/db/notion/client.ts`) — a batch of a few dozen jobs with a
+    // handful of retried calls can legitimately take several minutes.
+    // `retries` stays 0 (see note below) — only the per-attempt ceiling
+    // moves, not the retry count.
+    timeoutMs: 900_000,
     retries: 0,
     async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
       if (opts.dryRunPath) {

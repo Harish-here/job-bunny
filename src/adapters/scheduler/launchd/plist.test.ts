@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ScheduledJob } from '../../../ports/scheduler.ts';
-import { buildPlists } from './plist.ts';
+import { buildPlists, DEFAULT_RUN_CAP_MS } from './plist.ts';
 
 const ROOT = '/repo';
 const HOME = '/Users/tester';
@@ -93,10 +93,23 @@ test('buildPlists: one profile failing does not abort the others (semicolon-join
   );
 });
 
-test('buildPlists: default backstopSeconds is runCapMs(1_800_000)/1000 + 300 = 2100', () => {
+test('buildPlists: default backstopSeconds is runCapMs(16_200_000)/1000 + 300 = 16500', () => {
   const result = buildPlists(jobs(['rajni', '09:00']), { root: ROOT, home: HOME });
   const xml = result[0]?.xml ?? '';
-  assert.match(xml, /\b2100\b/);
+  assert.match(xml, /\b16500\b/);
+});
+
+test('buildPlists: default run cap exceeds the production run-level cap (13_012_500ms — see plist.ts DEFAULT_RUN_CAP_MS doc)', () => {
+  // Mirrors `cli/commands/run.ts`'s `computeRunCapMs` measured against the
+  // real production stage set (P8/P9). Not import-linked (adapters may not
+  // import cli — `.dependency-cruiser.cjs`'s `nothing-imports-cli`), so this
+  // is a manual tripwire: if the production run cap is ever remeasured above
+  // this literal, `DEFAULT_RUN_CAP_MS` must be bumped by hand alongside it.
+  const PRODUCTION_RUN_CAP_MS = 13_012_500;
+  assert.ok(
+    DEFAULT_RUN_CAP_MS > PRODUCTION_RUN_CAP_MS,
+    `DEFAULT_RUN_CAP_MS (${DEFAULT_RUN_CAP_MS}) must exceed the production run cap (${PRODUCTION_RUN_CAP_MS})`,
+  );
 });
 
 test('buildPlists: custom runCapMs changes the backstopSeconds value (ceil + 300)', () => {
