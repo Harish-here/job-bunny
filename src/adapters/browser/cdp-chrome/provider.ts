@@ -62,9 +62,22 @@ export interface CdpPage {
   close(): Promise<void>;
 }
 
-/** Minimal playwright Browser surface this adapter drives. */
+/** Minimal playwright BrowserContext surface this adapter drives. Over
+ * `connectOverCDP`, `browser.contexts()[0]` is the REAL Chrome profile's
+ * persistent context — the one holding the logged-in session cookies. */
+export interface CdpBrowserContext {
+  newPage(): Promise<CdpPage>;
+}
+
+/** Minimal playwright Browser surface this adapter drives.
+ *
+ * `contexts`/`newContext` are optional only so the many `{ newPage }` fakes
+ * in this file's tests stay terse — a real playwright `Browser` always has
+ * both, so the persistent-context path below is what actually runs. */
 export interface CdpBrowser {
   newPage(): Promise<CdpPage>;
+  contexts?(): CdpBrowserContext[];
+  newContext?(): Promise<CdpBrowserContext>;
 }
 
 export type ConnectFn = (cdpUrl: string) => Promise<CdpBrowser>;
@@ -367,8 +380,25 @@ class CdpChromeBrowserHandle implements BrowserHandle {
   }
 
   async newPage(): Promise<PageHandle> {
-    const page = await this.browser.newPage();
+    const page = await this.openPage();
     return new CdpChromePageHandle(page, this.ctx);
+  }
+
+  /** Pages MUST open in the persistent context, mirroring v0
+   * (`scripts/lib/browser.js:180` — `browser.contexts()[0] || newContext()`).
+   * playwright's `browser.newPage()` is shorthand for `newContext()` +
+   * `newPage()`, i.e. a FRESH, cookie-less context. Using it over
+   * `connectOverCDP` opened every page logged OUT even though the attached
+   * Chrome profile held a valid session — LinkedIn answered every url with
+   * its logout wall (observed 2026-07-25). */
+  private async openPage(): Promise<CdpPage> {
+    const existing = this.browser.contexts?.()[0];
+    if (existing) return existing.newPage();
+    if (this.browser.newContext) {
+      const created = await this.browser.newContext();
+      return created.newPage();
+    }
+    return this.browser.newPage();
   }
 
   async close(): Promise<void> {
