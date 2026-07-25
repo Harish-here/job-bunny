@@ -51,3 +51,11 @@ profiles/rajni/data/runs/
 # P5 company registry: companies.json + companies_seen.json are generated
 # per run (probe/fetch state, farm-stage side-write) — never committed.
 profiles/rajni/data/registry/
+
+# v2: every per-run stage writes its own subdirectory under profiles/<name>/data/
+# (cache/, lanes/, structure/, and more to come). Ignore the whole subtree so new
+# v2 stages never need a new rule here, then carve the two tracked fixture files
+# back out (gitignore is last-match-wins per path — this must stay last).
+profiles/*/data/*
+!profiles/rajni/data/jobs_raw.json
+!profiles/rajni/data/cache.json

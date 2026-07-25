@@ -250,6 +250,21 @@ export class LinkedInLane implements FarmingLane {
     let attemptedUrls = 0;
     let failedUrls = 0;
 
+    // Lane-wide "no JD ever opened" guard (distinct from, and in addition
+    // to, the per-url and all-urls-failed guards above/below): a url whose
+    // cards all survive title-gating but whose JD-opens all fail is only
+    // caught by the per-url guard if it also lands on failedUrls ===
+    // attemptedUrls — a url where NOTHING survives gating (cardsAttempted
+    // === 0) never becomes a failedUrl, so it can silently drag
+    // attemptedUrls above failedUrls and mask a 100%-JD-open-failure run
+    // (2026-07-25 incident: url A attempted 2, both failed; url B
+    // attempted 0; failedUrls (1) !== attemptedUrls (2), no throw,
+    // outcome: "passed"). These totals are summed across every url,
+    // independent of per-url pass/fail bookkeeping, so this guard fires on
+    // the aggregate even when no single url is "the" failed one.
+    let totalCardsAttempted = 0;
+    let totalCaptured = 0;
+
     // Evidence for the all-urls-failed message below: distinct failure
     // shapes get counted (and one sample message kept) separately, rather
     // than collapsed into a single guessed cause. See the throw site for
@@ -355,6 +370,7 @@ export class LinkedInLane implements FarmingLane {
 
               processedIds.add(card.id);
               cardsAttempted += 1;
+              totalCardsAttempted += 1;
               ctx.beat();
               try {
                 // v0 parity placement: jitter before every JD open
@@ -379,6 +395,7 @@ export class LinkedInLane implements FarmingLane {
                 });
                 await captureStore.append(this.storage, jd);
                 capturedCount += 1;
+                totalCaptured += 1;
               } catch (err) {
                 // Distinguish "JD pane genuinely failed to open" (openJd
                 // already wraps that as a SoftError) from "the card's own
@@ -543,6 +560,25 @@ export class LinkedInLane implements FarmingLane {
           (evidence.length > 0
             ? evidence.join(' ')
             : 'No further diagnostic evidence was captured for the underlying failures.'),
+      );
+    }
+
+    // Lane-wide "no JD ever opened" guard: reached only when the
+    // all-urls-failed check above did NOT already throw with its
+    // detailed evidence, i.e. not every url was marked failed — e.g. one
+    // url attempts and fails cards while another has nothing survive
+    // title-gating, so cardsAttempted === 0 for it and it never counts
+    // toward failedUrls. A 100% JD-open failure rate across the whole
+    // lane is still a real outage even then, not a clean run. Fires only
+    // when cards WERE attempted somewhere — a run where every url's
+    // cards were legitimately title-gated away (totalCardsAttempted ===
+    // 0) is an empty result, not an outage, and must not throw here.
+    if (totalCardsAttempted > 0 && totalCaptured === 0) {
+      throw new Error(
+        `linkedin lane: ${totalCardsAttempted} card(s) were attempted across ` +
+          `${attemptedUrls} url(s) this run, but zero JDs were captured — every JD-open ` +
+          'failed. Check the JD-open path (openJd, jd_open.ts) and whether the jdRoot ' +
+          'selector still matches (page_inventory/linkedin__jobs-search.json).',
       );
     }
 

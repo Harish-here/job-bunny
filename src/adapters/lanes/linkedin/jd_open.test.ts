@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { isSoftError } from '../../../core/errors/index.ts';
 import type { PageHandle } from '../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { openJd } from './jd_open.ts';
+import { buildJdAnchorScript, openJd } from './jd_open.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -131,33 +132,62 @@ test('popup happy path: click(cardTitle) -> waitFor(jdRoot) -> evaluate, in orde
   ]);
 });
 
-test('a waitFor rejection throws a SoftError scoped "url", naming the card url', async () => {
+/** Distinguishes the two evaluate scripts openJd issues: the anchor
+ * fallback script (buildJdAnchorScript) uses querySelectorAll over
+ * multiple tag names; the configured-selector script uses a single
+ * querySelector call. */
+function isAnchorScript(fn: string): boolean {
+  return fn.includes('querySelectorAll');
+}
+
+test('jdRoot waitFor times out but the configured selector still returns text: card succeeds, no throw', async () => {
   const inv = await detailsPageInventory();
   const calls: string[] = [];
   const page = fakePage(calls, {
     waitFor: async () => {
-      throw new Error('selector never appeared');
+      throw new Error('waitFor(jdRoot) timed out');
     },
+    evaluate: async (fn) =>
+      (isAnchorScript(fn as string) ? '' : 'About the job — we build things.') as never,
   });
   const ctx = fakeCtx();
   const card = { id: 'li-3', url: 'https://www.linkedin.com/jobs/view/3/' };
 
-  await assert.rejects(
-    () => openJd(page, card, inv, ctx),
-    (err: unknown) => {
-      assert.ok(isSoftError(err));
-      assert.equal((err as { scope: string }).scope, 'url');
-      assert.match(
-        (err as Error).message,
-        /https:\/\/www\.linkedin\.com\/jobs\/view\/3\//,
-      );
-      assert.match((err as Error).message, /selector never appeared/);
-      return true;
-    },
-  );
+  const text = await openJd(page, card, inv, ctx);
+
+  assert.equal(text, 'About the job — we build things.');
+  assert.deepEqual(calls, [
+    `goto:${card.url}`,
+    `waitFor:${inv.selectors.jdRoot}`,
+    'evaluate',
+  ]);
 });
 
-test('empty extracted text throws a SoftError scoped "url"', async () => {
+test('jdRoot waitFor times out and the configured selector is empty: anchor fallback returns text, card succeeds', async () => {
+  const inv = await detailsPageInventory();
+  const calls: string[] = [];
+  const page = fakePage(calls, {
+    waitFor: async () => {
+      throw new Error('waitFor(jdRoot) timed out');
+    },
+    evaluate: async (fn) =>
+      (isAnchorScript(fn as string) ? 'About the job — anchor fallback.' : '') as never,
+  });
+  const ctx = fakeCtx();
+  const card = { id: 'li-3b', url: 'https://www.linkedin.com/jobs/view/3b/' };
+
+  const text = await openJd(page, card, inv, ctx);
+
+  assert.equal(text, 'About the job — anchor fallback.');
+  assert.deepEqual(calls, [
+    `goto:${card.url}`,
+    `waitFor:${inv.selectors.jdRoot}`,
+    'evaluate',
+    'evaluate',
+  ]);
+});
+
+test('both the configured selector and the anchor fallback come back empty: fails exactly as before (SoftError, scope "url")', async () => {
   const inv = await detailsPageInventory();
   const calls: string[] = [];
   const page = fakePage(calls, {
@@ -171,9 +201,16 @@ test('empty extracted text throws a SoftError scoped "url"', async () => {
     (err: unknown) => {
       assert.ok(isSoftError(err));
       assert.equal((err as { scope: string }).scope, 'url');
+      assert.match(
+        (err as Error).message,
+        /https:\/\/www\.linkedin\.com\/jobs\/view\/4\//,
+      );
+      assert.match((err as Error).message, /extracted JD text was empty/);
       return true;
     },
   );
+  // Both evaluate scripts (configured selector, then anchor fallback) ran.
+  assert.equal(calls.filter((c) => c === 'evaluate').length, 2);
 });
 
 test('a non-Error throw (e.g. a rejected primitive) is still normalized into a SoftError, never escapes raw', async () => {
@@ -221,4 +258,37 @@ test('openJd ticks ctx.beat() between the open step and waitFor on a happy path'
   );
 
   assert.ok(beats >= 1);
+});
+
+// --- buildJdAnchorScript, evaluated over a fake `document` via node:vm ---
+
+function fakeAnchorDocument(texts: string[]): unknown {
+  const els = texts.map((t) => ({ innerText: t }));
+  return {
+    querySelectorAll(s: string) {
+      return s === 'section, div, article, main' ? els : [];
+    },
+  };
+}
+
+test('buildJdAnchorScript picks the SHORTEST qualifying element when several match', async () => {
+  const anchorText = 'About the job — ';
+  const longer = `${anchorText}${'x'.repeat(220)}`;
+  const shorter = `${anchorText}${'y'.repeat(200)}`;
+  const document = fakeAnchorDocument([longer, shorter]);
+
+  const result = await vm.runInNewContext(buildJdAnchorScript(), { document });
+
+  assert.equal(result, shorter);
+  assert.ok(result.length < longer.length);
+});
+
+test('buildJdAnchorScript ignores elements shorter than the minimum length or not starting with the anchor phrase', async () => {
+  const tooShort = `About the job — ${'z'.repeat(50)}`; // starts right, too short
+  const wrongStart = `Some other heading — ${'w'.repeat(300)}`; // long enough, wrong start
+  const document = fakeAnchorDocument([tooShort, wrongStart]);
+
+  const result = await vm.runInNewContext(buildJdAnchorScript(), { document });
+
+  assert.equal(result, '');
 });

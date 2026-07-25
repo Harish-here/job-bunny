@@ -454,6 +454,111 @@ test('every card JD-open failing for a url leaves it un-marked-done (resumable) 
   );
 });
 
+test('lane-wide "no JD ever opened" guard: url A attempts 2 cards and fails both, url B has zero cards survive gating — not every url is marked failed, but the lane still throws (2026-07-25 incident)', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  // url1: both surviving cards (Acme li-1001, Globex li-1003) fail to open.
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/');
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1003/');
+  // url2: its one card is entirely gated out (avoid-listed company), so
+  // cardsAttempted === 0 for url2 — it can never be marked a failedUrl by
+  // the per-url guard, which is exactly what let this incident slip past
+  // the old attemptedUrls/failedUrls check.
+  script.harvestByUrl.set(URL_2, [
+    {
+      title: 'Staff Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/2001/',
+    },
+  ]);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const ctx = fakeCtx();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  await assert.rejects(
+    () => lane.source(ctx),
+    (err: Error) => {
+      assert.match(err.message, /2 card\(s\) were attempted across 2 url\(s\)/);
+      assert.match(err.message, /zero JDs were captured/);
+      assert.match(err.message, /jd_open\.ts/);
+      assert.match(err.message, /jdRoot/);
+      return true;
+    },
+  );
+});
+
+test('lane-wide "no JD ever opened" guard does not fire when nothing survives title-gating anywhere (legitimate empty result)', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  // Every card on every url is avoid-listed — a clean "nothing to
+  // capture" run, not an outage.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/1001/',
+    },
+  ]);
+  script.harvestByUrl.set(URL_2, [
+    {
+      title: 'Staff Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/2001/',
+    },
+  ]);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const ctx = fakeCtx();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs, dropped } = await lane.source(ctx);
+  assert.deepEqual(jobs, []);
+  assert.ok(dropped.length >= 2);
+});
+
+test('lane-wide "no JD ever opened" guard does not fire when at least one JD-open succeeds somewhere', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  // url1's cards both fail to open; url2 is untouched and still succeeds.
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/');
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1003/');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const ctx = fakeCtx();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+  const ids = jobs.map((jd) => jd.identity.id).sort();
+  assert.deepEqual(ids, ['li-2001', 'li-2002']);
+});
+
 test('resume: a url already marked done in ResumeState is skipped entirely — its page is never opened', async () => {
   const inv = await realInventory();
   const script = newScript();
