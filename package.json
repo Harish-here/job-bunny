@@ -11,7 +11,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test \"scripts/**/*.test.js\" \"src/**/*.test.ts\"",
+    "test": "node --test \"scripts/**/*.test.js\" \"src/**/*.test.ts\" \"scripts-v2-migrate/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",
     "boundaries": "depcruise src",
