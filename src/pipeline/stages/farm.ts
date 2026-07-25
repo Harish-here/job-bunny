@@ -9,14 +9,15 @@ import { CompaniesSeenSchema } from './source.ts';
  * order so the side-write exists when source needs it. */
 const COMPANIES_SEEN_PATH = 'registry/companies_seen.json';
 
-/** Generous over a browser-driven farming run — LinkedIn navigation across
- * several search-URL groups is slower than an API probe/fetch loop
- * (source.ts's 300s), and each FarmingLane already owns its own bounded
- * per-URL/per-card timeouts internally (see adapters/lanes/linkedin), so
- * this is a ceiling on the whole stage, not a per-URL budget. Sized to allow
- * multiple LinkedIn search groups with multiple cards per group to farm within
- * the stage timeout. */
-const TIMEOUT_MS = 1_800_000;
+/** 90-minute ceiling over a browser-driven farming run. LinkedIn navigation is
+ * slower than API-only staging (source.ts's 300s). The LinkedIn lane adds 2–5s
+ * jitter per JD open and per URL navigation (v0 parity, anti-bot-detection),
+ * requiring this larger ceiling. Each FarmingLane owns its own bounded per-URL/
+ * per-card timeouts internally (adapters/lanes/linkedin), so this is a stage
+ * ceiling, not a per-URL budget. This is a ceiling, not typical runtime: real
+ * card counts drop well below maxCardsPerUrl (40) via title/avoid card-gating
+ * and Notion-cache skips. */
+const TIMEOUT_MS = 5_400_000;
 
 /**
  * Farming-lane source stage (spec §5, sibling to source.ts's ApiLane
@@ -42,6 +43,11 @@ const TIMEOUT_MS = 1_800_000;
  * run-level abort (an aborted run must not durably clobber a healthy
  * companies_seen.json with a partial run's view).
  *
+ * If EVERY farming lane throws, this is not "some breadth lost", it's a
+ * total outage — mirrors linkedin/lane.ts's own all-urls-failed guard:
+ * fail loud rather than a silently-green zero-job run (v0
+ * checkAggregateFailure).
+ *
  * **WIRING CONSTRAINT (runPipeline integration):** This stage declares
  * `heartbeat: true` and calls `ctx.beat()` from within each FarmingLane's
  * source() loop (LinkedInLane.source() calls ctx.beat() per card). When
@@ -65,6 +71,7 @@ export function makeFarmStage(
       const farmedJobs: JD[] = [];
       const farmedDropped: DroppedRecord[] = [];
       const seen: Record<string, string[]> = {};
+      let failedLanes = 0;
 
       for (const lane of farmingLanes) {
         try {
@@ -75,12 +82,23 @@ export function makeFarmStage(
         } catch (err) {
           if (ctx.signal.aborted) throw err; // run-level abort: propagate, no side-write
           // Whole-lane outage: never let one lane's total failure stop the others.
+          failedLanes += 1;
           const message = err instanceof Error ? err.message : String(err);
           ctx.logger.warn('farming lane failed entirely', {
             lane: lane.name,
             error: message,
           });
         }
+      }
+
+      // Every farming lane failed: not one broken lane, a total outage —
+      // fail loud rather than a silently-green zero-job run (mirrors
+      // linkedin/lane.ts's all-urls-failed guard, v0 checkAggregateFailure).
+      if (farmingLanes.length > 0 && failedLanes === farmingLanes.length) {
+        throw new Error(
+          `farm stage: all ${farmingLanes.length} farming lane(s) failed this run — ` +
+            'total outage, not one broken lane',
+        );
       }
 
       await ctx.storage.writeJson(COMPANIES_SEEN_PATH, CompaniesSeenSchema.parse(seen));

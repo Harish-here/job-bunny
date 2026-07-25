@@ -1,4 +1,4 @@
-import type { JD, SourcedJD } from '../../core/jd/index.ts';
+import type { DroppedRecord, JD, SourcedJD } from '../../core/jd/index.ts';
 import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
 
 /**
@@ -48,13 +48,24 @@ function sanitiseRawText(raw: string): string {
  * to rejoin against the LLM's decisions). A job without `content.rawText`
  * fails loud — compress must run after the source/farming lanes, so a
  * missing content is a pipeline-ordering bug, not recoverable data.
+ *
+ * Two jobs sharing the same `identity.id` (should be rare — ids are meant
+ * to be unique — but a source-lane bug or a keyless-ATS collision can still
+ * produce one) would otherwise silently collapse to one `passthrough` entry
+ * on the second `passthrough[id] = job` write, with no record that the
+ * first job vanished. The first occurrence wins (matches core/dedup's
+ * "first occurrence wins" convention); the later one is excluded from both
+ * the table and the passthrough map and gets a `compress.duplicate-id`
+ * `DroppedRecord` instead, so it isn't silently lost.
  */
 export function toTable(jobs: SourcedJD[]): {
   table: string;
   passthrough: Record<string, JD>;
+  dropped: DroppedRecord[];
 } {
   const passthrough: Record<string, JD> = {};
   const rows: string[] = [];
+  const dropped: DroppedRecord[] = [];
 
   for (const job of jobs) {
     const rawText = job.content?.rawText;
@@ -65,6 +76,21 @@ export function toTable(jobs: SourcedJD[]): {
     }
 
     const { id, title, company } = job.identity;
+    if (Object.hasOwn(passthrough, id)) {
+      dropped.push({
+        jd: job,
+        reasons: [
+          {
+            rule: 'compress.duplicate-id',
+            severity: 'hard',
+            pass: false,
+            detail: `duplicate identity.id "${id}" — first occurrence "${passthrough[id]?.identity.title}" at "${passthrough[id]?.identity.company}" already kept`,
+          },
+        ],
+      });
+      continue;
+    }
+
     rows.push(
       `| ${id} | ${escapePipe(title)} | ${escapePipe(company)} | ${sanitiseRawText(rawText)} |`,
     );
@@ -72,7 +98,7 @@ export function toTable(jobs: SourcedJD[]): {
   }
 
   const table = rows.length > 0 ? `${TABLE_HEADER}\n${rows.join('\n')}` : TABLE_HEADER;
-  return { table, passthrough };
+  return { table, passthrough, dropped };
 }
 
 export const compressStage: StageDef<StagePayload, StagePayload> = {
@@ -84,11 +110,11 @@ export const compressStage: StageDef<StagePayload, StagePayload> = {
     // content to be present — the type-level guarantee lives at SourcedJD,
     // but toTable defensively checks at runtime too, in case a caller
     // hands compress a payload out of pipeline order.
-    const { table, passthrough } = toTable(input.jobs as SourcedJD[]);
+    const { table, passthrough, dropped } = toTable(input.jobs as SourcedJD[]);
 
     await ctx.storage.writeJson(TABLE_PATH, table);
     await ctx.storage.writeJson(PASSTHROUGH_PATH, passthrough);
 
-    return input;
+    return { jobs: input.jobs, dropped: [...input.dropped, ...dropped] };
   },
 };

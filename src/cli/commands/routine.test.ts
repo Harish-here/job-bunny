@@ -27,7 +27,7 @@ function fakeConnector(): Connector & { archiveCalls: ArchivePolicy[] } {
     },
     async archiveStale(policy: ArchivePolicy, _ctx: RunContext) {
       archiveCalls.push(policy);
-      return 3;
+      return { archived: 3, dropped: [] };
     },
   };
 }

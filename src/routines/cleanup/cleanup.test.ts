@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { CacheEntry, JD, SyncedJD } from '../../core/jd/index.ts';
+import type { CacheEntry, DroppedRecord, JD, SyncedJD } from '../../core/jd/index.ts';
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/index.ts';
 import type {
   ArchivePolicy,
@@ -37,7 +37,10 @@ function fakeLogger(): Logger & { calls: LogCall[] } {
 }
 
 function fakeConnector(overrides?: {
-  archiveStale?: (policy: ArchivePolicy, ctx: RunContext) => Promise<number>;
+  archiveStale?: (
+    policy: ArchivePolicy,
+    ctx: RunContext,
+  ) => Promise<{ archived: number; dropped: DroppedRecord[] }>;
 }): Connector & { archiveCalls: ArchivePolicy[] } {
   const archiveCalls: ArchivePolicy[] = [];
   return {
@@ -49,9 +52,11 @@ function fakeConnector(overrides?: {
     async syncJobs(jobs: JD[]): Promise<SyncedJD[]> {
       return jobs.map((jd) => ({ ...jd, sync: { pageId: 'x', syncedAt: 'now' } }));
     },
-    async archiveStale(policy: ArchivePolicy, ctx: RunContext): Promise<number> {
+    async archiveStale(policy: ArchivePolicy, ctx: RunContext) {
       archiveCalls.push(policy);
-      return overrides?.archiveStale ? overrides.archiveStale(policy, ctx) : 3;
+      return overrides?.archiveStale
+        ? overrides.archiveStale(policy, ctx)
+        : { archived: 3, dropped: [] };
     },
   };
 }
@@ -135,7 +140,9 @@ test('run(): does not pass a dryRun field — that stays owned entirely by the c
 
 test('run(): logs the archived count', async () => {
   const logger = fakeLogger();
-  const connector = fakeConnector({ archiveStale: async () => 5 });
+  const connector = fakeConnector({
+    archiveStale: async () => ({ archived: 5, dropped: [] }),
+  });
   const ctx = fakeCtx({ connector, logger });
 
   await cleanupRoutine.run(ctx);
@@ -143,6 +150,35 @@ test('run(): logs the archived count', async () => {
   const infoCall = logger.calls.find((c) => c.level === 'info');
   assert.ok(infoCall);
   assert.equal(infoCall?.data?.archived, 5);
+});
+
+test('run(): a page the connector failed to archive is warned about instead of silently vanishing', async () => {
+  const logger = fakeLogger();
+  const droppedRecord: DroppedRecord = {
+    jd: {
+      identity: {
+        id: 'page-1',
+        lane: 'notion-archive',
+        url: 'https://www.notion.so/page1',
+        company: 'Acme',
+        title: 'Engineer',
+        scrapedAt: '2026-07-25T00:00:00.000Z',
+      },
+    },
+    reasons: [
+      { rule: 'archive.failed', severity: 'hard', pass: false, detail: 'HTTP 429' },
+    ],
+  };
+  const connector = fakeConnector({
+    archiveStale: async () => ({ archived: 1, dropped: [droppedRecord] }),
+  });
+  const ctx = fakeCtx({ connector, logger });
+
+  await cleanupRoutine.run(ctx);
+
+  const warnCall = logger.calls.find((c) => c.level === 'warn');
+  assert.ok(warnCall, 'archive-failure drops must be logged, not silently dropped');
+  assert.equal(warnCall?.data?.count, 1);
 });
 
 test('run(): rejects an invalid settings.cleanup slice loudly rather than silently falling back', async () => {

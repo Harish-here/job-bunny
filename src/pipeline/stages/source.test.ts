@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { FilterConfig } from '../../core/filter/config.ts';
 import { companyKey } from '../../core/jd/index.ts';
 import type { ApiLane, ProbeResult, Storage } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { CACHE_PATH } from './reconcile.ts';
-import { makeSourceStage } from './source.ts';
+import { API_SEEN_PATH, makeSourceStage } from './source.ts';
 
 const POLICY = {
   reprobeNotFoundAfterDays: 30,
@@ -69,6 +70,10 @@ function makeFakeLane(opts: {
   name: string;
   probeResults?: Record<string, ProbeResult | 'throw'>;
   boardJobs?: Record<string, ReturnType<typeof fakeJob>[] | 'throw'>;
+  /** Per-boardRef DroppedRecords `fetchBoard` should return alongside its
+   * jobs — models a lane like Greenhouse/Keka that drops a job failing its
+   * final JDSchema build (see source.test.ts's dedicated funnel test). */
+  boardDropped?: Record<string, unknown[]>;
   probeCalls?: string[];
   fetchCalls?: string[];
 }): ApiLane {
@@ -85,7 +90,10 @@ function makeFakeLane(opts: {
       opts.fetchCalls?.push(boardRef);
       const jobs = opts.boardJobs?.[boardRef];
       if (jobs === 'throw') throw new Error(`fetch boom for ${boardRef}`);
-      return (jobs ?? []) as never;
+      return {
+        jobs: (jobs ?? []) as never,
+        dropped: (opts.boardDropped?.[boardRef] ?? []) as never,
+      };
     },
   };
 }
@@ -269,7 +277,7 @@ test('registry written exactly once; dropped passed through unchanged; jobsIn pr
   );
   assert.equal(registryWrites.length, 1);
 
-  assert.equal(out.dropped, input.dropped);
+  assert.deepEqual(out.dropped, input.dropped);
   assert.ok(out.jobs.some((j) => j.identity.id === 'pre-existing'));
   assert.ok(out.jobs.some((j) => j.identity.id === 'gh-5'));
   assert.equal(out.jobs.length, 2);
@@ -388,6 +396,93 @@ test('a lane exceeding its budget is a soft per-lane event: warn logged, other l
   );
 });
 
+test('a lane-level JDSchema drop (e.g. greenhouse.jdSchema) surfaces in the stage dropped output — the funnel actually receives it, not just a warn log', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+
+  const droppedFromLane = {
+    jd: fakeJob('gh-bad', 'greenhouse', 'Acme Corp'),
+    reasons: [
+      {
+        rule: 'greenhouse.jdSchema',
+        severity: 'hard' as const,
+        pass: false,
+        detail: 'content.rawText too short',
+      },
+    ],
+  };
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: { 'acme-corp': [fakeJob('gh-1', 'greenhouse', 'Acme Corp')] },
+    boardDropped: { 'acme-corp': [droppedFromLane] },
+  });
+
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage);
+
+  const out = await stage.run(emptyPayload(), ctx);
+
+  // The surviving job still reaches out.jobs...
+  assert.ok(out.jobs.some((j) => j.identity.id === 'gh-1'));
+  // ...and the JDSchema-dropped job reaches out.dropped instead of vanishing.
+  assert.equal(out.dropped.length, 1);
+  assert.equal(out.dropped[0]?.jd.identity.id, 'gh-bad');
+  assert.equal(out.dropped[0]?.reasons[0]?.rule, 'greenhouse.jdSchema');
+});
+
+test('all api lanes failing entirely: stage throws loud, no registry write', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', {
+    linkedin: ['Flaky Co', 'Broken Co'],
+  });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+
+  // A lane whose whole per-lane block throws (not a narrow per-candidate/
+  // per-board SoftError caught internally) — simulates a lane-level bug or
+  // outage that escapes the inner try/catches, e.g. a malformed registry
+  // read for that lane's own bookkeeping. `name` is accessed (not called)
+  // by probeCandidates/boardsToFetch/logging inside the per-lane try block,
+  // so a throwing getter is the narrowest way to force that escape in a test.
+  function makeBrokenLane(laneName: string): ApiLane {
+    let nameAccesses = 0;
+    return {
+      kind: 'api',
+      get name(): string {
+        nameAccesses += 1;
+        // Throws only on the FIRST access (probeCandidates' lookup) so the
+        // outer catch's own logging/aggregation — which also reads
+        // apiLane.name — succeeds normally, same as a real thrown Error
+        // would once past the point of failure.
+        if (nameAccesses === 1) throw new Error(`${laneName} lane bookkeeping broken`);
+        return laneName;
+      },
+      async probe() {
+        throw new Error('unreachable');
+      },
+      async fetchBoard() {
+        throw new Error('unreachable');
+      },
+    };
+  }
+
+  const laneA = makeBrokenLane('keka');
+  const laneB = makeBrokenLane('greenhouse');
+
+  const stage = makeSourceStage([laneA, laneB], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage, { warn: (msg, data) => warnings.push({ msg, data }) });
+
+  await assert.rejects(
+    () => stage.run(emptyPayload(), ctx),
+    /all 2 api lane\(s\) failed/,
+  );
+
+  assert.equal(warnings.filter((w) => w.msg === 'api lane failed entirely').length, 2);
+  assert.equal(storage.store.has('registry/companies.json'), false);
+});
+
 function fakeCacheEntry(id: string) {
   return { id, company: 'Acme Corp', title: 'Frontend Engineer', pageId: `page-${id}` };
 }
@@ -409,7 +504,7 @@ test('cache gate: a job whose id is in the cache is skipped entirely — not in 
   const out = await stage.run(input, ctx);
 
   assert.equal(out.jobs.length, 0);
-  assert.equal(out.dropped, input.dropped);
+  assert.deepEqual(out.dropped, input.dropped);
 });
 
 test('cache gate: a job whose id is NOT in the cache passes through', async () => {
@@ -496,4 +591,122 @@ test('cache gate: cache present but empty array -> all jobs pass, no cache-absen
   assert.equal(out.jobs.length, 1);
   assert.equal(out.jobs[0]?.identity.id, 'gh-1');
   assert.ok(!warnings.some((w) => w.msg.toLowerCase().includes('cache')));
+});
+
+// ---------- card gate (title/avoid), seen ledger, maxNewPerLane cap ----------
+
+const TITLE_GATE_CFG: FilterConfig = {
+  title: { domain: { match: [], reject: ['sales'], severity: 'hard' } },
+};
+
+test('card gate: a job whose title fails the title rule is dropped before it ever reaches out.jobs — and never counts against the cap or gets marked seen', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: {
+      'acme-corp': [
+        {
+          ...fakeJob('gh-1', 'greenhouse', 'Acme Corp'),
+          identity: {
+            ...fakeJob('gh-1', 'greenhouse', 'Acme Corp').identity,
+            title: 'Sales Rep',
+          },
+        },
+        fakeJob('gh-2', 'greenhouse', 'Acme Corp'),
+      ],
+    },
+  });
+
+  const stage = makeSourceStage([lane], POLICY, {
+    maxProbesPerRun: 25,
+    filterCfg: TITLE_GATE_CFG,
+  });
+  const ctx = fakeCtx(storage);
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.deepEqual(
+    out.jobs.map((j) => j.identity.id),
+    ['gh-2'],
+  );
+  assert.equal(out.dropped.length, 1);
+  assert.equal(out.dropped[0]?.jd.identity.id, 'gh-1');
+  assert.equal(out.dropped[0]?.reasons[0]?.rule, 'title.domain');
+
+  // The gate-dropped job must never be recorded in the seen ledger — it
+  // was never "emitted", so a later run must still be free to re-judge it
+  // if the title config changes.
+  const seen = storage.store.get(API_SEEN_PATH) as Record<string, string>;
+  assert.equal(Object.hasOwn(seen, 'gh-1'), false);
+  assert.ok(Object.hasOwn(seen, 'gh-2'));
+});
+
+test('seen ledger: a job already recorded as seen in a prior run is skipped this run even though not in the Notion cache', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+  storage.store.set(API_SEEN_PATH, { 'gh-1': '2026-07-20T00:00:00.000Z' });
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: {
+      'acme-corp': [
+        fakeJob('gh-1', 'greenhouse', 'Acme Corp'),
+        fakeJob('gh-2', 'greenhouse', 'Acme Corp'),
+      ],
+    },
+  });
+
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(storage);
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.deepEqual(
+    out.jobs.map((j) => j.identity.id),
+    ['gh-2'],
+  );
+  // Silent skip, same posture as the cache gate — no DroppedRecord.
+  assert.equal(out.dropped.length, 0);
+});
+
+test('maxNewPerLane cap: a lane with more surviving jobs than the cap emits only the cap, logs loudly once, and emits a DroppedRecord for every truncated job', async () => {
+  const storage = fakeStorage();
+  storage.store.set('registry/companies_seen.json', { linkedin: ['Acme Corp'] });
+
+  const jobs = Array.from({ length: 5 }, (_, i) =>
+    fakeJob(`gh-${i}`, 'greenhouse', 'Acme Corp'),
+  );
+
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    probeResults: { 'Acme Corp': { status: 'found', boardRef: 'acme-corp' } },
+    boardJobs: { 'acme-corp': jobs },
+  });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const stage = makeSourceStage([lane], POLICY, {
+    maxProbesPerRun: 25,
+    maxNewPerLane: 2,
+  });
+  const ctx = fakeCtx(storage, { warn: (msg, data) => warnings.push({ msg, data }) });
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.equal(out.jobs.length, 2);
+  assert.deepEqual(
+    out.jobs.map((j) => j.identity.id),
+    ['gh-0', 'gh-1'],
+  );
+
+  const capDrops = out.dropped.filter((d) => d.reasons[0]?.rule === 'source.maxNewCap');
+  assert.equal(capDrops.length, 3);
+  assert.deepEqual(capDrops.map((d) => d.jd.identity.id).sort(), [
+    'gh-2',
+    'gh-3',
+    'gh-4',
+  ]);
+
+  const capWarnings = warnings.filter((w) => w.msg.includes('maxNewPerLane cap hit'));
+  assert.equal(capWarnings.length, 1);
 });

@@ -21,12 +21,21 @@ export interface FarmingLane {
   }>;
 }
 
-/** Keyless ATS API sourcing, driven by the generic probe/fetch loop (P5). */
+/** Keyless ATS API sourcing, driven by the generic probe/fetch loop (P5).
+ * `fetchBoard` returns both the surviving jobs AND every job it dropped
+ * (e.g. a job that parses the lane's own raw-job schema but fails the
+ * final JDSchema build) as DroppedRecords — same funnel-visibility
+ * contract as `FarmingLane.source`'s `dropped`, so a caller (the source
+ * stage) can always account for a disappearing job instead of a lane
+ * being able to swallow it into a warn log line alone. */
 export interface ApiLane {
   readonly kind: 'api';
   readonly name: string;
   probe(company: string, ctx: RunContext): Promise<ProbeResult>;
-  fetchBoard(boardRef: string, ctx: RunContext): Promise<JD[]>;
+  fetchBoard(
+    boardRef: string,
+    ctx: RunContext,
+  ): Promise<{ jobs: JD[]; dropped: DroppedRecord[] }>;
 }
 
 export type Lane = FarmingLane | ApiLane;

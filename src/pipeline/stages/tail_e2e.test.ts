@@ -138,8 +138,8 @@ function stubConnector(cache: CacheEntry[]): Connector & { syncCalls: JD[][] } {
         sync: { pageId: `page-${jd.identity.id}`, syncedAt: '2026-07-23T00:00:00.000Z' },
       }));
     },
-    async archiveStale(_policy: ArchivePolicy, _ctx: RunContext): Promise<number> {
-      return 0;
+    async archiveStale(_policy: ArchivePolicy, _ctx: RunContext) {
+      return { archived: 0, dropped: [] };
     },
   };
 }

@@ -161,7 +161,7 @@ test('fetchBoard: fixture jobs → valid JDs, gh- ids, malformed job skipped', a
   }) as typeof fetch;
 
   const lane = new GreenhouseLane();
-  const jds = await lane.fetchBoard('acmerobotics', fakeCtx());
+  const { jobs: jds } = await lane.fetchBoard('acmerobotics', fakeCtx());
 
   // fixture has 3 raw jobs, one with an empty title (JDSchema-invalid) — dropped.
   assert.equal(jds.length, 2);
@@ -189,9 +189,73 @@ test('fetchBoard: board-info lookup failing falls back to boardRef as company', 
   }) as typeof fetch;
 
   const lane = new GreenhouseLane();
-  const jds = await lane.fetchBoard('acmerobotics', fakeCtx());
+  const { jobs: jds } = await lane.fetchBoard('acmerobotics', fakeCtx());
   assert.equal(jds.length, 2);
   assert.equal(jds[0]?.identity.company, 'acmerobotics');
+});
+
+test('fetchBoard: a job passing GreenhouseJobSchema but failing JDSchema (empty content -> empty rawText) is returned in the dropped array', async () => {
+  const boardInfo = await loadFixture('board-info.json');
+  // GreenhouseJobSchema-valid (non-empty title, valid absolute_url), but
+  // `content: null` -> htmlToText('') -> rawText fails JDSchema's min(1) —
+  // this is the JDSchema-failure branch, distinct from the
+  // GreenhouseJobSchema.safeParse failure the other fixture test covers.
+  const jobsResponse = {
+    jobs: [
+      {
+        id: 999,
+        title: 'Empty Content Role',
+        absolute_url: 'https://boards.greenhouse.io/acmerobotics/jobs/999',
+        content: null,
+      },
+    ],
+  };
+
+  globalThis.fetch = (async (input: string | URL) => {
+    const url = String(input);
+    if (url.endsWith('/jobs?content=true')) {
+      return new Response(JSON.stringify(jobsResponse), { status: 200 });
+    }
+    return new Response(JSON.stringify(boardInfo), { status: 200 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const { jobs: jds, dropped } = await lane.fetchBoard('acmerobotics', fakeCtx());
+
+  assert.equal(jds.length, 0);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]?.jd.identity.id, 'gh-999');
+  assert.equal(dropped[0]?.jd.identity.title, 'Empty Content Role');
+  assert.equal(dropped[0]?.jd.identity.company, 'Acme Robotics');
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'greenhouse.jdSchema');
+  assert.equal(dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(dropped[0]?.reasons[0]?.pass, false);
+});
+
+test('fetchBoard: a JDSchema-dropped job never appears in the returned jobs array', async () => {
+  const boardInfo = await loadFixture('board-info.json');
+  const jobsResponse = {
+    jobs: [
+      {
+        id: 999,
+        title: 'Empty Content Role',
+        absolute_url: 'https://boards.greenhouse.io/acmerobotics/jobs/999',
+        content: null,
+      },
+    ],
+  };
+
+  globalThis.fetch = (async (input: string | URL) => {
+    const url = String(input);
+    if (url.endsWith('/jobs?content=true')) {
+      return new Response(JSON.stringify(jobsResponse), { status: 200 });
+    }
+    return new Response(JSON.stringify(boardInfo), { status: 200 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const { jobs: jds } = await lane.fetchBoard('acmerobotics', fakeCtx());
+  assert.equal(jds.length, 0);
 });
 
 test('fetchBoard: whole-board fetch failure throws (caller/source-stage turns it into a SoftError)', async () => {

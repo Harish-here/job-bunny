@@ -178,6 +178,36 @@ test('one lane throwing is soft: other lane still yields jobs, failure recorded,
   assert.deepEqual(seen, { 'linkedin-secondary': ['Reliable Co'] });
 });
 
+test('all lanes throwing: stage throws loud, no companies_seen write', async () => {
+  const storage = fakeStorage();
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+
+  const laneA = makeFakeLane({
+    name: 'linkedin',
+    throwErr: new Error('all attempted URLs failed — logout shape'),
+  });
+  const laneB = makeFakeLane({
+    name: 'linkedin-secondary',
+    throwErr: new Error('total outage'),
+  });
+
+  const stage = makeFarmStage([laneA, laneB]);
+  const ctx = fakeCtx(storage, { warn: (msg, data) => warnings.push({ msg, data }) });
+
+  await assert.rejects(
+    () => stage.run(emptyPayload(), ctx),
+    /all 2 farming lane\(s\) failed/,
+  );
+
+  // Both individual failures are still warned (fail-soft per-lane logging
+  // stays intact; only the aggregate result becomes a thrown error).
+  assert.equal(
+    warnings.filter((w) => w.msg === 'farming lane failed entirely').length,
+    2,
+  );
+  assert.equal(storage.store.has('registry/companies_seen.json'), false);
+});
+
 test('empty lanes list: passthrough of input, empty companiesSeen written, no crash', async () => {
   const storage = fakeStorage();
   const stage = makeFarmStage([]);
@@ -223,5 +253,5 @@ test('run-level abort mid-lane propagates loud and never writes companies_seen.j
 test('stage definition has heartbeat armed and correct timeout', () => {
   const stage = makeFarmStage([]);
   assert.equal(stage.heartbeat, true, 'heartbeat must be true');
-  assert.equal(stage.timeoutMs, 1_800_000, 'timeoutMs must be 1_800_000 (30 min)');
+  assert.equal(stage.timeoutMs, 5_400_000, 'timeoutMs must be 5_400_000 (90 min)');
 });

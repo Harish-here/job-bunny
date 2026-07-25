@@ -1,4 +1,9 @@
-import { companyKey, type JD, JDSchema } from '../../../core/jd/index.ts';
+import {
+  companyKey,
+  type DroppedRecord,
+  type JD,
+  JDSchema,
+} from '../../../core/jd/index.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { ApiLane, ProbeResult } from '../../../ports/lane.ts';
 import {
@@ -130,8 +135,19 @@ export class KekaLane implements ApiLane {
     return { status: 'not-found' };
   }
 
-  async fetchBoard(boardRef: string, ctx: RunContext): Promise<JD[]> {
+  /** A job that parses `KekaJobSchema` but fails the final `JDSchema`
+   * build is returned as a DroppedRecord in `dropped` instead of only a
+   * warn, so the caller (the source stage) can account for it in the
+   * funnel. The identity-only `jd` reuses `id`/`title` straight off the
+   * already-validated `KekaJobSchema` job and a URL built the same way
+   * the successful path builds it, so constructing this record can
+   * never itself throw. */
+  async fetchBoard(
+    boardRef: string,
+    ctx: RunContext,
+  ): Promise<{ jobs: JD[]; dropped: DroppedRecord[] }> {
     const now = new Date().toISOString();
+    const dropped: DroppedRecord[] = [];
 
     // Not caught: a network-level failure here is the whole-board
     // failure (same fail-loud posture as v0's discoverGuid, whose own
@@ -175,14 +191,30 @@ export class KekaLane implements ApiLane {
         });
         jobs.push(jd);
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         ctx.logger.warn('keka fetchBoard: dropped job failing JDSchema', {
           boardRef,
           jobId: job.id,
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
+        });
+        dropped.push({
+          jd: JDSchema.parse({
+            identity: {
+              id: `kk-${job.id}`,
+              lane: 'keka',
+              url: `${kekaBase(boardRef)}/careers/jobdetails/${job.id}`,
+              company: companyName,
+              title: job.title,
+              scrapedAt: now,
+            },
+          }),
+          reasons: [
+            { rule: 'keka.jdSchema', severity: 'hard', pass: false, detail: message },
+          ],
         });
       }
     }
 
-    return jobs;
+    return { jobs, dropped };
   }
 }

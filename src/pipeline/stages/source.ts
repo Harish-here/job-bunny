@@ -10,12 +10,42 @@ import {
   upsertSeen,
 } from '../../core/company/index.ts';
 import { isSoftError, SoftError } from '../../core/errors/index.ts';
-import { CacheEntrySchema, type JD, JDSchema } from '../../core/jd/index.ts';
+import { type FilterConfig, FilterConfigSchema } from '../../core/filter/config.ts';
+import { decide, evaluateCard } from '../../core/filter/engine.ts';
+import {
+  CacheEntrySchema,
+  type DroppedRecord,
+  type JD,
+  JDSchema,
+} from '../../core/jd/index.ts';
 import type { ApiLane } from '../../ports/index.ts';
 import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
 import { CACHE_PATH } from './reconcile.ts';
 
 const CacheSchema = z.array(CacheEntrySchema);
+
+/**
+ * Per-job "already fetched in a prior run" ledger for the API lanes —
+ * job id -> last-seen ISO date. Deliberately a SEPARATE file from
+ * `registry/companies.json` (a per-COMPANY ledger, unrelated) and from
+ * `registry/companies_seen.json` (the farming-lane side-write of company
+ * names this stage upserts into the registry above) — v0 parity name
+ * would be ghSeen.json/kekaSeen.json (one per lane); v2 uses one shared
+ * file since job ids already carry a lane-specific prefix (`gh-`/`kk-`)
+ * and never collide across lanes.
+ */
+export const API_SEEN_PATH = 'registry/api_seen.json';
+const ApiSeenSchema = z.record(z.string(), z.string());
+
+/** v0 parity: GH_MAX_NEW/KEKA_MAX_NEW both default 40 (scripts/pipeline/
+ * greenhouse.js, keka.js) — a per-lane backstop cap on how many NEW jobs
+ * (post title/avoid-gate, post seen/cache-skip) one run emits from a
+ * single api lane. This is a backstop, not the primary mechanism — the
+ * title/avoid gate above it is what does the real volume reduction (P9
+ * closure register §1); when the cap does fire it must never truncate
+ * silently, so every job it drops still gets a DroppedRecord plus one
+ * loud warn per lane the first time it fires. */
+const DEFAULT_MAX_NEW_PER_LANE = 40;
 
 /**
  * Side-write from farming lanes: map of farming-lane-name → company names
@@ -44,9 +74,12 @@ const LANE_BUDGET_MS = 90_000;
  * registry + companies-seen side-write, upserts sightings, probes candidates
  * (capped by opts.maxProbesPerRun across the whole run, politeness), fetches
  * boards found, and appends the resulting JDs to the payload. Every
- * probe/fetch failure is a narrow SoftError — a whole-lane outage yields
- * zero jobs from that lane plus a warn, never a thrown stage failure
- * (v0 invariant: API lanes are optional breadth).
+ * probe/fetch failure is a narrow SoftError — ONE lane's whole outage
+ * yields zero jobs from that lane plus a warn, never a thrown stage
+ * failure (v0 invariant: API lanes are optional breadth). But if EVERY
+ * api lane fails entirely, that's not lost breadth, it's a total
+ * outage — the stage throws rather than silently reporting a
+ * zero-job success (mirrors linkedin/lane.ts's all-urls-failed guard).
  *
  * Notion-cache gate (parity with v0's greenhouse.js/ats_common.js): every
  * fetched job whose id already appears in the reconciled Notion cache
@@ -88,6 +121,18 @@ export function makeSourceStage(
      * unset; tests use it to exercise the budget-expiry path without a
      * real 90s wait. */
     laneBudgetMs?: number;
+    /** Card-gate config (title/company avoid) applied to every fetched
+     * job BEFORE the seen/cache skip and the maxNewPerLane cap — the
+     * cheapest check runs first (P9 closure register §1: gate first,
+     * measure what survives, cap only as a backstop). Defaults to a
+     * permissive empty FilterConfig (no title/company sections ⇒
+     * evaluateCard drops nothing) so existing callers/tests that don't
+     * pass one see unchanged behavior. */
+    filterCfg?: FilterConfig;
+    /** Per-lane backstop cap on new jobs emitted this run (v0 parity:
+     * GH_MAX_NEW/KEKA_MAX_NEW, both default 40). Applies independently to
+     * each api lane. */
+    maxNewPerLane?: number;
   },
 ): StageDef<StagePayload, StagePayload> {
   const laneBudgetMs = opts.laneBudgetMs ?? LANE_BUDGET_MS;
@@ -123,9 +168,20 @@ export function makeSourceStage(
       }
       const cacheIds = new Set<string>((cache ?? []).map((c) => c.id).filter(Boolean));
 
+      const apiSeen: Record<string, string> =
+        (await ctx.storage.readJson(API_SEEN_PATH, ApiSeenSchema)) ?? {};
+
+      const filterCfg = opts.filterCfg ?? FilterConfigSchema.parse({});
+      const maxNewPerLane = opts.maxNewPerLane ?? DEFAULT_MAX_NEW_PER_LANE;
+
       const fetchedJobs: JD[] = [];
+      const laneDrops: DroppedRecord[] = [];
       let probesIssued = 0;
       let cacheSkipped = 0;
+      let apiSeenSkipped = 0;
+      let cardGateDropped = 0;
+      let capDropped = 0;
+      let failedLanes = 0;
 
       for (const apiLane of apiLanes) {
         throwIfAborted(ctx.signal);
@@ -187,6 +243,8 @@ export function makeSourceStage(
 
           if (!budgetExpired) {
             const boards = boardsToFetch(reg, apiLane.name);
+            let emittedThisLane = 0;
+            let capLoggedThisLane = false;
             for (const { key, boardRef } of boards) {
               throwIfAborted(ctx.signal);
               if (laneSignal.aborted) {
@@ -195,28 +253,93 @@ export function makeSourceStage(
               }
 
               try {
-                const jobs = await apiLane.fetchBoard(boardRef, laneCtx);
+                const { jobs, dropped } = await apiLane.fetchBoard(boardRef, laneCtx);
+                laneDrops.push(...dropped);
                 for (const job of jobs) {
                   const parsed = JDSchema.safeParse(job);
-                  if (parsed.success) {
-                    // Cache hit: this job was never a candidate that got
-                    // judged, so unlike a real drop it gets no
-                    // DroppedRecord (which carries the full `jd` payload —
-                    // retaining ~3000 of them is exactly the bloat this
-                    // gate exists to remove) and no per-job log, only the
-                    // aggregate counter below.
-                    if (cacheIds.has(parsed.data.identity.id)) {
-                      cacheSkipped++;
-                      continue;
-                    }
-                    fetchedJobs.push(parsed.data);
-                  } else {
+                  if (!parsed.success) {
                     ctx.logger.warn('dropped invalid JD from board fetch', {
                       lane: apiLane.name,
                       boardRef,
                       error: parsed.error.message,
                     });
+                    continue;
                   }
+
+                  const { identity } = parsed.data;
+
+                  // Gate order, cheapest first (P9 closure register §1):
+                  // 1. title/avoid card gate — pure computation, no
+                  //    lookup at all, and the workhorse that actually cuts
+                  //    volume before this job can ever reach the LLM
+                  //    `structure` stage.
+                  const verdicts = evaluateCard(
+                    { title: identity.title, company: identity.company },
+                    filterCfg,
+                  );
+                  if (decide(verdicts) === 'drop') {
+                    cardGateDropped++;
+                    laneDrops.push({
+                      jd: JDSchema.parse({ identity }),
+                      reasons: verdicts,
+                    });
+                    continue;
+                  }
+
+                  // 2. seen ledger — this exact job id was already emitted
+                  // by this lane in a prior run; skip without a
+                  // DroppedRecord (same posture as the cache gate below —
+                  // it was never freshly judged this run).
+                  if (Object.hasOwn(apiSeen, identity.id)) {
+                    apiSeenSkipped++;
+                    continue;
+                  }
+
+                  // 3. cache gate — already known to Notion. Cache hit:
+                  // this job was never a candidate that got judged, so
+                  // unlike a real drop it gets no DroppedRecord (which
+                  // carries the full `jd` payload — retaining ~3000 of
+                  // them is exactly the bloat this gate exists to remove)
+                  // and no per-job log, only the aggregate counter below.
+                  if (cacheIds.has(identity.id)) {
+                    cacheSkipped++;
+                    continue;
+                  }
+
+                  // 4. maxNewPerLane backstop — fires only once title/
+                  // avoid + seen + cache have already done the real
+                  // work. Never a silent truncation: every job the cap
+                  // drops still gets a DroppedRecord, and the cap firing
+                  // itself is logged once per lane.
+                  if (emittedThisLane >= maxNewPerLane) {
+                    capDropped++;
+                    if (!capLoggedThisLane) {
+                      capLoggedThisLane = true;
+                      ctx.logger.warn(
+                        'source: maxNewPerLane cap hit — dropping remainder',
+                        {
+                          lane: apiLane.name,
+                          maxNewPerLane,
+                        },
+                      );
+                    }
+                    laneDrops.push({
+                      jd: JDSchema.parse({ identity }),
+                      reasons: [
+                        {
+                          rule: 'source.maxNewCap',
+                          severity: 'hard',
+                          pass: false,
+                          detail: `maxNewPerLane=${maxNewPerLane} reached for lane "${apiLane.name}"`,
+                        },
+                      ],
+                    });
+                    continue;
+                  }
+
+                  fetchedJobs.push(parsed.data);
+                  apiSeen[identity.id] = now;
+                  emittedThisLane++;
                 }
               } catch (err) {
                 throwIfAborted(ctx.signal);
@@ -249,6 +372,7 @@ export function makeSourceStage(
         } catch (err) {
           if (ctx.signal.aborted) throw err; // run-level abort: propagate, no registry write
           // Whole-lane outage: never let one lane's total failure stop the others.
+          failedLanes += 1;
           const message = err instanceof Error ? err.message : String(err);
           ctx.logger.warn('api lane failed entirely', {
             lane: apiLane.name,
@@ -259,14 +383,31 @@ export function makeSourceStage(
         }
       }
 
-      await ctx.storage.writeJson(REGISTRY_PATH, reg);
+      // Every API lane failed: not one broken lane, a total outage — fail
+      // loud rather than a silently-green zero-job run (mirrors
+      // linkedin/lane.ts's all-urls-failed guard, v0 checkAggregateFailure).
+      if (apiLanes.length > 0 && failedLanes === apiLanes.length) {
+        throw new Error(
+          `source stage: all ${apiLanes.length} api lane(s) failed this run — ` +
+            'total outage, not one broken lane',
+        );
+      }
 
-      ctx.logger.info('source: cache gate summary', {
+      await ctx.storage.writeJson(REGISTRY_PATH, reg);
+      await ctx.storage.writeJson(API_SEEN_PATH, apiSeen);
+
+      ctx.logger.info('source: gate summary', {
         fetched: fetchedJobs.length,
+        cardGateDropped,
+        apiSeenSkipped,
         cacheSkipped,
+        capDropped,
       });
 
-      return { jobs: [...input.jobs, ...fetchedJobs], dropped: input.dropped };
+      return {
+        jobs: [...input.jobs, ...fetchedJobs],
+        dropped: [...input.dropped, ...laneDrops],
+      };
     },
   };
 }

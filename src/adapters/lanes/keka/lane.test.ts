@@ -173,7 +173,7 @@ test('fetchBoard: fixture jobs → valid JDs, kk- ids, malformed job skipped', a
   globalThis.fetch = fetchStub(portalInfo, embedJobs, careersHtml);
 
   const lane = new KekaLane();
-  const jds = await lane.fetchBoard('nimblelabs', fakeCtx());
+  const { jobs: jds } = await lane.fetchBoard('nimblelabs', fakeCtx());
 
   // fixture has 3 raw jobs, one with an empty title (KekaJobSchema-invalid) — dropped.
   assert.equal(jds.length, 2);
@@ -195,6 +195,42 @@ test('fetchBoard: fixture jobs → valid JDs, kk- ids, malformed job skipped', a
   assert.ok(jds[1]?.content?.rawText.startsWith('Own paid acquisition'));
 });
 
+test('fetchBoard: a job passing KekaJobSchema but failing JDSchema (empty description, no experience -> empty rawText) is returned in the dropped array', async () => {
+  const portalInfo = await loadFixtureText('portal-info.json');
+  const careersHtml = await loadFixtureText('careers.html');
+  // KekaJobSchema-valid (non-empty title), but description null and no
+  // experience -> rawText is '' -> fails JDSchema's content.rawText min(1).
+  const embedJobs = [{ id: 777, title: 'Empty Description Role', description: null }];
+  globalThis.fetch = fetchStub(portalInfo, embedJobs, careersHtml);
+
+  const lane = new KekaLane();
+  const { jobs: jds, dropped } = await lane.fetchBoard('nimblelabs', fakeCtx());
+
+  assert.equal(jds.length, 0);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]?.jd.identity.id, 'kk-777');
+  assert.equal(dropped[0]?.jd.identity.title, 'Empty Description Role');
+  assert.equal(dropped[0]?.jd.identity.company, 'Nimble Labs');
+  assert.equal(
+    dropped[0]?.jd.identity.url,
+    'https://nimblelabs.keka.com/careers/jobdetails/777',
+  );
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'keka.jdSchema');
+  assert.equal(dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(dropped[0]?.reasons[0]?.pass, false);
+});
+
+test('fetchBoard: a JDSchema-dropped job never appears in the returned jobs array', async () => {
+  const portalInfo = await loadFixtureText('portal-info.json');
+  const careersHtml = await loadFixtureText('careers.html');
+  const embedJobs = [{ id: 777, title: 'Empty Description Role', description: null }];
+  globalThis.fetch = fetchStub(portalInfo, embedJobs, careersHtml);
+
+  const lane = new KekaLane();
+  const { jobs: jds } = await lane.fetchBoard('nimblelabs', fakeCtx());
+  assert.equal(jds.length, 0);
+});
+
 test('fetchBoard: portal-info has no guid → falls back to scraping /careers/ HTML', async () => {
   const portalInfoNoGuid = JSON.stringify({ name: 'Nimble Labs' }); // no /ats/documents/ path
   const embedJobs = await loadFixtureJson('embedjobs-response.json');
@@ -202,7 +238,7 @@ test('fetchBoard: portal-info has no guid → falls back to scraping /careers/ H
   globalThis.fetch = fetchStub(portalInfoNoGuid, embedJobs, careersHtml);
 
   const lane = new KekaLane();
-  const jds = await lane.fetchBoard('nimblelabs', fakeCtx());
+  const { jobs: jds } = await lane.fetchBoard('nimblelabs', fakeCtx());
   assert.equal(jds.length, 2);
 });
 
@@ -235,7 +271,7 @@ test('fetchBoard: portal-info name lookup fails → falls back to boardRef as co
   }) as typeof fetch;
 
   const lane = new KekaLane();
-  const jds = await lane.fetchBoard('nimblelabs', fakeCtx());
+  const { jobs: jds } = await lane.fetchBoard('nimblelabs', fakeCtx());
   assert.equal(jds.length, 2);
   assert.equal(jds[0]?.identity.company, 'nimblelabs');
 });

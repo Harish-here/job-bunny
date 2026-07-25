@@ -15,7 +15,7 @@
  * `Connector` in the loop.
  */
 import { z } from 'zod';
-import type { JD, SyncedJD } from '../../../core/jd/index.ts';
+import type { DroppedRecord, JD, SyncedJD } from '../../../core/jd/index.ts';
 import type { ArchivePolicy, CacheEntry, Connector } from '../../../ports/connector.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import { archiveStale } from './archive.ts';
@@ -49,7 +49,10 @@ export class NotionConnector implements Connector {
     return syncJobs(this.api, this.settings.dbId, jobs, ctx);
   }
 
-  async archiveStale(policy: ArchivePolicy, ctx: RunContext): Promise<number> {
+  async archiveStale(
+    policy: ArchivePolicy,
+    ctx: RunContext,
+  ): Promise<{ archived: number; dropped: DroppedRecord[] }> {
     return archiveStale(this.api, this.settings.dbId, policy, this.settings.dryRun, ctx);
   }
 }

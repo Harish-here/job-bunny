@@ -124,7 +124,28 @@ test('toTable: a job without content.rawText fails loud', () => {
   assert.throws(() => toTable([bad]), /content/i);
 });
 
-test('compressStage: writes table + passthrough to storage and threads payload through unchanged', async () => {
+test('toTable: two jobs sharing an id — first kept, second dropped with a compress.duplicate-id DroppedRecord', () => {
+  const first = fakeJob('dup-1', { title: 'Backend Engineer', company: 'Acme' });
+  const second = fakeJob('dup-1', { title: 'Different Title', company: 'Different Co' });
+  const { table, passthrough, dropped } = toTable([first, second]);
+
+  // Only the first occurrence survives into the table and passthrough map.
+  assert.deepEqual(Object.keys(passthrough), ['dup-1']);
+  assert.deepEqual(passthrough['dup-1'], first);
+  const dataRows = table.split('\n').filter((l) => l.includes('dup-1'));
+  assert.equal(dataRows.length, 1);
+  assert.ok(dataRows[0]?.includes('Backend Engineer'));
+
+  // The second (loser) is recorded as a DroppedRecord, not silently lost.
+  assert.equal(dropped.length, 1);
+  assert.deepEqual(dropped[0]?.jd, second);
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'compress.duplicate-id');
+  assert.equal(dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(dropped[0]?.reasons[0]?.pass, false);
+  assert.match(dropped[0]?.reasons[0]?.detail ?? '', /dup-1/);
+});
+
+test('compressStage: writes table + passthrough to storage and threads jobs through unchanged (no dropped)', async () => {
   const storage = fakeStorage();
   const ctx = fakeCtx(storage);
   const jobs = [fakeJob('li-7'), fakeJob('li-8')];
@@ -132,7 +153,8 @@ test('compressStage: writes table + passthrough to storage and threads payload t
 
   const out = await compressStage.run(input, ctx);
 
-  assert.equal(out, input);
+  assert.equal(out.jobs, input.jobs);
+  assert.deepEqual(out.dropped, []);
 
   const table = storage.store.get(TABLE_PATH);
   assert.equal(typeof table, 'string');
@@ -155,4 +177,29 @@ test('compressStage: fails loud when a job in the payload has no content', async
   // Nothing should be written on a loud failure.
   assert.equal(storage.store.has(TABLE_PATH), false);
   assert.equal(storage.store.has(PASSTHROUGH_PATH), false);
+});
+
+test('compressStage: a duplicate id in the payload accumulates onto input.dropped, not replacing it', async () => {
+  const storage = fakeStorage();
+  const ctx = fakeCtx(storage);
+  const first = fakeJob('dup-2');
+  const second = fakeJob('dup-2', { title: 'Other Title' });
+  const preexisting = {
+    jd: fakeJob('unrelated'),
+    reasons: [
+      {
+        rule: 'source.earlier-drop',
+        severity: 'hard' as const,
+        pass: false,
+        detail: 'x',
+      },
+    ],
+  };
+  const input: StagePayload = { jobs: [first, second], dropped: [preexisting] };
+
+  const out = await compressStage.run(input, ctx);
+
+  assert.equal(out.dropped.length, 2);
+  assert.equal(out.dropped[0], preexisting);
+  assert.equal(out.dropped[1]?.reasons[0]?.rule, 'compress.duplicate-id');
 });

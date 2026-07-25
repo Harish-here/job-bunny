@@ -169,7 +169,7 @@ test('archiveStale: defaults to dry-run (no writes) when the connector was built
   });
   const connector = new NotionConnector({ dbId: 'my-db' }, api);
 
-  const count = await connector.archiveStale(
+  const { archived: count } = await connector.archiveStale(
     { passedOlderThanDays: 7, untouchedOlderThanDays: 30 },
     fakeCtx(),
   );
@@ -208,7 +208,7 @@ test('archiveStale: an explicit dryRun: false connector performs the write', asy
   });
   const connector = new NotionConnector({ dbId: 'my-db', dryRun: false }, api);
 
-  const count = await connector.archiveStale(
+  const { archived: count } = await connector.archiveStale(
     { passedOlderThanDays: 7, untouchedOlderThanDays: 30 },
     fakeCtx(),
   );

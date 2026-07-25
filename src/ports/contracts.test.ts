@@ -53,7 +53,7 @@ test('a farming lane and an api lane both satisfy Lane', async () => {
         : { status: 'not-found' };
     },
     async fetchBoard() {
-      return [fakeJD('a-1')];
+      return { jobs: [fakeJD('a-1')], dropped: [] };
     },
   };
   const lanes: Lane[] = [farming, api];
@@ -64,6 +64,8 @@ test('a farming lane and an api lane both satisfy Lane', async () => {
   const probed = await api.probe('Acme', fakeCtx());
   assert.equal(probed.status, 'found');
   assert.equal(lanes.length, 2);
+  const fetched = await api.fetchBoard('acme', fakeCtx());
+  assert.equal(fetched.jobs.length, 1);
 });
 
 test('a connector satisfies Connector and round-trips sync state', async () => {
@@ -84,7 +86,7 @@ test('a connector satisfies Connector and round-trips sync state', async () => {
       );
     },
     async archiveStale() {
-      return 0;
+      return { archived: 0, dropped: [] };
     },
   };
   const synced = await connector.syncJobs([fakeJD('f-1')], fakeCtx());

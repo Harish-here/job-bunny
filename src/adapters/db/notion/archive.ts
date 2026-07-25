@@ -24,15 +24,22 @@
  * batch continues, same contract as `sync.ts`.
  */
 import { isSoftError } from '../../../core/errors/soft_error.ts';
+import { type DroppedRecord, JDSchema } from '../../../core/jd/index.ts';
 import type { ArchivePolicy } from '../../../ports/connector.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { NotionApi } from './client.ts';
 import { PROPERTIES, type STATUS_OPTIONS } from './schema.ts';
 
-/** The narrow slice of a raw Notion page this module reads. */
+/** The narrow slice of a raw Notion page this module reads — title/
+ * rich_text/url added alongside select/date so a page that fails to
+ * archive can still be turned into a DroppedRecord (same property-reader
+ * idiom as `cache.ts`'s `propText`/`propUrl`). */
 interface RawPropertyValue {
   select?: { name: string } | null;
   date?: { start: string } | null;
+  title?: { plain_text: string }[];
+  rich_text?: { plain_text: string }[];
+  url?: string | null;
 }
 
 interface RawPage {
@@ -52,6 +59,62 @@ function propSelectName(p: RawPropertyValue | undefined): string | null {
 
 function propDateStart(p: RawPropertyValue | undefined): string | null {
   return p?.date?.start ?? null;
+}
+
+/** Same reader idiom as `cache.ts`'s `plainText`/`propText`/`propUrl` — kept
+ * as a private local copy (not imported) since `cache.ts` doesn't currently
+ * export these and this module's own `RawPropertyValue` is a strict subset
+ * anyway. */
+function plainText(parts: { plain_text: string }[] | undefined): string {
+  return (parts ?? []).map((t) => t.plain_text).join('');
+}
+
+function propText(p: RawPropertyValue | undefined): string {
+  if (p?.title) return plainText(p.title);
+  if (p?.rich_text) return plainText(p.rich_text);
+  return '';
+}
+
+function propUrl(p: RawPropertyValue | undefined): string | null {
+  return p?.url ?? null;
+}
+
+/** Builds a DroppedRecord for a page that failed to archive, so the
+ * caller can account for it (same funnel-visibility idiom as `sync.ts`'s
+ * `sync.failed` DroppedRecords) instead of it vanishing into a warn log
+ * line. Best-effort identity: Job Title/Company/Job URL read straight off
+ * the page's own properties (populated by `sync.ts` on write), falling
+ * back to placeholder values when a property is empty so JDSchema's
+ * min-length/url constraints are always satisfiable — a page can legally
+ * lack these (e.g. `sync.ts` never wrote them) without losing the drop
+ * accounting. */
+function toDroppedRecord(page: RawPage, detail: string): DroppedRecord {
+  const props = page.properties ?? {};
+  const title = propText(props[PROPERTIES.jobTitle.name]) || 'Unknown title';
+  const company = propText(props[PROPERTIES.company.name]) || 'Unknown company';
+  const url =
+    propUrl(props[PROPERTIES.jobUrl.name]) ||
+    `https://www.notion.so/${page.id.replace(/-/g, '')}`;
+  return {
+    jd: JDSchema.parse({
+      identity: {
+        id: page.id,
+        lane: 'notion-archive',
+        url,
+        company,
+        title,
+        scrapedAt: new Date().toISOString(),
+      },
+    }),
+    reasons: [
+      {
+        rule: 'archive.failed',
+        severity: 'hard',
+        pass: false,
+        detail,
+      },
+    ],
+  };
 }
 
 /** v0 cleanup.js's `cutoffISO` — `now` minus `daysOld`, as a `YYYY-MM-DD`
@@ -88,10 +151,13 @@ function isStale(page: RawPage, passedCutoff: string, untouchedCutoff: string): 
 
 /** Archives every page matching either staleness rule. Returns the number
  * archived (or, in dry-run, the number that WOULD be archived — no writes
- * performed). `now` defaults to the real current time — the optional
- * override exists purely so tests can pin `cutoffISO`'s output
- * deterministically; the `Connector` port (and every real caller) never
- * passes it. */
+ * performed) plus every page that failed to archive as a DroppedRecord
+ * (see `toDroppedRecord`) — mirrors `sync.ts`'s `sync.failed` drops, so a
+ * caller (the `Connector.archiveStale` port, and above it the `cleanup`
+ * routine) can account for it instead of it only reaching a warn log
+ * line. `now` defaults to the real current time — the optional override
+ * exists purely so tests can pin `cutoffISO`'s output deterministically;
+ * the `Connector` port (and every real caller) never passes it. */
 export async function archiveStale(
   api: NotionApi,
   dbId: string,
@@ -99,7 +165,7 @@ export async function archiveStale(
   dryRun: boolean,
   ctx: RunContext,
   now: Date = new Date(),
-): Promise<number> {
+): Promise<{ archived: number; dropped: DroppedRecord[] }> {
   const rawPages = (await api.queryDatabase(dbId, ctx)) as RawPage[];
   const passedCutoff = cutoffISO(policy.passedOlderThanDays, now);
   const untouchedCutoff = cutoffISO(policy.untouchedOlderThanDays, now);
@@ -109,10 +175,11 @@ export async function archiveStale(
     ctx.logger.info('notion archive: dry-run — no writes', {
       wouldArchive: stale.length,
     });
-    return stale.length;
+    return { archived: stale.length, dropped: [] };
   }
 
   let archived = 0;
+  const dropped: DroppedRecord[] = [];
   for (const page of stale) {
     try {
       await api.archivePage(page.id, ctx);
@@ -123,7 +190,8 @@ export async function archiveStale(
         pageId: page.id,
         error: err.message,
       });
+      dropped.push(toDroppedRecord(page, err.message));
     }
   }
-  return archived;
+  return { archived, dropped };
 }

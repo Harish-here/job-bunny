@@ -25,7 +25,7 @@ function fakeConnector(): Connector {
       return [];
     },
     async archiveStale() {
-      return 0;
+      return { archived: 0, dropped: [] };
     },
   };
 }

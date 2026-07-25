@@ -89,7 +89,7 @@ test('archiveStale: dry-run (default posture) returns the would-archive count an
     client: stubWithPages(fixturePages(), (args) => updateCalls.push(args)),
   });
 
-  const count = await archiveStale(api, 'db1', POLICY, true, fakeCtx());
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, true, fakeCtx());
 
   assert.equal(count, 2, 'passed-old + no-status-old are the only two stale rows');
   assert.equal(updateCalls.length, 0, 'dry-run must perform zero writes');
@@ -101,7 +101,7 @@ test('archiveStale: apply mode archives exactly the stale rows by flipping `arch
     client: stubWithPages(fixturePages(), (args) => updateCalls.push(args)),
   });
 
-  const count = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
 
   assert.equal(count, 2);
   assert.deepEqual(updateCalls.map((c) => c.page_id).sort(), [
@@ -121,7 +121,7 @@ test('archiveStale: regression — the write call is exactly `{ page_id, archive
     client: stubWithPages(pages, (args) => updateCalls.push(args)),
   });
 
-  const count = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
 
   assert.equal(count, 1);
   assert.equal(updateCalls.length, 1);
@@ -130,7 +130,7 @@ test('archiveStale: regression — the write call is exactly `{ page_id, archive
 
 test('archiveStale: a page missing Date Found is never archived under either rule', async () => {
   const api = new NotionApi({ client: stubWithPages(fixturePages()) });
-  const count = await archiveStale(api, 'db1', POLICY, true, fakeCtx());
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, true, fakeCtx());
   // passed-no-date is Passed but has no date — must not count toward the 2.
   assert.equal(count, 2);
 });
@@ -165,7 +165,7 @@ test('archiveStale: one page failing after exhausted retries (SoftError) is reco
     logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
   });
 
-  const count = await archiveStale(api, 'db1', POLICY, false, ctx);
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, ctx);
 
   assert.equal(
     count,
@@ -177,6 +177,83 @@ test('archiveStale: one page failing after exhausted retries (SoftError) is reco
     updateCalls,
     2,
     'both stale pages were attempted despite the first failing',
+  );
+});
+
+test('archiveStale: a page failing after exhausted retries is returned as a DroppedRecord (funnel visibility, mirrors sync.ts)', async () => {
+  const client: NotionSdkClientLike = {
+    databases: {
+      query: async () => ({
+        results: fixturePages(),
+        has_more: false,
+        next_cursor: null,
+      }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async (args) => {
+        if (args.page_id === 'passed-old') {
+          const err = new Error('HTTP 429') as Error & { status: number };
+          err.status = 429;
+          throw err;
+        }
+        return { id: args.page_id };
+      },
+    },
+  };
+  const api = new NotionApi({ client, maxAttempts: 1 });
+
+  const { archived: count, dropped } = await archiveStale(
+    api,
+    'db1',
+    POLICY,
+    false,
+    fakeCtx(),
+  );
+
+  assert.equal(count, 1, 'no-status-old still archived; passed-old is the casualty');
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]?.jd.identity.id, 'passed-old');
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'archive.failed');
+  assert.equal(dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(dropped[0]?.reasons[0]?.pass, false);
+  assert.match(dropped[0]?.reasons[0]?.detail ?? '', /HTTP 429/);
+});
+
+test('archiveStale: the warn-and-continue behavior is unaffected by the dropped array being returned', async () => {
+  const client: NotionSdkClientLike = {
+    databases: {
+      query: async () => ({
+        results: fixturePages(),
+        has_more: false,
+        next_cursor: null,
+      }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async (args) => {
+        if (args.page_id === 'passed-old') {
+          const err = new Error('HTTP 429') as Error & { status: number };
+          err.status = 429;
+          throw err;
+        }
+        return { id: args.page_id };
+      },
+    },
+  };
+  const api = new NotionApi({ client, maxAttempts: 1 });
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, ctx);
+
+  assert.equal(count, 1);
+  assert.equal(
+    warnings.length,
+    1,
+    'the existing warn log is unaffected by the returned dropped array',
   );
 });
 
@@ -216,7 +293,7 @@ test('archiveStale: no rows to archive returns 0 and performs zero writes', asyn
     client: stubWithPages(noneStale, (args) => updateCalls.push(args)),
   });
 
-  const count = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
   assert.equal(count, 0);
   assert.equal(updateCalls.length, 0);
 });
@@ -246,7 +323,14 @@ test('archiveStale: honors an injected `now` and is correct at the early-morning
   const pages = [page('just-stale', 'Passed', '2026-07-15')];
   const api = new NotionApi({ client: stubWithPages(pages) });
 
-  const count = await archiveStale(api, 'db1', POLICY, true, fakeCtx(), now);
+  const { archived: count } = await archiveStale(
+    api,
+    'db1',
+    POLICY,
+    true,
+    fakeCtx(),
+    now,
+  );
 
   assert.equal(
     count,

@@ -1,4 +1,4 @@
-import type { CacheEntry, JD, SyncedJD } from '../core/jd/index.ts';
+import type { CacheEntry, DroppedRecord, JD, SyncedJD } from '../core/jd/index.ts';
 import type { RunContext } from './context.ts';
 
 /** Canonical definition now lives in core/jd (a plain data shape, not port
@@ -19,6 +19,13 @@ export interface Connector {
   rebuildCache(ctx: RunContext): Promise<CacheEntry[]>;
   /** Writes automated fields only, never user-edited ones. */
   syncJobs(jobs: JD[], ctx: RunContext): Promise<SyncedJD[]>;
-  /** Returns the number of records archived. */
-  archiveStale(policy: ArchivePolicy, ctx: RunContext): Promise<number>;
+  /** Returns the number of records archived, plus every page that failed
+   * to archive (a per-page SoftError, retries exhausted) as a
+   * DroppedRecord — same funnel-visibility contract as `syncJobs`'s
+   * caller-side diff in `pipeline/stages/sync.ts` — so a caller can
+   * account for it instead of it only reaching a warn log line. */
+  archiveStale(
+    policy: ArchivePolicy,
+    ctx: RunContext,
+  ): Promise<{ archived: number; dropped: DroppedRecord[] }>;
 }

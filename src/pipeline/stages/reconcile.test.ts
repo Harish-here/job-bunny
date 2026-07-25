@@ -45,8 +45,8 @@ function fakeConnector(
     async syncJobs(jobs: JD[]): Promise<SyncedJD[]> {
       return jobs.map((jd) => ({ ...jd, sync: { pageId: 'x', syncedAt: 'now' } }));
     },
-    async archiveStale(_policy: ArchivePolicy): Promise<number> {
-      return 0;
+    async archiveStale(_policy: ArchivePolicy) {
+      return { archived: 0, dropped: [] };
     },
     ...overrides,
   };

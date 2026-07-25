@@ -1,4 +1,9 @@
-import { companyKey, type JD, JDSchema } from '../../../core/jd/index.ts';
+import {
+  companyKey,
+  type DroppedRecord,
+  type JD,
+  JDSchema,
+} from '../../../core/jd/index.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { ApiLane, ProbeResult } from '../../../ports/lane.ts';
 import {
@@ -110,8 +115,21 @@ export class GreenhouseLane implements ApiLane {
     return { status: 'not-found' };
   }
 
-  async fetchBoard(boardRef: string, ctx: RunContext): Promise<JD[]> {
+  /** A job that parses `GreenhouseJobSchema` but fails the final
+   * `JDSchema` build (e.g. `updated_at`/`content` shaped oddly) is
+   * returned as a DroppedRecord in `dropped` instead of only a warn, so
+   * the caller (the source stage) can account for it in the funnel. The
+   * identity-only `jd` reuses `id`/`absolute_url`/`title` straight off
+   * the already-validated `GreenhouseJobSchema` job (guaranteed
+   * present/valid), never the fields that caused the JDSchema failure
+   * (postedAt/content), so building this record can never itself
+   * throw. */
+  async fetchBoard(
+    boardRef: string,
+    ctx: RunContext,
+  ): Promise<{ jobs: JD[]; dropped: DroppedRecord[] }> {
     const now = new Date().toISOString();
+    const dropped: DroppedRecord[] = [];
 
     let companyName = boardRef;
     try {
@@ -160,15 +178,36 @@ export class GreenhouseLane implements ApiLane {
         });
         jobs.push(jd);
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         ctx.logger.warn('greenhouse fetchBoard: dropped job failing JDSchema', {
           boardRef,
           jobId: job.id,
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
+        });
+        dropped.push({
+          jd: JDSchema.parse({
+            identity: {
+              id: `gh-${job.id}`,
+              lane: 'greenhouse',
+              url: job.absolute_url,
+              company: companyName,
+              title: job.title,
+              scrapedAt: now,
+            },
+          }),
+          reasons: [
+            {
+              rule: 'greenhouse.jdSchema',
+              severity: 'hard',
+              pass: false,
+              detail: message,
+            },
+          ],
         });
       }
     }
 
-    return jobs;
+    return { jobs, dropped };
   }
 }
 
