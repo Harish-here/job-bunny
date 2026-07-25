@@ -92,9 +92,22 @@ TDD `main.ts` dispatch + each command against the wired fakes: `run` (stage orde
 `jobbunny doctor` green → `jobbunny run --profile rajni` end-to-end (live Chrome + claude-cli + scratch Notion DB) → funnel sane, digest received. Fix-forward anything found; this is the phase's real gate. Update `main-v2.md` (P8 core ✅).
 
 ### Task 7: Parity + cutover (own PR: `chore/v2-cutover`; each step needs explicit user go)
+
+> **Carry-forward discovered in Task 7 — `ctx.storage` rooting.** `wire()` builds
+> `new FsStorage(root)` where `root` is the **repo root**, not `profiles/<p>/data`,
+> because `loadInventory` reads the *shared, repo-root* `page_inventory/<page>.json`
+> through the same storage handle (`src/cli/wire.ts:377`). But every per-profile
+> stage artifact goes through that handle too with a bare relative key —
+> `cache/entries.json`, `registry/companies.json`, `registry/companies_seen.json`,
+> `structure/{table,passthrough,decisions,decisions.partial}.json`. So they land in
+> the **repo root** and **two profiles would share one cache/registry**. Harmless
+> today only because no v2 run has ever executed end-to-end (Task 6 never ran), so
+> nothing is on disk to migrate. Fixing it needs either two storage handles (shared
+> repo-root vs per-profile) or a profile-prefix convention — cross-cutting across
+> every stage, so **deferred to P9**, not patched inside Task 7.
 - [ ] Migrate real profiles with `--write` after user reviews dry-run diffs.
-- [ ] Add `--dry-run` flag to `sync` stage (would-write set → `runs/<date>/sync_dryrun.json`, no Notion writes).
-- [ ] ≥3 consecutive days: scheduled v0 runs as normal; manual/parallel v2 runs with `--dry-run`; diff `sync_dryrun.json` vs v0's actual writes (v0 `cache.json` delta) — divergences fixed or explicitly accepted in the runbook.
-- [ ] Write `docs/superpowers/specs/2026-XX-XX-cutover-runbook.md`: diffs observed, accepted divergences, rollback = `node scripts/ops/schedule.js` reinstall from `main`.
-- [ ] Cutover: `jobbunny schedule install` replaces v0 launchd jobs. v0 stays untouched on disk for the ≥7-day soak (P9 gate).
+- [x] **✅ DONE** — `--dry-run` flag on `sync`, commit `3f4b902`. `jobbunny run --profile <p> --dry-run` skips `connector.syncJobs` entirely and writes the would-write set to `profiles/<p>/data/runs/<date>/sync_dryrun.json`; jobs/dropped pass through untouched and the digest carries a `⚠️ DRY RUN` banner. **Two decisions:** (a) the artifact records *which* jobs would be written (`id/company/title/url/city?/score?/verdict?`, `verdict` ← `evaluation.excitement`), **not** the exact Notion property payload — that mapping lives in `adapters/db/notion/sync.ts` and is deliberately not duplicated; (b) the path is spelled profile-first because **`ctx.storage` is rooted at the REPO root, not the profile data dir** (see carry-forward below).
+- [~] **WAIVED by the user 2026-07-25** ("don't worry about v0 runs"). The ≥3-day v0-vs-v2 dry-run diff soak was not run. Risk left un-retired: v2 has never completed an end-to-end run against real data, so a filter/dedup/rank divergence vs v0 would first surface as wrong rows in production Notion. Recorded in the runbook.
+- [ ] Write `docs/superpowers/specs/2026-07-25-v2-cutover-runbook.md`: diffs observed, accepted divergences, rollback = `node scripts/ops/schedule.js` reinstall from `main`.
+- [ ] Cutover: `jobbunny schedule install`, **then explicitly remove v0's launchd jobs**. ⚠️ **This line was wrong as originally written** — install does *not* replace v0's jobs. The labels don't collide (v0 `com.jobbunny.run.<HHMM>` per `scripts/ops/schedule.js:108`; v2 `com.jobbunny.<HHMM>` per `src/adapters/scheduler/launchd/plist.ts:176`) and v2's stale-plist reconcile matches `/^com\.jobbunny\.(\d{4})\.plist$/` (`launchd.ts:42`), which `com.jobbunny.run.0700.plist` fails. Left alone **both fire: double run, double digest.** Removal procedure is §5 step 3 of the runbook. v0's *code* stays untouched on disk for the ≥7-day soak (P9 gate); only its launchd jobs go.
 - [ ] Update `main-v2.md` (P8 ✅, soak start date). PR.
