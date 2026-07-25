@@ -7,7 +7,7 @@
  *
  * Three independent things live here:
  *  - Config loading (`loadPipelineConfig`/`loadFilterConfig`): reads
- *    `profiles/<name>/profile.json` / `filter_config.json`, parses, and
+ *    `profiles/<name>/profile.json` / `filter.json`, parses, and
  *    validates against the core schemas. This is fail-loud config, NOT a
  *    doctor check — a missing/invalid `profile.json` throws immediately
  *    (mirrors `ops/doctor/aggregate.ts`'s `profileParsesCheck`, which
@@ -135,7 +135,7 @@ export async function loadPipelineConfig(
   return PipelineConfigSchema.parse(JSON.parse(raw));
 }
 
-/** Reads + validates `profiles/<name>/filter_config.json`. The file is
+/** Reads + validates `profiles/<name>/filter.json`. The file is
  * optional (missing ⇒ `undefined`); present-but-invalid still throws —
  * this isn't a doctor check, so it never soft-fails. */
 export async function loadFilterConfig(
@@ -143,12 +143,7 @@ export async function loadFilterConfig(
   deps: ConfigLoaderDeps = {},
 ): Promise<FilterConfig | undefined> {
   const readFile = resolveReadFile(deps);
-  const filePath = path.join(
-    resolveRoot(deps),
-    'profiles',
-    profileName,
-    'filter_config.json',
-  );
+  const filePath = path.join(resolveRoot(deps), 'profiles', profileName, 'filter.json');
   let raw: string;
   try {
     raw = await readFile(filePath);
@@ -344,7 +339,7 @@ async function buildLanes(config: PipelineConfig, deps: LiveLaneDeps): Promise<L
 async function buildLinkedInLane(deps: LiveLaneDeps): Promise<LinkedInLane> {
   if (!deps.filterCfg) {
     throw new Error(
-      `linkedin lane requires profiles/${deps.profileName}/filter_config.json (a FilterConfig)`,
+      `linkedin lane requires profiles/${deps.profileName}/filter.json (a FilterConfig)`,
     );
   }
   const searchUrlsPath = path.join(

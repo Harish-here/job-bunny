@@ -104,19 +104,19 @@ test('profileParsesCheck: never throws', async () => {
 
 // --- filterParsesCheck ---
 
-test('filterParsesCheck: ok on valid filter_config.json matching the schema', async () => {
+test('filterParsesCheck: ok on valid filter.json matching the schema', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
     root: '/repo',
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/filter_config.json': VALID_FILTER_JSON,
+      '/repo/profiles/rajni/filter.json': VALID_FILTER_JSON,
     }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'ok');
 });
 
-test('filterParsesCheck: warn on missing filter_config.json (optional)', async () => {
+test('filterParsesCheck: warn on missing filter.json (optional)', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
     root: '/repo',
@@ -130,7 +130,7 @@ test('filterParsesCheck: red on malformed JSON', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
     root: '/repo',
-    readFile: fakeReadFile({ '/repo/profiles/rajni/filter_config.json': '{ nope' }),
+    readFile: fakeReadFile({ '/repo/profiles/rajni/filter.json': '{ nope' }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'red');
@@ -141,7 +141,7 @@ test('filterParsesCheck: red on schema-mismatch', async () => {
     profileName: 'rajni',
     root: '/repo',
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/filter_config.json': JSON.stringify({
+      '/repo/profiles/rajni/filter.json': JSON.stringify({
         locations: [{ city: 'X', workTypes: ['not-a-worktype'] }],
       }),
     }),

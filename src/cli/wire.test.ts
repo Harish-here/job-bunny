@@ -267,11 +267,11 @@ const VALID_FILTER_JSON = JSON.stringify({
   locations: [{ city: 'Chennai', country: 'India', workTypes: ['onsite'] }],
 });
 
-test('loadFilterConfig: parses a valid filter_config.json', async () => {
+test('loadFilterConfig: parses a valid filter.json', async () => {
   const filterCfg = await loadFilterConfig('rajni', {
     root: '/repo',
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/filter_config.json': VALID_FILTER_JSON,
+      '/repo/profiles/rajni/filter.json': VALID_FILTER_JSON,
     }),
   });
 
@@ -280,7 +280,7 @@ test('loadFilterConfig: parses a valid filter_config.json', async () => {
   ]);
 });
 
-test('loadFilterConfig: returns undefined when filter_config.json is missing', async () => {
+test('loadFilterConfig: returns undefined when filter.json is missing', async () => {
   const filterCfg = await loadFilterConfig('rajni', {
     root: '/repo',
     readFile: fakeReadFile({}),
@@ -289,12 +289,12 @@ test('loadFilterConfig: returns undefined when filter_config.json is missing', a
   assert.equal(filterCfg, undefined);
 });
 
-test('loadFilterConfig: throws loudly when filter_config.json fails schema validation', async () => {
+test('loadFilterConfig: throws loudly when filter.json fails schema validation', async () => {
   await assert.rejects(() =>
     loadFilterConfig('rajni', {
       root: '/repo',
       readFile: fakeReadFile({
-        '/repo/profiles/rajni/filter_config.json': JSON.stringify({
+        '/repo/profiles/rajni/filter.json': JSON.stringify({
           locations: [{ city: '' }],
         }),
       }),
@@ -305,7 +305,7 @@ test('loadFilterConfig: throws loudly when filter_config.json fails schema valid
 // --- wire() ---
 
 // Deliberately lane-less (unlike VALID_PROFILE_JSON): `linkedin`'s live
-// construction needs a `filter_config.json`/`search_urls.md` this test
+// construction needs a `filter.json`/`search_urls.md` this test
 // doesn't provide, and that's not what's under test here — this test only
 // exercises the missing-`NOTION_TOKEN` swallow behavior.
 const NOTION_ONLY_PROFILE_JSON = JSON.stringify({
@@ -480,7 +480,7 @@ test('wire: linkedin lane requires a FilterConfig, throws a clear error when abs
 
   await assert.rejects(
     () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
-    /filter_config/,
+    /filter/,
   );
 });
 
@@ -506,7 +506,7 @@ test('wire: missing NOTION_TOKEN still resolves wire(), but the live connector r
   }
 });
 
-test('wire: filter defaults to parsed-{} FilterConfig when filter_config.json is absent (no rule drops anything)', async () => {
+test('wire: filter defaults to parsed-{} FilterConfig when filter.json is absent (no rule drops anything)', async () => {
   const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
   const filterStage = result.stages.find((s) => s.name === 'filter');
   assert.ok(filterStage);
@@ -553,10 +553,10 @@ test('wire: existing checks behavior is unchanged alongside the live ctx/stages/
 // per-page `Inventory` via `loadInventory(storage, page)`, and `storage` is
 // always a real `FsStorage(root)` inside `wire()` — there is no injectable
 // Storage seam for the live composition path (only `readFile`/`root`, used
-// above for profile.json/filter_config.json/search_urls.md). So this test
+// above for profile.json/filter.json/search_urls.md). So this test
 // uses a real temp directory as `root` and writes a real
 // `page_inventory/<page>.json` file for `FsStorage` to read, while still
-// routing profile.json/filter_config.json/search_urls.md through the same
+// routing profile.json/filter.json/search_urls.md through the same
 // injected `readFile` seam every other test in this file uses.
 function validInventoryJson(page: string): string {
   return JSON.stringify({
@@ -600,7 +600,7 @@ test('wire: linkedin lane builds successfully end to end (search_urls.md -> pars
     ].join('\n');
     const readFile = fakeReadFile({
       [join(root, 'profiles', 'rajni', 'profile.json')]: profileJson,
-      [join(root, 'profiles', 'rajni', 'filter_config.json')]: JSON.stringify({}),
+      [join(root, 'profiles', 'rajni', 'filter.json')]: JSON.stringify({}),
       [join(root, 'profiles', 'rajni', 'search_urls.md')]: searchUrlsMd,
     });
 

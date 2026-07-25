@@ -4,6 +4,9 @@
   "description": "Personal job-search companion — aggregates LinkedIn jobs daily, filters/ranks against your profile, syncs to Notion.",
   "type": "module",
   "private": true,
+  "bin": {
+    "jobbunny": "src/cli/main.ts"
+  },
   "engines": {
     "node": ">=24"
   },

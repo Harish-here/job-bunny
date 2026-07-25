@@ -12,7 +12,7 @@ import type {
 /**
  * ops/doctor/aggregate.ts (P8) — the three profile/config/env "core" doctor
  * checks (no adapter access — inputs are `profiles/<name>/profile.json`,
- * `profiles/<name>/filter_config.json`, and `process.env`) plus the
+ * `profiles/<name>/filter.json`, and `process.env`) plus the
  * generic `runChecks` aggregator that any set of `DoctorCheck`s (core +
  * adapter-contributed, wired in by the caller) is run through.
  *
@@ -120,7 +120,7 @@ export function profileParsesCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
-/** filterParsesCheck — `profiles/<name>/filter_config.json` is optional
+/** filterParsesCheck — `profiles/<name>/filter.json` is optional
  * (missing ⇒ warn), but if present it must validate against
  * `FilterConfigSchema` (parse/schema failure ⇒ red). */
 export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
@@ -130,7 +130,7 @@ export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
     resolveRoot(opts),
     'profiles',
     opts.profileName,
-    'filter_config.json',
+    'filter.json',
   );
   return {
     name,
@@ -143,13 +143,13 @@ export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
           return {
             check: name,
             status: 'warn',
-            detail: `filter_config.json not found at ${filePath} (optional)`,
+            detail: `filter.json not found at ${filePath} (optional)`,
           };
         }
         return {
           check: name,
           status: 'red',
-          detail: `could not read filter_config.json: ${errorMessage(err)}`,
+          detail: `could not read filter.json: ${errorMessage(err)}`,
         };
       }
       let parsed: unknown;
@@ -159,7 +159,7 @@ export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
         return {
           check: name,
           status: 'red',
-          detail: `filter_config.json is not valid JSON: ${errorMessage(err)}`,
+          detail: `filter.json is not valid JSON: ${errorMessage(err)}`,
         };
       }
       const result = FilterConfigSchema.safeParse(parsed);
@@ -167,13 +167,13 @@ export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
         return {
           check: name,
           status: 'red',
-          detail: `filter_config.json does not match the filter config schema: ${result.error.message}`,
+          detail: `filter.json does not match the filter config schema: ${result.error.message}`,
         };
       }
       return {
         check: name,
         status: 'ok',
-        detail: 'filter_config.json parses and matches the filter config schema',
+        detail: 'filter.json parses and matches the filter config schema',
       };
     },
   };

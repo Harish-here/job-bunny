@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * main.ts (P8) — the `jobbunny` CLI entry point: parses argv into a
  * command name + options and dispatches to the registered command. Holds
@@ -12,6 +13,8 @@
  * `process.exitCode`, so `main` itself is safe to call from a test without
  * side effects on the real process.
  */
+import { realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { doctorCommand } from './commands/doctor.ts';
 import { runCommand } from './commands/run.ts';
@@ -81,7 +84,12 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
 }
 
 function isMain(): boolean {
-  return import.meta.url === `file://${process.argv[1]}`;
+  try {
+    if (!process.argv[1]) return false;
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
 }
 
 if (isMain()) {
