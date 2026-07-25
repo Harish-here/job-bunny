@@ -109,5 +109,44 @@ TDD `main.ts` dispatch + each command against the wired fakes: `run` (stage orde
 - [x] **✅ DONE** — `--dry-run` flag on `sync`, commit `3f4b902`. `jobbunny run --profile <p> --dry-run` skips `connector.syncJobs` entirely and writes the would-write set to `profiles/<p>/data/runs/<date>/sync_dryrun.json`; jobs/dropped pass through untouched and the digest carries a `⚠️ DRY RUN` banner. **Two decisions:** (a) the artifact records *which* jobs would be written (`id/company/title/url/city?/score?/verdict?`, `verdict` ← `evaluation.excitement`), **not** the exact Notion property payload — that mapping lives in `adapters/db/notion/sync.ts` and is deliberately not duplicated; (b) the path is spelled profile-first because **`ctx.storage` is rooted at the REPO root, not the profile data dir** (see carry-forward below).
 - [~] **WAIVED by the user 2026-07-25** ("don't worry about v0 runs"). The ≥3-day v0-vs-v2 dry-run diff soak was not run. Risk left un-retired: v2 has never completed an end-to-end run against real data, so a filter/dedup/rank divergence vs v0 would first surface as wrong rows in production Notion. Recorded in the runbook.
 - [ ] Write `docs/superpowers/specs/2026-07-25-v2-cutover-runbook.md`: diffs observed, accepted divergences, rollback = `node scripts/ops/schedule.js` reinstall from `main`.
+> ## 🛑 CUTOVER BLOCKED — first end-to-end v2 run, 2026-07-25 (`harish`, `--dry-run`)
+>
+> The full-pipeline dry run **exited 0 and reported `outcome: passed`, but did
+> nothing**: every stage `0 -> 0`, `sync_dryrun.json` `count: 0`. Two defects,
+> both of which would have shipped silently had the launchd cutover gone first.
+>
+> **Blocker 1 — LinkedIn farm harvests zero cards, silently, and passes.**
+> `farm` burned 59.9s across all 21 of harish's search URLs, captured 0 jobs,
+> emitted 0 `DroppedRecord`s, and logged **nothing** (`run.log` holds 4 lines
+> total: reconcile, structure ×2, the dry-run banner). `lanes/linkedin/extract_resume.json`
+> shows all 21 URLs `markDone` with capture count `0`. Root cause: `LinkedInLane.source()`
+> does `page.goto(url)` and calls `harvestCards` **immediately** — there is no
+> bounded wait for the card-list selector to attach, so the harvest script reads a
+> still-hydrating SPA DOM. `buildHarvestScript` then does
+> `listEl ? listEl.querySelectorAll(cardSel) : []` (`harvest.ts:66`) and returns
+> `[]` with no log and no throw; the lane's aggregate-failure guard only counts
+> URLs that **threw**, so 21/21 empty reads is not "shaped like a logout wall" to it.
+> v0 does not have this hole: `scripts/pipeline/extract/cards.js:35-46` `runAssertions`
+> waits (bounded) for each `must_exist` selector **and** `job_card` to attach, then
+> **throws** when `count < min_job_cards`. v2 ported neither the wait nor the
+> minimum-cards assertion. Fix = both, plus a zero-card read must produce a loud
+> signal rather than a clean `markDone`.
+>
+> **Blocker 2 — the `ctx.storage` rooting carry-forward is not cosmetic; it
+> silently disabled the ATS lanes.** The run created `cache/`, `lanes/`,
+> `registry/`, `structure/` **in the repo root** (all four now untracked there).
+> `source` read repo-root `registry/companies.json` — a **0-entry** list it had just
+> created — instead of the migrated `profiles/harish/data/registry/companies.json`
+> with its **27 curated companies**. Hence `source: 0 -> 0` in 3ms: Greenhouse and
+> Keka never probed anything. This is no longer safe to defer to P9 behind a soak;
+> it must be fixed before any real run.
+>
+> Reconcile is the one stage that genuinely worked: 46 entries rebuilt from live
+> Notion (first real end-to-end exercise of the P7 adapter against the API).
+>
+> **Consequence: `jobbunny schedule install` was NOT run and v0's launchd jobs were
+> NOT removed.** v0 remains the scheduled pipeline. Cutover stays blocked on both
+> fixes plus a dry run that produces non-zero counts.
+
 - [ ] Cutover: `jobbunny schedule install`, **then explicitly remove v0's launchd jobs**. ⚠️ **This line was wrong as originally written** — install does *not* replace v0's jobs. The labels don't collide (v0 `com.jobbunny.run.<HHMM>` per `scripts/ops/schedule.js:108`; v2 `com.jobbunny.<HHMM>` per `src/adapters/scheduler/launchd/plist.ts:176`) and v2's stale-plist reconcile matches `/^com\.jobbunny\.(\d{4})\.plist$/` (`launchd.ts:42`), which `com.jobbunny.run.0700.plist` fails. Left alone **both fire: double run, double digest.** Removal procedure is §5 step 3 of the runbook. v0's *code* stays untouched on disk for the ≥7-day soak (P9 gate); only its launchd jobs go.
 - [ ] Update `main-v2.md` (P8 ✅, soak start date). PR.
