@@ -10,8 +10,9 @@
  * before the env is guaranteed to be loaded.
  *
  * `NotifyEvent` already carries the final composed `text` (digest or
- * alert) — this class only transmits it; `format.ts` owns building digest
- * text.
+ * alert) — this class only transmits it; `ops/observability/digest.ts`
+ * owns building digest text (the `run` CLI command formats it there,
+ * outside the adapter layer).
  */
 import { z } from 'zod';
 import type { Notifier, NotifyEvent } from '../../../ports/notifier.ts';

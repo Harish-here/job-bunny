@@ -1,8 +1,16 @@
 /**
- * format.ts (P8 Task 1) — pure text-transform: builds the Telegram digest
- * text from a `RunResult`-shaped value (`ops/observability/result.ts`). No
- * I/O, no env — `telegram.ts` owns "how to send," this module owns "what
- * the text looks like."
+ * digest.ts (P8) — pure text-transform: builds the Telegram digest text
+ * from a `RunResult` (`ops/observability/result.ts`). No I/O, no env — the
+ * `run` CLI command builds the text here and hands it to `ctx.notify` as a
+ * plain string; `TelegramNotifier` (adapters/notify/telegram/telegram.ts)
+ * owns "how to send," this module owns "what the text looks like."
+ *
+ * Lives under `ops/` (not `adapters/notify/telegram/`, where it started)
+ * because its real consumer is the `run` CLI command, which — per the
+ * dependency-cruiser layering (`.dependency-cruiser.cjs`) — may import
+ * `ops/**` but never `adapters/**`. Takes `RunResult` directly rather than
+ * a shadow `DigestInput` type now that the formatter itself lives in
+ * `ops/**` alongside `RunResult`.
  *
  * Mirrors the v0 house style (`scripts/notify/telegram_format.js`): a single-line
  * `<statusIcon> Job Bunny — <profile>` banner (or `<statusIcon> Job Bunny` if
@@ -12,36 +20,14 @@
  * funnel data (`jobsIn`/`jobsOut`/`dropsByRule`) — no markdown-table parsing
  * needed since the input is already structured.
  *
- * `DigestInput` deliberately mirrors `RunResult`'s shape rather than
- * importing it: `RunResult` lives under `src/ops/`, which transitively
- * pulls in the pipeline layer's `StagePayload`, and dependency-cruiser's
- * `adapters-only-ports-core` rule bars any `src/adapters/**` module from
- * depending on `src/ops/**` — including type-only imports (see
- * `.dependency-cruiser.cjs`, which explicitly tracks those edges). Every
- * real `RunResult` is structurally assignable to `DigestInput`, so the
- * pipeline/wire layer (which is allowed to import `ops`) can pass its
- * `RunResult` straight through with no cast.
- *
  * Alerts (`NotifyEvent.kind === 'alert'`) are NOT digests: their text is
  * used verbatim by the caller, so this module owns only digest formatting.
  */
-
-export interface DigestInput {
-  profile: string;
-  date: string;
-  outcome: 'passed' | 'failed';
-  failedStage?: string;
-  stages: Array<{
-    name: string;
-    jobsIn: number;
-    jobsOut: number;
-    dropsByRule: Record<string, number>;
-  }>;
-}
+import type { RunResult } from './result.ts';
 
 const SEPARATOR = '────────────────';
 
-function funnelLine(stage: DigestInput['stages'][number]): string {
+function funnelLine(stage: RunResult['stages'][number]): string {
   const base = `  • ${stage.name}: ${stage.jobsIn} → ${stage.jobsOut}`;
   const drops = Object.entries(stage.dropsByRule);
   if (drops.length === 0) return base;
@@ -49,7 +35,7 @@ function funnelLine(stage: DigestInput['stages'][number]): string {
   return `${base} (dropped — ${breakdown})`;
 }
 
-export function formatDigest(result: DigestInput): string {
+export function formatDigest(result: RunResult): string {
   const passed = result.outcome === 'passed';
   const icon = passed ? '✅' : '🔴';
   const banner = `${icon} Job Bunny${result.profile ? ` — ${result.profile}` : ''}`;

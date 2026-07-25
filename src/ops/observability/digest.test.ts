@@ -1,20 +1,16 @@
 /**
- * format.test.ts — TDD for formatDigest: pure function of a RunResult-shaped
- * fixture, no I/O. Fixtures carry the extra `elapsedMs`/`attempts` fields a
- * real `RunResult` stage has (see `format.ts`'s header on why `DigestInput`
- * is a locally-declared structural subset rather than an import of the real
- * `RunResult`) to confirm the caller can pass a real `RunResult` straight
- * through with no cast.
+ * digest.test.ts — TDD for formatDigest: pure function of a `RunResult`,
+ * no I/O. Ported from the old `adapters/notify/telegram/format.test.ts`
+ * (moved alongside `digest.ts` per the P8 layering fix) — fixtures now
+ * construct real `RunResult` values directly instead of the deleted
+ * `DigestInput` shadow type.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { type DigestInput, formatDigest } from './format.ts';
+import { formatDigest } from './digest.ts';
+import type { RunResult } from './result.ts';
 
-type RunResultFixture = DigestInput & {
-  stages: Array<DigestInput['stages'][number] & { elapsedMs: number; attempts: number }>;
-};
-
-function passedResult(overrides: Partial<RunResultFixture> = {}): RunResultFixture {
+function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   return {
     profile: 'rajni',
     date: '2026-07-23',
