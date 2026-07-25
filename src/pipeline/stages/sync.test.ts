@@ -155,6 +155,83 @@ test('multiple jobs silently dropped by the connector each get exactly one Dropp
   }
 });
 
+// --- dry-run (P8 Task 7) ---
+
+test('dry-run: never calls connector.syncJobs', async () => {
+  const stage = makeSyncStage(
+    fakeConnector({
+      async syncJobs(): Promise<SyncedJD[]> {
+        throw new Error('syncJobs must not be called in dry-run mode');
+      },
+    }),
+    { dryRunPath: 'runs/2026-07-25/sync_dryrun.json' },
+  );
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
+
+  await assert.doesNotReject(() => stage.run(input, fakeCtx()));
+});
+
+test('dry-run: writes the would-write set at the given path with the right count and fields', async () => {
+  const written: Array<{ path: string; value: unknown }> = [];
+  const ctx: StageContext = {
+    ...fakeCtx(),
+    storage: {
+      async readJson() {
+        return undefined;
+      },
+      async writeJson(path: string, value: unknown) {
+        written.push({ path, value });
+      },
+    },
+  };
+  const stage = makeSyncStage(fakeConnector(), {
+    dryRunPath: 'runs/2026-07-25/sync_dryrun.json',
+  });
+  const input: StagePayload = { jobs: [fakeJob('li-1'), fakeJob('li-2')], dropped: [] };
+
+  await stage.run(input, ctx);
+
+  assert.equal(written.length, 1);
+  assert.equal(written[0]?.path, 'runs/2026-07-25/sync_dryrun.json');
+  const payload = written[0]?.value as {
+    generatedAt: string;
+    profile: string;
+    count: number;
+    jobs: Array<{ id: string; company: string; title: string; url: string }>;
+  };
+  assert.equal(payload.profile, 'rajni');
+  assert.equal(payload.count, 2);
+  assert.deepEqual(
+    payload.jobs.map((j) => j.id),
+    ['li-1', 'li-2'],
+  );
+  assert.equal(payload.jobs[0]?.company, 'Acme Corp');
+  assert.equal(payload.jobs[0]?.title, 'Frontend Engineer');
+  assert.ok(typeof payload.generatedAt === 'string' && payload.generatedAt.length > 0);
+});
+
+test('dry-run: returns input unchanged — same jobs, same dropped, no sync.failed drops', async () => {
+  const priorDrop = { jd: fakeJob('li-0'), reasons: [] };
+  const stage = makeSyncStage(fakeConnector(), {
+    dryRunPath: 'runs/2026-07-25/sync_dryrun.json',
+  });
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [priorDrop] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.equal(out.jobs, input.jobs);
+  assert.deepEqual(out.dropped, [priorDrop]);
+});
+
+test('non-dry-run path is unaffected when opts is omitted', async () => {
+  const stage = makeSyncStage(fakeConnector());
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.equal(out.jobs[0]?.sync?.pageId, 'page-li-1');
+});
+
 test('a non-SoftError connector rejection propagates loudly (not caught/re-wrapped here)', async () => {
   const stage = makeSyncStage(
     fakeConnector({

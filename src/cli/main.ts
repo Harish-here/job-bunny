@@ -37,6 +37,7 @@ export interface CommandOptions {
   profile?: string;
   resume?: boolean;
   headless?: boolean;
+  dryRun?: boolean;
   stage?: string;
   routine?: string;
   action?: string;
@@ -71,7 +72,7 @@ export interface MainDeps {
 const USAGE = [
   'usage: jobbunny <command> [options]',
   '',
-  '  run       --profile <name> [--resume] [--headless]',
+  '  run       --profile <name> [--resume] [--headless] [--dry-run]',
   '  doctor    --profile <name>',
   '  reconcile --profile <name>',
   '  stage <stage-name> --profile <name>',
@@ -123,7 +124,13 @@ const COMMAND_NAMES = new Set<string>([
 function buildOptions(
   command: CommandName,
   rest: string[],
-  values: { profile?: string; resume?: boolean; headless?: boolean; force?: boolean },
+  values: {
+    profile?: string;
+    resume?: boolean;
+    headless?: boolean;
+    force?: boolean;
+    'dry-run'?: boolean;
+  },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
   const needsProfile = (): { error: string } | undefined =>
@@ -136,6 +143,7 @@ function buildOptions(
           profile,
           resume: values.resume ?? false,
           headless: values.headless ?? false,
+          dryRun: values['dry-run'] ?? false,
         }
       );
     case 'doctor':
@@ -194,6 +202,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       resume: { type: 'boolean', default: false },
       headless: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
     },
   });
 

@@ -122,6 +122,70 @@ test('runCommand: pre-run routines always run before runPipeline is called', asy
   assert.equal(code, 0);
 });
 
+test('runCommand: --dry-run threads a syncDryRunPath keyed to the run date into wire()', async () => {
+  const notified: NotifyEvent[] = [];
+  const ctx = fakeCtx(notified);
+  let receivedOverrides: unknown;
+
+  const code = await runCommand(
+    { profile: 'rajni', dryRun: true },
+    {
+      wire: async (_profile, overrides) => {
+        receivedOverrides = overrides;
+        return { ctx, stages: FAKE_STAGES, routines: [], checks: [] };
+      },
+      runPipeline: async () => passedResult(),
+      now: () => new Date('2026-07-25T00:00:00Z'),
+      root: '/fake/root',
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual(receivedOverrides, {
+    syncDryRunPath: 'profiles/rajni/data/runs/2026-07-25/sync_dryrun.json',
+  });
+});
+
+test('runCommand: without --dry-run, wire() gets no overrides', async () => {
+  const notified: NotifyEvent[] = [];
+  const ctx = fakeCtx(notified);
+  let receivedOverrides: unknown = 'unset';
+
+  await runCommand(
+    { profile: 'rajni' },
+    {
+      wire: async (_profile, overrides) => {
+        receivedOverrides = overrides;
+        return { ctx, stages: FAKE_STAGES, routines: [], checks: [] };
+      },
+      runPipeline: async () => passedResult(),
+      now: () => new Date('2026-07-25T00:00:00Z'),
+      root: '/fake/root',
+    },
+  );
+
+  assert.equal(receivedOverrides, undefined);
+});
+
+test('runCommand: --dry-run makes the digest text reflect the dry run', async () => {
+  const notified: NotifyEvent[] = [];
+  const ctx = fakeCtx(notified);
+
+  await runCommand(
+    { profile: 'rajni', dryRun: true },
+    {
+      wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+      runPipeline: async () => passedResult(),
+      now: () => new Date('2026-07-25T00:00:00Z'),
+      root: '/fake/root',
+    },
+  );
+
+  assert.equal(notified.length, 1);
+  const text = (notified[0] as { text: string }).text;
+  assert.match(text, /DRY RUN/);
+});
+
 test('runCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);

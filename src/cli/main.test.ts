@@ -27,7 +27,32 @@ test('main: dispatches "run" to the injected run command with parsed options', a
     stderr: stderr.write,
   });
   assert.equal(code, 0);
-  assert.deepEqual(received, { profile: 'rajni', resume: false, headless: false });
+  assert.deepEqual(received, {
+    profile: 'rajni',
+    resume: false,
+    headless: false,
+    dryRun: false,
+  });
+});
+
+test('main: parses --dry-run for "run"', async () => {
+  let received: unknown;
+  const code = await main(['run', '--profile', 'rajni', '--dry-run'], {
+    commands: {
+      run: async (opts) => {
+        received = opts;
+        return 0;
+      },
+      doctor: async () => 0,
+    },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(received, {
+    profile: 'rajni',
+    resume: false,
+    headless: false,
+    dryRun: true,
+  });
 });
 
 test('main: dispatches "doctor" to the injected doctor command', async () => {
@@ -58,7 +83,12 @@ test('main: parses --resume and --headless flags', async () => {
     },
   });
   assert.equal(code, 0);
-  assert.deepEqual(received, { profile: 'rajni', resume: true, headless: true });
+  assert.deepEqual(received, {
+    profile: 'rajni',
+    resume: true,
+    headless: true,
+    dryRun: false,
+  });
 });
 
 test('main: an unknown command prints usage to stderr and returns 2', async () => {

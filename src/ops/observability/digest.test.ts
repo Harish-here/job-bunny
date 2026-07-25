@@ -85,3 +85,11 @@ test('formatDigest: handles zero stages without throwing', () => {
   const text = formatDigest(passedResult({ stages: [] }));
   assert.match(text, /✅ Job Bunny — rajni/);
 });
+
+test('formatDigest: dryRun option adds a loud DRY RUN line, absent by default', () => {
+  const plain = formatDigest(passedResult());
+  assert.doesNotMatch(plain, /DRY RUN/);
+
+  const dry = formatDigest(passedResult(), { dryRun: true });
+  assert.match(dry, /DRY RUN/);
+});

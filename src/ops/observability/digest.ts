@@ -35,12 +35,16 @@ function funnelLine(stage: RunResult['stages'][number]): string {
   return `${base} (dropped — ${breakdown})`;
 }
 
-export function formatDigest(result: RunResult): string {
+export function formatDigest(result: RunResult, opts: { dryRun?: boolean } = {}): string {
   const passed = result.outcome === 'passed';
   const icon = passed ? '✅' : '🔴';
   const banner = `${icon} Job Bunny${result.profile ? ` — ${result.profile}` : ''}`;
 
   const lines = [banner, SEPARATOR];
+
+  if (opts.dryRun) {
+    lines.push('⚠️ DRY RUN — sync stage did not write to Notion');
+  }
 
   if (!passed && result.failedStage) {
     lines.push(`Failed at stage: ${result.failedStage}`);

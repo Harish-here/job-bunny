@@ -34,10 +34,21 @@ export interface RunCommandOptions {
   profile: string;
   resume?: boolean;
   headless?: boolean;
+  /** P8 Task 7: computes the sync stage's would-write set without writing
+   * to Notion — threaded into `wire()` as `syncDryRunPath` once the run
+   * date is known, so the artifact lands alongside this run's other
+   * observability files. The path is spelled out profile-first because
+   * `ctx.storage` is rooted at the REPO root, not the profile data dir
+   * (it also serves the shared `page_inventory/`), so a bare
+   * `runs/<date>/…` would land in the repo root. */
+  dryRun?: boolean;
 }
 
 export interface RunDeps {
-  wire: (profileName: string) => Promise<WireResult>;
+  wire: (
+    profileName: string,
+    overrides?: Parameters<typeof defaultWire>[1],
+  ) => Promise<WireResult>;
   runPipeline: (
     stages: Array<StageDef<StagePayload, StagePayload>>,
     ctx: PipelineCtx,
@@ -63,9 +74,10 @@ async function runRoutines(routines: Routine[], when: Routine['when'], ctx: Pipe
   }
 }
 
-function funnelSummary(result: RunResult): string {
+function funnelSummary(result: RunResult, dryRun: boolean): string {
   const lines = [
-    `profile=${result.profile} date=${result.date} outcome=${result.outcome}`,
+    `profile=${result.profile} date=${result.date} outcome=${result.outcome}` +
+      (dryRun ? ' [DRY RUN — sync not written to Notion]' : ''),
   ];
   if (result.outcome === 'failed' && result.failedStage) {
     lines.push(`failed at: ${result.failedStage}`);
@@ -81,9 +93,17 @@ export async function runCommand(
   deps: Partial<RunDeps> = {},
 ): Promise<number> {
   const resolved: RunDeps = { ...defaultDeps(), ...deps };
-  const { ctx, stages, routines } = await resolved.wire(opts.profile);
 
   const date = resolved.now().toISOString().slice(0, 10);
+  const { ctx, stages, routines } = await resolved.wire(
+    opts.profile,
+    opts.dryRun
+      ? {
+          syncDryRunPath: `profiles/${opts.profile}/data/runs/${date}/sync_dryrun.json`,
+        }
+      : undefined,
+  );
+
   const folder = new RunFolder(
     join(resolved.root, 'profiles', opts.profile, 'data'),
     date,
@@ -102,9 +122,13 @@ export async function runCommand(
     await runRoutines(routines, 'post-sync', ctx);
   }
 
-  await ctx.notify({ kind: 'digest', profile: opts.profile, text: formatDigest(result) });
+  await ctx.notify({
+    kind: 'digest',
+    profile: opts.profile,
+    text: formatDigest(result, { dryRun: opts.dryRun ?? false }),
+  });
 
-  console.log(funnelSummary(result));
+  console.log(funnelSummary(result, opts.dryRun ?? false));
 
   return result.outcome === 'passed' ? 0 : 1;
 }

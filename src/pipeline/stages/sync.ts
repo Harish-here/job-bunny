@@ -30,15 +30,54 @@ import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
  * back), so a whole-stage retry can double-insert a page. Per-page failures
  * are already `SoftError`s handled inside the connector and don't need
  * stage-level retry at all.
+ *
+ * `opts.dryRunPath` (P8 Task 7) — when set, this stage NEVER calls
+ * `connector.syncJobs`: it computes the would-write set straight off
+ * `input.jobs` and writes it to `ctx.storage` at that path instead,
+ * returning `input` completely unchanged (same `jobs`, same `dropped` — no
+ * `sync.failed` drops, since nothing was actually attempted). The artifact
+ * captures WHICH jobs would be written (id/company/title/url/city/score/
+ * excitement, for diffing against v0's `cache.json` delta which keys on
+ * title+company+city) — it is NOT the exact Notion property payload; that
+ * mapping lives in `adapters/db/notion/sync.ts` and is deliberately not
+ * duplicated here.
  */
+export interface SyncStageOpts {
+  dryRunPath?: string;
+}
+
 export function makeSyncStage(
   connector: Connector,
+  opts: SyncStageOpts = {},
 ): StageDef<StagePayload, StagePayload> {
   return {
     name: 'sync',
     timeoutMs: 180_000,
     retries: 0,
     async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
+      if (opts.dryRunPath) {
+        const jobs = input.jobs.map((jd) => ({
+          id: jd.identity.id,
+          company: jd.identity.company,
+          title: jd.identity.title,
+          url: jd.identity.url,
+          city: jd.structured?.locations[0]?.city,
+          score: jd.evaluation?.score,
+          verdict: jd.evaluation?.excitement,
+        }));
+        await ctx.storage.writeJson(opts.dryRunPath, {
+          generatedAt: new Date().toISOString(),
+          profile: ctx.profile,
+          count: jobs.length,
+          jobs,
+        });
+        ctx.logger.info(
+          `DRY RUN — sync stage would have written ${jobs.length} job(s) to Notion; ` +
+            `wrote the would-write set to ${opts.dryRunPath} instead (no Notion writes performed)`,
+        );
+        return input;
+      }
+
       const synced = await connector.syncJobs(input.jobs, ctx);
       const syncedIds = new Set(synced.map((jd) => jd.identity.id));
       const failedDrops: DroppedRecord[] = input.jobs
