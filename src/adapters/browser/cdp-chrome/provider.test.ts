@@ -17,6 +17,24 @@ function fakeCtx(signal: AbortSignal = new AbortController().signal): RunContext
   return { profile: 'rajni', signal, logger: noopLogger, beat() {} };
 }
 
+/** A logger that records every error() call so tests can assert the
+ * underlying connect failure actually reached the log, not just the
+ * thrown Error's `cause`. */
+function capturingErrorLogger(): { logger: Logger; calls: Array<[string, unknown]> } {
+  const calls: Array<[string, unknown]> = [];
+  return {
+    calls,
+    logger: {
+      debug() {},
+      info() {},
+      warn() {},
+      error(msg, data) {
+        calls.push([msg, data]);
+      },
+    },
+  };
+}
+
 /** A fake page whose method behavior is fully controlled per-test — either
  * resolves immediately with a value, or hangs forever (never settles) to
  * exercise the deadline race. */
@@ -396,6 +414,69 @@ test('launch() rejects after connectMaxWaitMs when connect always fails, naming 
   assert.ok(elapsed < 2000, `expected rejection near the 20ms cap, took ${elapsed}ms`);
 });
 
+test('launch() logs the underlying connect error (message + cause) before giving up', async () => {
+  const underlying = new Error('browserType.connectOverCDP: Timeout 30000ms exceeded.');
+  const { logger, calls } = capturingErrorLogger();
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
+    connectRetryMs: 1,
+    connectMaxWaitMs: 20,
+    connect: async () => {
+      throw underlying;
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.launch({
+        profile: 'rajni',
+        signal: new AbortController().signal,
+        logger,
+        beat() {},
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.equal(err.cause, underlying);
+      return true;
+    },
+  );
+
+  const errorCall = calls.find(([msg]) => msg.includes('gave up connecting'));
+  assert.ok(errorCall, 'expected an error() log call about giving up');
+  const [, data] = errorCall as [string, Record<string, unknown>];
+  assert.equal(data.error, underlying.message);
+});
+
+// Defect: a single connect() attempt that hangs past playwright's own
+// internal timeout (observed: ~30s) must not be allowed to outlive
+// connectMaxWaitMs. Each attempt is raced against the remaining budget so
+// the configured cap bounds real wall-clock time, not just the
+// retry-after-the-fact decision.
+test('launch() enforces connectMaxWaitMs even when a single connect() attempt hangs past it', async () => {
+  const provider = new CdpChromeProvider({
+    launchChrome: fakeLauncher().launchChrome,
+    cdpReachable: async () => null,
+    connectRetryMs: 1,
+    connectMaxWaitMs: 50,
+    // Simulates playwright's connectOverCDP internal timeout (~30s in the
+    // real incident) — never resolves or rejects within the test's
+    // lifetime on its own.
+    connect: () => new Promise<CdpBrowser>(() => {}),
+  });
+
+  const start = Date.now();
+  await assert.rejects(
+    () => provider.launch(fakeCtx()),
+    /gave up connecting to Chrome CDP/,
+  );
+  const elapsed = Date.now() - start;
+
+  // Bounded well below the ~30s a real unraced hang would take — proves the
+  // per-attempt race, not just the outer retry loop, enforces the cap.
+  assert.ok(elapsed < 2000, `expected rejection near the 50ms cap, took ${elapsed}ms`);
+});
+
 test('launch() kills the spawned Chrome pid when connect gives up (no leak)', async () => {
   const killCalls: Array<{ pid: number | undefined; deps: KillDeps | undefined }> = [];
   const provider = new CdpChromeProvider({
@@ -554,6 +635,141 @@ test('launch() treats an unresolvable age (resolveListenerPid returns undefined)
 
   assert.deepEqual(killCalls, []);
   assert.equal(launcher.calls.length, 0);
+});
+
+test('close() is a no-op for a reused Chrome — never kills a process this run did not spawn', async () => {
+  // Regression test for the 2026-07-25 incident: reuse must not kill the
+  // user's own persistent, already-logged-in Chrome on close().
+  const launcher = fakeLauncher(7777);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555,
+    getProcessAgeMs: () => 60_000, // fresh — well under maxAgeMs
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    killEnv: {},
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.close();
+
+  assert.equal(
+    launcher.calls.length,
+    0,
+    'expected no spawn — Chrome was reachable and fresh',
+  );
+  assert.deepEqual(killCalls, [], 'expected close() not to kill a reused Chrome');
+});
+
+test('close() is a no-op for a stale-but-kept Chrome when recycleIfOld is false', async () => {
+  const launcher = fakeLauncher(7777);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555,
+    getProcessAgeMs: () => 25 * 60 * 60 * 1000,
+    recycleIfOld: false,
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    killEnv: {},
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.close();
+
+  assert.deepEqual(
+    killCalls,
+    [],
+    'expected close() not to kill a stale-but-kept Chrome (recycleIfOld: false)',
+  );
+});
+
+test('close() kills a fresh spawn (action launch) — this run owns that process', async () => {
+  const launcher = fakeLauncher(4242);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => null, // unreachable -> action 'launch'
+    resolveListenerPid: () => 4242,
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    killEnv: {},
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.close();
+
+  assert.deepEqual(
+    killCalls,
+    [4242],
+    'expected close() to kill a Chrome this run spawned',
+  );
+});
+
+test('close() kills the freshly-respawned Chrome after a recycle — this run owns that process', async () => {
+  const launcher = fakeLauncher(8888);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555, // the pre-recycle listener, then the post-spawn one
+    getProcessAgeMs: () => 25 * 60 * 60 * 1000, // stale -> action 'recycle'
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    killEnv: {},
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  killCalls.length = 0; // clear the recycle-time kill (pre-spawn); isolate close()'s own kill
+  await handle.close();
+
+  assert.deepEqual(
+    killCalls,
+    [5555],
+    'expected close() to kill the process this run respawned after recycling',
+  );
+});
+
+test('close() respects JOBBUNNY_KEEP_BROWSER=1 after a recycle-then-spawn (owned process, global override)', async () => {
+  const launcher = fakeLauncher(8888);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    resolveListenerPid: () => 5555,
+    getProcessAgeMs: () => 25 * 60 * 60 * 1000,
+    killEnv: { JOBBUNNY_KEEP_BROWSER: '1' },
+    killChrome: (pid, deps) => {
+      if (deps?.env?.JOBBUNNY_KEEP_BROWSER === '1') return false;
+      killCalls.push(pid);
+      return true;
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.close();
+
+  assert.deepEqual(
+    killCalls,
+    [],
+    'expected JOBBUNNY_KEEP_BROWSER=1 to suppress the kill even for an owned (recycled) process',
+  );
 });
 
 test('name is "cdp-chrome"', () => {

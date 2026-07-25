@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { sleep } from '../../../core/async/index.ts';
 import type {
   BrowserHandle,
   BrowserProvider,
@@ -49,6 +50,12 @@ import {
  *    session) — release the playwright-side reference and separately kill
  *    the OS process by resolved pid (killChrome), unless
  *    JOBBUNNY_KEEP_BROWSER=1.
+ *  - close() only ever kills a Chrome process THIS run spawned (action
+ *    launch, or recycle's kill-then-respawn). A reused instance (action
+ *    reuse, or a stale-but-not-recycled one) is the user's own persistent
+ *    session — close() drops the CDP connection reference and leaves it
+ *    running (2026-07-25 incident: a reuse run's close() killed the user's
+ *    logged-in Chrome mid-session).
  */
 
 /** Minimal playwright Page surface this adapter drives — narrow so fakes in
@@ -247,6 +254,12 @@ export class CdpChromeProvider implements BrowserProvider {
         this.resolveListenerPidFn,
         this.killChromeFn,
         this.killEnv,
+        // Neither branch here spawned Chrome — a bare reuse, or a
+        // recycle-eligible instance kept alive because recycleIfOld is
+        // false. This process attached to something already running and
+        // must not kill it on close() (2026-07-25 incident: reuse killed
+        // the user's own logged-in Chrome mid-session).
+        false,
       );
     }
 
@@ -286,6 +299,10 @@ export class CdpChromeProvider implements BrowserProvider {
       this.resolveListenerPidFn,
       this.killChromeFn,
       this.killEnv,
+      // This process just spawned (or recycled-then-spawned) the Chrome
+      // instance behind proc.pid — it owns the process and close() must
+      // kill it.
+      true,
     );
   }
 
@@ -296,9 +313,17 @@ export class CdpChromeProvider implements BrowserProvider {
    * and fails intermittently. Retries connect() on failure, delayed by
    * connectRetryMs between attempts, bounded by BOTH connectMaxWaitMs and
    * ctx.signal.
+   *
+   * Each individual connect() attempt is itself raced against the REMAINING
+   * slice of connectMaxWaitMs (2026-07-25 incident: a single connect() call
+   * hung on playwright's own internal ~30s connectOverCDP timeout — well
+   * past the configured 10s cap — because it was `await`ed unconditionally.
+   * The cap must bound total wall-clock time, not just decide whether to
+   * retry after the fact).
    */
   private async connectWithRetry(cdpUrl: string, ctx: RunContext): Promise<CdpBrowser> {
-    const deadline = Date.now() + this.connectMaxWaitMs;
+    const start = Date.now();
+    const deadline = start + this.connectMaxWaitMs;
     let lastError: unknown;
     while (true) {
       if (ctx.signal.aborted) {
@@ -307,11 +332,22 @@ export class CdpChromeProvider implements BrowserProvider {
         });
       }
       try {
-        return await this.connect(cdpUrl);
+        return await raceWithTimeout(this.connect(cdpUrl), deadline - Date.now());
       } catch (err) {
         lastError = err;
       }
       if (Date.now() >= deadline) {
+        const elapsedMs = Date.now() - start;
+        ctx.logger.error('cdp-chrome: gave up connecting to Chrome CDP', {
+          cdpUrl,
+          connectMaxWaitMs: this.connectMaxWaitMs,
+          elapsedMs,
+          error: lastError instanceof Error ? lastError.message : String(lastError),
+          cause:
+            lastError instanceof Error && lastError.cause !== undefined
+              ? String(lastError.cause)
+              : undefined,
+        });
         throw new Error(
           `gave up connecting to Chrome CDP at ${cdpUrl} after ${this.connectMaxWaitMs}ms`,
           { cause: lastError },
@@ -325,20 +361,28 @@ export class CdpChromeProvider implements BrowserProvider {
   }
 }
 
-/** Resolves after ms, or rejects immediately with signal.reason if the
- * signal is already aborted / aborts during the wait. */
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal.reason ?? new Error('aborted'));
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
+/**
+ * Races an in-flight promise against a timer of `ms` — used to enforce
+ * connectMaxWaitMs on a single connect() attempt (playwright's
+ * connectOverCDP has its own internal ~30s timeout that must never be
+ * allowed to outlive our configured cap). The timer is always cleared,
+ * whichever side settles first, so a losing timer can never keep the
+ * process alive or leak. `task` itself is left to settle on its own time —
+ * Promise.race attaches a handler to it, so a late rejection never surfaces
+ * as an unhandled rejection.
+ */
+function raceWithTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => {
+        reject(new Error(`connect attempt exceeded ${Math.max(ms, 0)}ms`));
+      },
+      Math.max(ms, 0),
+    );
+  });
+  return Promise.race([task, timeout]).finally(() => {
+    clearTimeout(timer);
   });
 }
 
@@ -358,6 +402,14 @@ class CdpChromeBrowserHandle implements BrowserHandle {
   >;
   private readonly killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>;
   private readonly killEnv: NodeJS.ProcessEnv | undefined;
+  /** True only when THIS process spawned the Chrome instance behind this
+   * handle (launch, or recycle's kill-then-respawn) — false when it merely
+   * attached to one already running (reuse, or a recycle-eligible instance
+   * kept alive because recycleIfOld is false). close() must only ever kill
+   * a process this run is responsible for; killing a reused Chrome tore
+   * down the user's own logged-in session out from under them
+   * (2026-07-25 incident). */
+  private readonly ownsProcess: boolean;
 
   constructor(
     cdpUrl: string,
@@ -368,6 +420,7 @@ class CdpChromeBrowserHandle implements BrowserHandle {
     resolveListenerPidFn: NonNullable<CdpChromeProviderDeps['resolveListenerPid']>,
     killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>,
     killEnv: NodeJS.ProcessEnv | undefined,
+    ownsProcess: boolean,
   ) {
     this.cdpUrl = cdpUrl;
     this.browser = browser;
@@ -377,6 +430,7 @@ class CdpChromeBrowserHandle implements BrowserHandle {
     this.resolveListenerPidFn = resolveListenerPidFn;
     this.killChromeFn = killChromeFn;
     this.killEnv = killEnv;
+    this.ownsProcess = ownsProcess;
   }
 
   async newPage(): Promise<PageHandle> {
@@ -406,6 +460,11 @@ class CdpChromeBrowserHandle implements BrowserHandle {
     // doc comment / scripts/lib/browser.js's disconnect() for why. Only the
     // OS-level process kill actually ends the session.
     //
+    // This handle didn't spawn Chrome (reuse, or a stale-but-kept instance)
+    // — it's the user's own long-running session, so close() only drops
+    // the CDP connection reference and leaves the OS process alone.
+    if (!this.ownsProcess) return;
+
     // Re-resolve the pid actually LISTENING on the port right now rather
     // than trusting whatever pid this handle was built with — that stored
     // pid can be a dead hand-off stub (see class doc comment) that no

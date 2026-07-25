@@ -76,10 +76,34 @@ export interface LaunchArgvOptions {
   userDataDir: string;
 }
 
-/** Builds the CDP launch argv — ported 1:1 from scripts/lib/browser.js's
- * spawn() call (--remote-debugging-port + --user-data-dir, nothing else). */
+/** Builds the CDP launch argv — ported from scripts/lib/browser.js's spawn()
+ * call (--remote-debugging-port + --user-data-dir), extended (2026-07-25
+ * incident) with flags that suppress session/tab restore and the
+ * crash-restore bubble on launch. A prior unclean exit left Chrome
+ * restoring its ENTIRE previous session on next launch — ~97 CDP targets,
+ * duplicate tabs, an invalidated extension retrying a failed fetch every
+ * ~1s, and tracker iframes — which is what blew the connectWithRetry
+ * timeout in provider.ts. None of these touch cookies, storage, or the
+ * user-data-dir itself — the persistent LinkedIn login in .chrome-debug/
+ * MUST survive a launch, only the leftover TABS/SESSION must not come
+ * back:
+ *  - --restore-last-session=false: don't reopen the previous session's tabs.
+ *  - --no-first-run: skip first-run UI/promo interstitials that would
+ *    otherwise open their own tab.
+ *  - --disable-session-crashed-bubble / --hide-crash-restore-bubble: suppress
+ *    the "Chrome didn't shut down correctly — Restore" infobar, which both
+ *    clutters the page and, if ever clicked/auto-accepted, would itself
+ *    restore the old session.
+ */
 export function buildLaunchArgv({ port, userDataDir }: LaunchArgvOptions): string[] {
-  return [`--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`];
+  return [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${userDataDir}`,
+    '--restore-last-session=false',
+    '--no-first-run',
+    '--disable-session-crashed-bubble',
+    '--hide-crash-restore-bubble',
+  ];
 }
 
 export interface LaunchChromeOptions {

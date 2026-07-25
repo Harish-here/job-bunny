@@ -40,12 +40,38 @@ test('resolveChromePath throws a clear error naming every path checked when none
   );
 });
 
-test('buildLaunchArgv sets --remote-debugging-port and --user-data-dir, nothing else', () => {
+test('buildLaunchArgv sets --remote-debugging-port, --user-data-dir, and the session-restore-suppression flags', () => {
   const argv = buildLaunchArgv({ port: 9222, userDataDir: '/repo/.chrome-debug' });
   assert.deepEqual(argv, [
     '--remote-debugging-port=9222',
     '--user-data-dir=/repo/.chrome-debug',
+    '--restore-last-session=false',
+    '--no-first-run',
+    '--disable-session-crashed-bubble',
+    '--hide-crash-restore-bubble',
   ]);
+});
+
+test('buildLaunchArgv never adds a flag that would destroy auth state (cookies/storage/profile/incognito)', () => {
+  const argv = buildLaunchArgv({ port: 9222, userDataDir: '/repo/.chrome-debug' });
+  const authDestroyingPatterns = [
+    /incognito/i,
+    /guest/i,
+    /disable-application-cache/i,
+    /clear-token-service/i,
+    /disk-cache-dir/i,
+    /--user-data-dir=(?!\/repo\/\.chrome-debug$)/i, // must be the real profile, not a throwaway
+  ];
+  for (const flag of argv) {
+    for (const pattern of authDestroyingPatterns) {
+      assert.ok(
+        !pattern.test(flag),
+        `flag "${flag}" looks auth-destroying (matched ${pattern})`,
+      );
+    }
+  }
+  // The real user-data-dir must still be present, untouched.
+  assert.ok(argv.includes('--user-data-dir=/repo/.chrome-debug'));
 });
 
 test('launchChrome resolves the chrome path, builds argv, spawns detached+unref, and returns the pid', () => {
@@ -66,6 +92,10 @@ test('launchChrome resolves the chrome path, builds argv, spawns detached+unref,
   assert.deepEqual(spawnCalls[0]?.args, [
     '--remote-debugging-port=9333',
     '--user-data-dir=/repo/.chrome-debug',
+    '--restore-last-session=false',
+    '--no-first-run',
+    '--disable-session-crashed-bubble',
+    '--hide-crash-restore-bubble',
   ]);
   assert.deepEqual(spawnCalls[0]?.options, { detached: true, stdio: 'ignore' });
 });
