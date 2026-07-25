@@ -1,6 +1,104 @@
 {
   "notion_db_id": "",
   "notion_parent_page_id": "",
-  "schedule": { "enabled": false, "time": "09:00" },
-  "notify": { "telegram": { "enabled": false, "chat_id": "" } }
+  "schedule": {
+    "enabled": false,
+    "time": "09:00",
+    "times": []
+  },
+  "notify": {
+    "telegram": {
+      "enabled": false,
+      "chat_id": ""
+    }
+  },
+  "lanes": [
+    "linkedin"
+  ],
+  "connector": "notion",
+  "notifiers": [],
+  "routines": [],
+  "settings": {
+    "notion": {
+      "dbId": "7eb638f2140e49e4bb7cef10c25950e2",
+      "dryRun": true
+    },
+    "source": {
+      "maxNewPerLane": 3
+    },
+    "linkedin": {
+      "maxCardsPerUrl": 3
+    },
+    "rank": {
+      "skills": {
+        "primary": [
+          "React",
+          "TypeScript",
+          "JavaScript",
+          "UI Architecture",
+          "Design Systems"
+        ],
+        "secondary": [
+          "Vue.js",
+          "Redux Toolkit",
+          "Storybook",
+          "Jest",
+          "Node.js"
+        ],
+        "primarySkillPoints": 1,
+        "secondarySkillPoints": 0.5,
+        "maxPoints": 40,
+        "denomMin": 3,
+        "denomMax": 8
+      },
+      "title": {
+        "domainKeywords": [
+          "frontend",
+          "front-end",
+          "ui",
+          "react",
+          "design systems",
+          "platform",
+          "web"
+        ],
+        "maxPoints": 15,
+        "neutralPoints": 8
+      },
+      "seniority": {
+        "targets": [
+          "Staff",
+          "Lead"
+        ],
+        "maxPoints": 15
+      },
+      "location": {
+        "homeCities": [
+          "Chennai",
+          "Bengaluru"
+        ],
+        "acceptableTimezones": [
+          "APAC"
+        ],
+        "borderlineTimezones": [
+          "EMEA"
+        ],
+        "bonus": 20,
+        "partial": 10
+      },
+      "yoe": {
+        "maxPoints": 10,
+        "neutralPoints": 5
+      },
+      "workTypePreference": {
+        "onsite": 1,
+        "hybrid": 1,
+        "remote": 1
+      },
+      "softVerdictPenalty": 5
+    },
+    "cleanup": {
+      "passedOlderThanDays": 7,
+      "untouchedOlderThanDays": 30
+    }
+  }
 }

@@ -1,0 +1,80 @@
+{
+  "title": {
+    "domain": {
+      "match": [
+        "frontend",
+        "front-end",
+        "ui",
+        "react",
+        "design systems",
+        "platform",
+        "web"
+      ],
+      "reject": [],
+      "severity": "hard"
+    },
+    "function": {
+      "match": [
+        "engineer",
+        "developer",
+        "architect"
+      ],
+      "reject": [
+        "manager",
+        "director",
+        "vp",
+        "vice president",
+        "analyst",
+        "qa",
+        "devops",
+        "data",
+        "recruiter"
+      ],
+      "severity": "hard"
+    },
+    "seniority": {
+      "match": [
+        "staff",
+        "lead",
+        "principal",
+        "architect",
+        "associate principal",
+        "technical lead",
+        "tech lead"
+      ],
+      "reject": [],
+      "severity": "hard"
+    }
+  },
+  "companies": {
+    "avoid": [
+      "Chargebee",
+      "Rocketlane"
+    ]
+  },
+  "locations": [
+    {
+      "city": "Chennai",
+      "country": "India",
+      "workTypes": [
+        "onsite",
+        "hybrid"
+      ]
+    },
+    {
+      "city": "Bengaluru",
+      "country": "India",
+      "workTypes": [
+        "onsite",
+        "hybrid"
+      ]
+    }
+  ],
+  "timezones": {
+    "accept": [
+      "APAC",
+      "EMEA"
+    ],
+    "severity": "hard"
+  }
+}
