@@ -33,6 +33,7 @@ import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
 import { reconcileCommand } from './commands/reconcile.ts';
+import { releaseCommand } from './commands/release.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
 import { scheduleCommand } from './commands/schedule.ts';
@@ -54,6 +55,9 @@ export interface CommandOptions {
   url?: string;
   label?: string;
   force?: boolean;
+  version?: string;
+  noMerge?: boolean;
+  yes?: boolean;
 }
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
@@ -67,7 +71,8 @@ export type CommandName =
   | 'schedule'
   | 'lane'
   | 'profile'
-  | 'setup';
+  | 'setup'
+  | 'release';
 
 export type CommandRegistry = Record<CommandName, CommandFn>;
 
@@ -93,6 +98,7 @@ const USAGE = [
   '  profile build --profile <name>',
   '  profile remove --profile <name> [--force]',
   '  setup --profile <name>',
+  '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
 ].join('\n');
 
 function defaultCommands(): CommandRegistry {
@@ -113,6 +119,13 @@ function defaultCommands(): CommandRegistry {
           })
         : profileBuildCommand({ profile: opts.profile ?? '' })) as CommandFn,
     setup: setupCommand as unknown as CommandFn,
+    release: (async (opts: CommandOptions) =>
+      releaseCommand({
+        version: opts.version ?? '',
+        dryRun: opts.dryRun ?? false,
+        noMerge: opts.noMerge ?? false,
+        yes: opts.yes ?? false,
+      })) as CommandFn,
   };
 }
 
@@ -126,6 +139,7 @@ const COMMAND_NAMES = new Set<string>([
   'lane',
   'profile',
   'setup',
+  'release',
 ]);
 
 /** Per-command argv → options translation. Returns the options object, or a
@@ -141,6 +155,8 @@ function buildOptions(
     force?: boolean;
     'dry-run'?: boolean;
     'run-cap-ms'?: string;
+    'no-merge'?: boolean;
+    yes?: boolean;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -209,6 +225,16 @@ function buildOptions(
       if (action === 'build') return needsProfile() ?? { action, profile };
       return needsProfile() ?? { action, profile, force: values.force ?? false };
     }
+    case 'release': {
+      const version = rest[0];
+      if (!version) return { error: 'missing version — expected X.Y.Z' };
+      return {
+        version,
+        dryRun: values['dry-run'] ?? false,
+        noMerge: values['no-merge'] ?? false,
+        yes: values.yes ?? false,
+      };
+    }
   }
 }
 
@@ -226,6 +252,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       force: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
       'run-cap-ms': { type: 'string' },
+      'no-merge': { type: 'boolean', default: false },
+      yes: { type: 'boolean', default: false },
     },
   });
 
