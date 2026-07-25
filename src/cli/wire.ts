@@ -172,7 +172,13 @@ export async function loadFilterConfig(
  * a throwaway fake object — `assembleAdapterChecks` never inspects it
  * itself, only hands it to whichever factory the config names. */
 export interface RuntimeDeps {
+  /** Repo-root-rooted. Inventories (`page_inventory/<page>.json`) are
+   * machine-shared, NOT per-profile — this handle exists to reach them and
+   * nothing else. Per-stage artifacts go through `profileStorage`. */
   storage: Storage;
+  /** Rooted at `profiles/<name>/data` — every per-profile artifact
+   * (cache, registry, structure, lane resume/capture state). */
+  profileStorage: Storage;
   /** `undefined` when `NotionApi` construction failed (e.g. `NOTION_TOKEN`
    * missing) — `wire()` swallows that throw so doctor assembly never
    * crashes; `coreChecks`' `envTokensCheck` already reports the missing
@@ -318,7 +324,10 @@ interface LiveLaneDeps {
   profileName: string;
   root: string;
   readFile: (path: string) => Promise<string>;
+  /** Repo-root — inventories only (see `RuntimeDeps.storage`). */
   storage: Storage;
+  /** `profiles/<name>/data` — the lane's own resume/capture state. */
+  profileStorage: Storage;
   filterCfg: FilterConfig | undefined;
   browser: CdpChromeProvider;
 }
@@ -376,7 +385,15 @@ async function buildLinkedInLane(deps: LiveLaneDeps): Promise<LinkedInLane> {
   const inventories = await Promise.all(
     pages.map((page) => loadInventory(deps.storage, page)),
   );
-  return new LinkedInLane(deps.browser, inventories, urls, deps.filterCfg, deps.storage);
+  // Inventories come off the shared repo-root handle above; the lane's own
+  // resume/capture state is per-profile and must NOT.
+  return new LinkedInLane(
+    deps.browser,
+    inventories,
+    urls,
+    deps.filterCfg,
+    deps.profileStorage,
+  );
 }
 
 /** `RegistryPolicy` defaults for `makeSourceStage`, overridable per-profile
@@ -459,10 +476,22 @@ export async function wire(
     notionApiForConnector = new NotionApi({ client: missingTokenNotionClient() });
   }
 
+  // TWO storage handles, deliberately. `page_inventory/<page>.json` is
+  // machine-shared at the repo root and is not per-profile, while every
+  // stage artifact (`cache/`, `registry/`, `structure/`, the LinkedIn lane's
+  // resume/capture state) IS. Rooting a single handle at the repo root — as
+  // this did until 2026-07-25 — put all of them in the repo root and made
+  // two profiles share one cache and one company registry. That is not
+  // cosmetic: the first real run read a 0-entry repo-root
+  // `registry/companies.json` it had just created instead of the profile's
+  // 27 curated companies, so the Greenhouse and Keka lanes probed nothing
+  // and the run still reported `passed`.
   const storage = new FsStorage(root);
+  const profileStorage = new FsStorage(path.join(root, 'profiles', profileName, 'data'));
 
   const deps: RuntimeDeps = {
     storage,
+    profileStorage,
     notionApi,
     browserReachable: defaultCdpReachable,
     cdpPort: DEFAULT_CDP_PORT,
@@ -493,7 +522,8 @@ export async function wire(
     profileName,
     root,
     readFile,
-    storage,
+    storage: deps.storage,
+    profileStorage: deps.profileStorage,
     filterCfg,
     browser,
   });
@@ -523,7 +553,7 @@ export async function wire(
     // hands THAT to `stage.run`, so this is never the beat a stage actually
     // calls.
     beat() {},
-    storage,
+    storage: profileStorage,
     config,
     ports,
     async notify(event) {

@@ -302,7 +302,9 @@ test('harvestCards passes a timeoutMs through to page.evaluate opts', async () =
   const page = fakePage({
     evaluate: async (_fn, opts) => {
       seenTimeout = (opts as { timeoutMs: number }).timeoutMs;
-      return [] as never;
+      return [
+        { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/1/' },
+      ] as never;
     },
   });
   await harvestCards(page, inv, fakeCtx(), { timeoutMs: 5000 });
@@ -338,7 +340,12 @@ test('harvestCards, for the componentkey inventory shape (no href), derives the 
 });
 
 test('harvestCards skips a card with neither a parseable href nor an idAttr, warning', async () => {
-  const inv = componentkeyInventory();
+  // minJobCards 0 — as the real linkedin__jobs-search-results inventory
+  // declares. Ending with zero cards IS the behavior under test here, so the
+  // min-cards assertion must not be what fires.
+  const inv = componentkeyInventory({
+    behaviors: { ...componentkeyInventory().behaviors, minJobCards: '0' },
+  });
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -364,7 +371,12 @@ test('harvestCards skips a card with neither a parseable href nor an idAttr, war
   const cards = await harvestCards(page, inv, ctx);
 
   assert.deepEqual(cards, []);
-  assert.equal(warnings.length, 1);
+  // Two warns now: the skip itself, plus harvestCards' "harvested 0 cards"
+  // (minJobCards 0 tolerates empty, but never silently). Assert on the skip.
+  const skipWarn = (warnings as Array<{ msg: string }>).filter((w) =>
+    /skipping card/.test(w.msg),
+  );
+  assert.equal(skipWarn.length, 1);
 });
 
 test('harvestCards skips a card with an idAttr but no url pattern and no href, warning (id resolved, url not)', async () => {
@@ -372,6 +384,9 @@ test('harvestCards skips a card with an idAttr but no url pattern and no href, w
     behaviors: {
       jobCardIdAttr: 'componentkey',
       jobCardIdAttrPrefix: 'job-card-component-ref-',
+      // Ending with zero cards IS the behavior under test — the min-cards
+      // assertion must not be what fires.
+      minJobCards: '0',
     },
   });
   const warnings: unknown[] = [];
@@ -399,7 +414,12 @@ test('harvestCards skips a card with an idAttr but no url pattern and no href, w
   const cards = await harvestCards(page, inv, ctx);
 
   assert.deepEqual(cards, []);
-  assert.equal(warnings.length, 1);
+  // Two warns now: the skip itself, plus harvestCards' "harvested 0 cards"
+  // (minJobCards 0 tolerates empty, but never silently). Assert on the skip.
+  const skipWarn = (warnings as Array<{ msg: string }>).filter((w) =>
+    /skipping card/.test(w.msg),
+  );
+  assert.equal(skipWarn.length, 1);
 });
 
 test('harvestCards prefers an href-derived id over the idAttr when both are present', async () => {
@@ -469,4 +489,106 @@ test('gateCards keeps a card when no rule fails (empty FilterConfig ⇒ everythi
   const result = gateCards([card], cfg);
   assert.deepEqual(result.pass, [card]);
   assert.deepEqual(result.dropped, []);
+});
+
+// --- harvest readiness: the wait + the min-cards assertion ---
+//
+// Regression tests, 2026-07-25. The first real v2 run harvested ZERO cards
+// from all 21 of harish's search URLs, logged nothing, threw nothing, marked
+// every URL done, and reported `outcome: passed`. Cause: harvestCards ran its
+// in-page read immediately after page.goto(), so it read a still-hydrating SPA
+// DOM, and `listEl ? ... : []` returned [] silently. v0 never had this hole —
+// scripts/pipeline/extract/cards.js's runAssertions waits (bounded) for
+// must_exist and job_card to attach and THROWS on count < min_job_cards. Both
+// values already live in the inventory (behaviors.mustExist / minJobCards);
+// v2 simply ignored them.
+
+test('harvestCards waits for the mustExist selector before reading the DOM', async () => {
+  const inv = fixtureInventory({
+    behaviors: { mustExist: '.scaffold-layout__list', minJobCards: '1' },
+  });
+  const waited: string[] = [];
+  let evaluatedAfterWait = false;
+  const page = fakePage({
+    waitFor: async (selector: string) => {
+      waited.push(selector);
+    },
+    evaluate: async () => {
+      evaluatedAfterWait = waited.length > 0;
+      return [
+        { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/1/' },
+      ] as never;
+    },
+  });
+
+  await harvestCards(page, inv, fakeCtx());
+
+  assert.deepEqual(waited, ['.scaffold-layout__list']);
+  assert.equal(evaluatedAfterWait, true);
+});
+
+test('harvestCards falls back to the cardList selector when no mustExist behavior is declared', async () => {
+  const inv = fixtureInventory();
+  const waited: string[] = [];
+  const page = fakePage({
+    waitFor: async (selector: string) => {
+      waited.push(selector);
+    },
+    evaluate: async () =>
+      [
+        { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/1/' },
+      ] as never,
+  });
+
+  await harvestCards(page, inv, fakeCtx());
+
+  assert.deepEqual(waited, ['.scaffold-layout__list']);
+});
+
+test('harvestCards throws when the mustExist selector never attaches', async () => {
+  const inv = fixtureInventory();
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, inv, fakeCtx()),
+    /never attached|timeout waiting for selector/,
+  );
+});
+
+test('harvestCards throws when the page yields fewer cards than minJobCards', async () => {
+  const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
+  const page = fakePage({ evaluate: async () => [] as never });
+
+  await assert.rejects(() => harvestCards(page, inv, fakeCtx()), /0 card\(s\).*min/);
+});
+
+test('harvestCards tolerates an empty page when minJobCards is 0, but says so loudly', async () => {
+  const inv = componentkeyInventory({
+    behaviors: {
+      ...componentkeyInventory().behaviors,
+      minJobCards: '0',
+    },
+  });
+  const warnings: string[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      debug() {},
+      info() {},
+      warn(msg: string) {
+        warnings.push(msg);
+      },
+      error() {},
+    },
+  });
+  const page = fakePage({ evaluate: async () => [] as never });
+
+  const cards = await harvestCards(page, inv, ctx);
+
+  assert.deepEqual(cards, []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? '', /harvested 0 cards/);
 });

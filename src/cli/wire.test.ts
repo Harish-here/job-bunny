@@ -380,6 +380,22 @@ test('wire: returns a live ctx with config/ports/storage/notify populated', asyn
   assert.equal(typeof result.ctx.notify, 'function');
 });
 
+// Regression pin, 2026-07-25: `ctx.storage` was rooted at the REPO root
+// alongside the shared `page_inventory/` handle, so every per-stage artifact
+// (`cache/`, `registry/`, `structure/`) landed in the repo root and two
+// profiles shared one cache and one company registry. The first real run
+// therefore read a 0-entry `registry/companies.json` it had just created
+// instead of the profile's own, silently sourcing nothing from the ATS lanes
+// while still reporting `passed`. The two roots must stay distinct.
+test('wire: ctx.storage is rooted at the profile data dir, not the repo root', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+  assert.equal(
+    (result.ctx.storage as unknown as { rootDir: string }).rootDir,
+    '/repo/profiles/rajni/data',
+  );
+});
+
 test('wire: stages is the 10 job-flow stages in spec order', async () => {
   const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
 

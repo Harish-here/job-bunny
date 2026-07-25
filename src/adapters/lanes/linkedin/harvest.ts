@@ -41,6 +41,9 @@ interface RawCard {
 }
 
 const DEFAULT_HARVEST_TIMEOUT_MS = 15_000;
+/** Bounded wait for the results list to attach before the in-page read.
+ * Matches v0's DEFAULT_CALL_TIMEOUT_MS in scripts/pipeline/extract/cards.js. */
+const DEFAULT_READY_TIMEOUT_MS = 30_000;
 const JOB_ID_RE = /\/jobs\/view\/(\d+)/;
 const LINKEDIN_ORIGIN = 'https://www.linkedin.com';
 
@@ -121,8 +124,28 @@ export async function harvestCards(
   page: PageHandle,
   inv: Inventory,
   ctx: RunContext,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; readyTimeoutMs?: number } = {},
 ): Promise<HarvestedCard[]> {
+  // Readiness gate (v0 parity: runAssertions in
+  // scripts/pipeline/extract/cards.js). LinkedIn's results page is an SPA —
+  // goto() resolves long before the list hydrates, and the in-page script
+  // below returns [] for a missing list rather than throwing. Without this
+  // wait, a healthy page reads as zero cards, the lane marks the url done,
+  // and the whole run reports `passed` having captured nothing (observed on
+  // all 21 urls, 2026-07-25). Failing to attach is this url's failure — it
+  // throws, so the lane counts it and retries next fire.
+  const readySelector = inv.behaviors.mustExist || inv.selectors.cardList;
+  try {
+    await page.waitFor(readySelector, {
+      timeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `harvest: results list never attached (selector "${readySelector}"): ${message}`,
+    );
+  }
+
   const script = buildHarvestScript(inv);
   const raw = await page.evaluate<RawCard[]>(script, {
     timeoutMs: opts.timeoutMs ?? DEFAULT_HARVEST_TIMEOUT_MS,
@@ -161,6 +184,29 @@ export async function harvestCards(
       location: item.location || undefined,
       url,
       id: `li-${id}`,
+    });
+  }
+
+  // Minimum-cards assertion (v0 parity: `count < min_job_cards` throws).
+  // A page that attached its list but produced nothing is a broken selector
+  // or a logout wall, not an empty search — loud, so the lane counts the url
+  // as failed instead of marking it done with zero captures.
+  const minJobCards = Number.parseInt(inv.behaviors.minJobCards ?? '1', 10);
+  const min = Number.isNaN(minJobCards) ? 1 : minJobCards;
+  if (min > 0 && cards.length < min) {
+    throw new Error(
+      `harvest: ${cards.length} card(s) on "${inv.page}" is below min ${min} — ` +
+        'broken selector or an expired session, not an empty search',
+    );
+  }
+  // min === 0 pages (e.g. linkedin__jobs-search-results, whose inventory
+  // declares minJobCards 0) legitimately render empty, so this stays a warn
+  // — but it must never be silent, which is how the 2026-07-25 zero-job run
+  // went unnoticed.
+  if (cards.length === 0) {
+    ctx.logger.warn('harvest: harvested 0 cards', {
+      page: inv.page,
+      readySelector,
     });
   }
   return cards;
