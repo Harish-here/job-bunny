@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { PipelineConfig } from '../core/config/schema.ts';
 import type { DoctorCheck, DoctorFinding } from '../ports/doctor.ts';
@@ -301,6 +304,18 @@ test('loadFilterConfig: throws loudly when filter_config.json fails schema valid
 
 // --- wire() ---
 
+// Deliberately lane-less (unlike VALID_PROFILE_JSON): `linkedin`'s live
+// construction needs a `filter_config.json`/`search_urls.md` this test
+// doesn't provide, and that's not what's under test here — this test only
+// exercises the missing-`NOTION_TOKEN` swallow behavior.
+const NOTION_ONLY_PROFILE_JSON = JSON.stringify({
+  lanes: [],
+  connector: 'notion',
+  notifiers: ['telegram'],
+  routines: [],
+  settings: { notion: { dbId: 'db-1' }, telegram: { chatId: 7 } },
+});
+
 test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction failure is swallowed)', async () => {
   const originalToken = process.env.NOTION_TOKEN;
   delete process.env.NOTION_TOKEN;
@@ -308,7 +323,7 @@ test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction 
     const result = await wire('rajni', {
       root: '/repo',
       readFile: fakeReadFile({
-        '/repo/profiles/rajni/profile.json': VALID_PROFILE_JSON,
+        '/repo/profiles/rajni/profile.json': NOTION_ONLY_PROFILE_JSON,
       }),
     });
 
@@ -320,5 +335,284 @@ test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction 
   } finally {
     if (originalToken === undefined) delete process.env.NOTION_TOKEN;
     else process.env.NOTION_TOKEN = originalToken;
+  }
+});
+
+// --- wire(): live ctx/stages/routines composition ---
+//
+// These tests avoid `linkedin` (its live construction needs a real
+// filesystem for inventories via `FsStorage`, and a browser port) so they
+// can run entirely against the injected fake `readFile` — greenhouse/keka
+// need no per-profile files at all. Adapter identity is asserted via each
+// port's `.name`/`.kind`, never `instanceof` — this test file, like every
+// file under `src/cli` except `wire.ts` itself, may not import
+// `src/adapters/**` (depcruise's `only-wire-imports-adapters`).
+
+const LIVE_PROFILE_JSON = JSON.stringify({
+  lanes: ['greenhouse', 'keka'],
+  connector: 'notion',
+  notifiers: ['telegram'],
+  routines: ['cleanup'],
+  settings: { notion: { dbId: 'db-1' }, telegram: { chatId: 7 } },
+});
+
+function fakeLiveReadFile(profileJson: string = LIVE_PROFILE_JSON) {
+  return fakeReadFile({ '/repo/profiles/rajni/profile.json': profileJson });
+}
+
+test('wire: returns a live ctx with config/ports/storage/notify populated', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+  assert.equal(result.ctx.profile, 'rajni');
+  assert.equal(result.ctx.config.connector, 'notion');
+  assert.deepEqual(result.ctx.ports.lanes.map((l) => l.name).sort(), [
+    'greenhouse',
+    'keka',
+  ]);
+  assert.equal(result.ctx.ports.connector.name, 'notion');
+  assert.deepEqual(
+    result.ctx.ports.notifiers.map((n) => n.name),
+    ['telegram'],
+  );
+  assert.equal(result.ctx.ports.llm?.name, 'claude-cli');
+  assert.equal(result.ctx.ports.browser?.name, 'cdp-chrome');
+  assert.equal(typeof result.ctx.storage.readJson, 'function');
+  assert.equal(typeof result.ctx.notify, 'function');
+});
+
+test('wire: stages is the 10 job-flow stages in spec order', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+  assert.deepEqual(
+    result.stages.map((s) => s.name),
+    [
+      'reconcile',
+      'farm',
+      'source',
+      'compress',
+      'structure',
+      'assemble',
+      'filter',
+      'dedup',
+      'rank',
+      'sync',
+    ],
+  );
+});
+
+test('wire: routines maps config.routines to instances', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+  assert.deepEqual(
+    result.routines.map((r) => r.name),
+    ['cleanup'],
+  );
+});
+
+test('wire: unknown routine name throws loud', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'notion',
+    notifiers: [],
+    routines: ['not-a-real-routine'],
+    settings: { notion: { dbId: 'db-1' } },
+  });
+
+  await assert.rejects(
+    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    /not-a-real-routine/,
+  );
+});
+
+test('wire: unknown lane name throws loud (live construction, not just checks)', async () => {
+  const profileJson = JSON.stringify({
+    lanes: ['not-a-real-lane'],
+    connector: 'notion',
+    notifiers: [],
+    routines: [],
+    settings: { notion: { dbId: 'db-1' } },
+  });
+
+  await assert.rejects(
+    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    /not-a-real-lane/,
+  );
+});
+
+test('wire: unknown connector name throws loud', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'not-a-real-connector',
+    notifiers: [],
+    routines: [],
+    settings: {},
+  });
+
+  await assert.rejects(
+    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    /not-a-real-connector/,
+  );
+});
+
+test('wire: unknown notifier name throws loud', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'notion',
+    notifiers: ['not-a-real-notifier'],
+    routines: [],
+    settings: { notion: { dbId: 'db-1' } },
+  });
+
+  await assert.rejects(
+    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    /not-a-real-notifier/,
+  );
+});
+
+test('wire: linkedin lane requires a FilterConfig, throws a clear error when absent', async () => {
+  const profileJson = JSON.stringify({
+    lanes: ['linkedin'],
+    connector: 'notion',
+    notifiers: [],
+    routines: [],
+    settings: { notion: { dbId: 'db-1' } },
+  });
+
+  await assert.rejects(
+    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    /filter_config/,
+  );
+});
+
+test('wire: missing NOTION_TOKEN still resolves wire(), but the live connector rejects on first use', async () => {
+  const originalToken = process.env.NOTION_TOKEN;
+  delete process.env.NOTION_TOKEN;
+  try {
+    const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+    await assert.rejects(
+      () =>
+        result.ctx.ports.connector.rebuildCache({
+          profile: 'rajni',
+          signal: new AbortController().signal,
+          logger: { debug() {}, info() {}, warn() {}, error() {} },
+          beat() {},
+        }),
+      /NOTION_TOKEN/,
+    );
+  } finally {
+    if (originalToken === undefined) delete process.env.NOTION_TOKEN;
+    else process.env.NOTION_TOKEN = originalToken;
+  }
+});
+
+test('wire: filter defaults to parsed-{} FilterConfig when filter_config.json is absent (no rule drops anything)', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const filterStage = result.stages.find((s) => s.name === 'filter');
+  assert.ok(filterStage);
+
+  const job = {
+    identity: {
+      id: 'job-1',
+      lane: 'greenhouse',
+      url: 'https://example.com/job-1',
+      company: 'Acme',
+      title: 'Staff Engineer',
+      scrapedAt: new Date().toISOString(),
+    },
+    structured: {
+      titleParts: {},
+      locations: [{ city: 'Nowhereville' }],
+      skills: [],
+    },
+  };
+
+  const output = await filterStage?.run(
+    { jobs: [job], dropped: [] },
+    {
+      profile: 'rajni',
+      signal: new AbortController().signal,
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      beat() {},
+      storage: result.ctx.storage,
+    },
+  );
+
+  assert.equal(output?.jobs.length, 1);
+  assert.equal(output?.dropped.length, 0);
+});
+
+test('wire: existing checks behavior is unchanged alongside the live ctx/stages/routines', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  assert.ok(result.checks.length > 0);
+  assert.ok(result.checks.some((c) => c.name.length > 0));
+});
+
+// --- linkedin lane: happy path ---
+// Unlike greenhouse/keka, the linkedin lane's live construction reads a
+// per-page `Inventory` via `loadInventory(storage, page)`, and `storage` is
+// always a real `FsStorage(root)` inside `wire()` — there is no injectable
+// Storage seam for the live composition path (only `readFile`/`root`, used
+// above for profile.json/filter_config.json/search_urls.md). So this test
+// uses a real temp directory as `root` and writes a real
+// `page_inventory/<page>.json` file for `FsStorage` to read, while still
+// routing profile.json/filter_config.json/search_urls.md through the same
+// injected `readFile` seam every other test in this file uses.
+function validInventoryJson(page: string): string {
+  return JSON.stringify({
+    page,
+    pageType: 'details-page',
+    generatedAt: '2026-01-01',
+    selectors: {
+      cardList: '.jobs-list',
+      card: '.job-card',
+      cardTitle: '.job-title',
+      cardCompany: '.job-company',
+      cardLocation: '.job-location',
+      cardLink: 'a.job-link',
+      jdRoot: '.jd-root',
+    },
+    behaviors: {},
+  });
+}
+
+test('wire: linkedin lane builds successfully end to end (search_urls.md -> parseSearchUrls -> loadInventory -> LinkedInLane)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-'));
+  try {
+    await mkdir(join(root, 'page_inventory'), { recursive: true });
+    await writeFile(
+      join(root, 'page_inventory', 'staff-eng.json'),
+      validInventoryJson('staff-eng'),
+      'utf8',
+    );
+
+    const profileJson = JSON.stringify({
+      lanes: ['linkedin'],
+      connector: 'notion',
+      notifiers: [],
+      routines: [],
+      settings: { notion: { dbId: 'db-1' } },
+    });
+    const searchUrlsMd = [
+      '## Staff Engineer searches',
+      '### staff-eng',
+      '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
+    ].join('\n');
+    const readFile = fakeReadFile({
+      [join(root, 'profiles', 'rajni', 'profile.json')]: profileJson,
+      [join(root, 'profiles', 'rajni', 'filter_config.json')]: JSON.stringify({}),
+      [join(root, 'profiles', 'rajni', 'search_urls.md')]: searchUrlsMd,
+    });
+
+    const result = await wire('rajni', { root, readFile });
+
+    const farmingLanes = result.ctx.ports.lanes.filter((l) => l.kind === 'farming');
+    assert.equal(farmingLanes.length, 1);
+    assert.equal(farmingLanes[0]?.name, 'linkedin');
+
+    const farmStage = result.stages.find((s) => s.name === 'farm');
+    assert.ok(farmStage);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

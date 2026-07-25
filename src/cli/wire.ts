@@ -1,5 +1,3 @@
-// Doctor-surface composition only; ctx/stages/routines assembly is a
-// deferred Task 3 increment.
 /**
  * cli/wire.ts (P8) — the single composition point permitted to import from
  * `src/adapters/**` (`only-wire-imports-adapters` in
@@ -7,7 +5,7 @@
  * `ops/`, and every other file under `src/cli` (including this file's own
  * test) — reaches adapters only through what `wire()` hands back.
  *
- * Two independent things live here:
+ * Three independent things live here:
  *  - Config loading (`loadPipelineConfig`/`loadFilterConfig`): reads
  *    `profiles/<name>/profile.json` / `filter_config.json`, parses, and
  *    validates against the core schemas. This is fail-loud config, NOT a
@@ -23,43 +21,80 @@
  *    FAKE registry in `wire.test.ts` — it does no IO and needs no real
  *    adapter to exercise its lookup/ordering/error-naming/settings-slicing
  *    behavior.
+ *  - Live composition (`wire()`'s ctx/stages/routines build below the
+ *    checks): resolves `PipelineConfig.lanes/connector/notifiers/routines`
+ *    against real adapter constructors (unknown name ⇒ loud throw, same
+ *    posture as the check registry's `resolveFactory`) and assembles the
+ *    frozen 10-stage job-flow plus a `PipelineCtx` a caller can hand
+ *    straight to `runPipeline` (pipeline/runner/run.ts).
  *
- * `wire()` ties both to the REAL registry (built inline below, the only
- * place adapters are constructed) and returns `{ checks }` — the doctor
- * surface only. It does not build `ctx`, `stages`, or `routines`; that is
- * explicitly out of scope here (see the file-top comment) and left to a
- * later Task 3 increment.
+ * `wire()` ties the checks assembly to the REAL registry (built inline
+ * below, alongside the live adapter construction — the only two places
+ * adapters are constructed) and returns `{ ctx, stages, routines, checks }`.
  */
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { CdpReachableFn } from '../adapters/browser/cdp-chrome/index.ts';
+import type {
+  CdpChromeProviderDeps,
+  CdpReachableFn,
+} from '../adapters/browser/cdp-chrome/index.ts';
 import {
+  CdpChromeProvider,
   cdpReachableCheck,
   DEFAULT_CDP_PORT,
   defaultCdpReachable,
 } from '../adapters/browser/cdp-chrome/index.ts';
-import type { NotionApiLike } from '../adapters/db/notion/index.ts';
+import type { NotionApiLike, NotionSdkClientLike } from '../adapters/db/notion/index.ts';
 import {
   dbReachableCheck,
   NotionApi,
+  NotionConnector,
   NotionConnectorSettingsSchema,
 } from '../adapters/db/notion/index.ts';
+import { GreenhouseLane } from '../adapters/lanes/greenhouse/index.ts';
+import { KekaLane } from '../adapters/lanes/keka/index.ts';
 import {
   inventoryFreshnessCheck,
+  LinkedInLane,
+  loadInventory,
   parseSearchUrls,
 } from '../adapters/lanes/linkedin/index.ts';
 import {
+  ClaudeCliProvider,
+  type ClaudeCliProviderOptions,
+} from '../adapters/llm/claude-cli/index.ts';
+import {
   botTokenCheck,
+  TelegramNotifier,
   TelegramNotifierSettingsSchema,
 } from '../adapters/notify/telegram/index.ts';
+import type { RegistryPolicy } from '../core/company/schema.ts';
 import type { PipelineConfig } from '../core/config/schema.ts';
 import { PipelineConfigSchema } from '../core/config/schema.ts';
 import type { FilterConfig } from '../core/filter/config.ts';
 import { FilterConfigSchema } from '../core/filter/config.ts';
+import { RankConfigSchema } from '../core/rank/index.ts';
 import { coreChecks } from '../ops/doctor/aggregate.ts';
+import type { PipelineCtx, WiredPorts } from '../pipeline/runner/context.ts';
 import { FsStorage } from '../pipeline/runner/fs_storage.ts';
+import type { StageDef, StagePayload } from '../pipeline/runner/stage.ts';
+import {
+  assembleStage,
+  compressStage,
+  dedupStage,
+  makeFarmStage,
+  makeFilterStage,
+  makeRankStage,
+  makeReconcileStage,
+  makeSourceStage,
+  makeStructureStage,
+  makeSyncStage,
+} from '../pipeline/stages/index.ts';
 import type { DoctorCheck } from '../ports/doctor.ts';
+import type { ApiLane, FarmingLane, Lane } from '../ports/lane.ts';
 import type { Storage } from '../ports/storage.ts';
+import { cleanupRoutine } from '../routines/cleanup/index.ts';
+import type { Routine } from '../routines/types.ts';
 
 // --- shared IO-injection deps ---
 
@@ -231,6 +266,124 @@ const realRegistry: AdapterRegistry = {
   },
 };
 
+// --- live adapter construction (ctx/ports/stages/routines) ---
+
+/** A `NotionSdkClientLike` every method of which throws the same
+ * config-problem message. Used to build a `NotionApi` (not merely a
+ * `NotionApiLike`) when `NOTION_TOKEN` is missing, so `wire()` itself never
+ * throws (doctor must survive a missing token — `coreChecks` already
+ * reports it as a red) while the live connector still fails LOUD at first
+ * actual use (`rebuildCache`/`syncJobs`/`archiveStale`), never silently. */
+function missingTokenNotionClient(): NotionSdkClientLike {
+  const fail = (): never => {
+    throw new Error('NOTION_TOKEN missing — set it in .env');
+  };
+  return {
+    databases: { query: fail },
+    pages: { create: fail, update: fail },
+  };
+}
+
+function buildConnector(name: string, settings: unknown, api: NotionApi) {
+  if (name === 'notion') return new NotionConnector(settings, api);
+  throw new Error(`unknown connector "${name}"`);
+}
+
+function buildNotifier(name: string, settings: unknown) {
+  if (name === 'telegram') return new TelegramNotifier(settings);
+  throw new Error(`unknown notifier "${name}"`);
+}
+
+function buildRoutine(name: string): Routine {
+  if (name === 'cleanup') return cleanupRoutine;
+  throw new Error(`unknown routine "${name}"`);
+}
+
+function isFarmingLane(lane: Lane): lane is FarmingLane {
+  return lane.kind === 'farming';
+}
+
+function isApiLane(lane: Lane): lane is ApiLane {
+  return lane.kind === 'api';
+}
+
+interface LiveLaneDeps {
+  profileName: string;
+  root: string;
+  readFile: (path: string) => Promise<string>;
+  storage: Storage;
+  filterCfg: FilterConfig | undefined;
+  browser: CdpChromeProvider;
+}
+
+/** Builds the live `Lane[]` for `config.lanes`. Unlike the check-registry
+ * (which merely reports whether inventories/CDP are reachable), building
+ * the `linkedin` lane for real needs its `SearchUrlGroup[]` and
+ * `Inventory[]` up front — both are read here, fail-loud, rather than
+ * deferred into the lane's own `source()` call. */
+async function buildLanes(config: PipelineConfig, deps: LiveLaneDeps): Promise<Lane[]> {
+  const lanes: Lane[] = [];
+  for (const name of config.lanes) {
+    switch (name) {
+      case 'linkedin':
+        lanes.push(await buildLinkedInLane(deps));
+        break;
+      case 'greenhouse':
+        lanes.push(new GreenhouseLane());
+        break;
+      case 'keka':
+        lanes.push(new KekaLane());
+        break;
+      default:
+        throw new Error(`unknown lane "${name}"`);
+    }
+  }
+  return lanes;
+}
+
+async function buildLinkedInLane(deps: LiveLaneDeps): Promise<LinkedInLane> {
+  if (!deps.filterCfg) {
+    throw new Error(
+      `linkedin lane requires profiles/${deps.profileName}/filter_config.json (a FilterConfig)`,
+    );
+  }
+  const searchUrlsPath = path.join(
+    deps.root,
+    'profiles',
+    deps.profileName,
+    'search_urls.md',
+  );
+  let md: string;
+  try {
+    md = await deps.readFile(searchUrlsPath);
+  } catch (err) {
+    if (isNotFound(err)) {
+      throw new Error(
+        `linkedin lane requires profiles/${deps.profileName}/search_urls.md`,
+      );
+    }
+    throw err;
+  }
+  const urls = parseSearchUrls(md);
+  const pages = [...new Set(urls.map((group) => group.page))];
+  const inventories = await Promise.all(
+    pages.map((page) => loadInventory(deps.storage, page)),
+  );
+  return new LinkedInLane(deps.browser, inventories, urls, deps.filterCfg, deps.storage);
+}
+
+/** `RegistryPolicy` defaults for `makeSourceStage`, overridable per-profile
+ * via `settings.registry`. */
+const DEFAULT_REGISTRY_POLICY: RegistryPolicy = {
+  reprobeNotFoundAfterDays: 30,
+  maxProbeFailures: 3,
+  staleAfterFetchFailures: 3,
+};
+
+/** `maxProbesPerRun` default for `makeSourceStage`'s `opts`, overridable
+ * via `settings.source`. */
+const DEFAULT_MAX_PROBES_PER_RUN = 25;
+
 // --- wire() ---
 
 export interface WireOverrides {
@@ -241,13 +394,18 @@ export interface WireOverrides {
 }
 
 export interface WireResult {
+  ctx: PipelineCtx;
+  stages: Array<StageDef<StagePayload, StagePayload>>;
+  routines: Routine[];
   checks: DoctorCheck[];
 }
 
-/** Doctor-surface composition for one profile: loads config, resolves the
- * REAL adapter registry, and returns the concatenated `DoctorCheck[]`
- * (core checks first, then adapter-contributed ones). Does NOT build a
- * runnable `ctx`/`stages`/`routines` — see the file-top comment. */
+/** Composition for one profile: loads config, resolves the REAL adapter
+ * registry for doctor checks, builds the live ports/stages/routines, and
+ * returns `{ ctx, stages, routines, checks }` — everything a caller needs
+ * for both `/doctor` (checks) and an actual run (`ctx`/`stages` handed to
+ * `pipeline/runner/run.ts`'s `runPipeline`, `routines` invoked at their
+ * declared `when`). */
 export async function wire(
   profileName: string,
   overrides: WireOverrides = {},
@@ -267,18 +425,32 @@ export async function wire(
     if (!isNotFound(err)) throw err;
   }
 
+  // `notionApiForConnector` is ALWAYS a real `NotionApi` instance — either
+  // the genuine one (token present) or one built over a throwing stub
+  // client (token missing) — so the live `NotionConnector` below always has
+  // something to hold, never `undefined`. `notionApi` (the narrower
+  // `NotionApiLike | undefined`) stays exactly as before for the doctor
+  // check path: `undefined` on a missing token, since `dbReachableCheck`
+  // must not run against the throwing stub (it would just report a red for
+  // a problem `envTokensCheck` already reports).
   let notionApi: NotionApiLike | undefined;
+  let notionApiForConnector: NotionApi;
   try {
-    notionApi = new NotionApi();
+    const realApi = new NotionApi();
+    notionApi = realApi;
+    notionApiForConnector = realApi;
   } catch {
     // `NotionApi`'s constructor throws when `NOTION_TOKEN` is missing —
     // that's already surfaced as a red by `coreChecks`' `envTokensCheck`,
     // so wiring must not crash here; leave the handle undefined instead.
     notionApi = undefined;
+    notionApiForConnector = new NotionApi({ client: missingTokenNotionClient() });
   }
 
+  const storage = new FsStorage(root);
+
   const deps: RuntimeDeps = {
-    storage: new FsStorage(root),
+    storage,
     notionApi,
     browserReachable: defaultCdpReachable,
     cdpPort: DEFAULT_CDP_PORT,
@@ -292,5 +464,89 @@ export async function wire(
     ...coreChecks({ profileName, root, readFile }),
     ...assembleAdapterChecks(config, registry, deps),
   ];
-  return { checks };
+
+  // --- live ports ---
+  // llm/browser are NOT part of PipelineConfig (spec: selected by
+  // convention, not config-driven) — always constructed, settings sliced
+  // from `settings['claude-cli']`/`settings['cdp-chrome']` if present.
+  const llm = new ClaudeCliProvider(
+    (config.settings['claude-cli'] as ClaudeCliProviderOptions | undefined) ?? {},
+  );
+  const browser = new CdpChromeProvider({
+    port: deps.cdpPort,
+    ...((config.settings['cdp-chrome'] as CdpChromeProviderDeps | undefined) ?? {}),
+  });
+
+  const lanes = await buildLanes(config, {
+    profileName,
+    root,
+    readFile,
+    storage,
+    filterCfg,
+    browser,
+  });
+  const connector = buildConnector(
+    config.connector,
+    config.settings[config.connector],
+    notionApiForConnector,
+  );
+  const notifiers = config.notifiers.map((name) =>
+    buildNotifier(name, config.settings[name]),
+  );
+  const routines = config.routines.map((name) => buildRoutine(name));
+
+  const ports: WiredPorts = { lanes, connector, notifiers, llm, browser };
+
+  const ctx: PipelineCtx = {
+    profile: profileName,
+    // Placeholder — `runPipeline` (pipeline/runner/run.ts) replaces this
+    // with `AbortSignal.any([ctx.signal, AbortSignal.timeout(runCapMs)])`
+    // before running any stage, so this is never the signal a stage
+    // actually observes.
+    signal: new AbortController().signal,
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    // Placeholder no-op — `guardStage` (pipeline/runner/guard.ts) never
+    // calls the top-level `ctx.beat` directly; it builds its own
+    // stall-arming `childCtx.beat` per attempt (wrapping this one) and
+    // hands THAT to `stage.run`, so this is never the beat a stage actually
+    // calls.
+    beat() {},
+    storage,
+    config,
+    ports,
+    async notify(event) {
+      await Promise.all(ports.notifiers.map((n) => n.send(event)));
+    },
+  };
+
+  const registryPolicy: RegistryPolicy = {
+    ...DEFAULT_REGISTRY_POLICY,
+    ...(config.settings.registry as Partial<RegistryPolicy> | undefined),
+  };
+  const sourceOpts = {
+    maxProbesPerRun: DEFAULT_MAX_PROBES_PER_RUN,
+    ...(config.settings.source as
+      | Partial<{ maxProbesPerRun: number; laneBudgetMs: number }>
+      | undefined),
+  };
+  const rankCfg = RankConfigSchema.parse(config.settings.rank ?? {});
+  const filterCfgForStage = filterCfg ?? FilterConfigSchema.parse({});
+
+  const farmingLanes = lanes.filter(isFarmingLane);
+  const apiLanes = lanes.filter(isApiLane);
+
+  const stages: Array<StageDef<StagePayload, StagePayload>> = [
+    makeReconcileStage(connector),
+    makeFarmStage(farmingLanes),
+    makeSourceStage(apiLanes, registryPolicy, sourceOpts),
+    compressStage,
+    makeStructureStage(llm),
+    assembleStage,
+    makeFilterStage(filterCfgForStage),
+    dedupStage,
+    makeRankStage(rankCfg),
+    makeSyncStage(connector),
+  ];
+
+  return { ctx, stages, routines, checks };
 }
