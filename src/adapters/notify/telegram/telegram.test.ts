@@ -83,3 +83,18 @@ test('send: a 200 response resolves without throwing', async () => {
   const notifier = new TelegramNotifier({ chatId: 123 });
   await assert.doesNotReject(() => notifier.send(digestEvent()));
 });
+
+test('send: passes an AbortSignal so a hung request cannot stall the process forever', async () => {
+  process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  let seenInit: RequestInit | undefined;
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    seenInit = init;
+    return new Response(null, { status: 200 });
+  }) as typeof fetch;
+
+  const notifier = new TelegramNotifier({ chatId: 123 });
+  await notifier.send(digestEvent());
+
+  assert.ok(seenInit?.signal instanceof AbortSignal, 'fetch must receive an AbortSignal');
+  assert.equal(seenInit?.signal?.aborted, false);
+});

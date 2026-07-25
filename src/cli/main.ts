@@ -47,6 +47,7 @@ export interface CommandOptions {
   resume?: boolean;
   headless?: boolean;
   dryRun?: boolean;
+  runCapMs?: number;
   stage?: string;
   routine?: string;
   action?: string;
@@ -81,7 +82,7 @@ export interface MainDeps {
 const USAGE = [
   'usage: jobbunny <command> [options]',
   '',
-  '  run       --profile <name> [--resume] [--headless] [--dry-run]',
+  '  run       --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]',
   '  doctor    --profile <name>',
   '  reconcile --profile <name>',
   '  stage <stage-name> --profile <name>',
@@ -139,6 +140,7 @@ function buildOptions(
     headless?: boolean;
     force?: boolean;
     'dry-run'?: boolean;
+    'run-cap-ms'?: string;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -146,15 +148,26 @@ function buildOptions(
     profile ? undefined : { error: 'missing required --profile' };
 
   switch (command) {
-    case 'run':
+    case 'run': {
+      let runCapMs: number | undefined;
+      if (values['run-cap-ms'] !== undefined) {
+        runCapMs = Number(values['run-cap-ms']);
+        if (!Number.isFinite(runCapMs) || runCapMs <= 0) {
+          return {
+            error: `--run-cap-ms must be a positive number, got "${values['run-cap-ms']}"`,
+          };
+        }
+      }
       return (
         needsProfile() ?? {
           profile,
           resume: values.resume ?? false,
           headless: values.headless ?? false,
           dryRun: values['dry-run'] ?? false,
+          ...(runCapMs === undefined ? {} : { runCapMs }),
         }
       );
+    }
     case 'doctor':
     case 'reconcile':
     case 'setup':
@@ -212,6 +225,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       headless: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      'run-cap-ms': { type: 'string' },
     },
   });
 

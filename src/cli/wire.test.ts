@@ -12,6 +12,8 @@ import {
   loadFilterConfig,
   loadPipelineConfig,
   type RuntimeDeps,
+  resolveInventoryMaxAgeDays,
+  resolveJitterRange,
   wire,
 } from './wire.ts';
 
@@ -62,6 +64,64 @@ function fakeReadFile(files: Record<string, string>): (path: string) => Promise<
     throw enoent(path);
   };
 }
+
+// --- resolveInventoryMaxAgeDays ---
+
+test('resolveInventoryMaxAgeDays: defaults to 30 when settings has no maxAgeDays', () => {
+  assert.equal(resolveInventoryMaxAgeDays(undefined), 30);
+  assert.equal(resolveInventoryMaxAgeDays({}), 30);
+  assert.equal(resolveInventoryMaxAgeDays(null), 30);
+});
+
+test('resolveInventoryMaxAgeDays: honors a configured positive number', () => {
+  assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: 7 }), 7);
+  assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: 90 }), 90);
+});
+
+test('resolveInventoryMaxAgeDays: falls back to 30 on an invalid configured value', () => {
+  assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: 0 }), 30);
+  assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: -5 }), 30);
+  assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: Number.NaN }), 30);
+  assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: 'thirty' }), 30);
+});
+
+// --- resolveJitterRange (P9 tail: v0->v2 LinkedIn jitter parity fix) ---
+
+test('resolveJitterRange: defaults to v0-parity (2000, 5000) when settings has no jitter keys', () => {
+  assert.deepEqual(resolveJitterRange(undefined), { minMs: 2_000, maxMs: 5_000 });
+  assert.deepEqual(resolveJitterRange({}), { minMs: 2_000, maxMs: 5_000 });
+  assert.deepEqual(resolveJitterRange(null), { minMs: 2_000, maxMs: 5_000 });
+});
+
+test('resolveJitterRange: honors a configured valid range, including one-sided overrides', () => {
+  assert.deepEqual(resolveJitterRange({ jitterMinMs: 500, jitterMaxMs: 1_500 }), {
+    minMs: 500,
+    maxMs: 1_500,
+  });
+  // Only jitterMinMs overridden — jitterMaxMs still defaults to 5000, and
+  // 1000 <= 5000 so this is still a valid range.
+  assert.deepEqual(resolveJitterRange({ jitterMinMs: 1_000 }), {
+    minMs: 1_000,
+    maxMs: 5_000,
+  });
+  // A zero-length range (both 0) is valid — the "no jitter" case.
+  assert.deepEqual(resolveJitterRange({ jitterMinMs: 0, jitterMaxMs: 0 }), {
+    minMs: 0,
+    maxMs: 0,
+  });
+});
+
+test('resolveJitterRange: fails LOUD (throws) when jitterMinMs > jitterMaxMs', () => {
+  assert.throws(() => resolveJitterRange({ jitterMinMs: 5_000, jitterMaxMs: 2_000 }));
+  // Same failure via the one-sided override: default jitterMinMs (2000)
+  // now exceeds the configured jitterMaxMs.
+  assert.throws(() => resolveJitterRange({ jitterMaxMs: 1_000 }));
+});
+
+test('resolveJitterRange: fails LOUD (throws) on a negative jitterMinMs or jitterMaxMs', () => {
+  assert.throws(() => resolveJitterRange({ jitterMinMs: -1, jitterMaxMs: 5_000 }));
+  assert.throws(() => resolveJitterRange({ jitterMinMs: 2_000, jitterMaxMs: -1 }));
+});
 
 // --- assembleAdapterChecks ---
 
@@ -378,6 +438,47 @@ test('wire: returns a live ctx with config/ports/storage/notify populated', asyn
   assert.equal(result.ctx.ports.browser?.name, 'cdp-chrome');
   assert.equal(typeof result.ctx.storage.readJson, 'function');
   assert.equal(typeof result.ctx.notify, 'function');
+});
+
+// P9 closure register item 5: a notifier failure (e.g. Telegram's send()
+// throwing on a missing token) must never propagate out of ctx.notify — a
+// run.ts caller awaits notify() AFTER the pipeline has already produced a
+// PASSED/FAILED RunResult, so a thrown/rejected notifier send must not turn
+// an otherwise-passed run into a crash.
+test('wire: ctx.notify never throws when a notifier fails, and still calls the others', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+  const errors: string[] = [];
+  result.ctx.logger = {
+    debug() {},
+    info() {},
+    warn() {},
+    error: (msg: string) => errors.push(msg),
+  };
+
+  let okCalled = false;
+  result.ctx.ports.notifiers = [
+    {
+      name: 'failing',
+      async send() {
+        throw new Error('boom');
+      },
+    },
+    {
+      name: 'ok',
+      async send() {
+        okCalled = true;
+      },
+    },
+  ];
+
+  await assert.doesNotReject(() =>
+    result.ctx.notify({ kind: 'digest', profile: 'rajni', text: 'hi' }),
+  );
+  assert.equal(okCalled, true);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0] ?? '', /failing/);
+  assert.match(errors[0] ?? '', /boom/);
 });
 
 // Regression pin, 2026-07-25: `ctx.storage` was rooted at the REPO root

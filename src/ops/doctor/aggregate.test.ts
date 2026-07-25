@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
 import {
   coreChecks,
+  emptyLanesCheck,
   envTokensCheck,
   filterParsesCheck,
   profileParsesCheck,
@@ -201,18 +202,72 @@ test('envTokensCheck: red when NOTION_TOKEN is an empty string', async () => {
   assert.equal(finding.status, 'red');
 });
 
+// --- emptyLanesCheck ---
+
+test('emptyLanesCheck: red when profile.json has no lanes configured', async () => {
+  const path = '/repo/profiles/rajni/profile.json';
+  const check = emptyLanesCheck({
+    profileName: 'rajni',
+    root: '/repo',
+    readFile: fakeReadFile({
+      [path]: JSON.stringify({
+        lanes: [],
+        connector: 'notion',
+        notifiers: [],
+        routines: [],
+        settings: {},
+      }),
+    }),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'red');
+  assert.match(finding.detail, /no lanes configured/);
+});
+
+test('emptyLanesCheck: ok when at least one lane is configured', async () => {
+  const path = '/repo/profiles/rajni/profile.json';
+  const check = emptyLanesCheck({
+    profileName: 'rajni',
+    root: '/repo',
+    readFile: fakeReadFile({ [path]: VALID_PROFILE_JSON }),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('emptyLanesCheck: stays ok (silent) when profile.json is missing — profileParsesCheck already reports that red', async () => {
+  const check = emptyLanesCheck({
+    profileName: 'rajni',
+    root: '/repo',
+    readFile: fakeReadFile({}),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('emptyLanesCheck: stays ok (silent) when profile.json fails schema validation — profileParsesCheck already reports that red', async () => {
+  const path = '/repo/profiles/rajni/profile.json';
+  const check = emptyLanesCheck({
+    profileName: 'rajni',
+    root: '/repo',
+    readFile: fakeReadFile({ [path]: JSON.stringify({ nope: true }) }),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'ok');
+});
+
 // --- coreChecks ---
 
-test('coreChecks: returns the three core checks', () => {
+test('coreChecks: returns the four core checks', () => {
   const checks = coreChecks({
     profileName: 'rajni',
     root: '/repo',
     env: { NOTION_TOKEN: 't', TELEGRAM_BOT_TOKEN: 't' },
     readFile: fakeReadFile({}),
   });
-  assert.equal(checks.length, 3);
+  assert.equal(checks.length, 4);
   const names = checks.map((c) => c.name);
-  assert.equal(new Set(names).size, 3);
+  assert.equal(new Set(names).size, 4);
 });
 
 // --- runChecks ---

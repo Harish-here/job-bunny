@@ -44,6 +44,7 @@ import { execFile } from 'node:child_process';
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { z } from 'zod';
 import type {
   CdpChromeProviderDeps,
   CdpReachableFn,
@@ -246,15 +247,37 @@ export function assembleAdapterChecks(
 
 // --- real registry (the only adapter construction in this codebase) ---
 
+// Default inventory-freshness ceiling (days) when the linkedin lane's
+// settings don't specify one (§10 P9 closure register item 6 — was
+// hardcoded at the `inventoryFreshnessCheck` call site with no way for a
+// profile to override it).
+const DEFAULT_INVENTORY_MAX_AGE_DAYS = 30;
+
+/** Loosely reads an optional `maxAgeDays` off the linkedin lane's settings
+ * blob (typed `unknown` here — its full shape is owned by the adapter,
+ * `src/adapters/lanes/linkedin/**`, out of scope for this change) without
+ * requiring a schema import from that package. Anything other than a
+ * positive finite number (missing, wrong type, 0, negative, NaN) falls
+ * back to the default rather than risk `inventoryFreshnessCheck` treating a
+ * bad value as "everything is stale" or "nothing ever goes stale". */
+export function resolveInventoryMaxAgeDays(settings: unknown): number {
+  const candidate = (settings as { maxAgeDays?: unknown } | null | undefined)?.maxAgeDays;
+  return typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+    ? candidate
+    : DEFAULT_INVENTORY_MAX_AGE_DAYS;
+}
+
 const realRegistry: AdapterRegistry = {
   lanes: {
     // The CDP-reachability check rides with the browser-driven linkedin
     // lane rather than living on its own — nothing else in the registry
     // touches the browser.
-    linkedin: (_settings, deps) => [
-      // TODO: maxAgeDays is hardcoded to 30 — wire it from a configured
-      // value once the linkedin lane's settings shape carries one.
-      inventoryFreshnessCheck(deps.storage, deps.pages, 30),
+    linkedin: (settings, deps) => [
+      inventoryFreshnessCheck(
+        deps.storage,
+        deps.pages,
+        resolveInventoryMaxAgeDays(settings),
+      ),
       cdpReachableCheck({ reachable: deps.browserReachable, port: deps.cdpPort }),
     ],
     // Greenhouse/Keka lanes are stateless keyless-ATS lanes with no doctor
@@ -342,7 +365,13 @@ async function buildLanes(config: PipelineConfig, deps: LiveLaneDeps): Promise<L
   for (const name of config.lanes) {
     switch (name) {
       case 'linkedin':
-        lanes.push(await buildLinkedInLane(deps));
+        lanes.push(
+          await buildLinkedInLane(
+            deps,
+            resolveMaxCardsPerUrl(config.settings.linkedin),
+            resolveJitterRange(config.settings.linkedin),
+          ),
+        );
         break;
       case 'greenhouse':
         lanes.push(new GreenhouseLane());
@@ -357,7 +386,11 @@ async function buildLanes(config: PipelineConfig, deps: LiveLaneDeps): Promise<L
   return lanes;
 }
 
-async function buildLinkedInLane(deps: LiveLaneDeps): Promise<LinkedInLane> {
+async function buildLinkedInLane(
+  deps: LiveLaneDeps,
+  maxCardsPerUrl: number,
+  jitterRange: { minMs: number; maxMs: number },
+): Promise<LinkedInLane> {
   if (!deps.filterCfg) {
     throw new Error(
       `linkedin lane requires profiles/${deps.profileName}/filter.json (a FilterConfig)`,
@@ -393,6 +426,9 @@ async function buildLinkedInLane(deps: LiveLaneDeps): Promise<LinkedInLane> {
     urls,
     deps.filterCfg,
     deps.profileStorage,
+    maxCardsPerUrl,
+    jitterRange.minMs,
+    jitterRange.maxMs,
   );
 }
 
@@ -407,6 +443,76 @@ const DEFAULT_REGISTRY_POLICY: RegistryPolicy = {
 /** `maxProbesPerRun` default for `makeSourceStage`'s `opts`, overridable
  * via `settings.source`. */
 const DEFAULT_MAX_PROBES_PER_RUN = 25;
+
+/** Per-lane backstop cap on new jobs the generic api-lane source stage
+ * emits per run (P9 closure register §1, Task A) — v0 parity: GH_MAX_NEW/
+ * KEKA_MAX_NEW both default 40 (scripts/pipeline/{greenhouse,keka}.js).
+ * Overridable per-profile via `settings.source.maxNewPerLane`. */
+const DEFAULT_MAX_NEW_PER_LANE = 40;
+
+/** Per-url backstop cap on how many gate-passed LinkedIn cards get an
+ * expensive JD open in one run (P9 closure register §1, Task B) — no v0
+ * equivalent existed for the LinkedIn lane; this default just sits in the
+ * same range as the ATS lanes' cap. Overridable per-profile via
+ * `settings.linkedin.maxCardsPerUrl`. */
+const DEFAULT_MAX_CARDS_PER_URL = 40;
+
+/** Loosely reads an optional `maxCardsPerUrl` off the linkedin lane's
+ * settings blob, same posture as `resolveInventoryMaxAgeDays` above: any
+ * non-positive/non-finite/missing value falls back to the default rather
+ * than risk the lane treating a bad value as "open nothing" or "no cap at
+ * all". */
+export function resolveMaxCardsPerUrl(settings: unknown): number {
+  const candidate = (settings as { maxCardsPerUrl?: unknown } | null | undefined)
+    ?.maxCardsPerUrl;
+  return typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+    ? candidate
+    : DEFAULT_MAX_CARDS_PER_URL;
+}
+
+/** v0-parity defaults for the linkedin lane's inter-request jitter (P9
+ * tail: confirmed parity regression fix — see adapters/lanes/linkedin/
+ * lane.ts's DEFAULT_JITTER_MIN_MS/MAX_MS doc comment). Kept here (not just
+ * in the lane) so a profile with no `settings.linkedin.jitter*Ms` at all
+ * still gets a fully-populated, schema-validated range object out of
+ * `resolveJitterRange`. */
+const DEFAULT_JITTER_MIN_MS = 2_000;
+const DEFAULT_JITTER_MAX_MS = 5_000;
+
+/** Unlike `resolveMaxCardsPerUrl`/`resolveInventoryMaxAgeDays` (silently
+ * fall back to a default on any bad value), an operator-set jitter range
+ * that doesn't make sense (min > max, or either negative) is a
+ * config-authoring mistake, not "value absent" — fail LOUD (zod throws),
+ * same posture as `NotionConnectorSettingsSchema.parse`/
+ * `TelegramNotifierSettingsSchema.parse` above. Missing keys still default
+ * quietly (v0 parity values), only a present-but-invalid value throws. */
+const JitterSettingsSchema = z
+  .object({
+    jitterMinMs: z.number().min(0).default(DEFAULT_JITTER_MIN_MS),
+    jitterMaxMs: z.number().min(0).default(DEFAULT_JITTER_MAX_MS),
+  })
+  .refine((v) => v.jitterMinMs <= v.jitterMaxMs, {
+    message: 'settings.linkedin.jitterMinMs must be <= settings.linkedin.jitterMaxMs',
+  });
+
+/** Parses `settings.linkedin`'s `jitterMinMs`/`jitterMaxMs` pair — throws
+ * (fail loud) on a negative value or `jitterMinMs > jitterMaxMs`; missing
+ * settings (`undefined`/`{}`) fall back to v0-parity defaults. */
+export function resolveJitterRange(settings: unknown): { minMs: number; maxMs: number } {
+  const parsed = JitterSettingsSchema.parse(settings ?? {});
+  return { minMs: parsed.jitterMinMs, maxMs: parsed.jitterMaxMs };
+}
+
+/** Loosely reads an optional `maxNewPerLane` off the generic api-lane
+ * source stage's settings blob (`settings.source`), same posture as
+ * `resolveMaxCardsPerUrl`/`resolveInventoryMaxAgeDays`. */
+export function resolveMaxNewPerLane(settings: unknown): number {
+  const candidate = (settings as { maxNewPerLane?: unknown } | null | undefined)
+    ?.maxNewPerLane;
+  return typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+    ? candidate
+    : DEFAULT_MAX_NEW_PER_LANE;
+}
 
 // --- wire() ---
 
@@ -556,8 +662,25 @@ export async function wire(
     storage: profileStorage,
     config,
     ports,
+    // A notifier failure (e.g. Telegram's `send()` throwing on a missing
+    // token or a hung request) must never change the run's outcome — `run.ts`
+    // calls this AFTER `runPipeline` has already produced a PASSED/FAILED
+    // `RunResult`, so an unhandled rejection here would escape to `main.ts`'s
+    // catch and turn an otherwise-passed run into exit 1 (and skip the
+    // funnel summary print that follows). `Promise.allSettled` + per-notifier
+    // logging keeps every send independent and never throws.
     async notify(event) {
-      await Promise.all(ports.notifiers.map((n) => n.send(event)));
+      const results = await Promise.allSettled(ports.notifiers.map((n) => n.send(event)));
+      for (const [i, result] of results.entries()) {
+        if (result.status === 'rejected') {
+          const name = ports.notifiers[i]?.name ?? `notifier[${i}]`;
+          const reason =
+            result.reason instanceof Error
+              ? result.reason.message
+              : String(result.reason);
+          ctx.logger.error(`notify: ${name} failed: ${reason}`);
+        }
+      }
     },
   };
 
@@ -565,14 +688,21 @@ export async function wire(
     ...DEFAULT_REGISTRY_POLICY,
     ...(config.settings.registry as Partial<RegistryPolicy> | undefined),
   };
-  const sourceOpts = {
-    maxProbesPerRun: DEFAULT_MAX_PROBES_PER_RUN,
-    ...(config.settings.source as
-      | Partial<{ maxProbesPerRun: number; laneBudgetMs: number }>
-      | undefined),
-  };
   const rankCfg = RankConfigSchema.parse(config.settings.rank ?? {});
   const filterCfgForStage = filterCfg ?? FilterConfigSchema.parse({});
+  const sourceOpts = {
+    maxProbesPerRun: DEFAULT_MAX_PROBES_PER_RUN,
+    // Card gate (title/company avoid) applied to every fetched api-lane
+    // job before the seen/cache skip and the maxNewPerLane cap — same
+    // FilterConfig the filter stage uses later, so a job the source stage
+    // lets through was always going to survive `filter` too (P9 closure
+    // register §1, Task A).
+    filterCfg: filterCfgForStage,
+    maxNewPerLane: resolveMaxNewPerLane(config.settings.source),
+    ...(config.settings.source as
+      | Partial<{ maxProbesPerRun: number; laneBudgetMs: number; maxNewPerLane: number }>
+      | undefined),
+  };
 
   const farmingLanes = lanes.filter(isFarmingLane);
   const apiLanes = lanes.filter(isApiLane);

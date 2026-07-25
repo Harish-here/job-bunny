@@ -32,6 +32,9 @@ structure_passthrough.json
 # Chrome remote-debug profile (local only)
 .chrome-debug/
 
+# Pipeline orchestration lock (local only)
+.jobbunny-run.lock
+
 # profiles/rajni/ is a committed, synthetic fixture profile for live-testing the
 # deterministic pipeline stages + onboarding reference (see profiles/rajni/README.md).
 # Must come after every blanket rule above that would otherwise re-shadow these paths

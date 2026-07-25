@@ -179,6 +179,72 @@ export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
+/** emptyLanesCheck — §10 P9 closure register: a freshly-`profile build`-ed
+ * profile seeds `lanes: []` (picking a default ATS board would mean
+ * guessing user intent — see `commands/profile.ts`), which runs zero
+ * source lanes and reports `passed` with 0 jobs — indistinguishable from a
+ * real, successful, quiet day. Rather than seed a guessed default, this
+ * makes the empty-lanes case a loud, un-missable `red` doctor finding
+ * instead: a profile with no lanes is a config problem, never a healthy
+ * "everything is fine" state. Piggybacks on `profileParsesCheck`'s own
+ * file: if `profile.json` is missing or fails schema validation, that's
+ * already reported red by `profileParsesCheck` — this check stays silent
+ * (`ok`) rather than double-reporting the same underlying problem. */
+export function emptyLanesCheck(opts: CoreCheckOpts): DoctorCheck {
+  const name = 'empty-lanes';
+  const readFile = resolveReadFile(opts);
+  const filePath = path.join(
+    resolveRoot(opts),
+    'profiles',
+    opts.profileName,
+    'profile.json',
+  );
+  return {
+    name,
+    async run(): Promise<DoctorFinding> {
+      let raw: string;
+      try {
+        raw = await readFile(filePath);
+      } catch {
+        return { check: name, status: 'ok', detail: 'skipped — profile.json unreadable' };
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return {
+          check: name,
+          status: 'ok',
+          detail: 'skipped — profile.json not valid JSON',
+        };
+      }
+      const result = PipelineConfigSchema.safeParse(parsed);
+      if (!result.success) {
+        return {
+          check: name,
+          status: 'ok',
+          detail: 'skipped — profile.json invalid schema',
+        };
+      }
+      if (result.data.lanes.length === 0) {
+        return {
+          check: name,
+          status: 'red',
+          detail:
+            'profile.json has no lanes configured — a run would source zero jobs and ' +
+            'report "passed" with 0 jobs, indistinguishable from a real quiet day. ' +
+            'Add at least one lane to lanes[] before running.',
+        };
+      }
+      return {
+        check: name,
+        status: 'ok',
+        detail: `${result.data.lanes.length} lane(s) configured`,
+      };
+    },
+  };
+}
+
 /** envTokensCheck — `NOTION_TOKEN` absent/empty ⇒ red (Notion is the
  * always-present source of truth); `TELEGRAM_BOT_TOKEN` absent/empty ⇒
  * warn (optional notifier). If both are missing, reports the worst
@@ -217,7 +283,12 @@ export function envTokensCheck(opts: CoreCheckOpts): DoctorCheck {
  * order. Callers append adapter-contributed checks (e.g. Notion/Telegram
  * reachability) themselves before calling `runChecks`. */
 export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {
-  return [profileParsesCheck(opts), filterParsesCheck(opts), envTokensCheck(opts)];
+  return [
+    profileParsesCheck(opts),
+    filterParsesCheck(opts),
+    emptyLanesCheck(opts),
+    envTokensCheck(opts),
+  ];
 }
 
 const STATUS_RANK: Record<DoctorStatus, number> = { ok: 0, warn: 1, red: 2 };

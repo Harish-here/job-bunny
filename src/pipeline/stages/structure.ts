@@ -146,6 +146,17 @@ function buildPrompt(inputHeaderLine: string, batch: TableRow[]): string {
  * `run()` (loud), and the runner's one retry + this stage's checkpoint
  * resume together give "failed batch retries once, then fails the stage
  * loudly" without redundant machinery.
+ *
+ * P9 closure register item 3: `retries: 1` on a `TIMEOUT_MS`-bounded stage
+ * needs `timeoutMs * 2` of run-level headroom in the worst case (each
+ * retry attempt gets its own fresh per-attempt timeout — see
+ * `guardStage`/`runOneAttempt`), which the OLD hardcoded run cap did not
+ * provide. Resolved at the run-cap layer, not here: `cli/commands/run.ts`'s
+ * `computeRunCapMs` derives the cap from every wired stage's
+ * `timeoutMs * (retries + 1)`, so `retries: 1` stays in place (checkpoint
+ * resume makes a retry meaningfully cheap — a resumed attempt only
+ * re-sends batches after the last checkpoint, not the whole table) rather
+ * than being dropped to fit an arbitrary cap.
  */
 export function makeStructureStage(
   llm: LlmProvider,

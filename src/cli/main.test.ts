@@ -55,6 +55,52 @@ test('main: parses --dry-run for "run"', async () => {
   });
 });
 
+test('main: parses --run-cap-ms for "run"', async () => {
+  let received: unknown;
+  const code = await main(['run', '--profile', 'rajni', '--run-cap-ms', '42000'], {
+    commands: {
+      run: async (opts) => {
+        received = opts;
+        return 0;
+      },
+      doctor: async () => 0,
+    },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(received, {
+    profile: 'rajni',
+    resume: false,
+    headless: false,
+    dryRun: false,
+    runCapMs: 42_000,
+  });
+});
+
+test('main: "run" without --run-cap-ms omits runCapMs entirely (not undefined)', async () => {
+  let received: unknown;
+  await main(['run', '--profile', 'rajni'], {
+    commands: {
+      run: async (opts) => {
+        received = opts;
+        return 0;
+      },
+      doctor: async () => 0,
+    },
+  });
+  assert.equal((received as { runCapMs?: number }).runCapMs, undefined);
+  assert.equal(Object.hasOwn(received as object, 'runCapMs'), false);
+});
+
+test('main: a non-numeric --run-cap-ms returns 2', async () => {
+  const stderr = captureStderr();
+  const code = await main(['run', '--profile', 'rajni', '--run-cap-ms', 'nope'], {
+    commands: { run: async () => 0, doctor: async () => 0 },
+    stderr: stderr.write,
+  });
+  assert.equal(code, 2);
+  assert.match(stderr.lines.join('\n'), /--run-cap-ms/);
+});
+
 test('main: dispatches "doctor" to the injected doctor command', async () => {
   let called = false;
   const code = await main(['doctor', '--profile', 'rajni'], {

@@ -23,6 +23,12 @@ export const TelegramNotifierSettingsSchema = z.object({
 
 export type TelegramNotifierSettings = z.infer<typeof TelegramNotifierSettingsSchema>;
 
+/** Bound on the `sendMessage` HTTP call so a hung notifier (dead DNS, a
+ * stalled TCP connection, Telegram itself wedged) can never stall the
+ * whole process — `run.ts` awaits the digest send AFTER the pipeline has
+ * already finished, so an unbounded fetch here would hang the CLI exit. */
+const SEND_TIMEOUT_MS = 10_000;
+
 export class TelegramNotifier implements Notifier {
   readonly name = 'telegram';
   private readonly settings: TelegramNotifierSettings;
@@ -41,6 +47,7 @@ export class TelegramNotifier implements Notifier {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: this.settings.chatId, text: event.text }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
 
     if (!response.ok) {
