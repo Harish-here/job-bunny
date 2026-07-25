@@ -15,7 +15,7 @@ import type { Storage } from '../../../ports/storage.ts';
 import { CAPTURE_PATH } from './capture_store.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { LinkedInLane, parseSearchUrls } from './lane.ts';
+import { jitterMs, LinkedInLane, parseSearchUrls } from './lane.ts';
 import { RESUME_STATE_PATH } from './resume_state.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -374,7 +374,7 @@ test("one card's openJd throws (empty text): that card is skipped, other cards i
     storage,
   );
 
-  const { jobs, companiesSeen } = await lane.source(ctx);
+  const { jobs, dropped, companiesSeen } = await lane.source(ctx);
 
   const ids = jobs.map((jd) => jd.identity.id).sort();
   assert.deepEqual(ids, ['li-1003', 'li-2001', 'li-2002']);
@@ -386,6 +386,72 @@ test("one card's openJd throws (empty text): that card is skipped, other cards i
   // still be marked done, unlike a whole-url failure.
   const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.ok(Object.hasOwn(persisted.done, URL_1));
+
+  // The failed card's JD-open still shows up as a DroppedRecord, not just
+  // a warn — the funnel must always be able to answer "why did this
+  // disappear?".
+  const acmeDrop = dropped.find((d) => d.jd.identity.id === 'li-1001');
+  assert.ok(acmeDrop, 'the failed-to-open Acme card must appear in dropped');
+  assert.ok(
+    acmeDrop?.reasons.some((r) => r.rule === 'linkedin.jdOpenFailed' && r.pass === false),
+  );
+});
+
+test('every card JD-open failing for a url leaves it un-marked-done (resumable) and does not throw when another url still succeeds', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  // Delete BOTH surviving cards' jd text for url1 (Acme li-1001, Globex
+  // li-1003) so every card that passed the card-gate still fails to open —
+  // url2 is untouched and still succeeds normally.
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/');
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1003/');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn(msg, data) {
+        warnings.push({ msg, data });
+      },
+    },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs, dropped } = await lane.source(ctx);
+
+  // url2's jobs still come through — this is not treated as an aggregate
+  // failure since url2 succeeded.
+  const ids = jobs.map((jd) => jd.identity.id).sort();
+  assert.deepEqual(ids, ['li-2001', 'li-2002']);
+
+  // Both of url1's cards appear as DroppedRecords.
+  const url1DropIds = dropped
+    .filter((d) => d.reasons.some((r) => r.rule === 'linkedin.jdOpenFailed'))
+    .map((d) => d.jd.identity.id)
+    .sort();
+  assert.deepEqual(url1DropIds, ['li-1001', 'li-1003']);
+
+  // url1 must NOT be marked done — a run where every JD-open failed for a
+  // url must be retried next fire, not skipped as if it were healthy.
+  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  assert.equal(Object.hasOwn(persisted.done, URL_1), false);
+  assert.ok(Object.hasOwn(persisted.done, URL_2));
+
+  assert.ok(
+    warnings.some(
+      (w) =>
+        (w as { msg: string }).msg === 'linkedin lane: every card JD-open failed for url',
+    ),
+  );
 });
 
 test('resume: a url already marked done in ResumeState is skipped entirely — its page is never opened', async () => {
@@ -494,7 +560,7 @@ test('browser.launch throwing is a loud lane failure: source() rejects', async (
   await assert.rejects(() => lane.source(ctx), /Chrome would not launch/);
 });
 
-test('every attempted url failing is a loud aggregate failure — shaped like an expired LinkedIn session (finding 3)', async () => {
+test('every attempted url failing is a loud aggregate failure (finding 3) — goto failures report as "other reasons", NOT an asserted expired session', async () => {
   const inv = await realInventory();
   const script = newScript();
   seedHappyPathScript(script);
@@ -512,7 +578,106 @@ test('every attempted url failing is a loud aggregate failure — shaped like an
     storage,
   );
 
-  await assert.rejects(() => lane.source(ctx), /expired LinkedIn session|logout wall/);
+  // The guard must still throw loud (do NOT weaken it) — but a plain goto
+  // failure is neither "zero cards in the DOM" nor "field validation
+  // failed"; it must land in the evidence-based "other reasons" bucket and
+  // must NOT assert a confident "expired session" cause.
+  await assert.rejects(
+    () => lane.source(ctx),
+    /all 2 attempted url\(s\) failed this run.*url\(s\) failed for other reasons.*goto failed/s,
+  );
+  await assert.rejects(
+    () => lane.source(ctx),
+    (err: Error) => {
+      assert.doesNotMatch(err.message, /expired LinkedIn session/);
+      return true;
+    },
+  );
+});
+
+test('every attempted url failing with zero cards harvested reports a DOM/authwall-shaped message, distinct from field-validation failures', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  // No cards scripted for either url at all — harvestCards' own min-count
+  // guard (harvest.ts) throws "... is below min N ...", the genuine
+  // zero-cards-in-the-DOM signal.
+  script.harvestByUrl.set(URL_1, []);
+  script.harvestByUrl.set(URL_2, []);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const ctx = fakeCtx();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  let message = '';
+  await assert.rejects(
+    () => lane.source(ctx),
+    (err: Error) => {
+      message = err.message;
+      return true;
+    },
+  );
+  assert.match(message, /zero \(or too few\) cards in the DOM/);
+  assert.match(message, /is below min/);
+  assert.match(message, /authwall\/logout wall/);
+  assert.match(message, /\.chrome-debug\//);
+  // This case legitimately implicates the session, so it MAY mention it —
+  // but only as one candidate among others, not an outright assertion.
+  assert.doesNotMatch(message, /had empty\/invalid title or company/);
+});
+
+test('every attempted url failing with cards found but empty title/company reports a field-extraction message and does NOT claim the session expired', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  // Cards ARE found in the DOM and the JD pane DOES open with real text —
+  // but title/company extracted as empty strings, so JDSchema.parse's Zod
+  // `too_small` on identity.company/title fires in the per-card capture
+  // path (lane.ts, after openJd succeeds), NOT because the JD-open itself
+  // failed. This is the 2026-07-25 real incident this defect was filed
+  // against: an empty-fields problem, not a session or JD-open problem.
+  script.harvestByUrl.set(URL_1, [
+    { title: '', company: '', location: 'Remote', href: '/jobs/view/9001/' },
+  ]);
+  script.harvestByUrl.set(URL_2, [
+    { title: '', company: '', location: 'Remote', href: '/jobs/view/9002/' },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9001/', 'JD text — 9001');
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9002/', 'JD text — 9002');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const ctx = fakeCtx();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  let message = '';
+  await assert.rejects(
+    () => lane.source(ctx),
+    (err: Error) => {
+      message = err.message;
+      return true;
+    },
+  );
+  assert.match(message, /had empty\/invalid title or company after extraction/);
+  assert.match(message, /cards WERE found in the DOM/);
+  assert.match(message, /page_inventory\/linkedin__jobs-search\.json/);
+  assert.match(message, /NOT a session problem/);
+  // The defining assertion for this defect: an empty-fields failure must
+  // never claim the session expired, and must not even land in the
+  // zero-cards bucket (cards WERE found).
+  assert.doesNotMatch(message, /expired LinkedIn session/);
+  assert.doesNotMatch(message, /zero \(or too few\) cards in the DOM/);
 });
 
 test('zero attempted urls (empty url list) does not trip the aggregate-failure check', async () => {
@@ -671,6 +836,297 @@ test('a url group with no matching inventory is logged and skipped, not thrown',
   ) as { data: { page: string } } | undefined;
   assert.ok(groupWarning);
   assert.equal(groupWarning.data.page, 'unknown-page');
+});
+
+// ---------- cache-skip / cross-url dedup / per-url cap (Task B) ----------
+
+test('cache-skip: a card whose id is already in the Notion cache never gets a JD open', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/1001/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/1003/',
+    },
+  ]);
+  script.jdTextByUrl.set(
+    'https://www.linkedin.com/jobs/view/1003/',
+    'JD text — Globex FE',
+  );
+  // Deliberately no jdTextByUrl entry for 1001 — if the cache gate failed
+  // to skip it, openJd would see '' and throw (empty-text SoftError),
+  // which the assertions below would catch as an unexpected drop/failure.
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  storage.set('cache/entries.json', [
+    { id: 'li-1001', company: 'Acme', title: 'Frontend Engineer', pageId: 'page-1' },
+  ]);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs, dropped } = await lane.source(fakeCtx());
+
+  assert.deepEqual(
+    jobs.map((j) => j.identity.id),
+    ['li-1003'],
+  );
+  // Cache-skip is silent, same posture as the ATS lanes' cache gate — no
+  // DroppedRecord, no jdOpenFailed noise for the cached card.
+  assert.equal(dropped.length, 0);
+});
+
+test('cross-url run-dedup: the same job id harvested under two different search urls is JD-opened only once', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  // Both urls harvest the exact same job (same href -> same id li-9001).
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/9001/',
+    },
+  ]);
+  script.harvestByUrl.set(URL_2, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/9001/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9001/', 'JD text — Acme FE');
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs, dropped } = await lane.source(fakeCtx());
+
+  assert.deepEqual(
+    jobs.map((j) => j.identity.id),
+    ['li-9001'],
+  );
+  assert.equal(dropped.length, 0);
+  // 2 newPage() calls, one per url — the dedup must skip the second
+  // harvest's already-processed card before any per-card work (openJd)
+  // happens for it, not merely dedup the final output.
+  assert.equal(provider.handle?.pages.length, 2);
+});
+
+test('per-url cap: more gate-passed cards than maxCardsPerUrl for one url -> only the cap gets a JD open, cap fires loud with a DroppedRecord per truncated card', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  const hrefs = ['5001', '5002', '5003', '5004', '5005'];
+  script.harvestByUrl.set(
+    URL_1,
+    hrefs.map((id) => ({
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: `/jobs/view/${id}/`,
+    })),
+  );
+  for (const id of hrefs) {
+    script.jdTextByUrl.set(
+      `https://www.linkedin.com/jobs/view/${id}/`,
+      `JD text — ${id}`,
+    );
+  }
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1] }],
+    fixtureFilterConfig(),
+    storage,
+    2, // maxCardsPerUrl
+  );
+
+  const { jobs, dropped } = await lane.source(ctx);
+
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(jobs.map((j) => j.identity.id).sort(), ['li-5001', 'li-5002']);
+
+  const capDrops = dropped.filter(
+    (d) => d.reasons[0]?.rule === 'linkedin.maxCardsPerUrlCap',
+  );
+  assert.equal(capDrops.length, 3);
+  assert.deepEqual(capDrops.map((d) => d.jd.identity.id).sort(), [
+    'li-5003',
+    'li-5004',
+    'li-5005',
+  ]);
+
+  assert.ok(warnings.some((w) => w.msg.includes('maxCardsPerUrl cap hit')));
+});
+
+// ---------- jitter (P9 tail: v0->v2 parity regression fix) ----------
+
+test('jitterMs: rand=0 returns exactly minMs (inclusive lower bound)', () => {
+  assert.equal(
+    jitterMs(2_000, 5_000, () => 0),
+    2_000,
+  );
+});
+
+test('jitterMs: rand=~1 returns just under maxMs (exclusive upper bound), never maxMs itself', () => {
+  const result = jitterMs(2_000, 5_000, () => 0.999_999);
+  assert.ok(result < 5_000);
+  assert.ok(result >= 2_000);
+});
+
+test('jitterMs: rand=0.5 returns the midpoint of the range', () => {
+  assert.equal(
+    jitterMs(2_000, 5_000, () => 0.5),
+    2_000 + Math.floor(0.5 * 3_000),
+  );
+});
+
+/** Records every jitter delay this lane applies — (ms, whether ctx.signal
+ * was passed through) — without ever really waiting. Used by both the
+ * card-loop and url-loop jitter-placement tests below (assert §2/§3 of
+ * the fix's DONE-WHEN) and by the abort test (assert §5, real default
+ * sleepFn from core/async, no fake needed there — see that test). */
+function spySleepFn(calls: number[]): (ms: number, signal: AbortSignal) => Promise<void> {
+  return async (ms, signal) => {
+    calls.push(ms);
+    assert.ok(signal instanceof AbortSignal, 'jitter must be called with ctx.signal');
+  };
+}
+
+test('jitter: applied once before every JD open (card loop) and once per attempted url (url loop), never a real multi-second wait', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined, // maxCardsPerUrl: default
+    1_234, // jitterMinMs
+    4_321, // jitterMaxMs
+    () => 0.5, // randomFn: deterministic midpoint
+    spySleepFn(sleepCalls),
+  );
+
+  const start = Date.now();
+  const { jobs } = await lane.source(fakeCtx());
+  const elapsedMs = Date.now() - start;
+
+  // Happy-path fixture: 2 urls attempted (1 jitter each) + 4 cards opened
+  // (1 jitter each, li-1001/1003/2001/2002 — li-1002 was gated out before
+  // ever reaching the jitter/JD-open step) = 6 total.
+  assert.equal(jobs.length, 4);
+  assert.equal(sleepCalls.length, 6);
+  for (const ms of sleepCalls) {
+    assert.equal(ms, 1_234 + Math.floor(0.5 * (4_321 - 1_234)));
+  }
+  // The spy never actually sleeps — a real 2-5s-per-call implementation
+  // would take seconds here; this must stay well under that.
+  assert.ok(elapsedMs < 500, `expected a fake-sleep run to be fast, took ${elapsedMs}ms`);
+});
+
+test('jitter: a zero-length range (jitterMinMs === jitterMaxMs === 0) is a no-op — the sleepFn is never called', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+  );
+
+  await lane.source(fakeCtx());
+
+  assert.equal(sleepCalls.length, 0);
+});
+
+test('jitter: an already-aborted ctx.signal makes the (real, default) jitter reject immediately — the run fails fast rather than hanging for seconds', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  // No injected sleepFn here — deliberately exercising the REAL default
+  // (core/async's abort-aware sleep) to prove an already-aborted signal
+  // short-circuits without ever starting its 2-5s timer. A real (nonzero)
+  // jitter range is passed explicitly since the class's own default is a
+  // no-op (see DEFAULT_JITTER_MIN_MS's doc comment) — production's real
+  // v0-parity default lives in cli/wire.ts's resolveJitterRange instead.
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    2_000,
+    5_000,
+  );
+
+  const controller = new AbortController();
+  controller.abort(new Error('run cancelled'));
+  const ctx = fakeCtx({ signal: controller.signal });
+
+  const start = Date.now();
+  // Every url's first jitter call rejects immediately (aborted signal) ->
+  // every attempted url fails -> aggregate all-urls-failed throw. The
+  // assertion that matters is the timing: this must not take anywhere
+  // near the 2-5s-per-url the real jitter range would imply if it didn't
+  // honor the abort.
+  await assert.rejects(() => lane.source(ctx), /all 2 attempted url\(s\) failed/);
+  assert.ok(
+    Date.now() - start < 1_000,
+    'an aborted signal must not sit in the jitter sleep',
+  );
 });
 
 // ---------- parseSearchUrls ----------
