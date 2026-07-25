@@ -158,6 +158,42 @@ test('does not clobber a cache-sourced index entry: a job kept only via citiesCo
   assert.match(dropped[0]?.reasons[0]?.detail ?? '', /page-1/);
 });
 
+test('two cache entries share a title+company key but differ in city: neither is lost to Map overwrite', () => {
+  const cache = [
+    cacheEntry({
+      id: 'cache-nyc',
+      title: 'SWE',
+      company: 'Acme',
+      city: 'NYC',
+      pageId: 'page-nyc',
+    }),
+    cacheEntry({
+      id: 'cache-sf',
+      title: 'SWE',
+      company: 'Acme',
+      city: 'SF',
+      pageId: 'page-sf',
+    }),
+  ];
+
+  // A repost of the NYC cache entry must still resolve to page-nyc, not
+  // silently escape dedup because a naive title+company Map would have
+  // overwritten that entry's index slot with the SF entry.
+  const nycRepost = jd({ id: 'fresh-nyc', title: 'SWE', company: 'Acme', city: 'NYC' });
+  const { jobs: nycJobs, dropped: nycDropped } = dedupe([nycRepost], cache);
+  assert.equal(nycJobs.length, 0);
+  assert.equal(nycDropped.length, 1);
+  assert.equal(nycDropped[0]?.reasons[0]?.rule, 'dedup.repost');
+  assert.match(nycDropped[0]?.reasons[0]?.detail ?? '', /page-nyc/);
+
+  // Likewise a repost of the SF entry must resolve to page-sf.
+  const sfRepost = jd({ id: 'fresh-sf', title: 'SWE', company: 'Acme', city: 'SF' });
+  const { jobs: sfJobs, dropped: sfDropped } = dedupe([sfRepost], cache);
+  assert.equal(sfJobs.length, 0);
+  assert.equal(sfDropped.length, 1);
+  assert.match(sfDropped[0]?.reasons[0]?.detail ?? '', /page-sf/);
+});
+
 test('dedup.role-company: drops a job that only matches a cache entry after aggressive (legal-suffix/token) normalization', () => {
   // "Widget Ltd" vs "Widget Private Limited" only line up once companyKey
   // folds legal suffixes — light exactKey normalization keeps them distinct,

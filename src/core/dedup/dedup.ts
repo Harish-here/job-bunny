@@ -98,6 +98,22 @@ type Rule = 'dedup.id' | 'dedup.repost' | 'dedup.role-company';
 
 type Origin = { source: 'cache'; entry: CacheEntry } | { source: 'run'; jd: JD };
 
+/** A title+company key's candidates — kept as an array (not a single
+ * `Origin`) because two cache entries (or a cache entry and a kept run job)
+ * can legitimately share a title+company key while differing in city (see
+ * `citiesConflict`). A plain `Map<string, Origin>` would silently overwrite
+ * the earlier candidate on a `.set()` of the second, permanently losing it
+ * from the index — bug fixed here: every candidate is pushed onto its
+ * key's bucket and `findMatch` below picks the first one whose city
+ * doesn't conflict with the incoming job. */
+type Bucket = Origin[];
+
+function pushBucket(map: Map<string, Bucket>, key: string, origin: Origin): void {
+  const bucket = map.get(key);
+  if (bucket) bucket.push(origin);
+  else map.set(key, [origin]);
+}
+
 /** The derivable city for a job/origin — first `structured.locations`
  * entry's city for a JD (a job may list several; the first is treated as
  * "the" city, same simplification v0's single `location_city` string made
@@ -126,6 +142,15 @@ function citiesConflict(job: JD, origin: Origin): boolean {
   return normalizeCity(jobCity) !== normalizeCity(originCity);
 }
 
+/** First candidate in `key`'s bucket whose city doesn't conflict with
+ * `job` — candidates are tried in insertion order (cache entries first, in
+ * cache order, then kept run jobs in run order), so this mirrors the old
+ * single-`Origin` lookup's behavior whenever at most one candidate exists,
+ * while no longer losing same-key different-city candidates to overwrite. */
+function findMatch(job: JD, map: Map<string, Bucket>, key: string): Origin | undefined {
+  return map.get(key)?.find((origin) => !citiesConflict(job, origin));
+}
+
 function describeMatch(rule: Rule, origin: Origin): string {
   const label =
     rule === 'dedup.id'
@@ -147,13 +172,19 @@ function describeMatch(rule: Rule, origin: Origin): string {
  * header for the three cache rules and how the intra-run case reuses them. */
 export function dedupe(jobs: JD[], cache: CacheEntry[]): DedupResult {
   const idIndex = new Map<string, Origin>();
-  const exactIndex = new Map<string, Origin>();
-  const fuzzyIndex = new Map<string, Origin>();
+  const exactIndex = new Map<string, Bucket>();
+  const fuzzyIndex = new Map<string, Bucket>();
 
   for (const entry of cache) {
     if (entry.id) idIndex.set(entry.id, { source: 'cache', entry });
-    exactIndex.set(exactKey(entry.title, entry.company), { source: 'cache', entry });
-    fuzzyIndex.set(fuzzyKey(entry.title, entry.company), { source: 'cache', entry });
+    pushBucket(exactIndex, exactKey(entry.title, entry.company), {
+      source: 'cache',
+      entry,
+    });
+    pushBucket(fuzzyIndex, fuzzyKey(entry.title, entry.company), {
+      source: 'cache',
+      entry,
+    });
   }
 
   const kept: JD[] = [];
@@ -165,14 +196,12 @@ export function dedupe(jobs: JD[], cache: CacheEntry[]): DedupResult {
     const fKey = fuzzyKey(title, company);
 
     const idMatch = idIndex.get(id);
-    const exactCandidate = idMatch ? undefined : exactIndex.get(eKey);
-    // A same-title+company candidate whose city (when both sides have one)
-    // differs from this job's is not a repost — fall through as if no
-    // exact match were found.
-    const exactMatch =
-      exactCandidate && citiesConflict(job, exactCandidate) ? undefined : exactCandidate;
-    const fuzzyCandidate = idMatch || exactMatch ? undefined : fuzzyIndex.get(fKey);
-    // Same city guard applied to the fuzzy fallback: without it, a
+    // `findMatch` applies the city guard itself, trying every candidate in
+    // the key's bucket (not just one) — a same-title+company candidate
+    // whose city (when both sides have one) differs from this job's is not
+    // a repost, but a DIFFERENT candidate under the same key might still be.
+    const exactMatch = idMatch ? undefined : findMatch(job, exactIndex, eKey);
+    // Same city-aware bucket search for the fuzzy fallback: without it, a
     // same-title+company-but-different-city job that the exact tier
     // correctly refused to match would still get caught here (its
     // aggressively-normalized key is identical when the names are already
@@ -180,7 +209,7 @@ export function dedupe(jobs: JD[], cache: CacheEntry[]): DedupResult {
     // case. `dedup.role-company`'s own match criterion (legal-suffix/token
     // folding) is otherwise unchanged.
     const fuzzyMatch =
-      fuzzyCandidate && citiesConflict(job, fuzzyCandidate) ? undefined : fuzzyCandidate;
+      idMatch || exactMatch ? undefined : findMatch(job, fuzzyIndex, fKey);
 
     const found: { rule: Rule; origin: Origin } | undefined = idMatch
       ? { rule: 'dedup.id', origin: idMatch }
@@ -219,15 +248,17 @@ export function dedupe(jobs: JD[], cache: CacheEntry[]): DedupResult {
     }
 
     kept.push(job);
-    // Never overwrite an existing index entry (cache- or run-sourced): a job
-    // kept only because `citiesConflict` rejected an otherwise-matching
-    // candidate must not replace that candidate's index slot, or a later
-    // genuinely-matching job (e.g. same title+company, matching city) would
-    // compare itself against THIS job instead of the original and wrongly
-    // escape dedup too (see dedup.test.ts's "does not clobber" case).
+    // Push (never overwrite) this kept job onto its key's bucket. A job
+    // kept only because `citiesConflict` rejected every existing candidate
+    // under this key must not replace those candidates' bucket slots — it's
+    // appended alongside them, so a later genuinely-matching job (e.g. same
+    // title+company, matching city) still finds the ORIGINAL candidate via
+    // `findMatch`'s scan, rather than wrongly comparing itself only against
+    // THIS job and escaping dedup too (see dedup.test.ts's "does not
+    // clobber" case).
     if (!idIndex.has(id)) idIndex.set(id, { source: 'run', jd: job });
-    if (!exactIndex.has(eKey)) exactIndex.set(eKey, { source: 'run', jd: job });
-    if (!fuzzyIndex.has(fKey)) fuzzyIndex.set(fKey, { source: 'run', jd: job });
+    pushBucket(exactIndex, eKey, { source: 'run', jd: job });
+    pushBucket(fuzzyIndex, fKey, { source: 'run', jd: job });
   }
 
   return { jobs: kept, dropped };
