@@ -163,11 +163,13 @@ go for this specific step (Task 7 requires per-bullet go, not a blanket one):
    rm -f ~/Library/LaunchAgents/com.jobbunny.run.*.plist
    ```
 
-   UNVERIFIED: whether re-running `node scripts/ops/schedule.js` after clearing all
-   profiles' `schedule.enabled` would achieve the same stale-job cleanup automatically
-   (its own code does delete plists not in its `desiredLabels` set) — the manual
-   `launchctl`/`rm` above is the path actually verified against the script's real label
-   format and is safe regardless of profile config state.
+   The alternative — setting every profile's `schedule.enabled` to `false` and
+   re-running `node scripts/ops/schedule.js` — **does** work: `desiredLabels` comes
+   out empty and the cleanup loop (`scripts/ops/schedule.js:168–194`) boots out and
+   deletes every `com.jobbunny.run.*.plist`. It is not the recommended path here
+   because it mutates profile config to achieve a launchd change, and that same
+   `enabled: false` then has to be reverted before rollback (§6) can reinstall v0.
+   Prefer the `launchctl`/`rm` loop above, which leaves config untouched.
 4. Confirm only v2 jobs remain:
 
    ```bash
