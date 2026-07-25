@@ -4,97 +4,126 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls extra postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a user's resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. It runs on macOS only (launchd scheduling, hardcoded Chrome path) and is driven either manually via slash commands or headlessly via launchd.
+Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls extra postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a user's resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. macOS only (launchd scheduling, hardcoded Chrome path).
 
-## v2 rewrite in progress (branch main-v2)
+## Rewrite status
 
-A clean-room TypeScript rewrite lives under `src/` — decision log in
-`main-v2.md` (read it before any v2 work), spec in
-`docs/superpowers/specs/2026-07-21-main-v2-architecture-design.md`.
-v0 under `scripts/` remains the running pipeline until parity cutover —
-don't mix the trees. Gate for v2 changes: `npm run check`
-(typecheck + biome + depcruise + all tests).
+The v0→v2 rewrite is complete and cut over: `scripts/`, `templates/`, `resume.example.json`, and `config.json` have been deleted from this branch. `src/` (TypeScript) is the only pipeline, full stop — there is no "two trees" situation to reason about anymore. v0 is preserved for history on the `main` branch only; never reference `scripts/` as a live path. Decision log for every v2 architecture choice: `main-v2.md` (read before any v2 work). Full spec: `docs/superpowers/specs/2026-07-21-main-v2-architecture-design.md`. A one-off migrator for profiles still shaped like v0, `scripts-v2-migrate/migrate.ts --profile <name> [--write]` (dry-run by default), reads a profile's legacy `resume_meta.json`/`filter_config.json` once to produce v2's `filter.json`.
+
+## Mandatory: Node 24
+
+The pipeline requires **Node ≥ 24** (native TypeScript type-stripping — there is no build step; `.ts` files run directly, per `engines.node` in `package.json`). The machine default is older, which fails immediately on any command. Every command must run under Node 24:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 24 && <command>
+```
 
 ## Commands
 
 ```bash
-npm test                                          # all unit tests (node --test scripts/)
-node --test scripts/pipeline/filter.test.js       # single test file
-JOBBUNNY_PROFILE=<name> node scripts/pipeline/<stage>.js   # run one pipeline stage
-node scripts/ops/doctor.js                        # preflight (secrets, CDP, inventories, cache)
-node scripts/ops/release.js <X.Y.Z> [--dry-run]   # release spine (used by /wrap ship)
+npm run check                                     # THE gate: typecheck + lint + boundaries + tests
+npm run typecheck                                 # tsc --noEmit
+npm run lint                                       # biome check src
+npm run boundaries                                # depcruise src (dependency-direction rules)
+npm test                                           # node --test src/**/*.test.ts + scripts-v2-migrate/**/*.test.ts + test/**/*.test.ts
+node --test src/core/filter/engine.test.ts        # single test file
+node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]
+node src/cli/main.ts doctor --profile <name>
+node src/cli/main.ts stage <stage-name> --profile <name>
+node src/cli/main.ts routine <routine-name> --profile <name>
 ```
 
-There is no build or lint step. Tests never launch a browser (CI sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`).
+`jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — same commands without the `node` prefix once installed/linked. Full usage: `src/cli/main.ts`'s `USAGE` string. `npm run release` runs `jobbunny release <X.Y.Z> [--dry-run] [--no-merge] [--yes]`. There is no separate lint/build step beyond what `npm run check` runs; CI's `test` check is exactly `npm run check`.
 
-**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data, schedule disabled, no Notion IDs) — see the `/verify` skill. Never run test/experimental stages against `profiles/harish/` or `profiles/uvashree/`; those hold real user data.
+**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data, no Notion IDs) — see the `/verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
 
 ## Profile resolution
 
-Everything is multi-profile. `scripts/lib/config.js` is the **only** place that knows the filesystem layout — all scripts get paths from its `paths()` and profile config from `loadProfile()`. Selection precedence: `JOBBUNNY_PROFILE` env var → `config.json` `default_profile`. Each Bash call is a fresh shell, so prefix `JOBBUNNY_PROFILE=<name>` on **every** command rather than relying on `export`.
+`--profile <name>` is required on every `jobbunny` command except `schedule install` (cross-profile by design). `src/cli/wire.ts` is the single place that turns a profile name + config into a running pipeline: it reads `profiles/<name>/profile.json` (`PipelineConfigSchema` — lanes, connector, notifiers, routines, schedule) and `profiles/<name>/filter.json` (`FilterConfigSchema`), validates both with zod, and maps the enabled names onto real adapter constructors — nothing else instantiates an adapter. A missing/invalid `profile.json` throws loudly at wire time (`ops/doctor/aggregate.ts`'s `profileParsesCheck` reports the same failure without throwing, for `/doctor`-style diagnosis).
 
-Per profile (`profiles/<name>/`): `profile.json` (Notion IDs, schedule times, Telegram chat_id), `resume.json` → `resume_meta.json` (generated by `npm run meta`), `search_urls.md` (LinkedIn saved searches, one page-type per group), `filter_config.json`, `avoid.md`, `greenhouse_boards.md` / `keka_boards.md` (ATS watchlists). Per-run intermediates live in `profiles/<name>/data/` and are gitignored.
+Per profile (`profiles/<name>/`): `profile.json` (lanes, connector, notifiers, routines, schedule), `filter.json` (the sole geo/skills/rank authority — `resume_meta.json` is dead in v2 runtime code), `resume.json` (hand-maintained), `search_urls.md` (drives `lane add-url`/`/page-analyse`). `avoid.md` is still scaffolded by `setup`/`profile build` but read by zero v2 code — vestigial, kept only so `migrate.ts` can still import a v0 avoid-list; edit `filter.json`'s `title`/`companies` blocks instead. There are no more hand-maintained ATS board watchlist files — Greenhouse/Keka company state is auto-managed in `data/registry/companies.json`. Per-run intermediates live in `profiles/<name>/data/` and are **gitignored** (`.gitignore:59`, `profiles/*/data/*`) except the two tracked rajni fixture files (`data/jobs_raw.json`, `data/cache.json`).
 
-Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env` (gitignored, template in `.env.example`); Notion DB/page IDs live in `profile.json`, never in `.env`.
+Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env` (gitignored, loaded once at `src/cli/main.ts` via `dotenv/config` — the one bin entry point, so this must not be duplicated elsewhere); Notion DB/page IDs live in `profile.json`, never in `.env`.
 
 ## Pipeline architecture
 
-The `/run` slash command orchestrates the stages in order; each stage is a plain Node CLI reading explicit input files and writing explicit output files under `profiles/<name>/data/`:
+One `jobbunny` CLI drives a frozen 10-stage in-process pipeline (`src/cli/wire.ts`), each stage a typed function; the runner (`src/pipeline/runner/`) checkpoints after every stage:
 
 ```
-doctor → reconcile → extract → greenhouse → keka → compress → structure → assemble → filter → dedup → rank → sync
+reconcile → farm → source → compress → structure → assemble → filter → dedup → rank → sync
 ```
 
-| Stage | Script | Output |
+| Stage | Module | Role |
 |---|---|---|
-| doctor | `scripts/ops/doctor.js` | preflight only — red aborts the run |
-| reconcile | `scripts/notion/cache.js` | `cache.json` rebuilt from the live Notion DB |
-| extract | `scripts/pipeline/extract.js` | `jobs_raw_text.json`, `companies_seen.json` |
-| greenhouse / keka | `scripts/pipeline/{greenhouse,keka}.js` | appends to `jobs_raw_text.json` (`gh-`/`kk-` ids) |
-| compress | `scripts/pipeline/compress.js` | `structure_input.md` + `structure_passthrough.json` |
-| **structure** | **no script — LLM stage done inline by Claude** (see `.claude/commands/structure.md`) | `jobs_raw_decisions.md` (checkpoints every 25 rows) |
-| assemble | `scripts/pipeline/assemble.js` | `jobs_raw.json` (decisions + passthrough merged) |
-| filter / dedup / rank | `scripts/pipeline/{filter,dedup,rank}.js` | `filtered_jobs.json` → `new_jobs.json` (+ scores) |
-| sync | `scripts/notion/notion_sync.js` | pushes to Notion, updates `cache.json` + `last_run` |
+| reconcile | `pipeline/stages/reconcile.ts` | rebuilds the dedup cache from the live Notion DB (read-only) |
+| farm | `pipeline/stages/farm.ts` | runs each `FarmingLane` (currently LinkedIn, browser-driven; auto-launches/kills debug Chrome unless `JOBBUNNY_KEEP_BROWSER=1`); writes `registry/companies_seen.json` |
+| source | `pipeline/stages/source.ts` | drives every `ApiLane` (Greenhouse, Keka) against `data/registry/companies.json` (auto-managed; `curated: true` entries are never re-probed/expired); probes/fetches, `maxNewPerLane` capped |
+| compress | `pipeline/stages/compress.ts` | truncates raw JD text (2500 chars), emits the LLM's markdown input |
+| **structure** | `pipeline/stages/structure.ts` | LLM stage via `ports/llm.ts` (`ClaudeCliProvider` wraps `claude -p`); 25-row batches, per-batch checkpoint |
+| assemble | `pipeline/stages/assemble.ts` | zod-parses structured output into `StructuredJD`; unparseable rows → `DroppedRecord` |
+| filter | `pipeline/stages/filter.ts` | `core/filter` engine: title/company/location/timezone/skills rules, hard/soft verdicts |
+| dedup | `pipeline/stages/dedup.ts` | drops reposts/intra-run dupes against the reconciled cache |
+| rank | `pipeline/stages/rank.ts` | 100-pt scale, 5 axes, excitement banding |
+| sync | `pipeline/stages/sync.ts` | pushes to Notion via `adapters/db/notion`, automated fields only |
+
+Architecture: hexagonal-lite — `core/` (pure, zod schemas + engines, no I/O) + `ports/` (TS interfaces) + `adapters/` (implementations: `db/notion`, `lanes/{linkedin,greenhouse,keka}`, `llm/claude-cli`, `notify/telegram`, `browser/cdp-chrome`, `scheduler/launchd`) + `pipeline/` (stages + runner) + `routines/` (e.g. `cleanup`) + `ops/` (doctor, observability) + `cli/`. `dependency-cruiser` (`.dependency-cruiser.cjs`, run via `npm run boundaries`) mechanically enforces the direction:
+
+| Rule | Forbids |
+|---|---|
+| `core-is-pure` | `core/` importing `ports`, `adapters`, `pipeline`, `routines`, `ops`, or `cli` |
+| `ports-only-core` | `ports/` importing anything but `core` |
+| `adapters-no-cross-family` | one adapter family importing another (e.g. LinkedIn importing Notion) |
+| `adapters-only-ports-core` | `adapters/` importing `pipeline`, `routines`, `ops`, or `cli` |
+| `only-wire-imports-adapters` | anything except `cli/wire.ts` importing `src/adapters/**` |
+| `nothing-imports-cli` | `core`/`ports`/`adapters`/`pipeline`/`routines`/`ops` importing `cli` |
+
+Note: `boundaries` parses via `@swc/core` with `tsConfig` omitted (dependency-cruiser 18.x's typescript resolver caps below TS7; setting `tsConfig` silently cruises 0 modules).
 
 Key invariants:
 
-- **Notion is the source of truth.** `cache.json` is always rebuildable from the live DB (`/reconcile` is read-only on Notion). `sync` writes only automated fields, never user-edited ones.
-- **Fail-soft where breadth matters, fail-loud everywhere else.** In extract, a broken page-group or URL is skipped and recorded — one stale selector must never kill a run. The Greenhouse/Keka lanes exit 0 on a missing watchlist or whole-lane outage. Everything else fails loudly with a non-zero exit.
-- **Extract is config-driven, not code-driven.** Selectors and page behavior come from `page_inventory/<page>.md`, read at runtime. DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing `extract.js`. `search_urls.md` maps each URL group to its inventory.
-- **Extract owns Chrome.** `scripts/lib/browser.js` launches Chrome with `--remote-debugging-port=9222` against the `.chrome-debug/` user-data-dir (persistent LinkedIn login) and always kills it on exit unless `JOBBUNNY_KEEP_BROWSER=1`.
-- **Extract is resumable.** `extract_resume.json` tracks per-URL same-day completion (a rerun skips done URLs; all-done triggers a rescan reset for multi-fire schedules; `JOBBUNNY_FRESH=1` forces clean). `extract_progress.json` is a heartbeat rewritten at every checkpoint so the scheduled-run watchdog can detect stalls. Same-day resets must never discard already-flushed captures.
-- **The two ATS lanes share scaffolding.** `scripts/pipeline/ats_common.js` holds the generic probe/fetch loops; per-ATS specifics are injected. A third lane should reuse it.
-- **The pipeline runs as one orchestrator process.** `scripts/ops/orchestrate.js` spawns every stage (doctor → sync) as a blocking foreground child and owns retry/stall/timeout/failure-capture; `/structure` is spawned as `claude -p`. Headless and interactive `/run` share this one code path — no stage is ever backgrounded.
+- **Notion is the source of truth.** `reconcile` rebuilds the cache from the live DB every run (read-only). `sync` writes only automated fields, never user-edited ones.
+- **Fail-soft where breadth matters, fail-loud on total outage.** A single broken URL, card, company probe, or board fetch is a `SoftError` — recorded, run continues. But a stage that attempted work and captured **nothing** must be loud: the LinkedIn lane throws if every attempted URL yields zero JDs (shaped like an expired login) — a partial lane failure stays fail-soft, a total one is fail-loud. `core/errors`' `SoftError` type makes this a compile-time distinction, not a convention.
+- **Lanes are config-driven, not code-driven.** Selectors and page behavior come from `page_inventory/<page>.md` at runtime. DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing lane code.
+- **Farm writes what source reads.** `farm` (browser lanes) must run before `source` (API lanes) in the same invocation: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry (`core/company`) via `upsertSeen`.
+- **The runner is the single notifier.** Success and failure digests are both built from `result.json` at run end — no double-notify, no headless guard.
+- **Uniform checkpoints.** After every stage the runner writes `profiles/<name>/data/runs/<date>/NN-<stage>.json`; a crashed run resumes from the last one (`--resume`).
 
-## Scheduling and notifications
+## Slash commands
 
-`scripts/ops/schedule.js` reads each profile's `schedule.times` from `profile.json` and installs one launchd job per distinct time. Each job runs `scripts/ops/run_scheduled.sh`, which runs profiles strictly sequentially (they share one Chrome/CDP session) and invokes `node scripts/ops/orchestrate.js --profile <profile>` per profile. The per-stage watchdog (extract stall, per-stage timeout, run cap) lives inside orchestrate.js; the shell keeps only a coarse backstop timeout above that cap.
+Only four survive as slash commands, everything else is a plain `jobbunny` subcommand:
 
-Run outcome is orchestrate.js's exit code (0 = passed, non-zero = failed); orchestrate also writes `profiles/<profile>/data/last_run_result.json` and sends the Telegram digest itself (success and failure) via `notify()` — the single sender, so there is no double-notify and no `JOBBUNNY_HEADLESS` guard. `run_scheduled.sh` only reads the exit code (and keeps its local osascript ping).
+- `/setup <profile>` — onboarding wizard; the interactive parts (Notion adopt-or-create via MCP, secrets prompt, resume parse) that `jobbunny setup` deliberately can't do non-interactively.
+- `/page-analyse <page-slug>` — browser-driven DOM analysis; writes/refreshes `page_inventory/<page>.json`.
+- `/structure` — the LLM stage itself; there is no `structure.ts` script, Claude produces the markdown table inline.
+- `/wrap` — session close-out (design doc/log/roadmap), calls `jobbunny release` for the ship path.
 
-## Slash commands and skills
-
-The workflow surface is the slash commands in `.claude/commands/` (mirrored as skills): `/setup` (onboarding wizard), `/run` (full pipeline), `/doctor`, per-stage commands, `/page-analyse` (rebuild a page inventory via browser DOM analysis), `/schedule`, `/notify-setup`, `/reconcile`, `/cleanup` (Notion archival, not part of `/run`), `/wrap` (session close-out / release). Read the command file before modifying any stage — the command docs carry the operational contracts (fail-soft rules, summary templates, headless checks) that the scripts assume.
+Plus the `verify` skill (`.claude/skills/verify/SKILL.md`) for exercising stages against `profiles/rajni/`. There is no `/notify-setup` — Telegram wiring is a manual procedure now (README).
 
 ## Before any PR
 
-`main` is protected — all work branches off `main` (`feat/<slug>`, `fix/<slug>`, `release/vX.Y.Z`) and lands via a PR with the `test` check green; only tags are pushed straight. Gate for product-code PRs: `npm test` → `/simplify` → `/verify` (exercise the change end-to-end); larger changes also `/code-review`. Run `/simplify` and `/code-review` at **medium effort only** — never higher; the extra effort levels burn tokens without paying for themselves here. Doc-only and version-sync PRs need only `npm test`.
+`main` is protected — work branches per the task's convention, lands via a PR with the `test` check (`npm run check`) green. Gate for code changes: `npm run check`. Doc-only changes need only a passing `npm run check` (docs don't affect it, but confirm nothing broke).
 
 ## Hard rules
 
-- **Notion select option strings are byte-exact** (`scripts/notion/schema.js`) — changing one without updating the live Notion options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or hard delete — archiving sets Notion's own recoverable `archived: true` trash flag (30-day undo), gated behind an explicit `--apply`/`CLEANUP_APPLY=1` opt-in, dry-run by default.
-- **Home geo is authoritative in `filter_config.json`'s `locations[]`** (city + country + accepted work types), consumed via `scripts/pipeline/jd_filter.js`'s `loadFilterContext` — `resume_meta.json`'s `location` (string or array of strings) and the `homeLocations()`/`isHomeCity()` helpers in `scripts/lib/util.js` still exist but are due to be refactored onto this model in the wiring packet.
-- **Token efficiency is a design constraint on the `/structure` path.** Avoid-list companies drop on card data before JDs open; `compress.js` emits a compact markdown table; `/structure` outputs a markdown table, not JSON. Preserve this shape — it roughly halves the stage's token cost.
-- **No PDF parsing in the daily path** — `resume.json` is the hand-maintained source of truth; PDF→JSON is a one-time `/setup` seed only.
-- **`release.js`'s merge-confirmation prompt needs live stdin** — never run it backgrounded or detached.
-- **Markdown is code here.** `.claude/commands/*.md`, `page_inventory/*.md`, and this file are LLM instructions loaded into context — state each rule once; prefer tightening an existing line over adding a new one.
+- **Notion select option strings are byte-exact** (`adapters/db/notion/schema.ts`, pinned in `schema.test.ts` against a frozen snapshot of v0's option strings) — changing one without first updating the live Notion DB's options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or hard delete — `routine cleanup` archives (Notion's own recoverable `archived: true`, 30-day undo) using `profile.json`'s `settings.cleanup.{passedOlderThanDays:7, untouchedOlderThanDays:30}` and is gated dry-run by `settings.notion.dryRun` (default `true`, edited directly in `profile.json`).
+- **`filter.json`'s `locations[]` is the only geo authority** — resume location is dead in v2. Consumed by `core/filter`'s `location` rule.
+- **Token efficiency is a design constraint on the `/structure` path.** `compress` truncates raw JD text to 2500 chars and emits a markdown table; the structure stage's output stays a markdown table, not JSON. Preserve this shape.
+- **No PDF parsing in the daily path** — `resume.json` is hand-maintained; PDF→JSON is a one-time `/setup` seed only.
+- **Seeding never clobbers.** `jobbunny profile build` derives `filter.json` skills/rank weights from `resume.json`; it fills gaps in user-tuned config, never overwrites them — reruns propose a diff.
+- **`profile remove` is dry-run by default and refuses `rajni`** (the only hardcoded protected name — it's the committed fixture); pass `--force` to actually delete `profiles/<name>/`. It never touches Notion — archive stale jobs first via `routine cleanup` (with `settings.notion.dryRun: false`) if that's wanted.
+- **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
+- **Markdown is code here.** `.claude/commands/*.md`, `page_inventory/*.md`, `main-v2.md`, and this file are LLM instructions loaded into context — state each rule once; prefer tightening an existing line over adding a new one.
 
 ## Conventions
 
-- ESM throughout (`"type": "module"`), Node >= 20, minimal dependencies (`@notionhq/client`, `dotenv`, `playwright`).
-- Reuse `scripts/lib/` before writing anything new; no abstraction until a second concrete caller exists; match the file's existing idioms (CLI parsing via `lib/cli.js`, JSON I/O via `lib/io.js`).
-- Every script: explicit input file → explicit output file, idempotent, fail loud on missing input — never silent-skip.
-- Unit tests are colocated (`foo.js` + `foo.test.js`) and use the built-in `node:test` runner. Scripts guard CLI entry with `isMain` (`scripts/lib/cli.js`) so tests can import them.
-- Every script has a comment header stating its contract (inputs, outputs, invariants) — keep these accurate when changing behavior.
-- Releases: `/wrap ship` — CHANGELOG.md gets a dated `## [X.Y.Z] — YYYY-MM-DD` block first (human judgment), then `release.js` handles branch/PR/checks/tag. PRs are squash-merged; the tag goes on merged main HEAD.
+- ESM throughout, Node ≥ 24, TypeScript 7 (native, `--noEmit` typecheck, strict, erasable-syntax-only — no enums/namespaces), zod for schemas, Biome for lint/format. Runtime deps kept to three: `@notionhq/client`, `playwright`, `zod` (Telegram via `fetch`, `.env` via `dotenv/config`, CLI via `node:util` `parseArgs`, tests via `node:test`).
+- **Two-pair rule:** every module is a folder with an `index.ts` public surface; internals aren't imported across module boundaries. When a folder exceeds two implementation files (main + test pairs, `index.ts` excluded), split it into subfolders before adding a third.
+- Colocated tests (`foo.ts` + `foo.test.ts`), `node:test` runner.
+- Pipeline code never names a concrete adapter ("Notion", "LinkedIn") — it only sees port types (`Connector`, `FarmingLane[]`, `ApiLane[]`). `cli/wire.ts` is the only file allowed to instantiate one.
+- `main-v2.md` and per-module contracts are architecture docs as code — update them in the same change that alters behavior.
+
+## Known limitations (as of the 2026-07-25 live verification)
+
+- **LinkedIn's `#job-details` selector times out on direct-nav `/jobs/view/` pages** — the committed inventory's `jdRoot` was only ever verified against the `/jobs/search/` split-pane view. JD text recovery currently relies entirely on the anchor-text fallback in `src/adapters/lanes/linkedin/jd_open.ts` (scans for the shortest element starting with "About the job" and ≥ 200 chars). This mirrors long-standing v0 behavior — not a regression — but the inventory should be regenerated (`/page-analyse`) against a live `/jobs/view/` page.
+- **`farm`'s funnel reports `jobsIn: 0`** — the shared funnel helper (`ops/observability/result.ts`) measures `payload.jobs.length` before/after a stage, and `farm` is additive (a source stage, like `source`), not a filter. Cosmetic only; `dropsByRule` still reconciles correctly.
+- **`profiles/harish/` still carries legacy files** (`filter_config.json`, `resume_meta.json`, `greenhouse_boards.md`, `keka_boards.md`) alongside `filter.json` — run `scripts-v2-migrate/migrate.ts --profile harish` (dry-run first) to confirm it's fully on the v2 config shape before treating it as migrated. Never read or run the pipeline against it — real user data.

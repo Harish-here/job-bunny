@@ -10,30 +10,34 @@
 
 A personal job-search companion that runs on your own Mac. Several times a day it scrapes your saved LinkedIn job searches, pulls fresh postings from company career APIs (Greenhouse, Keka), filters and ranks everything against your resume, and syncs the survivors to a Notion board — with an optional Telegram digest so you know what landed.
 
-Built to be driven by [Claude Code](https://claude.com/claude-code): the pipeline's orchestration and one LLM stage (structuring raw job descriptions into clean fields) run as Claude Code slash commands; everything else is plain Node.
+This repo went through a clean-room TypeScript rewrite (v2, under `src/`); the original plain-JavaScript pipeline (v0, `scripts/`) has since been deleted from this branch and is preserved for history only on `main`. `src/` is the pipeline, full stop. See [CLAUDE.md](CLAUDE.md) for the full architecture detail and `main-v2.md` for the decision log behind why it's shaped the way it is.
+
+Built to be driven by [Claude Code](https://claude.com/claude-code): a few workflow steps (onboarding, page-selector maintenance, the LLM structuring stage, session close-out) run as Claude Code slash commands; the rest is a single `jobbunny` CLI.
 
 ## How it works
 
 ```
 LinkedIn (Playwright over Chrome CDP) ─┐
-Greenhouse boards API ─────────────────┼─► raw job text ─► compress ─► structure (LLM)
-Keka careers API ──────────────────────┘                                    │
-                                                                            ▼
-        Notion board ◄─ sync ◄─ rank ◄─ dedup ◄─ filter ◄─ assemble ◄─ structured jobs
+Greenhouse / Keka APIs ────────────────┼─► reconcile ─► farm ─► source ─► compress ─► structure (LLM)
+                                        ┘                                                    │
+                                                                                              ▼
+        Notion board ◄─ sync ◄─ rank ◄─ dedup ◄──────────────────────────────── filter ◄─ assemble
                                                           │
                                               Telegram digest (optional)
 ```
 
-- **Extraction is config-driven.** Selectors live in `page_inventory/*.md` files, read at runtime. When LinkedIn changes its DOM, you regenerate the inventory with `/page-analyse` — no code changes.
-- **Fail-soft scraping.** A broken search page or a dead careers API skips that lane and keeps going; one stale selector never kills a run.
+Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage detail is in [CLAUDE.md](CLAUDE.md).
+
+- **Config-driven scraping.** Selectors live in `page_inventory/*.md` files, read at runtime. When LinkedIn changes its DOM, you regenerate the inventory with `/page-analyse` — no code changes.
+- **Fail-soft, but loud on total outage.** A broken search page, a dead careers API, or one bad job card is skipped and logged; the run keeps going. But if a whole lane comes back completely empty (e.g. an expired LinkedIn login), that's treated as a real failure, not silence.
 - **Notion is the source of truth.** The local cache is rebuilt from your Notion database on every run, and sync only ever touches automated fields — your notes and statuses are safe.
 - **Multi-profile.** Each person gets a `profiles/<name>/` directory with their own resume, search URLs, filters, Notion database, and schedule. One machine can run several profiles back to back.
 
 ## Requirements
 
 - macOS (scheduling uses launchd; Chrome is expected at its standard path)
-- Node.js ≥ 20
-- Google Chrome with a logged-in LinkedIn session (kept in a dedicated `.chrome-debug/` browser profile)
+- **Node.js ≥ 24** — v2 runs TypeScript natively with zero build step; older Node fails immediately. If you use nvm: `source ~/.nvm/nvm.sh && nvm use 24` before any `jobbunny`/`npm` command.
+- Google Chrome with a logged-in LinkedIn session (kept in a dedicated `.chrome-debug/` browser profile) — driven via CDP, not `playwright install`
 - [Claude Code](https://claude.com/claude-code) CLI
 - A [Notion internal integration](https://www.notion.so/my-integrations) token
 - Optional: a Telegram bot (via @BotFather) for run digests
@@ -46,61 +50,78 @@ From a fresh clone, in Claude Code:
 /setup <your-name>
 ```
 
-The wizard walks you through everything: dependencies, your `.env` (Notion token), resume import, Notion database creation, search URLs, and a first health check. It's idempotent — rerun it any time to resume where you left off.
+The interactive wizard walks you through onboarding (Notion adopt-or-create, secrets, resume import, search URLs). It calls `jobbunny setup --profile <name>` internally for the non-interactive scaffolding steps and is idempotent — rerun any time to resume where you left off.
 
 Then:
 
+```bash
+source ~/.nvm/nvm.sh && nvm use 24
+node src/cli/main.ts doctor --profile <name>   # preflight: secrets, Chrome/CDP, page inventories, cache
+node src/cli/main.ts run --profile <name>      # full pipeline, end to end
 ```
-/doctor        # preflight: secrets, Chrome/CDP, page inventories, cache
-/run           # full pipeline, end to end
-```
+
+(Once installed as a bin, drop the `node src/cli/main.ts` prefix and just run `jobbunny doctor` / `jobbunny run`.)
 
 Useful day-2 commands:
 
 | Command | What it does |
 |---|---|
-| `/add-url` | Add a LinkedIn saved-search URL (strips tracking params) |
+| `jobbunny lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
 | `/page-analyse` | Rebuild a page inventory from live DOM analysis |
-| `/schedule` | Install launchd jobs from each profile's `schedule` in `profile.json` |
-| `/notify-setup` | Wire up Telegram notifications for a profile |
-| `/reconcile` | Rebuild the local cache from your Notion database |
-| `/cleanup` | Archive stale Notion entries (dry-run by default) |
-| `/update-resume` | Regenerate resume metadata after editing `resume.json` |
+| `jobbunny schedule install` | Install launchd jobs from every profile's `schedule` in `profile.json` |
+| `jobbunny reconcile --profile <name>` | Rebuild the local cache from your Notion database |
+| `jobbunny routine cleanup --profile <name>` | Archive stale Notion entries (dry-run by default) |
+| `jobbunny profile build --profile <name>` | Regenerate filter/rank config from an edited `resume.json` |
+
+## Telegram digest (optional)
+
+There's no setup wizard for this — wire it by hand:
+
+1. **Bot token (one-time, shared across profiles).** Message `@BotFather` on Telegram, run `/newbot`, and add the token it gives you to `.env` as `TELEGRAM_BOT_TOKEN` (never in chat).
+2. **Your chat id.** Message `@userinfobot` — it replies with your numeric id immediately.
+3. **Wire it into the profile.** In `profiles/<name>/profile.json`: add `"telegram"` to the top-level `notifiers` array, and under `settings` add `"telegram": { "chatId": <number> }` (a number, not a quoted string) — leave every other key untouched.
+4. **Verify.** `jobbunny doctor --profile <name>` checks `TELEGRAM_BOT_TOKEN` against Telegram's `getMe` endpoint (it can't validate `chatId` itself — a live digest at the next run is the real test).
 
 ## Scheduled runs
 
-Set times in your profile:
+Set times in your profile's `profile.json`:
 
 ```json
-"schedule": { "enabled": true, "times": ["09:00", "14:00", "19:00"] }
+"schedule": { "times": ["09:00", "14:00", "19:00"] }
 ```
 
-then run `/schedule`. Each firing launches a headless `claude -p "/run <profile>"` with watchdogs for hangs and stalls, keeps the machine awake with `caffeinate`, and sends a Telegram digest with the run summary. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — extraction is resumable per URL.
+then run `jobbunny schedule install`. Each firing runs `jobbunny run --profile <name> --headless` with watchdogs for per-stage timeouts and stalls; profiles sharing a time slot are chained into one job and run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — farming resumes per URL (`--resume`). Per-profile run logs land in `profiles/<name>/data/runs/<date>/`; the launchd job's own stdout/stderr land in `~/Library/Logs/JobBunny/`.
+
+If your Mac regularly sleeps through a scheduled time, pre-wake it: `sudo pmset repeat wakeorpoweron MTWRF <HH:MM:SS>` a few minutes early (requires you to already be logged in — screen-locked is fine, logged out is not — and is most reliable on AC power with the lid closed).
 
 ## Development
 
 ```bash
-npm test                                    # unit tests (node --test, no browser needed)
-node --test scripts/pipeline/filter.test.js # one file
+source ~/.nvm/nvm.sh && nvm use 24
+npm run check                                # the gate: typecheck + lint + boundaries + tests
+node --test src/core/filter/engine.test.ts   # one file
 ```
 
-- Pipeline stages are plain Node CLIs: `JOBBUNNY_PROFILE=<name> node scripts/pipeline/<stage>.js`.
-- `profiles/rajni/` is a committed synthetic fixture profile for runtime verification — use it instead of real profiles when testing stages.
-- Architecture notes and contracts live in [CLAUDE.md](CLAUDE.md) and in each script's header comment.
+- `profiles/rajni/` is a committed synthetic fixture profile for runtime verification — use it instead of real profiles when testing stages, never `profiles/harish/` (real user data).
+- Architecture notes, hard rules, and per-stage detail live in [CLAUDE.md](CLAUDE.md); the full decision log is [main-v2.md](main-v2.md) and the spec is under `docs/superpowers/specs/`.
 - Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Layout
 
 ```
-.claude/commands/    slash commands (the workflow surface)
-scripts/pipeline/    extract, ATS lanes, compress, assemble, filter, dedup, rank
-scripts/notion/      cache reconcile, sync, cleanup
-scripts/notify/      Telegram digests
-scripts/ops/         doctor, scheduler, release, run watchdogs
-scripts/lib/         config/paths, browser (CDP), shared utils
+src/core/            pure domain logic — JD schema, filter/dedup/rank engines, config (no I/O)
+src/ports/           TS interfaces (connector, lane, llm, notifier, browser, scheduler, storage, doctor)
+src/adapters/        implementations: db/notion, lanes/{linkedin,greenhouse,keka}, llm/claude-cli,
+                     notify/telegram, browser/cdp-chrome, scheduler/launchd
+src/pipeline/        the 10 stages + the checkpointing runner
+src/routines/        recurring maintenance (e.g. cleanup)
+src/ops/             doctor, observability (run folder, logger, digest)
+src/cli/             jobbunny entry point + commands + wire.ts (the one composition point)
+.claude/commands/    /setup, /page-analyse, /structure, /wrap — everything else is a jobbunny subcommand
+.claude/skills/      /verify
 page_inventory/      runtime selector configs per page-type
-profiles/<name>/     per-person config + per-run data/ intermediates
-templates/           blank profile files used by /setup
+profiles/<name>/     per-person config + per-run data/ intermediates (gitignored)
+scripts-v2-migrate/  one-off migrator for profiles still shaped like the deleted v0 config
 ```
 
 Private project — not published to npm.
