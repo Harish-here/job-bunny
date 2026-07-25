@@ -143,7 +143,7 @@ function fakeDocument(inv: Inventory, cards: FakeElSpec[]): unknown {
   };
 }
 
-test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read via the inventory selectors', () => {
+test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read via the inventory selectors', async () => {
   const inv = fixtureInventory();
   const cards: FakeElSpec[] = [
     {
@@ -161,10 +161,15 @@ test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read vi
   ];
   const document = fakeDocument(inv, cards);
   const script = buildHarvestScript(inv);
-  // structuredClone: the vm context is a separate realm, so its Array/Object
-  // aren't reference-equal to this realm's — clone into plain values before
-  // a strict deepEqual (node:assert/strict's deepEqual IS deepStrictEqual).
-  const result = structuredClone(vm.runInNewContext(script, { document }));
+  // The script is now an async IIFE (hydration pass awaits between
+  // chunks), so runInNewContext returns a promise — await it before
+  // cloning. structuredClone: the vm context is a separate realm, so its
+  // Array/Object aren't reference-equal to this realm's — clone into plain
+  // values before a strict deepEqual (node:assert/strict's deepEqual IS
+  // deepStrictEqual).
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  );
 
   assert.deepEqual(result, [
     {
@@ -184,7 +189,7 @@ test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read vi
   ]);
 });
 
-test('buildHarvestScript, evaluated against the componentkey inventory shape, reads the id off the card element itself (no descendant href)', () => {
+test('buildHarvestScript, evaluated against the componentkey inventory shape, reads the id off the card element itself (no descendant href)', async () => {
   const inv = componentkeyInventory();
   const cards: FakeElSpec[] = [
     {
@@ -197,7 +202,9 @@ test('buildHarvestScript, evaluated against the componentkey inventory shape, re
   ];
   const document = fakeDocument(inv, cards);
   const script = buildHarvestScript(inv);
-  const result = structuredClone(vm.runInNewContext(script, { document }));
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  );
 
   assert.deepEqual(result, [
     {
@@ -210,12 +217,48 @@ test('buildHarvestScript, evaluated against the componentkey inventory shape, re
   ]);
 });
 
-test('buildHarvestScript returns [] when the card list container is absent', () => {
+test('buildHarvestScript returns [] when the card list container is absent', async () => {
   const inv = fixtureInventory();
   const document = { querySelector: () => null };
   const script = buildHarvestScript(inv);
-  const result = structuredClone(vm.runInNewContext(script, { document }));
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  );
   assert.deepEqual(result, []);
+});
+
+// --- hydration pass: the async IIFE, the budget constant, the scroll call ---
+
+test('buildHarvestScript emits an async IIFE (hydration awaits between chunks, and page.evaluate awaits the returned promise automatically)', () => {
+  const inv = fixtureInventory();
+  const script = buildHarvestScript(inv);
+  assert.match(script, /^\(async \(\) => \{/);
+});
+
+test('buildHarvestScript emits a hydration pass that scrolls each card into view before the read, bounded by an explicit deadline', () => {
+  const inv = fixtureInventory();
+  const script = buildHarvestScript(inv);
+  assert.match(script, /scrollIntoView/);
+  assert.match(script, /hydrationDeadline/);
+  assert.match(script, /Date\.now\(\)/);
+  // The budget constant itself is inlined into the script as a literal.
+  assert.match(script, /hydrationBudgetMs = 8000/);
+});
+
+test('buildHarvestScript, evaluated in a fake DOM with a card list larger than one hydration chunk, still returns every card (hydration loop covers the whole list)', async () => {
+  const inv = fixtureInventory();
+  const cards: FakeElSpec[] = Array.from({ length: 12 }, (_, i) => ({
+    title: `Job ${i}`,
+    company: `Company ${i}`,
+    location: 'Remote',
+    href: `/jobs/view/${1000 + i}/`,
+  }));
+  const document = fakeDocument(inv, cards);
+  const script = buildHarvestScript(inv);
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  );
+  assert.equal(result.length, 12);
 });
 
 // --- harvestCards: fake PageHandle, id parsing + url resolution + skip-on-no-id ---

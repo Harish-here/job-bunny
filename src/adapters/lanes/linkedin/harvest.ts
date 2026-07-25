@@ -44,19 +44,44 @@ const DEFAULT_HARVEST_TIMEOUT_MS = 15_000;
 /** Bounded wait for the results list to attach before the in-page read.
  * Matches v0's DEFAULT_CALL_TIMEOUT_MS in scripts/pipeline/extract/cards.js. */
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
+/** In-page deadline for the hydration pass inside buildHarvestScript's
+ * evaluate call (2026-07-25 fix: LinkedIn's results list is virtualized —
+ * only ~7 of ~25 cards mount content on load, the rest are empty <li>
+ * shells until scrollIntoView()'d into the IntersectionObserver). Kept well
+ * under DEFAULT_HARVEST_TIMEOUT_MS (the whole evaluate's own timeout, 15s)
+ * so hydration always leaves headroom for the read itself and can never be
+ * what times out the call; the pass self-stops at this deadline and reads
+ * whatever hydrated so far rather than throwing. */
+const HYDRATION_BUDGET_MS = 8_000;
+/** Cards scrolled into view per chunk before yielding to the browser —
+ * batching (vs. one scrollIntoView + yield per card) keeps the number of
+ * yields, and therefore wall-clock cost, low for a ~25-card page. */
+const HYDRATION_CHUNK_SIZE = 5;
+/** Yield between chunks so the IntersectionObserver actually fires and the
+ * framework renders before the next chunk scrolls. */
+const HYDRATION_CHUNK_DELAY_MS = 120;
 const JOB_ID_RE = /\/jobs\/view\/(\d+)/;
 const LINKEDIN_ORIGIN = 'https://www.linkedin.com';
 
 /**
- * Builds the in-page harvest function as a SOURCE STRING (an IIFE
+ * Builds the in-page harvest function as a SOURCE STRING (an async IIFE
  * expression) rather than a JS function value — PageHandle.evaluate takes a
- * string so it can be sent to the page over CDP. Pure and unit-testable in
- * isolation via node:vm against a fake `document`.
+ * string so it can be sent to the page over CDP; page.evaluate awaits
+ * whatever promise the string's top-level expression resolves to, so an
+ * async IIFE needs no call-site change. Pure and unit-testable in isolation
+ * via node:vm against a fake `document` (+ `setTimeout`, for the hydration
+ * pass's yields).
+ *
+ * Before the read, a hydration pass scrolls each card into view (in-page,
+ * single evaluate — never a per-card Playwright round trip, see the
+ * 2026-07-17 stall lesson in harvestCards' doc comment) so LinkedIn's
+ * virtualized results list actually mounts every card's content, bounded by
+ * HYDRATION_BUDGET_MS so a pathological page can't hang the call.
  */
 export function buildHarvestScript(inv: Inventory): string {
   const sel = inv.selectors;
   const idAttrName = inv.behaviors.jobCardIdAttr ?? null;
-  return `(() => {
+  return `(async () => {
   const cardListSel = ${JSON.stringify(sel.cardList)};
   const cardSel = ${JSON.stringify(sel.card)};
   const titleSel = ${JSON.stringify(sel.cardTitle)};
@@ -64,9 +89,33 @@ export function buildHarvestScript(inv: Inventory): string {
   const locationSel = ${JSON.stringify(sel.cardLocation)};
   const linkSel = ${JSON.stringify(sel.cardLink)};
   const idAttrName = ${JSON.stringify(idAttrName)};
+  const hydrationBudgetMs = ${HYDRATION_BUDGET_MS};
+  const hydrationChunkSize = ${HYDRATION_CHUNK_SIZE};
+  const hydrationChunkDelayMs = ${HYDRATION_CHUNK_DELAY_MS};
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const text = (el) => (el && el.textContent ? el.textContent.trim() : '');
   const listEl = document.querySelector(cardListSel);
   const cardEls = listEl ? Array.from(listEl.querySelectorAll(cardSel)) : [];
+
+  // Hydration: LinkedIn's results list is virtualized behind an
+  // IntersectionObserver — only the first ~7 of ~25 cards have content
+  // mounted on load, the rest are empty <li> shells with no lockup/title/
+  // company markup at all. scrollIntoView() on each card nudges the
+  // observer to mount it; a bulk scrollTop jump does NOT (per-element
+  // intersection, not scroll position — verified live 2026-07-25).
+  // Chunked + yielded (await sleep) so the observer/framework get an actual
+  // turn between chunks, and deadline-bounded so a pathological page can't
+  // hang this evaluate: if the budget runs out we stop hydrating and read
+  // whatever is there rather than throwing.
+  const hydrationDeadline = Date.now() + hydrationBudgetMs;
+  for (let i = 0; i < cardEls.length && Date.now() < hydrationDeadline; i += hydrationChunkSize) {
+    const chunk = cardEls.slice(i, i + hydrationChunkSize);
+    for (const el of chunk) {
+      if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView();
+    }
+    await sleep(hydrationChunkDelayMs);
+  }
+
   return cardEls.map((el) => {
     // cardLink sometimes duplicates the card selector itself (no href on
     // any descendant, e.g. linkedin__jobs-search-results) — querySelector
