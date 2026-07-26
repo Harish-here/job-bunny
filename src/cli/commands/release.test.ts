@@ -120,6 +120,10 @@ interface FakeState {
   branchExistsLocal?: boolean;
   branchExistsRemote?: boolean;
   pr?: { number: number; state: 'OPEN' | 'MERGED' | 'CLOSED'; url: string } | null;
+  /** Overrides the single-PR `pr` field with a full `gh pr list` response —
+   * models a stale CLOSED PR from a previously reused branch coexisting
+   * with the live one. */
+  prList?: Array<{ number: number; state: 'OPEN' | 'MERGED' | 'CLOSED'; url: string }>;
   pkgAtRef?: string | null;
   readmeAtRef?: string | null;
   versionSyncDirty?: boolean;
@@ -183,8 +187,10 @@ function makeExecCommand(state: FakeState) {
       return ok(state.branchExistsRemote ? `deadbeef\trefs/heads/${state.branch}` : '');
     }
     if (cmd === 'gh' && joined.startsWith(`pr list --head ${state.branch}`)) {
+      if (state.prList) return ok(JSON.stringify(state.prList));
       return ok(JSON.stringify(currentPr ? [currentPr] : []));
     }
+    if (cmd === 'git' && joined === `fetch origin ${state.branch} --quiet`) return ok('');
     if (cmd === 'git' && joined.startsWith('show ') && joined.endsWith(':package.json')) {
       return state.pkgAtRef != null ? ok(state.pkgAtRef) : fail();
     }
@@ -417,6 +423,66 @@ test('without --yes, a "no" answer aborts without merging', async () => {
   const code = await releaseCommand({ version: '1.3.0' }, deps); // confirm defaults to 'n'
   assert.equal(code, 1);
   assert.equal(merged, false);
+});
+
+// ---------- resume-state fidelity ----------
+
+test('a branch whose README has no badge at all resolves AWAITING_COMMIT, not AWAITING_PR', async () => {
+  const state = baseState({
+    branchExistsLocal: true,
+    pkgAtRef: JSON.stringify({ version: '1.3.0' }),
+    readmeAtRef: '# README with no badge in it',
+  });
+  const lines: string[] = [];
+  const deps = makeDeps(state, { write: (line) => lines.push(line) });
+  const code = await releaseCommand({ version: '1.3.0', dryRun: true }, deps);
+  assert.equal(code, 0);
+  assert.ok(
+    lines.some((l) => l.includes('resolved resume stage: AWAITING_COMMIT')),
+    `expected AWAITING_COMMIT, got: ${lines.join(' | ')}`,
+  );
+});
+
+test('getPr prefers the live OPEN PR over a stale CLOSED one on a reused branch', async () => {
+  const state = baseState({
+    prList: [
+      { number: 3, state: 'CLOSED', url: 'https://example/pr/3' },
+      { number: 7, state: 'OPEN', url: 'https://example/pr/7' },
+    ],
+    branchExistsRemote: true,
+    pkgAtRef: JSON.stringify({ version: '1.3.0' }),
+    readmeAtRef: '<img src="https://img.shields.io/badge/version-1.3.0-e8a0bf">',
+    checksSequence: [[{ name: 'test', state: 'SUCCESS' }]],
+    mergeCommitSha: 'deadbeef',
+    mainHeadAfterMerge: 'deadbeef',
+  });
+  const deps = makeDeps(state);
+  const code = await releaseCommand({ version: '1.3.0', yes: true }, deps);
+  assert.equal(code, 0, 'a stale CLOSED PR must not dead-end a resumable release');
+});
+
+test('a remote-only release branch is fetched before its origin/<branch> refs are read', async () => {
+  const state = baseState({
+    branchExistsRemote: true,
+    pkgAtRef: JSON.stringify({ version: '1.3.0' }),
+    readmeAtRef: '<img src="https://img.shields.io/badge/version-1.3.0-e8a0bf">',
+    checksSequence: [[{ name: 'test', state: 'SUCCESS' }]],
+    mergeCommitSha: 'deadbeef',
+    mainHeadAfterMerge: 'deadbeef',
+  });
+  const fetched: string[] = [];
+  const deps = makeDeps(state);
+  const wrapped = deps.execCommand;
+  deps.execCommand = (cmd, args) => {
+    if (cmd === 'git' && args[0] === 'fetch') fetched.push(args.join(' '));
+    return wrapped(cmd, args);
+  };
+  const code = await releaseCommand({ version: '1.3.0', yes: true }, deps);
+  assert.equal(code, 0);
+  assert.ok(
+    fetched.includes(`fetch origin ${state.branch} --quiet`),
+    `expected a fetch of the remote release branch, got: ${fetched.join(' | ')}`,
+  );
 });
 
 // ---------- --no-merge ----------

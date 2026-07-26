@@ -120,6 +120,32 @@ export function parseSearchUrls(md: string): SearchUrlGroup[] {
 
 const DEFAULT_GOTO_TIMEOUT_MS = 30_000;
 
+/** Distinct whole-url/per-card failure shapes, counted (with one sample
+ * message each) separately in the all-urls-failed evidence rather than
+ * collapsed into a single guessed cause — see the throw site in source(). */
+type FailureKind = 'zero-cards' | 'field-validation' | 'jd-open' | 'other';
+
+/** Per-url bookkeeping for one source() run — the single record the
+ * aggregate guards, the failure evidence, and the extraction-source
+ * observability are all derived from (replaces the parallel scalar
+ * counters that previously fed each of those independently). */
+interface UrlStat {
+  url: string;
+  /** Cards that reached a JD open (post gate/cache/dedup/cap filtering). */
+  cardsAttempted: number;
+  captured: number;
+  /** Captures whose text came from the anchor-text fallback, not jdRoot. */
+  anchorExtractions: number;
+  failed: boolean;
+  failures: Array<{ kind: FailureKind; message: string }>;
+}
+
+function zodIssuesMessage(err: z.ZodError): string {
+  return err.issues
+    .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+    .join('; ');
+}
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -244,45 +270,13 @@ export class LinkedInLane implements FarmingLane {
     const dropped: DroppedRecord[] = [];
     const companiesSeen = new Set<string>();
 
-    // Aggregate-failure detection (spec §7 fail-soft granularity, but a
-    // whole-run "every attempted url died" is not one flaky selector —
-    // see the loud check after the loop).
-    let attemptedUrls = 0;
-    let failedUrls = 0;
-
-    // Lane-wide "no JD ever opened" guard (distinct from, and in addition
-    // to, the per-url and all-urls-failed guards above/below): a url whose
-    // cards all survive title-gating but whose JD-opens all fail is only
-    // caught by the per-url guard if it also lands on failedUrls ===
-    // attemptedUrls — a url where NOTHING survives gating (cardsAttempted
-    // === 0) never becomes a failedUrl, so it can silently drag
-    // attemptedUrls above failedUrls and mask a 100%-JD-open-failure run
-    // (2026-07-25 incident: url A attempted 2, both failed; url B
-    // attempted 0; failedUrls (1) !== attemptedUrls (2), no throw,
-    // outcome: "passed"). These totals are summed across every url,
-    // independent of per-url pass/fail bookkeeping, so this guard fires on
-    // the aggregate even when no single url is "the" failed one.
-    let totalCardsAttempted = 0;
-    let totalCaptured = 0;
-    // Extraction-source observability (finding: a run where 100% of JDs
-    // came via the anchor fallback was indistinguishable from a healthy
-    // one, so a broken jdRoot selector never created pressure to
-    // regenerate the inventory — until the anchor also drifted and the
-    // lane went 100%-green to 100%-dead in one step).
-    let anchorExtractions = 0;
-
-    // Evidence for the all-urls-failed message below: distinct failure
-    // shapes get counted (and one sample message kept) separately, rather
-    // than collapsed into a single guessed cause. See the throw site for
-    // why these three buckets in particular.
-    let zeroCardHarvests = 0;
-    let sampleZeroCardsMsg: string | undefined;
-    let fieldValidationFailures = 0;
-    let sampleFieldValidationMsg: string | undefined;
-    let jdOpenFailures = 0;
-    let sampleJdOpenMsg: string | undefined;
-    let otherUrlFailures = 0;
-    let sampleOtherMsg: string | undefined;
+    // One UrlStat per attempted url — everything the post-loop guards and
+    // observability need (aggregate-failure detection, the lane-wide
+    // "no JD ever opened" guard that caught the 2026-07-25 incident, the
+    // per-kind failure evidence, extraction-source counts) is derived
+    // from these records after the loop instead of being tracked in
+    // parallel scalar counters.
+    const stats: UrlStat[] = [];
 
     // Lane's own failure (Chrome won't launch) is loud — deliberately NOT
     // caught here.
@@ -303,9 +297,15 @@ export class LinkedInLane implements FarmingLane {
             continue;
           }
 
-          attemptedUrls += 1;
-          let capturedCount = 0;
-          let urlFailed = false;
+          const stat: UrlStat = {
+            url,
+            cardsAttempted: 0,
+            captured: 0,
+            anchorExtractions: 0,
+            failed: false,
+            failures: [],
+          };
+          stats.push(stat);
           let page: PageHandle | undefined;
           try {
             // newPage() lives INSIDE this try: a dead CDP context (e.g.
@@ -334,7 +334,6 @@ export class LinkedInLane implements FarmingLane {
             // cache-skip and cross-url dedup (cheap Set lookups), then
             // the per-url cap (backstop, loud when it fires), and only
             // then the expensive JD open.
-            let cardsAttempted = 0;
             let capLoggedThisUrl = false;
             for (const card of pass) {
               if (cacheIds.has(card.id)) {
@@ -343,7 +342,7 @@ export class LinkedInLane implements FarmingLane {
               if (processedIds.has(card.id)) {
                 continue;
               }
-              if (cardsAttempted >= this.maxCardsPerUrl) {
+              if (stat.cardsAttempted >= this.maxCardsPerUrl) {
                 if (!capLoggedThisUrl) {
                   capLoggedThisUrl = true;
                   ctx.logger.warn(
@@ -375,8 +374,7 @@ export class LinkedInLane implements FarmingLane {
               }
 
               processedIds.add(card.id);
-              cardsAttempted += 1;
-              totalCardsAttempted += 1;
+              stat.cardsAttempted += 1;
               ctx.beat();
               try {
                 // v0 parity placement: jitter before every JD open
@@ -388,7 +386,7 @@ export class LinkedInLane implements FarmingLane {
                 // an uncaught throw out of the whole card loop.
                 await this.jitter(ctx);
                 const { text: rawText, source } = await openJd(page, card, inv, ctx);
-                if (source === 'anchor') anchorExtractions += 1;
+                if (source === 'anchor') stat.anchorExtractions += 1;
                 const jd = JDSchema.parse({
                   identity: {
                     id: card.id,
@@ -401,8 +399,7 @@ export class LinkedInLane implements FarmingLane {
                   content: { rawText },
                 });
                 await captureStore.append(this.storage, jd);
-                capturedCount += 1;
-                totalCaptured += 1;
+                stat.captured += 1;
               } catch (err) {
                 // Distinguish "JD pane genuinely failed to open" (openJd
                 // already wraps that as a SoftError) from "the card's own
@@ -410,18 +407,15 @@ export class LinkedInLane implements FarmingLane {
                 // JDSchema.parse rejected them" (a plain ZodError, thrown
                 // here rather than inside openJd). These are different bugs
                 // with different fixes, so they must not be folded into one
-                // counter/message below.
-                if (err instanceof z.ZodError) {
-                  fieldValidationFailures += 1;
-                  sampleFieldValidationMsg ??= err.issues
-                    .map(
-                      (issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`,
-                    )
-                    .join('; ');
-                } else {
-                  jdOpenFailures += 1;
-                  sampleJdOpenMsg ??= err instanceof Error ? err.message : String(err);
-                }
+                // failure kind below.
+                stat.failures.push(
+                  err instanceof z.ZodError
+                    ? { kind: 'field-validation', message: zodIssuesMessage(err) }
+                    : {
+                        kind: 'jd-open',
+                        message: err instanceof Error ? err.message : String(err),
+                      },
+                );
                 const soft = toSoftError('url', card.url, err);
                 ctx.logger.warn('linkedin lane: card JD open failed', {
                   url: card.url,
@@ -467,38 +461,38 @@ export class LinkedInLane implements FarmingLane {
             // gate-passed cards were all cache-hits or cross-url dupes
             // legitimately opens zero JDs and must NOT be misread as an
             // outage.
-            if (cardsAttempted > 0 && capturedCount === 0) {
-              urlFailed = true;
-              failedUrls += 1;
+            if (stat.cardsAttempted > 0 && stat.captured === 0) {
+              stat.failed = true;
               ctx.logger.warn('linkedin lane: every card JD-open failed for url', {
                 url,
-                cardCount: cardsAttempted,
+                cardCount: stat.cardsAttempted,
               });
             }
           } catch (err) {
-            urlFailed = true;
-            failedUrls += 1;
-            // Same evidence-gathering as the per-card catch above, but for
-            // whole-url failures: harvestCards' own "list never attached" /
-            // "below min" guards (harvest.ts) are the zero-cards-in-DOM
-            // signal; a ZodError here is gateCards' card-gate-drop path
-            // hitting the same empty-identity-field problem as the per-card
-            // catch; anything else (goto timeout, dead CDP newPage, etc.) is
-            // its own "other" bucket rather than being guessed at.
+            stat.failed = true;
+            // Same failure-kind classification as the per-card catch above,
+            // but for whole-url failures: harvestCards' own "list never
+            // attached" / "below min" guards (harvest.ts) are the
+            // zero-cards-in-DOM signal; a ZodError here is gateCards'
+            // card-gate-drop path hitting the same empty-identity-field
+            // problem as the per-card catch; anything else (goto timeout,
+            // dead CDP newPage, etc.) is its own "other" kind rather than
+            // being guessed at.
             if (err instanceof z.ZodError) {
-              fieldValidationFailures += 1;
-              sampleFieldValidationMsg ??= err.issues
-                .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-                .join('; ');
+              stat.failures.push({
+                kind: 'field-validation',
+                message: zodIssuesMessage(err),
+              });
             } else if (
               err instanceof Error &&
               /results list never attached|is below min \d+/.test(err.message)
             ) {
-              zeroCardHarvests += 1;
-              sampleZeroCardsMsg ??= err.message;
+              stat.failures.push({ kind: 'zero-cards', message: err.message });
             } else {
-              otherUrlFailures += 1;
-              sampleOtherMsg ??= err instanceof Error ? err.message : String(err);
+              stat.failures.push({
+                kind: 'other',
+                message: err instanceof Error ? err.message : String(err),
+              });
             }
             const soft = toSoftError('url', url, err);
             ctx.logger.warn('linkedin lane: url failed', { url, message: soft.message });
@@ -508,8 +502,8 @@ export class LinkedInLane implements FarmingLane {
 
           // markDone only on success — a url whose goto/harvest/newPage
           // threw must be retried on the next fire, not skipped as done.
-          if (!urlFailed) {
-            resumeState.markDone(url, capturedCount);
+          if (!stat.failed) {
+            resumeState.markDone(url, stat.captured);
           }
           // Persisted after EVERY url (success or failure), not once at
           // the end — a mid-run SIGKILL must lose at most the in-flight
@@ -520,6 +514,22 @@ export class LinkedInLane implements FarmingLane {
     } finally {
       await handle.close();
     }
+
+    // Everything below is derived from the per-url stats gathered above.
+    const attemptedUrls = stats.length;
+    const failedUrls = stats.filter((s) => s.failed).length;
+    // Summed across every url, independent of per-url pass/fail — the
+    // lane-wide guard further down fires on these aggregates even when no
+    // single url is "the" failed one (2026-07-25 incident: url A attempted
+    // 2 cards and failed both, url B attempted 0, so failedUrls (1) !==
+    // attemptedUrls (2) kept the all-urls-failed check quiet).
+    const totalCardsAttempted = stats.reduce((n, s) => n + s.cardsAttempted, 0);
+    const totalCaptured = stats.reduce((n, s) => n + s.captured, 0);
+    const anchorExtractions = stats.reduce((n, s) => n + s.anchorExtractions, 0);
+    const failures = stats.flatMap((s) => s.failures);
+    const countOf = (kind: FailureKind) => failures.filter((f) => f.kind === kind).length;
+    const sampleOf = (kind: FailureKind) =>
+      failures.find((f) => f.kind === kind)?.message;
 
     // The anchor fallback carrying captures means the configured jdRoot
     // selector is not matching — the run still succeeds, but silently
@@ -543,35 +553,42 @@ export class LinkedInLane implements FarmingLane {
     // asserting one guessed cause.
     if (attemptedUrls > 0 && failedUrls === attemptedUrls) {
       const evidence: string[] = [];
-      if (zeroCardHarvests > 0) {
+      const zeroCards = countOf('zero-cards');
+      if (zeroCards > 0) {
+        const sample = sampleOf('zero-cards');
         evidence.push(
-          `${zeroCardHarvests}/${attemptedUrls} url(s) found zero (or too few) cards in ` +
-            `the DOM${sampleZeroCardsMsg ? ` (e.g. "${sampleZeroCardsMsg}")` : ''} — ` +
+          `${zeroCards}/${attemptedUrls} url(s) found zero (or too few) cards in ` +
+            `the DOM${sample ? ` (e.g. "${sample}")` : ''} — ` +
             'consistent with an authwall/logout wall OR a broken results-list selector; ' +
             'candidates: check .chrome-debug/ session state, and/or whether the ' +
             'list-container selector still matches (page_inventory/linkedin__jobs-search.json).',
         );
       }
-      if (fieldValidationFailures > 0) {
+      const fieldValidation = countOf('field-validation');
+      if (fieldValidation > 0) {
+        const sample = sampleOf('field-validation');
         evidence.push(
-          `${fieldValidationFailures} card(s) had empty/invalid title or company after ` +
-            `extraction${sampleFieldValidationMsg ? ` (e.g. "${sampleFieldValidationMsg}")` : ''} ` +
+          `${fieldValidation} card(s) had empty/invalid title or company after ` +
+            `extraction${sample ? ` (e.g. "${sample}")` : ''} ` +
             '— cards WERE found in the DOM, but field extraction failed schema validation; ' +
             'this points at drifted title/company sub-selectors in ' +
             'page_inventory/linkedin__jobs-search.json, NOT a session problem.',
         );
       }
-      if (jdOpenFailures > 0) {
+      const jdOpen = countOf('jd-open');
+      if (jdOpen > 0) {
+        const sample = sampleOf('jd-open');
         evidence.push(
-          `${jdOpenFailures} card(s) were found and extracted, but JD-open failed for ` +
-            `them${sampleJdOpenMsg ? ` (e.g. "${sampleJdOpenMsg}")` : ''} — a different ` +
+          `${jdOpen} card(s) were found and extracted, but JD-open failed for ` +
+            `them${sample ? ` (e.g. "${sample}")` : ''} — a different ` +
             'failure mode from the above two; check the jdRoot selector or JD-pane load timing.',
         );
       }
-      if (otherUrlFailures > 0) {
+      const other = countOf('other');
+      if (other > 0) {
+        const sample = sampleOf('other');
         evidence.push(
-          `${otherUrlFailures} url(s) failed for other reasons` +
-            `${sampleOtherMsg ? ` (e.g. "${sampleOtherMsg}")` : ''}.`,
+          `${other} url(s) failed for other reasons${sample ? ` (e.g. "${sample}")` : ''}.`,
         );
       }
       throw new Error(

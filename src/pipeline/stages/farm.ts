@@ -94,6 +94,18 @@ export function makeFarmStage(
       // Every farming lane failed: not one broken lane, a total outage —
       // fail loud rather than a silently-green zero-job run (mirrors
       // linkedin/lane.ts's all-urls-failed guard, v0 checkAggregateFailure).
+      //
+      // Known, accepted cost (2026-07-26 review): LinkedIn is currently
+      // the ONLY farming lane, so this throw aborts the whole 10-stage run
+      // at stage 2 and the healthy Greenhouse/Keka lanes never run that
+      // day — an expired login pauses ATS sourcing until it's fixed.
+      // Deliberately kept: the abort is what makes the outage loud (the
+      // runner's failure digest fires), and downgrading it to a warn
+      // inside a green run would bury the expired-login signal — exactly
+      // what CLAUDE.md's fail-loud-on-total-outage invariant forbids.
+      // Letting ATS lanes still run would need a real "degraded run"
+      // status flowing through result.json into both digests — a feature,
+      // not a tweak to this condition.
       if (farmingLanes.length > 0 && failedLanes === farmingLanes.length) {
         throw new Error(
           `farm stage: all ${farmingLanes.length} farming lane(s) failed this run — ` +

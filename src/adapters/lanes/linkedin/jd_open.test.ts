@@ -133,13 +133,9 @@ test('popup happy path: click(cardTitle) -> waitFor(jdRoot) -> evaluate, in orde
   ]);
 });
 
-/** Distinguishes the two evaluate scripts openJd issues: the anchor
- * fallback script (buildJdAnchorScript) uses querySelectorAll over
- * multiple tag names; the configured-selector script uses a single
- * querySelector call. */
-function isAnchorScript(fn: string): boolean {
-  return fn.includes('querySelectorAll');
-}
+// openJd's contract is "configured jdRoot selector first, anchor fallback
+// second" — the fakes below dispatch on evaluate CALL ORDER (first call =
+// jdRoot, second = anchor), not by sniffing the script source.
 
 test('jdRoot waitFor times out but the configured selector still returns text: card succeeds, no throw', async () => {
   const inv = await detailsPageInventory();
@@ -148,8 +144,7 @@ test('jdRoot waitFor times out but the configured selector still returns text: c
     waitFor: async () => {
       throw new Error('waitFor(jdRoot) timed out');
     },
-    evaluate: async (fn) =>
-      (isAnchorScript(fn as string) ? '' : 'About the job — we build things.') as never,
+    evaluate: async () => 'About the job — we build things.' as never,
   });
   const ctx = fakeCtx();
   const card = { id: 'li-3', url: 'https://www.linkedin.com/jobs/view/3/' };
@@ -167,12 +162,15 @@ test('jdRoot waitFor times out but the configured selector still returns text: c
 test('jdRoot waitFor times out and the configured selector is empty: anchor fallback returns text, card succeeds', async () => {
   const inv = await detailsPageInventory();
   const calls: string[] = [];
+  let evalCalls = 0;
   const page = fakePage(calls, {
     waitFor: async () => {
       throw new Error('waitFor(jdRoot) timed out');
     },
-    evaluate: async (fn) =>
-      (isAnchorScript(fn as string) ? 'About the job — anchor fallback.' : '') as never,
+    evaluate: async () => {
+      evalCalls += 1;
+      return (evalCalls === 1 ? '' : 'About the job — anchor fallback.') as never;
+    },
   });
   const ctx = fakeCtx();
   const card = { id: 'li-3b', url: 'https://www.linkedin.com/jobs/view/3b/' };
@@ -315,9 +313,11 @@ test('a "Target closed" CDP error from evaluate propagates with its real message
 test('a generic script error from the jdRoot evaluate still falls back to the anchor scan', async () => {
   const inv = await detailsPageInventory();
   const calls: string[] = [];
+  let evalCalls = 0;
   const page = fakePage(calls, {
-    evaluate: async (fn) => {
-      if (!isAnchorScript(fn as string)) {
+    evaluate: async () => {
+      evalCalls += 1;
+      if (evalCalls === 1) {
         throw new Error('ReferenceError: something page-side');
       }
       return 'About the job — recovered via anchor.' as never;
@@ -340,14 +340,16 @@ test('the anchor script uses behaviors.jdAnchorText from the inventory, not a co
   });
   const calls: string[] = [];
   const anchorText = `Om jobbet — ${'x'.repeat(120)}`;
+  let evalCalls = 0;
   const page = fakePage(calls, {
     evaluate: async (fn) => {
-      if (isAnchorScript(fn as string)) {
-        assert.match(fn as string, /Om jobbet/);
-        assert.doesNotMatch(fn as string, /About the job/);
-        return anchorText as never;
-      }
-      return '' as never;
+      evalCalls += 1;
+      if (evalCalls === 1) return '' as never;
+      // Second call is the anchor script — the assertion under test: it
+      // must embed the inventory's phrase, not the code default.
+      assert.match(fn as string, /Om jobbet/);
+      assert.doesNotMatch(fn as string, /About the job/);
+      return anchorText as never;
     },
   });
   const ctx = fakeCtx();

@@ -58,7 +58,7 @@ export interface ReleaseDeps {
   execCommand: (cmd: string, args: string[]) => ExecResult;
   readFile: (path: string) => string;
   writeFile: (path: string, data: string) => void;
-  /** Resolves with the raw (untrimmed) answer to an interactive y/N prompt. */
+  /** Resolves with the trimmed answer to an interactive y/N prompt. */
   confirm: (question: string) => Promise<string>;
   sleep: (ms: number) => Promise<void>;
   /** Injectable clock — real default is `Date.now()`; tests fast-forward it
@@ -94,6 +94,11 @@ function defaultDeps(): ReleaseDeps {
           resolve(answer.trim());
         });
       }),
+    // Plain setTimeout, deliberately not AbortSignal-bound: release is an
+    // interactive foreground command (see confirmMerge's live-stdin warning
+    // above) whose only cancellation is the user's SIGINT killing the whole
+    // process — there is no run-level signal to honor here, and the check
+    // poll's own deps.now() deadline bounds the total wait.
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => Date.now(),
     write: (line: string) => console.log(`[release] ${line}`),
@@ -253,24 +258,22 @@ export function resolveResumeStage(state: ResumeState): Stage {
 
 // ---------- shell helpers (thin wrappers over the single execCommand dep) ----------
 
-function run(deps: ReleaseDeps, cmd: string, args: string[]): string {
+/** Throwing wrapper over the single execCommand dep. `trim: false` exists
+ * for `git status --porcelain` output — see the VERSION_SYNC_FILES header
+ * note on why porcelain must never be trimmed. */
+function run(
+  deps: ReleaseDeps,
+  cmd: string,
+  args: string[],
+  opts: { trim?: boolean } = {},
+): string {
   const r = deps.execCommand(cmd, args);
   if (!r.ok) {
     throw r.error instanceof Error
       ? r.error
       : new Error(`${cmd} ${args.join(' ')} failed`);
   }
-  return r.stdout.trim();
-}
-
-function runPorcelain(deps: ReleaseDeps, cmd: string, args: string[]): string {
-  const r = deps.execCommand(cmd, args);
-  if (!r.ok) {
-    throw r.error instanceof Error
-      ? r.error
-      : new Error(`${cmd} ${args.join(' ')} failed`);
-  }
-  return r.stdout;
+  return opts.trim === false ? r.stdout : r.stdout.trim();
 }
 
 function runOk(
@@ -306,10 +309,17 @@ function getPr(deps: ReleaseDeps, branch: string): PrInfo | null {
   ]);
   if (!out.ok) return null;
   const arr = JSON.parse(out.out || '[]') as PrInfo[];
-  return arr[0] ?? null;
+  // `--state all` can return a stale CLOSED PR from a previously reused
+  // branch alongside the live one — prefer OPEN, then MERGED, and surface
+  // a CLOSED PR only when it is all there is (resolveResumeStage treats
+  // that as the resolve-manually anomaly it really is).
+  return (
+    arr.find((pr) => pr.state === 'OPEN') ??
+    arr.find((pr) => pr.state === 'MERGED') ??
+    arr[0] ??
+    null
+  );
 }
-
-const sleep = (deps: ReleaseDeps, ms: number) => deps.sleep(ms);
 
 function printResult(deps: ReleaseDeps, result: Record<string, unknown>): void {
   deps.write(`RESULT ${JSON.stringify(result)}`);
@@ -437,7 +447,7 @@ async function waitForChecks(deps: ReleaseDeps, prNumber: number): Promise<Check
     if (failed.length) return { ok: false, failed };
     if (checks.length && checks.every((c) => PASSING_CHECK_STATES.has(c.state)))
       return { ok: true };
-    await sleep(deps, CHECK_POLL_MS);
+    await deps.sleep(CHECK_POLL_MS);
   }
   return { ok: false, timedOut: true };
 }
@@ -515,7 +525,7 @@ export async function releaseCommand(
       throw new Error(`on branch "${currentBranch}" — expected "main" or "${branch}"`);
     }
     if (currentBranch === 'main') {
-      const dirty = runPorcelain(deps, 'git', ['status', '--porcelain']);
+      const dirty = run(deps, 'git', ['status', '--porcelain'], { trim: false });
       const strayDirty = dirty
         .split('\n')
         .filter(Boolean)
@@ -559,6 +569,13 @@ export async function releaseCommand(
       'origin',
       branch,
     ]).includes(branch);
+    if (branchExistsRemote && !branchExistsLocal) {
+      // ls-remote proved the branch exists on the remote, but nothing so
+      // far has fetched it — the resume paths below read `origin/<branch>`
+      // refs (readAtRef, ensureBranch), which fail with "invalid reference"
+      // in a fresh clone or a pruned repo unless the ref is actually local.
+      run(deps, 'git', ['fetch', 'origin', branch, '--quiet']);
+    }
     const pr = getPr(deps, branch);
 
     let pkgVersionMatches = false;
@@ -569,8 +586,13 @@ export async function releaseCommand(
       const pkgAtRef = readAtRef(deps, ref, 'package.json');
       const readmeAtRef = readAtRef(deps, ref, 'README.md');
       pkgVersionMatches = pkgAtRef !== null && packageJsonVersion(pkgAtRef) === version;
-      readmeBadgeMatches =
-        readmeAtRef !== null && !updateReadmeBadge(readmeAtRef, version).changed;
+      // `.found` must be checked alongside `.changed` — a README with no
+      // badge at all is "needs the version-sync step" (AWAITING_COMMIT,
+      // where ensureVersionSync fail-louds on it), never "already matches".
+      if (readmeAtRef !== null) {
+        const badgeAtRef = updateReadmeBadge(readmeAtRef, version);
+        readmeBadgeMatches = badgeAtRef.found && !badgeAtRef.changed;
+      }
       if (currentBranch === branch) {
         const dirty = run(deps, 'git', [
           'status',
