@@ -34,7 +34,7 @@ Idempotent: creates `profiles/<profile>/` and seeds any missing `profile.json` /
 
 **7. Geo filter — derive it, don't dump JSON on the user.** Edit `filter.json`'s `locations[]` yourself: one entry per home city with `city`, `country`, and `workTypes` (`["onsite","hybrid","remote"]` subset) — this is now the sole home-geo source (no more `resume_meta.json` location lookup). If the candidate takes remote roles in specific timezones, set `timezones.accept` (e.g. `["APAC","EMEA"]`) and `timezones.severity`. Show the resulting block and get one confirmation — a mismatch here silently drops or penalizes every job at that location.
 
-**8. First search URL.** Ask for one LinkedIn saved-search URL and a short label, then run `node src/cli/main.ts lane add-url "<url>" "<label>" --profile <profile>`. More can be added later the same way. Confirm a `page_inventory/<page>.json` exists for its page-type (run `/page-analyse <page-slug>` if not).
+**8. First search URL.** Ask for one LinkedIn saved-search URL and a short label, then run `node src/cli/main.ts lane add-url "<url>" "<label>" --profile <profile>`. More can be added later the same way. Confirm a `src/adapters/lanes/linkedin/page_inventory/<page>.json` exists for its page-type (run `/page-analyse <page-slug>` if not).
 
 **9. Notifications.** One yes/no: want a Telegram run digest? If yes, walk the README's "Telegram digest" section with the user yourself: `TELEGRAM_BOT_TOKEN` from @BotFather into `.env` (masked, same handling as step 3), get the numeric `chat_id`, then add `"telegram"` to `notifiers` and `settings.telegram.chatId` (a number, not a string) in `profile.json`. If no, skip.
 

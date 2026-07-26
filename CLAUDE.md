@@ -75,7 +75,7 @@ Key invariants:
 
 - **Notion is the source of truth.** `reconcile` reads the live DB every run; `sync` writes only automated fields, never user-edited ones.
 - **Fail-soft where breadth matters, fail-loud on total outage.** One broken URL/card/probe/fetch is a `SoftError` — recorded, run continues. A stage that attempted work and captured **nothing** throws loud (e.g. the LinkedIn lane when every attempted URL yields zero JDs — shaped like an expired login).
-- **Lanes are config-driven.** Selectors and page behavior come from `page_inventory/<page>.json` at runtime; DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing lane code.
+- **Lanes are config-driven.** Selectors and page behavior come from `src/adapters/lanes/linkedin/page_inventory/<page>.json` at runtime; DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing lane code.
 - **Farm writes what source reads.** `farm` must run before `source`: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry.
 - **The runner is the single notifier.** Success and failure digests are both built from `result.json` at run end.
 - **Uniform checkpoints.** The runner writes `profiles/<name>/data/runs/<date>/NN-<stage>.json` after every stage; `--resume` continues from the last one.
@@ -85,7 +85,7 @@ Key invariants:
 Only four exist; everything else is a plain `jobbunny` subcommand:
 
 - `/setup <profile>` — onboarding wizard (the interactive parts `jobbunny setup` can't do: Notion adopt-or-create via MCP, secrets prompt, resume parse).
-- `/page-analyse <page-slug>` — browser-driven DOM analysis; writes/refreshes `page_inventory/<page>.json`.
+- `/page-analyse <page-slug>` — browser-driven DOM analysis; writes/refreshes `src/adapters/lanes/linkedin/page_inventory/<page>.json`.
 - `/structure` — the LLM stage run inline by Claude (no API key).
 - `/wrap` — session close-out; calls `jobbunny release` for the ship path.
 
@@ -104,7 +104,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **Seeding never clobbers.** `jobbunny profile build` fills gaps in user-tuned `filter.json`, never overwrites — reruns propose a diff.
 - **`profile remove` is dry-run by default and refuses `rajni`** (the committed fixture); `--force` actually deletes `profiles/<name>/`. It never touches Notion.
 - **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
-- **Markdown is code here.** `.claude/commands/*.md`, `.claude/agents/*.md`, `page_inventory/*.md`, and this file are LLM instructions loaded into context — state each rule once; tighten an existing line before adding a new one.
+- **Markdown is code here.** `.claude/commands/*.md`, `.claude/agents/*.md`, `src/adapters/lanes/linkedin/page_inventory/*.md`, and this file are LLM instructions loaded into context — state each rule once; tighten an existing line before adding a new one.
 
 ## Conventions
 

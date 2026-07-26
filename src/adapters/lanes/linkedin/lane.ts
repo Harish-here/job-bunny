@@ -711,7 +711,7 @@ export class LinkedInLane implements FarmingLane {
             `the DOM${sample ? ` (e.g. "${sample}")` : ''} — ` +
             'consistent with an authwall/logout wall OR a broken results-list selector; ' +
             'candidates: check .chrome-debug/ session state, and/or whether the ' +
-            'list-container selector still matches (page_inventory/linkedin__jobs-search.json).',
+            'list-container selector still matches (src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json).',
         );
       }
       const fieldValidation = countOf('field-validation');
@@ -722,7 +722,7 @@ export class LinkedInLane implements FarmingLane {
             `extraction${sample ? ` (e.g. "${sample}")` : ''} ` +
             '— cards WERE found in the DOM, but field extraction failed schema validation; ' +
             'this points at drifted title/company sub-selectors in ' +
-            'page_inventory/linkedin__jobs-search.json, NOT a session problem.',
+            'src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json, NOT a session problem.',
         );
       }
       const jdOpen = countOf('jd-open');
@@ -772,7 +772,7 @@ export class LinkedInLane implements FarmingLane {
           `linkedin lane: ${totalCardsAttempted} card(s) were attempted across ` +
             `${attemptedUrls} url(s) this run, but zero JDs were captured — every JD-open ` +
             'failed. Check the JD-open path (openJd, jd_open.ts) and whether the jdRoot ' +
-            'selector still matches (page_inventory/linkedin__jobs-search.json).',
+            'selector still matches (src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json).',
         );
       }
       ctx.logger.warn(

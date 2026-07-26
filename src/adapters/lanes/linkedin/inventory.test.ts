@@ -66,7 +66,10 @@ test('InventorySchema rejects a missing required selector', () => {
 
 test('loadInventory returns the parsed inventory for a present page', async () => {
   const storage = new FakeStorage();
-  storage.set('page_inventory/linkedin__jobs-search.json', fixtureInventory());
+  storage.set(
+    'src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json',
+    fixtureInventory(),
+  );
   const inv = await loadInventory(storage, 'linkedin__jobs-search');
   assert.equal(inv.selectors.card, 'li[data-occludable-job-id]');
 });
@@ -83,7 +86,7 @@ test('inventoryFreshnessCheck: ok when all pages present and fresh', async () =>
   const storage = new FakeStorage();
   const today = new Date().toISOString().slice(0, 10);
   storage.set(
-    'page_inventory/a.json',
+    'src/adapters/lanes/linkedin/page_inventory/a.json',
     fixtureInventory({ page: 'a', generatedAt: today }),
   );
   const check = inventoryFreshnessCheck(storage, ['a'], 30);
@@ -95,7 +98,7 @@ test('inventoryFreshnessCheck: ok when all pages present and fresh', async () =>
 test('inventoryFreshnessCheck: warn when generatedAt is older than maxAgeDays', async () => {
   const storage = new FakeStorage();
   storage.set(
-    'page_inventory/a.json',
+    'src/adapters/lanes/linkedin/page_inventory/a.json',
     fixtureInventory({ page: 'a', generatedAt: '2020-01-01' }),
   );
   const check = inventoryFreshnessCheck(storage, ['a'], 30);
@@ -112,7 +115,7 @@ test('inventoryFreshnessCheck: red when a page inventory is missing', async () =
   assert.match(finding.detail, /missing-page/);
 });
 
-const REPO_ROOT = fileURLToPath(new URL('../../../../page_inventory/', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('./page_inventory/', import.meta.url));
 
 for (const page of ['linkedin__jobs-search', 'linkedin__jobs-search-results']) {
   test(`committed page_inventory/${page}.json validates against InventorySchema`, async () => {
@@ -125,7 +128,7 @@ for (const page of ['linkedin__jobs-search', 'linkedin__jobs-search-results']) {
 test('inventoryFreshnessCheck: red detail also names stale pages alongside missing ones', async () => {
   const storage = new FakeStorage();
   storage.set(
-    'page_inventory/stale.json',
+    'src/adapters/lanes/linkedin/page_inventory/stale.json',
     fixtureInventory({ page: 'stale', generatedAt: '2020-01-01' }),
   );
   const check = inventoryFreshnessCheck(storage, ['stale', 'missing'], 30);

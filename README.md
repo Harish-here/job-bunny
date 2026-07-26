@@ -28,7 +28,7 @@ Greenhouse / Keka APIs ────────────────┼─►
 
 Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage detail is in [CLAUDE.md](CLAUDE.md).
 
-- **Config-driven scraping.** Selectors live in `page_inventory/*.md` files, read at runtime. When LinkedIn changes its DOM, you regenerate the inventory with `/page-analyse` — no code changes.
+- **Config-driven scraping.** Selectors live in `src/adapters/lanes/linkedin/page_inventory/*.md` files, read at runtime. When LinkedIn changes its DOM, you regenerate the inventory with `/page-analyse` — no code changes.
 - **Fail-soft, but loud on total outage.** A broken search page, a dead careers API, or one bad job card is skipped and logged; the run keeps going. But if a whole lane comes back completely empty (e.g. an expired LinkedIn login), that's treated as a real failure, not silence.
 - **Notion is the source of truth.** The local cache is rebuilt from your Notion database on every run, and sync only ever touches automated fields — your notes and statuses are safe.
 - **Multi-profile.** Each person gets a `profiles/<name>/` directory with their own resume, search URLs, filters, Notion database, and schedule. One machine can run several profiles back to back.
@@ -113,13 +113,13 @@ src/core/            pure domain logic — JD schema, filter/dedup/rank engines,
 src/ports/           TS interfaces (connector, lane, llm, notifier, browser, scheduler, storage, doctor)
 src/adapters/        implementations: db/notion, lanes/{linkedin,greenhouse,keka}, llm/claude-cli,
                      notify/telegram, browser/cdp-chrome, scheduler/launchd
+                     (lanes/linkedin/page_inventory/ — runtime selector configs per page-type)
 src/pipeline/        the 10 stages + the checkpointing runner
 src/routines/        recurring maintenance (e.g. cleanup)
 src/ops/             doctor, observability (run folder, logger, digest)
 src/cli/             jobbunny entry point + commands + wire.ts (the one composition point)
 .claude/commands/    /setup, /page-analyse, /structure, /wrap — everything else is a jobbunny subcommand
 .claude/skills/      /verify
-page_inventory/      runtime selector configs per page-type
 profiles/<name>/     per-person config + per-run data/ intermediates (gitignored)
 ```
 

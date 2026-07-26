@@ -4,7 +4,8 @@ import type { DoctorCheck, DoctorFinding, Storage } from '../../../ports/index.t
 /**
  * v2 page-inventory schema (spec: DOM drift is fixed by regenerating the
  * inventory via /page-analyse, never by editing lane code). Inventories are
- * machine-shared JSON at repo root `page_inventory/<page>.json`.
+ * machine-shared JSON at `src/adapters/lanes/linkedin/page_inventory/<page>.json`
+ * (repo-root-relative, read via the repo-root storage handle).
  */
 export const InventorySchema = z.object({
   page: z.string(),
@@ -26,7 +27,7 @@ export const InventorySchema = z.object({
 export type Inventory = z.infer<typeof InventorySchema>;
 
 export function inventoryPath(page: string): string {
-  return `page_inventory/${page}.json`;
+  return `src/adapters/lanes/linkedin/page_inventory/${page}.json`;
 }
 
 /** Loud on a missing inventory — the caller asked for this page; the

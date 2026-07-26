@@ -30,6 +30,6 @@
     "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
     "mustExist": ".scaffold-layout__list",
     "minJobCards": "1",
-    "sourceInventory": "page_inventory/linkedin__jobs-search.md (v0, verified live DOM 2026-06-18, Chrome 149, logged-in session, https://www.linkedin.com/jobs/search/)"
+    "sourceInventory": "linkedin__jobs-search.md (v0, verified live DOM 2026-06-18, Chrome 149, logged-in session, https://www.linkedin.com/jobs/search/)"
   }
 }

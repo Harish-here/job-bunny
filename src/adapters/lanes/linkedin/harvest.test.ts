@@ -7,8 +7,9 @@ import type { Logger, RunContext } from '../../../ports/context.ts';
 import { buildHarvestScript, gateCards, harvestCards } from './harvest.ts';
 import type { Inventory } from './inventory.ts';
 
-/** Real selectors from page_inventory/linkedin__jobs-search.json (pinned at
- * phase start) — buildHarvestScript must target these exactly. */
+/** Real selectors from src/adapters/lanes/linkedin/page_inventory/
+ * linkedin__jobs-search.json (pinned at phase start) — buildHarvestScript
+ * must target these exactly. */
 function fixtureInventory(overrides: Partial<Inventory> = {}): Inventory {
   return {
     page: 'linkedin__jobs-search',
@@ -28,8 +29,9 @@ function fixtureInventory(overrides: Partial<Inventory> = {}): Inventory {
   };
 }
 
-/** Real selectors from page_inventory/linkedin__jobs-search-results.json —
- * cardLink duplicates the card selector (no href anywhere on the card);
+/** Real selectors from src/adapters/lanes/linkedin/page_inventory/
+ * linkedin__jobs-search-results.json — cardLink duplicates the card selector
+ * (no href anywhere on the card);
  * the id lives in the componentkey attribute, per jobCardIdAttr /
  * jobCardIdAttrPrefix, and the job url is built from urlPatternOfJob. */
 function componentkeyInventory(overrides: Partial<Inventory> = {}): Inventory {

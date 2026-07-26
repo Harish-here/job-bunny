@@ -129,7 +129,7 @@ export async function laneAddUrlCommand(
     // add the page node (with inventory pointer) right after the channel heading
     text = text.replace(
       channelHeading,
-      `${channelHeading}\n${pageHeading}\n<!-- inventory: page_inventory/${page}.md -->`,
+      `${channelHeading}\n${pageHeading}\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.md -->`,
     );
   }
 
@@ -148,7 +148,15 @@ export async function laneAddUrlCommand(
   resolved.write(`[lane add-url] stripped ${EPHEMERAL.join(', ')}`);
   resolved.write(`[lane add-url] appended under ${channel} / ${page}: ${cleanUrl}`);
 
-  const inventoryPath = path.join(resolved.root, 'page_inventory', `${page}.md`);
+  const inventoryPath = path.join(
+    resolved.root,
+    'src',
+    'adapters',
+    'lanes',
+    'linkedin',
+    'page_inventory',
+    `${page}.md`,
+  );
   if (!(await resolved.exists(inventoryPath))) {
     resolved.warn(
       `[lane add-url] no inventory yet for "${page}" — run /page-analyse before /run.`,

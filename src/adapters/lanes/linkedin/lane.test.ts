@@ -22,7 +22,10 @@ const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
 async function realInventory(): Promise<Inventory> {
   const raw = JSON.parse(
-    await readFile(`${REPO_ROOT}page_inventory/linkedin__jobs-search.json`, 'utf8'),
+    await readFile(
+      `${REPO_ROOT}src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json`,
+      'utf8',
+    ),
   );
   const inv = InventorySchema.parse(raw);
   assert.equal(inv.pageType, 'details-page');
@@ -31,7 +34,8 @@ async function realInventory(): Promise<Inventory> {
 
 /** The real committed inventory pinned to `maxPages: '1'` — used by every
  * test in this file that is NOT about pagination itself. The committed
- * `page_inventory/linkedin__jobs-search.json` declares real (now-live)
+ * `src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json`
+ * declares real (now-live)
  * pagination behaviors, so leaving it unpinned would make every one of
  * those tests silently attempt a page 2 (and beyond) against a fixture
  * `Script` that never scripted one, which is unrelated noise for tests
@@ -917,7 +921,10 @@ test('every attempted url failing with cards found but empty title/company repor
   );
   assert.match(message, /had empty\/invalid title or company after extraction/);
   assert.match(message, /cards WERE found in the DOM/);
-  assert.match(message, /page_inventory\/linkedin__jobs-search\.json/);
+  assert.match(
+    message,
+    /src\/adapters\/lanes\/linkedin\/page_inventory\/linkedin__jobs-search\.json/,
+  );
   assert.match(message, /NOT a session problem/);
   // The defining assertion for this defect: an empty-fields failure must
   // never claim the session expired, and must not even land in the
@@ -1896,7 +1903,7 @@ test('parseSearchUrls drops a page heading with zero urls beneath it', () => {
   const md = [
     '## linkedin',
     '### empty-page',
-    '<!-- inventory: page_inventory/empty-page.md -->',
+    '<!-- inventory: src/adapters/lanes/linkedin/page_inventory/empty-page.md -->',
     '',
     '### linkedin__jobs-search',
     '  • Some Search - https://www.linkedin.com/jobs/search/?keywords=X',

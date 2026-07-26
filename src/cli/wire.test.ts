@@ -672,7 +672,8 @@ test('wire: existing checks behavior is unchanged alongside the live ctx/stages/
 // Storage seam for the live composition path (only `readFile`/`root`, used
 // above for profile.json/filter.json/search_urls.md). So this test
 // uses a real temp directory as `root` and writes a real
-// `page_inventory/<page>.json` file for `FsStorage` to read, while still
+// `src/adapters/lanes/linkedin/page_inventory/<page>.json` file for
+// `FsStorage` to read, while still
 // routing profile.json/filter.json/search_urls.md through the same
 // injected `readFile` seam every other test in this file uses.
 function validInventoryJson(page: string): string {
@@ -696,9 +697,17 @@ function validInventoryJson(page: string): string {
 test('wire: linkedin lane builds successfully end to end (search_urls.md -> parseSearchUrls -> loadInventory -> LinkedInLane)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-'));
   try {
-    await mkdir(join(root, 'page_inventory'), { recursive: true });
+    const inventoryDir = join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+    );
+    await mkdir(inventoryDir, { recursive: true });
     await writeFile(
-      join(root, 'page_inventory', 'staff-eng.json'),
+      join(inventoryDir, 'staff-eng.json'),
       validInventoryJson('staff-eng'),
       'utf8',
     );

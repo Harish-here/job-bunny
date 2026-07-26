@@ -14,7 +14,10 @@ const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
 async function detailsPageInventory(): Promise<Inventory> {
   const raw = JSON.parse(
-    await readFile(`${REPO_ROOT}page_inventory/linkedin__jobs-search.json`, 'utf8'),
+    await readFile(
+      `${REPO_ROOT}src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json`,
+      'utf8',
+    ),
   );
   const inv = InventorySchema.parse(raw);
   assert.equal(inv.pageType, 'details-page');

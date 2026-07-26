@@ -147,7 +147,10 @@ test('laneAddUrlCommand creates search_urls.md with channel/page nodes and the U
     );
     assert.match(text, /## linkedin/);
     assert.match(text, /### linkedin__jobs-search/);
-    assert.match(text, /<!-- inventory: page_inventory\/linkedin__jobs-search\.md -->/);
+    assert.match(
+      text,
+      /<!-- inventory: src\/adapters\/lanes\/linkedin\/page_inventory\/linkedin__jobs-search\.md -->/,
+    );
     assert.match(
       text,
       /• eng - https:\/\/www\.linkedin\.com\/jobs\/search\/\?keywords=engineer/,
@@ -160,11 +163,16 @@ test('laneAddUrlCommand creates search_urls.md with channel/page nodes and the U
 test('laneAddUrlCommand does not warn when the page inventory exists', async () => {
   await withTmpRoot(async (root) => {
     const { mkdir, writeFile } = await import('node:fs/promises');
-    await mkdir(path.join(root, 'page_inventory'), { recursive: true });
-    await writeFile(
-      path.join(root, 'page_inventory', 'linkedin__jobs-search.md'),
-      '# inventory\n',
+    const inventoryDir = path.join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
     );
+    await mkdir(inventoryDir, { recursive: true });
+    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.md'), '# inventory\n');
 
     const warnings: string[] = [];
     const code = await laneAddUrlCommand(

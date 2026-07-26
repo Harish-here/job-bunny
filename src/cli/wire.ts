@@ -173,7 +173,8 @@ export async function loadFilterConfig(
  * a throwaway fake object — `assembleAdapterChecks` never inspects it
  * itself, only hands it to whichever factory the config names. */
 export interface RuntimeDeps {
-  /** Repo-root-rooted. Inventories (`page_inventory/<page>.json`) are
+  /** Repo-root-rooted. Inventories
+   * (`src/adapters/lanes/linkedin/page_inventory/<page>.json`) are
    * machine-shared, NOT per-profile — this handle exists to reach them and
    * nothing else. Per-stage artifacts go through `profileStorage`. */
   storage: Storage;
@@ -582,8 +583,9 @@ export async function wire(
     notionApiForConnector = new NotionApi({ client: missingTokenNotionClient() });
   }
 
-  // TWO storage handles, deliberately. `page_inventory/<page>.json` is
-  // machine-shared at the repo root and is not per-profile, while every
+  // TWO storage handles, deliberately.
+  // `src/adapters/lanes/linkedin/page_inventory/<page>.json` is
+  // machine-shared (repo-root-relative) and is not per-profile, while every
   // stage artifact (`cache/`, `registry/`, `structure/`, the LinkedIn lane's
   // resume/capture state) IS. Rooting a single handle at the repo root — as
   // this did until 2026-07-25 — put all of them in the repo root and made

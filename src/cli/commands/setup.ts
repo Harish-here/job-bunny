@@ -148,7 +148,15 @@ async function stepInventory(
   }
   const missing: string[] = [];
   for (const page of pages) {
-    const p = path.join(root, 'page_inventory', `${page}.md`);
+    const p = path.join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+      `${page}.md`,
+    );
     if (!(await deps.exists(p))) missing.push(page);
   }
   if (missing.length === 0) {

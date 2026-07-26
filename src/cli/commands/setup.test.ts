@@ -48,13 +48,18 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
     await writeFile(path.join(profileDir, 'resume.json'), '{}');
     await writeFile(
       path.join(profileDir, 'search_urls.md'),
-      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: page_inventory/linkedin__jobs-search.md -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
+      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.md -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
-    await mkdir(path.join(root, 'page_inventory'), { recursive: true });
-    await writeFile(
-      path.join(root, 'page_inventory', 'linkedin__jobs-search.md'),
-      '# inventory\n',
+    const inventoryDir = path.join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
     );
+    await mkdir(inventoryDir, { recursive: true });
+    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.md'), '# inventory\n');
 
     const lines: string[] = [];
     const code = await setupCommand(
@@ -99,7 +104,7 @@ test('setupCommand: search_urls.md present with a referenced page but missing in
     const profileDir = path.join(root, 'profiles', 'acme');
     await writeFile(
       path.join(profileDir, 'search_urls.md'),
-      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: page_inventory/linkedin__jobs-search.md -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
+      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.md -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
 
     const lines: string[] = [];
@@ -154,7 +159,10 @@ test('setupCommand never mutates outside profiles/<p>/: does not touch .env or p
 
     let inventoryExists = true;
     try {
-      await readFile(path.join(root, 'page_inventory'), 'utf8');
+      await readFile(
+        path.join(root, 'src', 'adapters', 'lanes', 'linkedin', 'page_inventory'),
+        'utf8',
+      );
     } catch {
       inventoryExists = false;
     }
