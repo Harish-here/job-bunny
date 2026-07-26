@@ -112,7 +112,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **Two-pair rule:** every module is a folder with an `index.ts` public surface; internals aren't imported across module boundaries. A folder exceeding two implementation files (test pairs and `index.ts` excluded) gets split into subfolders first.
 - Colocated tests (`foo.ts` + `foo.test.ts`).
 - Pipeline code never names a concrete adapter — it sees only port types; `cli/wire.ts` is the one file allowed to instantiate one.
-- `main-v2.md` and per-module contracts are architecture docs as code — update them in the same change that alters behavior.
+- `main-v2.md` and per-module contracts are architecture docs as code — update them in the same change that alters behavior, along with the baked-in KB in `.claude/agents/explainer.md` and the rules in `.claude/agents/executor.md`.
 
 ## Known limitations
 
