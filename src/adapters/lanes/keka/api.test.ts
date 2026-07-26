@@ -9,6 +9,7 @@ import {
   getEmbedJobs,
   getPortalInfo,
   htmlToText,
+  KekaJobSchema,
   kekaBase,
 } from './api.ts';
 
@@ -156,4 +157,23 @@ test('htmlToText: decodes entities then strips tags', () => {
 test('htmlToText: null/undefined → empty string', () => {
   assert.equal(htmlToText(null), '');
   assert.equal(htmlToText(undefined), '');
+});
+
+test('KekaJobSchema: parses jobLocations city, absent when omitted or empty', () => {
+  const withLocation = KekaJobSchema.parse({
+    id: 1,
+    title: 'Product Designer',
+    jobLocations: [{ city: 'Bengaluru' }],
+  });
+  assert.equal(withLocation.jobLocations?.[0]?.city, 'Bengaluru');
+
+  const withoutLocation = KekaJobSchema.parse({ id: 2, title: 'Growth Manager' });
+  assert.equal(withoutLocation.jobLocations, undefined);
+
+  const emptyLocations = KekaJobSchema.parse({
+    id: 3,
+    title: 'Empty Locations',
+    jobLocations: [],
+  });
+  assert.deepEqual(emptyLocations.jobLocations, []);
 });

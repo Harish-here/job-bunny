@@ -26,9 +26,25 @@ export const PASSTHROUGH_PATH = 'structure/passthrough.json';
  */
 export const RAW_TEXT_TRUNCATE_LENGTH = 2500;
 
-const TABLE_HEADER = '| id | title | company | rawText |\n|---|---|---|---|';
+/** As-posted location strings are short (a city/country caption, not JD
+ * body text) — capped well under RAW_TEXT_TRUNCATE_LENGTH purely as a
+ * defensive bound against a pathological source value, not because
+ * legitimate locations ever approach it. */
+export const LOCATION_TRUNCATE_LENGTH = 100;
+
+const TABLE_HEADER =
+  '| id | title | company | location | rawText |\n|---|---|---|---|---|';
 
 const escapePipe = (value: string): string => value.replace(/\|/g, '｜');
+
+/** `identity.location` cell: empty string when the lane's source gave no
+ * location (empty cell = unknown, not an error) — escaped and truncated
+ * the same way every other table cell is. */
+function sanitiseLocation(location: string | undefined): string {
+  return escapePipe(location ?? '')
+    .trim()
+    .slice(0, LOCATION_TRUNCATE_LENGTH);
+}
 
 /** Ports v0's sanitiseRawText shape: strip the "about the job" boilerplate
  * header, collapse newlines to a single space, escape `|` for the
@@ -44,10 +60,12 @@ function sanitiseRawText(raw: string): string {
 
 /**
  * Builds the compact markdown table (one row per job: id | title | company
- * | rawText) plus the id-keyed passthrough map (the full JD, for assemble
- * to rejoin against the LLM's decisions). A job without `content.rawText`
- * fails loud — compress must run after the source/farming lanes, so a
- * missing content is a pipeline-ordering bug, not recoverable data.
+ * | location | rawText, `location` sourced from `identity.location` —
+ * empty cell when the lane's source gave none) plus the id-keyed
+ * passthrough map (the full JD, for assemble to rejoin against the LLM's
+ * decisions). A job without `content.rawText` fails loud — compress must
+ * run after the source/farming lanes, so a missing content is a
+ * pipeline-ordering bug, not recoverable data.
  *
  * Two jobs sharing the same `identity.id` (should be rare — ids are meant
  * to be unique — but a source-lane bug or a keyless-ATS collision can still
@@ -75,7 +93,7 @@ export function toTable(jobs: SourcedJD[]): {
       );
     }
 
-    const { id, title, company } = job.identity;
+    const { id, title, company, location } = job.identity;
     if (Object.hasOwn(passthrough, id)) {
       dropped.push({
         jd: job,
@@ -92,7 +110,7 @@ export function toTable(jobs: SourcedJD[]): {
     }
 
     rows.push(
-      `| ${id} | ${escapePipe(title)} | ${escapePipe(company)} | ${sanitiseRawText(rawText)} |`,
+      `| ${id} | ${escapePipe(title)} | ${escapePipe(company)} | ${sanitiseLocation(location)} | ${sanitiseRawText(rawText)} |`,
     );
     passthrough[id] = job;
   }

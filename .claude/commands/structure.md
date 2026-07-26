@@ -8,7 +8,7 @@ This stage is **LLM-driven and runs inline — you (Claude Code) do it directly,
 
 **Checkpoint resume:** Before starting, read `structure/decisions.partial.json`. Collect the `id` (first cell) of every data row already present and skip those rows in the input — resume from where a prior attempt left off.
 
-1. Read `structure/table.json` (markdown table written by the compress stage). Columns: `| id | title | company | rawText |` (`TABLE_HEADER` in `src/pipeline/stages/compress.ts`). `title` and `company` come straight from the search card; city/country/workType must be derived from them plus `rawText`.
+1. Read `structure/table.json` (markdown table written by the compress stage). Columns: `| id | title | company | location | rawText |` (`TABLE_HEADER` in `src/pipeline/stages/compress.ts`). `title`, `company`, and `location` come straight from the search card/lane (`location` is the as-posted location string, empty when the source gave none); `workType` must be derived from title/company/location/rawText.
 2. For each remaining row, emit exactly one output row (columns below). One output row per input id — do not skip, merge, or reorder rows.
 3. **Checkpoint every 25 rows:** write the accumulated table so far (header + separator + every row emitted, including resumed ones) to `structure/decisions.partial.json`.
 4. At completion, write the full table to `structure/decisions.json`, then reset `structure/decisions.partial.json` to just the header + separator (so a stale partial can never shadow a later run).
@@ -26,7 +26,7 @@ This stage is **LLM-driven and runs inline — you (Claude Code) do it directly,
 - `domain` — broad domain/space of the role (e.g. `Frontend`, `Backend`, `Data`, `ML`, `DevOps`); empty if unclear.
 - `seniority` — free-text seniority level (e.g. `Staff`, `Lead`, `Mid`, `Manager`, `Senior`); empty if unclear.
 - `func` — specific function/discipline within the domain (e.g. `React`, `Platform Engineering`, `Growth`); empty if unclear.
-- `city` / `country` — where the role is based, from title/company/rawText; empty if unknown.
+- `city` / `country` — the input `location` column is the as-posted job location: PREFER it when filling these; if it resolves only a city, INFER the country from that city; only when `location` is empty, derive city/country from rawText instead; leave city and country empty only when neither location nor rawText resolves them.
 - `workType` — one of `onsite`, `hybrid`, `remote` (lowercase); empty if unclear.
 - `timezone` — populate ONLY when `workType` = `remote` (e.g. `APAC`, `EMEA`, `US Pacific`); empty otherwise.
 - `skills` — semicolon-separated normalized skill names (`React; TypeScript; Node.js`); normalize synonyms (`ReactJS` → `React`).

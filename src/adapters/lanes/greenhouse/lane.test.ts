@@ -175,6 +175,9 @@ test('fetchBoard: fixture jobs → valid JDs, gh- ids, malformed job skipped', a
   assert.equal(jds[0]?.identity.id, 'gh-5738292');
   assert.equal(jds[0]?.identity.postedAt, '2026-07-15');
   assert.ok(jds[0]?.content?.rawText.includes('Senior Backend Engineer'));
+  // fixture's location.name maps straight onto identity.location.
+  assert.equal(jds[0]?.identity.location, 'Remote - US');
+  assert.equal(jds[1]?.identity.location, 'San Francisco, CA');
 });
 
 test('fetchBoard: board-info lookup failing falls back to boardRef as company', async () => {

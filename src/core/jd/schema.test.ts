@@ -16,6 +16,17 @@ test('minimal JD (identity only) parses; optional sections stay absent', () => {
   assert.equal(jd.identity.company, 'Acme Corp');
   assert.equal(jd.content, undefined);
   assert.equal(jd.structured, undefined);
+  assert.equal(jd.identity.location, undefined);
+});
+
+test('identity.location: accepted when present, absent stays undefined', () => {
+  const withLocation = JDSchema.parse({
+    identity: { ...identity, location: 'Bengaluru, India' },
+  });
+  assert.equal(withLocation.identity.location, 'Bengaluru, India');
+
+  const withoutLocation = JDSchema.parse({ identity });
+  assert.equal(withoutLocation.identity.location, undefined);
 });
 
 test('full JD parses and evaluation.matchReasons defaults to []', () => {

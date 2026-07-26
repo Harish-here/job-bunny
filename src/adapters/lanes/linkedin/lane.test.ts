@@ -358,6 +358,9 @@ test('happy path: 2 urls, some cards gated out, surviving JDs opened, companiesS
   for (const jd of jobs) {
     assert.equal(jd.identity.lane, 'linkedin');
     assert.ok(jd.content?.rawText);
+    // Every seeded card carries location: 'Remote' — it must land on
+    // identity.location, not just live on the harvested card.
+    assert.equal(jd.identity.location, 'Remote');
   }
   const ids = jobs.map((jd) => jd.identity.id).sort();
   assert.deepEqual(ids, ['li-1001', 'li-1003', 'li-2001', 'li-2002']);

@@ -186,6 +186,7 @@ export class KekaLane implements ApiLane {
             company: companyName,
             title: job.title,
             scrapedAt: now,
+            location: job.jobLocations?.[0]?.city || undefined,
           },
           content: { rawText: (experiencePrefix + htmlToText(job.description)).trim() },
         });

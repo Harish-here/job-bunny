@@ -193,6 +193,9 @@ test('fetchBoard: fixture jobs → valid JDs, kk- ids, malformed job skipped', a
   assert.ok(jds[0]?.content?.rawText.includes('Design delightful experiences'));
   // no `experience` field on the second job → no prefix
   assert.ok(jds[1]?.content?.rawText.startsWith('Own paid acquisition'));
+  // fixture's jobLocations[0].city maps straight onto identity.location.
+  assert.equal(jds[0]?.identity.location, 'Bengaluru');
+  assert.equal(jds[1]?.identity.location, 'Remote');
 });
 
 test('fetchBoard: a job passing KekaJobSchema but failing JDSchema (empty description, no experience -> empty rawText) is returned in the dropped array', async () => {

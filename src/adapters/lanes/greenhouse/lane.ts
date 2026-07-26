@@ -173,6 +173,7 @@ export class GreenhouseLane implements ApiLane {
             title: job.title,
             postedAt: job.updated_at ? job.updated_at.slice(0, 10) : undefined,
             scrapedAt: now,
+            location: job.location?.name || undefined,
           },
           content: { rawText: htmlToText(job.content) },
         });

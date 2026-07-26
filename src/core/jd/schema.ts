@@ -19,6 +19,15 @@ export const IdentitySchema = z.object({
   title: z.string().min(1),
   postedAt: z.iso.date().optional(),
   scrapedAt: z.iso.datetime(),
+  /** Raw as-posted location string, verbatim from the lane's source (a
+   * LinkedIn card's location caption, a Greenhouse job's `location.name`,
+   * a Keka job's `jobLocations[0].city`, etc.) — carried through untouched
+   * for the structure stage to prefer over deriving city/country from
+   * `rawText` alone. Optional: every lane MUST populate it whenever its
+   * source exposes a location; absent means the source gave none (not
+   * that it's unknown), so downstream code must not treat absence as an
+   * error. */
+  location: z.string().optional(),
 });
 
 export const ContentSchema = z.object({

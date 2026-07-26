@@ -318,6 +318,25 @@ test('run() fails loud when the input table is missing (structure run before com
   await assert.rejects(() => stage.run(emptyPayload(), ctx), /no input table/);
 });
 
+test('prompt instructs the LLM to prefer the input location column for city/country, inferring country from city, falling back to rawText only when location is empty', async () => {
+  const storage = fakeStorage();
+  storage.store.set(TABLE_PATH, inputTableFor(['li-1']));
+
+  const llm = makeFakeLlm();
+  const stage = makeStructureStage(llm);
+  const ctx = fakeCtx(storage);
+  await stage.run(emptyPayload(), ctx);
+
+  const prompt = llm.prompts[0] as string;
+  assert.match(prompt, /input `location` column is the as-posted job location/);
+  assert.match(prompt, /PREFER it when filling these/);
+  assert.match(prompt, /INFER the country from that city/);
+  assert.match(
+    prompt,
+    /only when the `location` column is empty, derive city\/country from rawText/,
+  );
+});
+
 test('signal is passed through to llm.complete', async () => {
   const storage = fakeStorage();
   storage.store.set(TABLE_PATH, inputTableFor(['li-1']));

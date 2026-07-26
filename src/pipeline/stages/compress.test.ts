@@ -5,6 +5,7 @@ import type { Storage } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import {
   compressStage,
+  LOCATION_TRUNCATE_LENGTH,
   PASSTHROUGH_PATH,
   RAW_TEXT_TRUNCATE_LENGTH,
   TABLE_PATH,
@@ -44,7 +45,12 @@ function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
 
 function fakeJob(
   id: string,
-  overrides?: Partial<{ title: string; company: string; rawText: string }>,
+  overrides?: Partial<{
+    title: string;
+    company: string;
+    rawText: string;
+    location: string;
+  }>,
 ): FakeSourcedJD {
   return {
     identity: {
@@ -54,37 +60,68 @@ function fakeJob(
       company: overrides?.company ?? 'Acme Corp',
       title: overrides?.title ?? 'Frontend Engineer',
       scrapedAt: '2026-07-21T09:00:00.000Z',
+      location: overrides?.location,
     },
     content: { rawText: overrides?.rawText ?? 'About the job\nWe build things.' },
   };
 }
 
-test('toTable: one row per job with id | title | company | rawText columns', () => {
-  const jobs = [fakeJob('li-1')];
+test('toTable: one row per job with id | title | company | location | rawText columns', () => {
+  const jobs = [fakeJob('li-1', { location: 'Bengaluru, India' })];
   const { table } = toTable(jobs);
   const lines = table.split('\n');
   assert.ok(lines[0]?.includes('id'));
   assert.ok(lines[0]?.includes('title'));
   assert.ok(lines[0]?.includes('company'));
+  assert.ok(lines[0]?.includes('location'));
   assert.ok(lines[0]?.includes('rawText'));
   const dataRow = lines.find((l) => l.includes('li-1'));
   assert.ok(dataRow);
   assert.ok(dataRow?.includes('Frontend Engineer'));
   assert.ok(dataRow?.includes('Acme Corp'));
+  assert.ok(dataRow?.includes('Bengaluru, India'));
   assert.ok(dataRow?.includes('We build things.'));
 });
 
-test('toTable: escapes | in title and company', () => {
-  const jobs = [fakeJob('li-2', { title: 'Engineer | Backend', company: 'Acme | Corp' })];
+test('toTable: absent identity.location renders as an empty cell', () => {
+  const jobs = [fakeJob('li-1b')];
+  const { table } = toTable(jobs);
+  const dataRow = table.split('\n').find((l) => l.includes('li-1b'));
+  assert.ok(dataRow);
+  const cells = (dataRow ?? '').split('|').map((c) => c.trim());
+  // leading empty, id, title, company, location, rawText, trailing empty
+  assert.equal(cells[4], '');
+});
+
+test('toTable: escapes | in title, company, and location', () => {
+  const jobs = [
+    fakeJob('li-2', {
+      title: 'Engineer | Backend',
+      company: 'Acme | Corp',
+      location: 'Remote | US',
+    }),
+  ];
   const { table } = toTable(jobs);
   const dataRow = table.split('\n').find((l) => l.includes('li-2'));
   assert.ok(dataRow);
   assert.ok(dataRow?.includes('Engineer ｜ Backend'));
   assert.ok(dataRow?.includes('Acme ｜ Corp'));
+  assert.ok(dataRow?.includes('Remote ｜ US'));
   // The raw pipe character must not appear inside the cell content itself
   // (only as the table's own column delimiters).
   const cells = dataRow?.split('|') ?? [];
-  assert.equal(cells.length, 6); // leading empty + id, title, company, rawText + trailing empty
+  assert.equal(cells.length, 7); // leading empty + id, title, company, location, rawText + trailing empty
+});
+
+test('toTable: location truncated to LOCATION_TRUNCATE_LENGTH chars', () => {
+  assert.equal(LOCATION_TRUNCATE_LENGTH, 100);
+  const longLocation = `Bengaluru${'x'.repeat(200)}`;
+  const jobs = [fakeJob('li-2b', { location: longLocation })];
+  const { table } = toTable(jobs);
+  const dataRow = table.split('\n').find((l) => l.includes('li-2b'));
+  assert.ok(dataRow);
+  const cells = (dataRow ?? '').split('|').map((c) => c.trim());
+  assert.equal(cells[4]?.length, LOCATION_TRUNCATE_LENGTH);
 });
 
 test('toTable: rawText truncated to exactly 2500 chars and sanitised (newline collapse, header strip)', () => {

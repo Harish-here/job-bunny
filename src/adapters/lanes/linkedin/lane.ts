@@ -518,6 +518,7 @@ export class LinkedInLane implements FarmingLane {
                       company: card.company,
                       title: card.title,
                       scrapedAt: new Date().toISOString(),
+                      location: card.location,
                     },
                     content: { rawText },
                   });

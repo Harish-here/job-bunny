@@ -93,16 +93,20 @@ export async function getCareersHtml(
   return res.ok ? await res.text() : null;
 }
 
-/** One embedjobs entry. Fields are exactly what v0's mapKekaJob reads
- * (job.id, .title, .description, .experience); jobLocations is Keka-only
- * card metadata v0 uses for card_location, which has no home in v2's JD
- * (structured.locations is filled later by the LLM structuring stage, not
- * by a lane) — so it is not part of this schema. */
+/** One embedjobs entry. Fields are what v0's mapKekaJob reads (job.id,
+ * .title, .description, .experience) plus `jobLocations` — Keka-only card
+ * metadata v0 used for card_location. `jobLocations[0].city` now has a
+ * home: it feeds `identity.location` (the raw as-posted location string
+ * every lane populates when its source exposes one), not
+ * `structured.locations` (still filled later by the LLM structuring
+ * stage). Only the first entry's city is read — embedjobs jobs are
+ * single-location in practice for this pipeline's purposes. */
 export const KekaJobSchema = z.object({
   id: z.union([z.number(), z.string()]),
   title: z.string().min(1),
   description: z.string().optional().nullable(),
   experience: z.string().optional().nullable(),
+  jobLocations: z.array(z.object({ city: z.string().optional() })).optional(),
 });
 export type KekaJob = z.infer<typeof KekaJobSchema>;
 
