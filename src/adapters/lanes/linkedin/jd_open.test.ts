@@ -94,7 +94,7 @@ test('details-page happy path: goto -> waitFor(jdRoot) -> evaluate, in order, re
   });
   const ctx = fakeCtx();
 
-  const text = await openJd(
+  const { text, source } = await openJd(
     page,
     { id: 'li-1', url: 'https://www.linkedin.com/jobs/view/1/' },
     inv,
@@ -102,6 +102,7 @@ test('details-page happy path: goto -> waitFor(jdRoot) -> evaluate, in order, re
   );
 
   assert.equal(text, 'About the job — we build things.');
+  assert.equal(source, 'jdRoot');
   assert.deepEqual(calls, [
     'goto:https://www.linkedin.com/jobs/view/1/',
     `waitFor:${inv.selectors.jdRoot}`,
@@ -117,7 +118,7 @@ test('popup happy path: click(cardTitle) -> waitFor(jdRoot) -> evaluate, in orde
   });
   const ctx = fakeCtx();
 
-  const text = await openJd(
+  const { text } = await openJd(
     page,
     { id: 'li-2', url: 'https://www.linkedin.com/jobs/view/2/' },
     inv,
@@ -153,7 +154,7 @@ test('jdRoot waitFor times out but the configured selector still returns text: c
   const ctx = fakeCtx();
   const card = { id: 'li-3', url: 'https://www.linkedin.com/jobs/view/3/' };
 
-  const text = await openJd(page, card, inv, ctx);
+  const { text } = await openJd(page, card, inv, ctx);
 
   assert.equal(text, 'About the job — we build things.');
   assert.deepEqual(calls, [
@@ -176,9 +177,10 @@ test('jdRoot waitFor times out and the configured selector is empty: anchor fall
   const ctx = fakeCtx();
   const card = { id: 'li-3b', url: 'https://www.linkedin.com/jobs/view/3b/' };
 
-  const text = await openJd(page, card, inv, ctx);
+  const { text, source } = await openJd(page, card, inv, ctx);
 
   assert.equal(text, 'About the job — anchor fallback.');
+  assert.equal(source, 'anchor');
   assert.deepEqual(calls, [
     `goto:${card.url}`,
     `waitFor:${inv.selectors.jdRoot}`,
@@ -260,6 +262,135 @@ test('openJd ticks ctx.beat() between the open step and waitFor on a happy path'
   assert.ok(beats >= 1);
 });
 
+// --- error fidelity (finding 6): aborts/dead CDP must not be relabeled ---
+
+test('an AbortError from evaluate propagates with its real message — never relabeled as empty text, no anchor fallback attempted', async () => {
+  const inv = await detailsPageInventory();
+  const calls: string[] = [];
+  const page = fakePage(calls, {
+    evaluate: async () => {
+      const err = new Error('This operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    },
+  });
+  const ctx = fakeCtx();
+  const card = { id: 'li-7', url: 'https://www.linkedin.com/jobs/view/7/' };
+
+  await assert.rejects(
+    () => openJd(page, card, inv, ctx),
+    (err: unknown) => {
+      assert.ok(isSoftError(err));
+      assert.match((err as Error).message, /aborted/);
+      assert.doesNotMatch((err as Error).message, /extracted JD text was empty/);
+      return true;
+    },
+  );
+  assert.equal(calls.filter((c) => c === 'evaluate').length, 1);
+});
+
+test('a "Target closed" CDP error from evaluate propagates with its real message', async () => {
+  const inv = await detailsPageInventory();
+  const calls: string[] = [];
+  const page = fakePage(calls, {
+    evaluate: async () => {
+      throw new Error('Protocol error (Runtime.evaluate): Target closed');
+    },
+  });
+  const ctx = fakeCtx();
+  const card = { id: 'li-8', url: 'https://www.linkedin.com/jobs/view/8/' };
+
+  await assert.rejects(
+    () => openJd(page, card, inv, ctx),
+    (err: unknown) => {
+      assert.ok(isSoftError(err));
+      assert.match((err as Error).message, /Target closed/);
+      assert.doesNotMatch((err as Error).message, /extracted JD text was empty/);
+      return true;
+    },
+  );
+  assert.equal(calls.filter((c) => c === 'evaluate').length, 1);
+});
+
+test('a generic script error from the jdRoot evaluate still falls back to the anchor scan', async () => {
+  const inv = await detailsPageInventory();
+  const calls: string[] = [];
+  const page = fakePage(calls, {
+    evaluate: async (fn) => {
+      if (!isAnchorScript(fn as string)) {
+        throw new Error('ReferenceError: something page-side');
+      }
+      return 'About the job — recovered via anchor.' as never;
+    },
+  });
+  const ctx = fakeCtx();
+  const card = { id: 'li-9', url: 'https://www.linkedin.com/jobs/view/9/' };
+
+  const { text, source } = await openJd(page, card, inv, ctx);
+  assert.equal(text, 'About the job — recovered via anchor.');
+  assert.equal(source, 'anchor');
+});
+
+// --- config-driven anchor (finding 7) & per-pageType wait timeout (finding 8) ---
+
+test('the anchor script uses behaviors.jdAnchorText from the inventory, not a code constant', async () => {
+  const inv = InventorySchema.parse({
+    ...popupInventory(),
+    behaviors: { jdAnchorText: 'Om jobbet', jdAnchorMinChars: '100' },
+  });
+  const calls: string[] = [];
+  const anchorText = `Om jobbet — ${'x'.repeat(120)}`;
+  const page = fakePage(calls, {
+    evaluate: async (fn) => {
+      if (isAnchorScript(fn as string)) {
+        assert.match(fn as string, /Om jobbet/);
+        assert.doesNotMatch(fn as string, /About the job/);
+        return anchorText as never;
+      }
+      return '' as never;
+    },
+  });
+  const ctx = fakeCtx();
+
+  const { text, source } = await openJd(
+    page,
+    { id: 'li-10', url: 'https://www.linkedin.com/jobs/view/10/' },
+    inv,
+    ctx,
+  );
+  assert.equal(text, anchorText);
+  assert.equal(source, 'anchor');
+});
+
+test('details-page uses a short best-effort jdRoot wait; popup keeps the long one', async () => {
+  const seen: Array<number | undefined> = [];
+  const waitFor: PageHandle['waitFor'] = async (_selector, opts) => {
+    seen.push(opts?.timeoutMs);
+  };
+
+  const detailsInv = await detailsPageInventory();
+  await openJd(
+    fakePage([], { waitFor, evaluate: async () => 'About the job — d.' as never }),
+    { id: 'li-11', url: 'https://www.linkedin.com/jobs/view/11/' },
+    detailsInv,
+    fakeCtx(),
+  );
+
+  await openJd(
+    fakePage([], { waitFor, evaluate: async () => 'About the job — p.' as never }),
+    { id: 'li-12', url: 'https://www.linkedin.com/jobs/view/12/' },
+    popupInventory(),
+    fakeCtx(),
+  );
+
+  const [detailsTimeout, popupTimeout] = seen;
+  assert.ok(
+    (detailsTimeout ?? 0) <= 5_000,
+    `details-page wait should be short, got ${detailsTimeout}`,
+  );
+  assert.equal(popupTimeout, 15_000);
+});
+
 // --- buildJdAnchorScript, evaluated over a fake `document` via node:vm ---
 
 function fakeAnchorDocument(texts: string[]): unknown {
@@ -291,4 +422,15 @@ test('buildJdAnchorScript ignores elements shorter than the minimum length or no
   const result = await vm.runInNewContext(buildJdAnchorScript(), { document });
 
   assert.equal(result, '');
+});
+
+test('buildJdAnchorScript honors a custom anchor phrase and minimum length', async () => {
+  const match = `Om jobbet — ${'q'.repeat(100)}`;
+  const document = fakeAnchorDocument([`About the job — ${'r'.repeat(300)}`, match]);
+
+  const result = await vm.runInNewContext(buildJdAnchorScript('Om jobbet', 50), {
+    document,
+  });
+
+  assert.equal(result, match);
 });

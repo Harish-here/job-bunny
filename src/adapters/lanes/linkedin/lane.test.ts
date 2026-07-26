@@ -87,10 +87,19 @@ interface Script {
   gotoThrows: Set<string>;
   harvestByUrl: Map<string, RawCardFixture[]>;
   jdTextByUrl: Map<string, string>;
+  /** JD urls whose configured-selector (jdRoot) read comes back empty so
+   * only the anchor-fallback script yields the scripted text — models the
+   * live details-page reality where #job-details never matches. */
+  anchorOnlyUrls: Set<string>;
 }
 
 function newScript(): Script {
-  return { gotoThrows: new Set(), harvestByUrl: new Map(), jdTextByUrl: new Map() };
+  return {
+    gotoThrows: new Set(),
+    harvestByUrl: new Map(),
+    jdTextByUrl: new Map(),
+    anchorOnlyUrls: new Set(),
+  };
 }
 
 class FakePage implements PageHandle {
@@ -120,7 +129,16 @@ class FakePage implements PageHandle {
     }
     // Missing scripted JD text resolves to '' — openJd treats an empty
     // extracted text as a SoftError, which is exactly how the
-    // "card openJd fails" test scenario is triggered below.
+    // "card openJd fails" test scenario is triggered below. An
+    // anchorOnly url returns text only from the anchor-fallback script
+    // (buildJdAnchorScript's querySelectorAll over multiple tag names —
+    // buildJdTextScript uses a single querySelector).
+    if (
+      this.script.anchorOnlyUrls.has(this.lastUrl) &&
+      !fn.includes('querySelectorAll')
+    ) {
+      return '' as unknown as T;
+    }
     return (this.script.jdTextByUrl.get(this.lastUrl) ?? '') as unknown as T;
   }
 
@@ -497,6 +515,57 @@ test('lane-wide "no JD ever opened" guard: url A attempts 2 cards and fails both
   );
 });
 
+test('lane-wide "no JD ever opened" guard preserves prior same-day captures instead of throwing them away (review finding 4)', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  // Same shape as the 2026-07-25 incident test above: url1's surviving
+  // cards both fail to open, url2's card is entirely gated out. But this
+  // fire follows an earlier same-day fire that already flushed a capture —
+  // throwing here would discard that real work.
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/');
+  script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1003/');
+  script.harvestByUrl.set(URL_2, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/2001/',
+    },
+  ]);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  storage.set(CAPTURE_PATH, [fakeCapturedJD('li-9001', 'EarlierCo')]);
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn(msg, data) {
+        warnings.push({ msg, data });
+      },
+    },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+  assert.deepEqual(
+    jobs.map((jd) => jd.identity.id),
+    ['li-9001'],
+    "the prior fire's capture must survive this fire's JD-open outage",
+  );
+  assert.ok(
+    warnings.some((w) => /every JD-open failed/.test((w as { msg: string }).msg)),
+    'the outage must still be surfaced loudly in the log',
+  );
+});
+
 test('lane-wide "no JD ever opened" guard does not fire when nothing survives title-gating anywhere (legitimate empty result)', async () => {
   const inv = await realInventory();
   const script = newScript();
@@ -557,6 +626,40 @@ test('lane-wide "no JD ever opened" guard does not fire when at least one JD-ope
   const { jobs } = await lane.source(ctx);
   const ids = jobs.map((jd) => jd.identity.id).sort();
   assert.deepEqual(ids, ['li-2001', 'li-2002']);
+});
+
+test('anchor-fallback extractions are counted and surfaced as one lane-level warning (review finding 7)', async () => {
+  const inv = await realInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  for (const url of script.jdTextByUrl.keys()) script.anchorOnlyUrls.add(url);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn(msg, data) {
+        warnings.push({ msg, data });
+      },
+    },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+  assert.equal(jobs.length, 4, 'anchor-fallback extraction must still capture JDs');
+  const anchorWarning = warnings.find((w) => /anchor/.test((w as { msg: string }).msg)) as
+    | { data?: { anchorExtractions?: number } }
+    | undefined;
+  assert.ok(anchorWarning, 'expected a lane-level anchor-fallback warning');
+  assert.equal(anchorWarning?.data?.anchorExtractions, 4);
 });
 
 test('resume: a url already marked done in ResumeState is skipped entirely — its page is never opened', async () => {

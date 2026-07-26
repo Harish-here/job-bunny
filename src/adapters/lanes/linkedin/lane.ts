@@ -264,6 +264,12 @@ export class LinkedInLane implements FarmingLane {
     // the aggregate even when no single url is "the" failed one.
     let totalCardsAttempted = 0;
     let totalCaptured = 0;
+    // Extraction-source observability (finding: a run where 100% of JDs
+    // came via the anchor fallback was indistinguishable from a healthy
+    // one, so a broken jdRoot selector never created pressure to
+    // regenerate the inventory — until the anchor also drifted and the
+    // lane went 100%-green to 100%-dead in one step).
+    let anchorExtractions = 0;
 
     // Evidence for the all-urls-failed message below: distinct failure
     // shapes get counted (and one sample message kept) separately, rather
@@ -381,7 +387,8 @@ export class LinkedInLane implements FarmingLane {
                 // SoftError, same as any other openJd failure below, not
                 // an uncaught throw out of the whole card loop.
                 await this.jitter(ctx);
-                const rawText = await openJd(page, card, inv, ctx);
+                const { text: rawText, source } = await openJd(page, card, inv, ctx);
+                if (source === 'anchor') anchorExtractions += 1;
                 const jd = JDSchema.parse({
                   identity: {
                     id: card.id,
@@ -514,6 +521,18 @@ export class LinkedInLane implements FarmingLane {
       await handle.close();
     }
 
+    // The anchor fallback carrying captures means the configured jdRoot
+    // selector is not matching — the run still succeeds, but silently
+    // depending on the last-resort path is one copy/locale drift away
+    // from a total outage. Surface it every run until the inventory is
+    // regenerated.
+    if (anchorExtractions > 0) {
+      ctx.logger.warn(
+        'linkedin lane: JD text came from the anchor-text fallback, not the configured jdRoot selector — regenerate the page inventory (/page-analyse)',
+        { anchorExtractions, totalCaptured },
+      );
+    }
+
     // Every attempted url failed: this is not one broken selector — fail
     // loud rather than a silently-green zero-job run (v0
     // checkAggregateFailure). It is NOT always an expired session, though
@@ -573,12 +592,25 @@ export class LinkedInLane implements FarmingLane {
     // when cards WERE attempted somewhere — a run where every url's
     // cards were legitimately title-gated away (totalCardsAttempted ===
     // 0) is an empty result, not an outage, and must not throw here.
+    // Throwing is the discard-everything channel, though: the lane's
+    // return value is captureStore.all(), which a resumed/second same-day
+    // fire seeds with the EARLIER fire's persisted captures — so when
+    // real captured work coexists with this fire's outage, the outage is
+    // logged loudly and the preserved JDs are returned instead of thrown
+    // away (review finding 4).
     if (totalCardsAttempted > 0 && totalCaptured === 0) {
-      throw new Error(
-        `linkedin lane: ${totalCardsAttempted} card(s) were attempted across ` +
-          `${attemptedUrls} url(s) this run, but zero JDs were captured — every JD-open ` +
-          'failed. Check the JD-open path (openJd, jd_open.ts) and whether the jdRoot ' +
-          'selector still matches (page_inventory/linkedin__jobs-search.json).',
+      const priorCaptures = captureStore.all().length;
+      if (priorCaptures === 0) {
+        throw new Error(
+          `linkedin lane: ${totalCardsAttempted} card(s) were attempted across ` +
+            `${attemptedUrls} url(s) this run, but zero JDs were captured — every JD-open ` +
+            'failed. Check the JD-open path (openJd, jd_open.ts) and whether the jdRoot ' +
+            'selector still matches (page_inventory/linkedin__jobs-search.json).',
+        );
+      }
+      ctx.logger.warn(
+        'linkedin lane: every JD-open failed this fire — returning JDs preserved from an earlier same-day fire instead of failing the run',
+        { totalCardsAttempted, attemptedUrls, priorCaptures },
       );
     }
 
