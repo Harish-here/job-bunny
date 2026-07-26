@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ZodType } from 'zod';
 import type { Storage } from '../../ports/index.ts';
@@ -31,6 +32,23 @@ export class FsStorage implements Storage {
     const body = `${JSON.stringify(value, null, 2)}\n`;
     await writeFile(tmpPath, body, 'utf8');
     await rename(tmpPath, absPath);
+  }
+
+  async listSubdirs(relPath: string): Promise<string[]> {
+    const absPath = join(this.rootDir, relPath);
+    let entries: Dirent<string>[];
+    try {
+      entries = await readdir(absPath, { withFileTypes: true });
+    } catch (err) {
+      if (isEnoent(err)) return [];
+      throw err;
+    }
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  }
+
+  async removeTree(relPath: string): Promise<void> {
+    const absPath = join(this.rootDir, relPath);
+    await rm(absPath, { recursive: true, force: true });
   }
 }
 

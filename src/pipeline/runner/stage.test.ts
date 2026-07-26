@@ -14,6 +14,10 @@ function fakeStorage(): Storage {
     async writeJson(relPath, value) {
       store.set(relPath, value);
     },
+    async listSubdirs() {
+      return [];
+    },
+    async removeTree() {},
   };
 }
 

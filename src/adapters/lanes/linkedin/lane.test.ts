@@ -96,6 +96,12 @@ class FakeStorage implements Storage {
     this.files.set(relPath, value);
     this.writes.push(relPath);
   }
+
+  async listSubdirs(): Promise<string[]> {
+    return [];
+  }
+
+  async removeTree(): Promise<void> {}
 }
 
 interface RawCardFixture {

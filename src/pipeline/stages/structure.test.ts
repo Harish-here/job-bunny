@@ -21,6 +21,10 @@ function fakeStorage(): Storage & { store: Map<string, unknown> } {
     async writeJson(relPath: string, value: unknown) {
       store.set(relPath, value);
     },
+    async listSubdirs() {
+      return [];
+    },
+    async removeTree() {},
   };
 }
 

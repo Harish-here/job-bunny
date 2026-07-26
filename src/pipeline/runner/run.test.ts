@@ -44,6 +44,10 @@ function fakeStorage(): Storage {
       return undefined;
     },
     async writeJson() {},
+    async listSubdirs() {
+      return [];
+    },
+    async removeTree() {},
   };
 }
 

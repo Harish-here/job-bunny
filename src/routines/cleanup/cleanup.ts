@@ -7,7 +7,10 @@ import type { Routine } from '../types.ts';
  * `adapters/db/notion/archive.ts` (ported from v0 `scripts/notion/
  * cleanup.js`): Status=Passed pages older than `passedOlderThanDays`, and
  * pages with NO Status at all (never triaged — `syncJobs` never writes
- * Status) older than `untouchedOlderThanDays`.
+ * Status) older than `untouchedOlderThanDays`. It then prunes local
+ * `runs/<date>/` checkpoint folders older than `runsOlderThanDays` via
+ * `ctx.storage` — a purely local-disk concern, unrelated to Notion
+ * staleness.
  *
  * Settings come from the pipeline config's `settings.cleanup` slice
  * (`PipelineConfigSchema.settings` is an untyped `Record<string, unknown>`
@@ -17,22 +20,54 @@ import type { Routine } from '../types.ts';
  * validates on every `run()` instead ("at first use", per the task). An
  * absent `settings.cleanup` key parses to the pinned v0 defaults, not an
  * error: `passedOlderThanDays: 7`, `untouchedOlderThanDays: 30` (v0
- * `cleanup.js`'s own `DAYS_OLD`/`LEAD_DAYS_OLD` env-var defaults).
+ * `cleanup.js`'s own `DAYS_OLD`/`LEAD_DAYS_OLD` env-var defaults);
+ * `runsOlderThanDays` has no v0 precedent (v0 never wrote checkpoints) and
+ * defaults to 30.
  *
  * Dry-run is deliberately NOT modeled here: it belongs entirely to the
  * connector's own settings (`NotionConnectorSettings.dryRun`, defaulting to
  * `true` — v0's `--apply`/`CLEANUP_APPLY` opt-in invariant). This routine
  * always calls `archiveStale`; whether that call actually writes anything
- * is a decision owned by the connector and never overridden here.
+ * is a decision owned by the connector and never overridden here. Run-folder
+ * pruning has no equivalent dry-run knob — deleting an old checkpoint
+ * folder is not a Notion write and carries no undo requirement.
  */
 export const CleanupSettingsSchema = z.object({
   /** v0 `cleanup.js` `DAYS_OLD` default. */
   passedOlderThanDays: z.number().int().min(0).default(7),
   /** v0 `cleanup.js` `LEAD_DAYS_OLD` default. */
   untouchedOlderThanDays: z.number().int().min(0).default(30),
+  /** No v0 precedent (v0 never wrote checkpoints); TTL for local
+   * `runs/<date>/` folders under `ctx.storage`. */
+  runsOlderThanDays: z.number().int().min(0).default(30),
 });
 
 export type CleanupSettings = z.infer<typeof CleanupSettingsSchema>;
+
+const RUN_DIR_NAME = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Pure selection of which `runs/` subdirectory names are prunable: only
+ * date-shaped names (`YYYY-MM-DD`) strictly older than `today` minus
+ * `ttlDays` are returned. `today` never comes back even at `ttlDays: 0` —
+ * this routine runs post-sync *during* a run whose own `runs/<today>/`
+ * folder is actively being written to, so a same-day match must never be
+ * eligible regardless of TTL. `today` is passed in (not read via
+ * `Date.now()`) to keep this helper deterministic and testable.
+ */
+export function selectPrunableRunDirs(
+  dirNames: string[],
+  today: string,
+  ttlDays: number,
+): string[] {
+  const cutoff = new Date(`${today}T00:00:00.000Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - ttlDays);
+  return dirNames.filter((name) => {
+    if (name === today) return false;
+    if (!RUN_DIR_NAME.test(name)) return false;
+    return new Date(`${name}T00:00:00.000Z`) < cutoff;
+  });
+}
 
 export const cleanupRoutine: Routine = {
   name: 'cleanup',
@@ -41,7 +76,13 @@ export const cleanupRoutine: Routine = {
     const raw = ctx.config.settings.cleanup ?? {};
     const settings = CleanupSettingsSchema.parse(raw);
 
-    const { archived, dropped } = await ctx.ports.connector.archiveStale(settings, ctx);
+    const { archived, dropped } = await ctx.ports.connector.archiveStale(
+      {
+        passedOlderThanDays: settings.passedOlderThanDays,
+        untouchedOlderThanDays: settings.untouchedOlderThanDays,
+      },
+      ctx,
+    );
 
     ctx.logger.info('cleanup: archived stale jobs', {
       archived,
@@ -67,5 +108,34 @@ export const cleanupRoutine: Routine = {
         })),
       });
     }
+
+    // This routine runs post-sync DURING a run whose own `runs/<today>/`
+    // checkpoint folder is actively being written — `selectPrunableRunDirs`'s
+    // never-today guard plus its strict-older-than-cutoff comparison make
+    // pruning alongside that live folder safe.
+    const today = new Date().toISOString().slice(0, 10);
+    const runDirs = await ctx.storage.listSubdirs('runs');
+    const prunable = selectPrunableRunDirs(runDirs, today, settings.runsOlderThanDays);
+
+    let prunedRuns = 0;
+    const prunedNames: string[] = [];
+    for (const dir of prunable) {
+      try {
+        await ctx.storage.removeTree(`runs/${dir}`);
+        prunedRuns += 1;
+        prunedNames.push(dir);
+      } catch (err) {
+        ctx.logger.warn('cleanup: failed to prune a run folder', {
+          dir,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    ctx.logger.debug('cleanup: pruned run folders', { prunedNames });
+    ctx.logger.info('cleanup: pruned local run folders', {
+      prunedRuns,
+      runsOlderThanDays: settings.runsOlderThanDays,
+    });
   },
 };

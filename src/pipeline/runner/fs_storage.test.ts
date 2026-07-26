@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, test } from 'node:test';
@@ -76,4 +76,32 @@ test('.tmp file is never left behind after a successful write', async () => {
   const entries = await readdir(join(root, dir));
   assert.deepEqual(entries, ['clean.json']);
   await assert.rejects(() => stat(`${join(root, relPath)}.tmp`));
+});
+
+test('listSubdirs: returns immediate subdirectory names only', async () => {
+  const { storage, dir } = freshStorage();
+  await mkdir(join(root, dir, 'a'), { recursive: true });
+  await mkdir(join(root, dir, 'b'), { recursive: true });
+  await storage.writeJson(`${dir}/file.json`, { hello: 'not-a-dir' });
+  const names = (await storage.listSubdirs(dir)).sort();
+  assert.deepEqual(names, ['a', 'b']);
+});
+
+test('listSubdirs: [] when the path does not exist', async () => {
+  const { storage, dir } = freshStorage();
+  const names = await storage.listSubdirs(`${dir}/nope`);
+  assert.deepEqual(names, []);
+});
+
+test('removeTree: recursively deletes a directory', async () => {
+  const { storage, dir } = freshStorage();
+  await mkdir(join(root, dir, 'nested'), { recursive: true });
+  await storage.writeJson(`${dir}/nested/thing.json`, { hello: 'gone' });
+  await storage.removeTree(dir);
+  await assert.rejects(() => stat(join(root, dir)));
+});
+
+test('removeTree: no-op when already absent', async () => {
+  const { storage, dir } = freshStorage();
+  await assert.doesNotReject(() => storage.removeTree(`${dir}/nope`));
 });

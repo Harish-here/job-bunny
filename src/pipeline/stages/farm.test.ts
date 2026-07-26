@@ -18,6 +18,10 @@ function fakeStorage(): Storage & { store: Map<string, unknown>; writeCalls: str
       writeCalls.push(relPath);
       store.set(relPath, value);
     },
+    async listSubdirs() {
+      return [];
+    },
+    async removeTree() {},
   };
 }
 

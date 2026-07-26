@@ -8,8 +8,13 @@ import type {
   LogData,
   Logger,
   RunContext,
+  Storage,
 } from '../../ports/index.ts';
-import { CleanupSettingsSchema, cleanupRoutine } from './cleanup.ts';
+import {
+  CleanupSettingsSchema,
+  cleanupRoutine,
+  selectPrunableRunDirs,
+} from './cleanup.ts';
 
 interface LogCall {
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -61,10 +66,34 @@ function fakeConnector(overrides?: {
   };
 }
 
+function fakeRunsStorage(opts?: {
+  runDirs?: string[];
+  failOn?: Set<string>;
+}): Storage & { removedTrees: string[] } {
+  const removedTrees: string[] = [];
+  return {
+    removedTrees,
+    async readJson() {
+      return undefined;
+    },
+    async writeJson() {},
+    async listSubdirs(relPath: string) {
+      if (relPath !== 'runs') return [];
+      return opts?.runDirs ?? [];
+    },
+    async removeTree(relPath: string) {
+      const dir = relPath.replace(/^runs\//, '');
+      if (opts?.failOn?.has(dir)) throw new Error(`boom: ${dir}`);
+      removedTrees.push(relPath);
+    },
+  };
+}
+
 function fakeCtx(opts?: {
   settings?: Record<string, unknown>;
   connector?: Connector;
   logger?: Logger;
+  storage?: Storage;
 }): PipelineCtx {
   const connector = opts?.connector ?? fakeConnector();
   const ports: WiredPorts = { lanes: [], connector, notifiers: [] };
@@ -73,12 +102,7 @@ function fakeCtx(opts?: {
     signal: new AbortController().signal,
     logger: opts?.logger ?? { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
-    storage: {
-      async readJson() {
-        return undefined;
-      },
-      async writeJson() {},
-    },
+    storage: opts?.storage ?? fakeRunsStorage(),
     config: {
       lanes: [],
       connector: 'notion',
@@ -91,9 +115,13 @@ function fakeCtx(opts?: {
   };
 }
 
-test('CleanupSettingsSchema: empty object parses to v0-pinned defaults (7 / 30)', () => {
+test('CleanupSettingsSchema: empty object parses to defaults (7 / 30 / 30)', () => {
   const settings = CleanupSettingsSchema.parse({});
-  assert.deepEqual(settings, { passedOlderThanDays: 7, untouchedOlderThanDays: 30 });
+  assert.deepEqual(settings, {
+    passedOlderThanDays: 7,
+    untouchedOlderThanDays: 30,
+    runsOlderThanDays: 30,
+  });
 });
 
 test('cleanupRoutine: name "cleanup", when "post-sync"', () => {
@@ -186,4 +214,74 @@ test('run(): rejects an invalid settings.cleanup slice loudly rather than silent
   const ctx = fakeCtx({ connector, settings: { cleanup: { passedOlderThanDays: -1 } } });
 
   await assert.rejects(() => cleanupRoutine.run(ctx));
+});
+
+test('selectPrunableRunDirs: a date strictly older than the cutoff is pruned', () => {
+  const result = selectPrunableRunDirs(['2026-06-01'], '2026-07-26', 30);
+  assert.deepEqual(result, ['2026-06-01']);
+});
+
+test('selectPrunableRunDirs: a date exactly at the cutoff is kept', () => {
+  const result = selectPrunableRunDirs(['2026-06-26'], '2026-07-26', 30);
+  assert.deepEqual(result, []);
+});
+
+test("selectPrunableRunDirs: today's own date is always kept, even at ttlDays 0", () => {
+  const result = selectPrunableRunDirs(['2026-07-26'], '2026-07-26', 0);
+  assert.deepEqual(result, []);
+});
+
+test('selectPrunableRunDirs: non-date-shaped names are ignored', () => {
+  const result = selectPrunableRunDirs(
+    ['not-a-date', '.DS_Store', '2026-06-01'],
+    '2026-07-26',
+    30,
+  );
+  assert.deepEqual(result, ['2026-06-01']);
+});
+
+test('selectPrunableRunDirs: a recent date within the TTL is kept', () => {
+  const result = selectPrunableRunDirs(['2026-07-20'], '2026-07-26', 30);
+  assert.deepEqual(result, []);
+});
+
+test('run(): prunes run folders older than runsOlderThanDays, keeps today and recent, and still archives', async () => {
+  const connector = fakeConnector();
+  const storage = fakeRunsStorage({
+    runDirs: ['2026-06-01', '2026-07-20', '2026-07-26', 'not-a-date'],
+  });
+  const ctx = fakeCtx({
+    connector,
+    storage,
+    settings: { cleanup: { runsOlderThanDays: 30 } },
+  });
+  // Pin "today" via the fake ctx's storage listSubdirs('runs') input above;
+  // the routine itself computes today from Date.now(), so this test only
+  // exercises 2026-06-01 (unambiguously > 30 days before any plausible
+  // "today") to avoid coupling to wall-clock time.
+
+  await cleanupRoutine.run(ctx);
+
+  assert.deepEqual(connector.archiveCalls, [
+    { passedOlderThanDays: 7, untouchedOlderThanDays: 30 },
+  ]);
+  assert.deepEqual(storage.removedTrees, ['runs/2026-06-01']);
+});
+
+test('run(): a removeTree failure for one run folder is warned about but does not throw, and other prunes still happen', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const storage = fakeRunsStorage({
+    runDirs: ['2020-01-01', '2020-02-02'],
+    failOn: new Set(['2020-01-01']),
+  });
+  const ctx = fakeCtx({ connector, storage, logger });
+
+  await assert.doesNotReject(() => cleanupRoutine.run(ctx));
+
+  const warnCall = logger.calls.find(
+    (c) => c.level === 'warn' && c.msg.includes('failed to prune'),
+  );
+  assert.ok(warnCall, 'a per-folder prune failure must be warned, not thrown');
+  assert.deepEqual(storage.removedTrees, ['runs/2020-02-02']);
 });

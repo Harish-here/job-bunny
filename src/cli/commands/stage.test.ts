@@ -36,6 +36,10 @@ function fakeCtx(): PipelineCtx {
         return undefined;
       },
       async writeJson() {},
+      async listSubdirs() {
+        return [];
+      },
+      async removeTree() {},
     },
     config: {} as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],

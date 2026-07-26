@@ -44,6 +44,10 @@ function fakeCtx(connector: Connector): PipelineCtx {
         return undefined;
       },
       async writeJson() {},
+      async listSubdirs() {
+        return [];
+      },
+      async removeTree() {},
     },
     config: {
       lanes: [],

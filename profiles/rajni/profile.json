@@ -98,7 +98,8 @@
     },
     "cleanup": {
       "passedOlderThanDays": 7,
-      "untouchedOlderThanDays": 30
+      "untouchedOlderThanDays": 30,
+      "runsOlderThanDays": 30
     }
   }
 }

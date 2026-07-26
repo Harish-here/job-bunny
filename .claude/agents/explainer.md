@@ -137,7 +137,7 @@ Three watchdog layers:
 
 ### `src/ports/` — 9 interfaces, no implementations
 
-`browser.ts` (`BrowserProvider`/`BrowserHandle`/`PageHandle` — every method takes `timeoutMs`), `connector.ts` (`rebuildCache`/`syncJobs`/`archiveStale`, `ArchivePolicy`), `context.ts` (`Logger`, `RunContext { profile, signal, logger, beat() }`), `doctor.ts` (`DoctorCheck/Finding/Report`, `ok|warn|red`), `lane.ts` (`FarmingLane.source → {jobs, dropped, companiesSeen}`; `ApiLane.probe/fetchBoard`), `llm.ts` (`complete(prompt, {signal})`), `notifier.ts` (digest|alert), `scheduler.ts` (`install/remove/list`), `storage.ts` (`readJson<T>(rel, schema)`/`writeJson`).
+`browser.ts` (`BrowserProvider`/`BrowserHandle`/`PageHandle` — every method takes `timeoutMs`), `connector.ts` (`rebuildCache`/`syncJobs`/`archiveStale`, `ArchivePolicy`), `context.ts` (`Logger`, `RunContext { profile, signal, logger, beat() }`), `doctor.ts` (`DoctorCheck/Finding/Report`, `ok|warn|red`), `lane.ts` (`FarmingLane.source → {jobs, dropped, companiesSeen}`; `ApiLane.probe/fetchBoard`), `llm.ts` (`complete(prompt, {signal})`), `notifier.ts` (digest|alert), `scheduler.ts` (`install/remove/list`), `storage.ts` (`readJson<T>(rel, schema)`/`writeJson`/`listSubdirs`/`removeTree`).
 
 ### `src/adapters/`
 
@@ -158,7 +158,7 @@ Three watchdog layers:
 - `stages/` — the 10 stages + `tail_e2e.test.ts` (fixtures → real `FsStorage` → stubbed connector, no network).
 
 ### `src/routines/`
-`types.ts` — `Routine { name, when: 'pre-run'|'post-sync'|'standalone', run(ctx: PipelineCtx) }` (takes full `PipelineCtx`, unlike stages). `cleanup/` — archives via `connector.archiveStale`; `settings.cleanup` parsed on every run (defaults 7/30 days); dry-run deliberately not modeled here — it's the connector's.
+`types.ts` — `Routine { name, when: 'pre-run'|'post-sync'|'standalone', run(ctx: PipelineCtx) }` (takes full `PipelineCtx`, unlike stages). `cleanup/` — archives via `connector.archiveStale`; `settings.cleanup` parsed on every run (defaults 7/30/30 days); dry-run deliberately not modeled here — it's the connector's; also prunes `ctx.storage`'s `runs/<date>/` folders strictly older than `settings.cleanup.runsOlderThanDays` via the pure `selectPrunableRunDirs` helper (never prunes today's folder, even at TTL 0), per-folder `removeTree` failure warns and continues.
 
 ### `src/ops/`
 - `doctor/aggregate.ts` — core checks + `runChecks`; never throws — failing check = `red` finding. Adapter checks passed in by `wire()`.
@@ -179,7 +179,7 @@ Three watchdog layers:
 - `avoid.md` — read by no runtime code; edit `filter.json` instead.
 - `data/` — `cache/entries.json`, `registry/{companies,companies_seen,api_seen}.json`, `structure/*`, `lanes/linkedin/*`, `runs/<date>/`.
 
-**`runs/<date>/`** observability surface: `run.log` (JSON-lines), `heartbeat.json`, `NN-<stage>.json` (double as resume points), `result.json` (outcome, timings, funnel), `failure.json` on failed stage, `sync_dryrun.json` under `--dry-run`.
+**`runs/<date>/`** observability surface: `run.log` (JSON-lines), `heartbeat.json`, `NN-<stage>.json` (double as resume points), `result.json` (outcome, timings, funnel), `failure.json` on failed stage, `sync_dryrun.json` under `--dry-run`; pruned by `routine cleanup` past `settings.cleanup.runsOlderThanDays` (default 30), never today's folder.
 
 **Notion is the source of truth.** `reconcile` reads the live DB every run; local cache always rebuildable, never authoritative; `sync` writes only automated fields.
 

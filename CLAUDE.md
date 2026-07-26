@@ -82,7 +82,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 
 ## Hard rules
 
-- **Notion select option strings are byte-exact** (`adapters/db/notion/schema.ts`, pinned by `schema.test.ts` against a frozen snapshot) — changing one without first updating the live Notion DB's options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or hard delete — `routine cleanup` archives (recoverable, 30-day undo) per `settings.cleanup`, gated by `settings.notion.dryRun` (default `true`).
+- **Notion select option strings are byte-exact** (`adapters/db/notion/schema.ts`, pinned by `schema.test.ts` against a frozen snapshot) — changing one without first updating the live Notion DB's options makes sync throw. Inserts and anchored updates only; never whole-page overwrite or hard delete — `routine cleanup` archives (recoverable, 30-day undo) per `settings.cleanup`, gated by `settings.notion.dryRun` (default `true`); it also prunes local `profiles/<name>/data/runs/<date>/` folders strictly older than `settings.cleanup.runsOlderThanDays` (default 30, per-profile).
 - **`filter.json`'s `locations[]` is the only geo authority** — resume location is never read.
 - **Token efficiency on the structure path.** JD text capped at 2500 chars; the structure stage's input and output stay markdown tables, not JSON. Preserve this shape.
 - **No PDF parsing in the daily path** — `resume.json` is hand-maintained; PDF→JSON is a one-time `/setup` seed only.

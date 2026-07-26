@@ -16,6 +16,10 @@ function fakeCtx(): StageContext {
         return undefined;
       },
       async writeJson() {},
+      async listSubdirs() {
+        return [];
+      },
+      async removeTree() {},
     },
   };
 }
@@ -186,6 +190,10 @@ test('dry-run: writes the would-write set at the given path with the right count
       async writeJson(path: string, value: unknown) {
         written.push({ path, value });
       },
+      async listSubdirs() {
+        return [];
+      },
+      async removeTree() {},
     },
   };
   const stage = makeSyncStage(fakeConnector(), {

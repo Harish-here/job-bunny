@@ -21,6 +21,12 @@ class FakeStorage implements Storage {
   async writeJson(relPath: string, value: unknown): Promise<void> {
     this.files.set(relPath, value);
   }
+
+  async listSubdirs(): Promise<string[]> {
+    return [];
+  }
+
+  async removeTree(): Promise<void> {}
 }
 
 test('load with no persisted file returns a fresh empty state for today', async () => {
