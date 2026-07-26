@@ -265,7 +265,7 @@ Brainstorm complete — full consolidated spec:
   in city overwrite each other; FilterConfig/RankConfig reach their stages by factory
   injection — composing them from profile.json/filter_config.json is P8's job (no
   wire.ts exists yet).
-- ⚠️ P9 in progress (not complete) — fetch-time gate parity CLOSED 2026-07-25, other register items still open. Full detail: `docs/superpowers/plans/2026-07-21-v2-p9-v0-retirement.md`.
+- ⚠️ P9 in progress (not complete) — fetch-time gate parity CLOSED 2026-07-25; profile migration + migrator retirement CLOSED 2026-07-26; still open: live Notion write verify, cutover (see `docs/superpowers/specs/2026-07-25-v2-cutover-runbook.md`), v0 deletion after ≥7-day green soak. (The dated phase plans were removed 2026-07-26; recover from git history if needed.)
   **Fetch-time gate parity (was: v2's ATS lane emitting ~40x too many jobs, 3275 into `structure` on 2026-07-25, blowing its 30-min timeout) — RESOLVED.** ATS `source.ts` now runs `evaluateCard` at fetch time (before `structure`), a job-level `seen` ledger (`registry/api_seen.json`), and a `maxNewPerLane` cap (default 40, matching v0's GH_MAX_NEW/KEKA_MAX_NEW) — hard ceiling now 80 vs 3275. LinkedIn's existing card gate (`gateCards`/`evaluateCard`, unchanged) gained cache-skip, cross-URL run-dedup, and a per-URL cap (`maxCardsPerUrl`, default 40).
   **Decision — gate ordering divergence from v0 (deliberate):** gate order is title/avoid FIRST, then seen/cache, then cap; v0 was seen → cache → avoid → title. Changed to cheapest-first on purpose.
   **Decision — no stale-seen pruning (deliberate):** v0 pruned seen entries once they left the live board; v2's `api_seen.json` only grows. Accepted for now.

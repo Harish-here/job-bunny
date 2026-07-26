@@ -1,7 +1,7 @@
 # v2 Cutover Runbook
 
 > Operational — follow this at 7am when a scheduled run has broken, or when actually
-> executing cutover. Not an essay. Source: `docs/superpowers/plans/2026-07-21-v2-p8-cli-wiring-cutover.md`
+> executing cutover. Not an essay. Source: the P8 plan `2026-07-21-v2-p8-cli-wiring-cutover.md` (removed 2026-07-26 — in git history).
 > Task 7, root `CLAUDE.md`'s "Scheduling and notifications" / "Hard rules" sections.
 
 ## 1. Preconditions
