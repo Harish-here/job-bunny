@@ -4,6 +4,7 @@ import type { StagePayload } from '../../pipeline/runner/stage.ts';
 export const RunResultSchema = z.object({
   profile: z.string(),
   date: z.string(),
+  time: z.string(),
   outcome: z.enum(['passed', 'failed']),
   failedStage: z.string().optional(),
   stages: z.array(

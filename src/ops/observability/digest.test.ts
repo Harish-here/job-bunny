@@ -14,6 +14,7 @@ function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   return {
     profile: 'rajni',
     date: '2026-07-23',
+    time: '09-00',
     outcome: 'passed',
     stages: [
       {
@@ -40,6 +41,11 @@ function passedResult(overrides: Partial<RunResult> = {}): RunResult {
 test('formatDigest: includes the Job Bunny banner with the profile name', () => {
   const text = formatDigest(passedResult());
   assert.match(text, /✅ Job Bunny — rajni/);
+});
+
+test('formatDigest: the banner includes the run date and time', () => {
+  const text = formatDigest(passedResult());
+  assert.match(text, /2026-07-23 09-00/);
 });
 
 test('formatDigest: includes the separator line', () => {

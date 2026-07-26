@@ -21,7 +21,11 @@
 import { join } from 'node:path';
 import { buildFunnel } from '../../ops/observability/index.ts';
 import { JsonlLogger } from '../../ops/observability/logger.ts';
-import { RunFolder } from '../../ops/observability/run_folder.ts';
+import {
+  formatRunTime,
+  latestTimeDir,
+  RunFolder,
+} from '../../ops/observability/run_folder.ts';
 import { guardStage } from '../../pipeline/runner/guard.ts';
 import type { StagePayload } from '../../pipeline/runner/stage.ts';
 import { wire as defaultWire, type WireResult } from '../wire.ts';
@@ -68,11 +72,16 @@ export async function stageCommand(
     throw new Error(`internal error: stage "${opts.stage}" resolved to index ${index}`);
   }
 
-  const date = resolved.now().toISOString().slice(0, 10);
-  const folder = new RunFolder(
-    join(resolved.root, 'profiles', opts.profile, 'data'),
-    date,
-  );
+  const now = resolved.now();
+  const date = now.toISOString().slice(0, 10);
+  const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
+  // Continue in TODAY's latest existing time folder if one exists — this
+  // keeps a chain of sequential single-stage runs (e.g. the verify skill's
+  // `stage filter` → `stage dedup` → `stage rank`) sharing checkpoints.
+  // Only when today has no folder yet does this create a fresh one.
+  const existing = await latestTimeDir(dataDir, date);
+  const time = existing ?? formatRunTime(now);
+  const folder = new RunFolder(dataDir, date, time);
   ctx.logger = new JsonlLogger(folder.logPath());
 
   const latest = await folder.readLatestCheckpoint();

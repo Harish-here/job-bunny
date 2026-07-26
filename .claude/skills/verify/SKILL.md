@@ -29,12 +29,12 @@ node src/cli/main.ts stage dedup --profile rajni
 node src/cli/main.ts stage rank --profile rajni
 ```
 
-Every `stage <name>` run resumes from the latest checkpoint in today's
-`profiles/rajni/data/runs/<date>/NN-<stage>.json` (falling back to `{ jobs: [], dropped: [] }`
-if there is none yet) and writes a new checkpoint at that stage's own slot — `dedup` needs
-`reconcile` to have run first this same day (it reads `profiles/rajni/data/cache.json`, not a
-checkpoint). If a stage run ever leaves `profiles/rajni/`'s *committed* files dirty, restore
-them with:
+Every `stage <name>` run continues in TODAY's latest existing time folder (creating a fresh
+`profiles/rajni/data/runs/<date>/<HH-MM>/` only when today has none yet), resumes from the
+latest checkpoint in that folder (falling back to `{ jobs: [], dropped: [] }` if there is none
+yet), and writes a new checkpoint at that stage's own slot — `dedup` needs `reconcile` to have
+run first this same day (it reads `profiles/rajni/data/cache.json`, not a checkpoint). If a
+stage run ever leaves `profiles/rajni/`'s *committed* files dirty, restore them with:
 
 ```bash
 git checkout -- profiles/rajni/
@@ -82,9 +82,9 @@ kill -TERM <pid>; sleep 3; kill -0 <pid> 2>/dev/null && kill -KILL <pid>
 ```
 
 To test code that runs *before* the browser connects (e.g. resume/reset logic), poll the run's
-log file (`profiles/<profile>/data/runs/<date>/*.log` — path from `RunFolder.logPath()`) for a
-checkpoint just before the part you're testing, give it ~0.3s to let async writes land, then
-SIGTERM.
+log file (`profiles/<profile>/data/runs/<date>/<HH-MM>/run.log` — path from
+`RunFolder.logPath()`) for a checkpoint just before the part you're testing, give it ~0.3s to
+let async writes land, then SIGTERM.
 
 ## Fallback: throwaway profile for scenarios Rajni doesn't cover
 

@@ -20,7 +20,11 @@ import { z } from 'zod';
 import { CacheEntrySchema } from '../../core/jd/index.ts';
 import { JsonlLogger } from '../../ops/observability/logger.ts';
 import type { RunResult } from '../../ops/observability/result.ts';
-import { RunFolder } from '../../ops/observability/run_folder.ts';
+import {
+  formatRunTime,
+  latestTimeDir,
+  RunFolder,
+} from '../../ops/observability/run_folder.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { RunnerOptions } from '../../pipeline/runner/run.ts';
 import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts';
@@ -70,17 +74,21 @@ export async function reconcileCommand(
     throw new Error('wire() did not produce a "reconcile" stage');
   }
 
-  const date = resolved.now().toISOString().slice(0, 10);
-  const folder = new RunFolder(
-    join(resolved.root, 'profiles', opts.profile, 'data'),
-    date,
-  );
+  const now = resolved.now();
+  const date = now.toISOString().slice(0, 10);
+  const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
+  // Same folder-selection semantics as `stageCommand`: continue in TODAY's
+  // latest existing time folder (this and `stage` are both ad-hoc
+  // single-stage entry points in the same verify chain), creating a fresh
+  // one only when today has none yet.
+  const existing = await latestTimeDir(dataDir, date);
+  const time = existing ?? formatRunTime(now);
+  const folder = new RunFolder(dataDir, date, time);
   ctx.logger = new JsonlLogger(folder.logPath());
 
   const result = await resolved.runPipeline([reconcileStage], ctx, folder, {
     runCapMs: RUN_CAP_MS,
     stallMs: STALL_MS,
-    resume: false,
   });
 
   if (result.outcome === 'failed') {

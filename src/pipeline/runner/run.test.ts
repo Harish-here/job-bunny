@@ -106,7 +106,7 @@ function fakeStage(
 
 test('happy path: 3 stages checkpoint, funnel populates, result passes', async () => {
   const dataDir = join(root, 'happy');
-  const folder = new RunFolder(dataDir, '2026-07-21');
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
   const { ctx } = fakeCtx();
 
   const jobA = makeJD('a');
@@ -135,7 +135,6 @@ test('happy path: 3 stages checkpoint, funnel populates, result passes', async (
   const result = await runPipeline([farm, filter, assemble], ctx, folder, {
     runCapMs: 5_000,
     stallMs: 5_000,
-    resume: false,
   });
 
   assert.equal(result.outcome, 'passed');
@@ -178,7 +177,7 @@ test('happy path: 3 stages checkpoint, funnel populates, result passes', async (
 
 test('passed run clears a stale failure.json left by an earlier same-day failed run', async () => {
   const dataDir = join(root, 'clears-stale-failure');
-  const folder = new RunFolder(dataDir, '2026-07-21');
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
   const { ctx } = fakeCtx();
 
   await folder.writeFailure({ stage: 'earlier-stage', error: 'boom', elapsedMs: 1 });
@@ -193,7 +192,6 @@ test('passed run clears a stale failure.json left by an earlier same-day failed 
   const result = await runPipeline([stage], ctx, folder, {
     runCapMs: 5_000,
     stallMs: 5_000,
-    resume: false,
   });
 
   assert.equal(result.outcome, 'passed');
@@ -206,7 +204,7 @@ test('passed run clears a stale failure.json left by an earlier same-day failed 
 
 test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does not throw', async () => {
   const dataDir = join(root, 'mid-failure');
-  const folder = new RunFolder(dataDir, '2026-07-21');
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
   const { ctx } = fakeCtx();
 
   let stage3Called = false;
@@ -234,7 +232,6 @@ test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does no
   const result = await runPipeline([stage1, stage2, stage3], ctx, folder, {
     runCapMs: 5_000,
     stallMs: 5_000,
-    resume: false,
   });
 
   assert.equal(result.outcome, 'failed');
@@ -252,16 +249,22 @@ test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does no
   assert.equal(resultJson.outcome, 'failed');
 });
 
-test('resume: fast-forwards past the latest checkpoint and reuses its payload', async () => {
+test('resume: seeded from an earlier folder, fast-forwards past its latest checkpoint, reuses its payload, and writes into its OWN folder', async () => {
   const dataDir = join(root, 'resume');
-  const folder = new RunFolder(dataDir, '2026-07-21');
+  // The prior (earlier same-day) run's folder — the seed source, per the
+  // new fresh-folder-per-invocation design. Discovery of this folder and
+  // reading its latest checkpoint is the CALLER's job (cli/commands/run.ts)
+  // — runPipeline itself only ever sees the resolved resumeFrom seed.
+  const priorFolder = new RunFolder(dataDir, '2026-07-21', '08-00');
+  // This run's OWN fresh folder — where its checkpoints land.
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
   const { ctx } = fakeCtx();
 
   let stage0Called = false;
   let stage1Input: StagePayload | undefined;
 
   const checkpointPayload: StagePayload = { jobs: [makeJD('seed')], dropped: [] };
-  await folder.writeCheckpoint(0, 'stage0', checkpointPayload);
+  await priorFolder.writeCheckpoint(0, 'stage0', checkpointPayload);
 
   const stage0: StageDef<StagePayload, StagePayload> = fakeStage({
     name: 'stage0',
@@ -287,7 +290,11 @@ test('resume: fast-forwards past the latest checkpoint and reuses its payload', 
   const result = await runPipeline([stage0, stage1, stage2], ctx, folder, {
     runCapMs: 5_000,
     stallMs: 5_000,
-    resume: true,
+    resumeFrom: {
+      startIndex: 1,
+      payload: checkpointPayload,
+      checkpointPath: priorFolder.checkpointPath(0, 'stage0'),
+    },
   });
 
   assert.equal(stage0Called, false);
@@ -296,11 +303,16 @@ test('resume: fast-forwards past the latest checkpoint and reuses its payload', 
   assert.equal(result.stages.length, 2);
   assert.equal(result.stages[0]?.name, 'stage1');
   assert.equal(result.stages[1]?.name, 'stage2');
+
+  // Checkpoints from the resumed run land in ITS OWN folder, not the prior one.
+  const cp1 = JSON.parse(await readFile(folder.checkpointPath(1, 'stage1'), 'utf8'));
+  assert.equal(cp1.jobs.length, 2);
+  await assert.rejects(() => readFile(priorFolder.checkpointPath(1, 'stage1'), 'utf8'));
 });
 
 test('run-cap: a hanging stage is killed at runCapMs and result is failed (no throw)', async () => {
   const dataDir = join(root, 'run-cap');
-  const folder = new RunFolder(dataDir, '2026-07-21');
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
   const { ctx } = fakeCtx();
 
   const hanging: StageDef<StagePayload, StagePayload> = fakeStage({
@@ -317,7 +329,6 @@ test('run-cap: a hanging stage is killed at runCapMs and result is failed (no th
   const result = await runPipeline([hanging], ctx, folder, {
     runCapMs: 40,
     stallMs: 5_000,
-    resume: false,
   });
   const elapsed = Date.now() - started;
 

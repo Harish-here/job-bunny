@@ -63,7 +63,7 @@ Key invariants:
 - **Lanes are config-driven.** Selectors and page behavior come from `src/adapters/lanes/linkedin/page_inventory/<page>.json` at runtime; DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing lane code.
 - **Farm writes what source reads.** `farm` must run before `source`: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry.
 - **The runner is the single notifier.** Success and failure digests are both built from `result.json` at run end.
-- **Uniform checkpoints.** The runner writes `profiles/<name>/data/runs/<date>/NN-<stage>.json` after every stage; `--resume` continues from the last one.
+- **Uniform checkpoints.** Each invocation owns its own `profiles/<name>/data/runs/<date>/<HH-MM>/` folder (local start time); the runner writes `NN-<stage>.json` there after every stage. `--resume` creates a fresh folder and seeds it from the latest checkpoint in the latest earlier same-day folder; `stage <name>` continues in today's latest existing folder instead of creating a new one, so a chain of single-stage runs shares checkpoints.
 
 ## Slash commands
 

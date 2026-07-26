@@ -110,7 +110,7 @@ Notable internals:
 
 ### 2.4 The runner & watchdogs
 
-`src/pipeline/runner/run.ts`'s `runPipeline` runs stages sequentially, checkpoints after each success, and **never throws** — failures become `failure.json` + a `'failed'` `RunResult`; exit code is the caller's. Resume reads the latest same-day checkpoint, restarts from index+1. A `'passed'` outcome clears any stale `failure.json` left by an earlier same-day failed run (`RunFolder.clearFailure`), so a green rerun never leaves a contradictory failure artifact beside `result.json`.
+`src/pipeline/runner/run.ts`'s `runPipeline` runs stages sequentially, checkpoints after each success, and **never throws** — failures become `failure.json` + a `'failed'` `RunResult`; exit code is the caller's. Each `run` invocation owns a FRESH `runs/<date>/<HH-MM>/` folder (local start time — `formatRunTime`/`nextTimeDir`), never a shared per-day one; `runPipeline` itself is ignorant of folder discovery — it only ever sees an optional `RunnerOptions.resumeFrom` seed (`{ startIndex, payload, checkpointPath? }`). `cli/commands/run.ts`'s `--resume` handling does the discovery: before running, it finds the latest EARLIER same-day folder via `latestTimeDir` (the just-created fresh folder is excluded automatically — nothing has been written into it yet), reads its latest checkpoint, and passes that as `resumeFrom`; absent that, the run starts from stage 0. The resumed run's own checkpoints land in its own new folder. `stage <name>` (and `reconcile`) instead continue in TODAY's latest EXISTING folder (creating one only when today has none), so a chain of ad-hoc single-stage runs shares checkpoints — this is `cli/commands/stage.ts`'s own logic, not `runPipeline`'s. A `'passed'` outcome clears any stale `failure.json` left by an earlier failed run in the SAME folder (`RunFolder.clearFailure`), so a green rerun never leaves a contradictory failure artifact beside `result.json`. `RunResult` carries both `date` and `time` (the owning folder's); `formatDigest` shows both in its banner.
 
 Three watchdog layers:
 1. **per-stage timeout** — `guardStage` composes `AbortSignal.any([ctx.signal, AbortSignal.timeout(stage.timeoutMs)])`; each retry gets a fresh budget
@@ -162,7 +162,7 @@ Three watchdog layers:
 
 ### `src/ops/`
 - `doctor/aggregate.ts` — core checks + `runChecks`; never throws — failing check = `red` finding. Adapter checks passed in by `wire()`.
-- `observability/` — `run_folder.ts` (`RunFolder`: `NN-<stage>.json`, `readLatestCheckpoint`, atomic), `result.ts` (`RunResultSchema`, `buildFunnel` — counts only *newly* dropped records, grouped by first failing rule), `logger.ts` (`JsonlLogger` → `run.log`, echoes to stdout on TTY, `flush()`), `digest.ts` (`formatDigest(RunResult)` → plaintext ✅/🔴 banner + funnel lines; in `ops/` because `cli/` may import `ops/**` never `adapters/**`).
+- `observability/` — `run_folder.ts` (`RunFolder(profileDataDir, date, time)`: `NN-<stage>.json`, `readLatestCheckpoint`, atomic, rooted at `runs/<date>/<time>/`; plus the folder-discovery helpers `formatRunTime` (local `HH-MM`), `latestTimeDir` (greatest existing time-subdir for a date), `nextTimeDir` (collision-avoiding fresh slot)), `result.ts` (`RunResultSchema` — `date`+`time`+outcome+per-stage funnel, `buildFunnel` — counts only *newly* dropped records, grouped by first failing rule), `logger.ts` (`JsonlLogger` → `run.log`, echoes to stdout on TTY, `flush()`), `digest.ts` (`formatDigest(RunResult)` → plaintext ✅/🔴 banner incl. date+time + funnel lines; in `ops/` because `cli/` may import `ops/**` never `adapters/**`).
 - `scheduling/run_lock.ts` — cross-process, cross-profile exclusive lock at `<root>/.jobbunny-run.lock` via `wx` create. Second run **skipped, not queued**. Stale if pid dead OR older than 4h default.
 
 ### `src/cli/`
@@ -177,9 +177,9 @@ Three watchdog layers:
 - `filter.json` — the sole geo/skills/rank-gate authority; `locations[]` the only geo source.
 - `resume.json` — hand-maintained; `search_urls.md` — Channel → `### <page-slug>` → `• <label> - <url>`, drives `lane add-url`/`/page-analyse`.
 - `avoid.md` — read by no runtime code; edit `filter.json` instead.
-- `data/` — `cache/entries.json`, `registry/{companies,companies_seen,api_seen}.json`, `structure/*`, `lanes/linkedin/*`, `runs/<date>/`.
+- `data/` — `cache/entries.json`, `registry/{companies,companies_seen,api_seen}.json`, `structure/*`, `lanes/linkedin/*`, `runs/<date>/<HH-MM>/`.
 
-**`runs/<date>/`** observability surface: `run.log` (JSON-lines), `heartbeat.json`, `NN-<stage>.json` (double as resume points), `result.json` (outcome, timings, funnel), `failure.json` on failed stage, `sync_dryrun.json` under `--dry-run`; pruned by `routine cleanup` past `settings.cleanup.runsOlderThanDays` (default 30), never today's folder.
+**`runs/<date>/<HH-MM>/`** — one folder per run invocation (local start time), not per day: `run.log` (JSON-lines), `heartbeat.json`, `NN-<stage>.json` (double as resume points), `result.json` (outcome, timings, funnel, now carrying `date`+`time`), `failure.json` on failed stage — all per-run instead of last-writer-wins per day. `sync_dryrun.json` under `--dry-run` stays at the `runs/<date>/` level (unchanged by this). `routine cleanup` prunes whole `runs/<date>/` trees (its subfolders come along) past `settings.cleanup.runsOlderThanDays` (default 30), never today's date.
 
 **Notion is the source of truth.** `reconcile` reads the live DB every run; local cache always rebuildable, never authoritative; `sync` writes only automated fields.
 

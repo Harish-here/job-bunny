@@ -30,6 +30,7 @@ function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   return {
     profile: 'rajni',
     date: '2026-07-25',
+    time: '09-00',
     outcome: 'passed',
     stages: [
       {

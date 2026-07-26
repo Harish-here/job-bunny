@@ -91,7 +91,7 @@ Set times in your profile's `profile.json`:
 "schedule": { "times": ["09:00", "14:00", "19:00"] }
 ```
 
-then run `jobbunny schedule install`. Each firing runs `jobbunny run --profile <name> --headless` with watchdogs for per-stage timeouts and stalls; profiles sharing a time slot are chained into one job and run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — farming resumes per URL (`--resume`). Per-profile run logs land in `profiles/<name>/data/runs/<date>/`; the launchd job's own stdout/stderr land in `~/Library/Logs/JobBunny/`.
+then run `jobbunny schedule install`. Each firing runs `jobbunny run --profile <name> --headless` with watchdogs for per-stage timeouts and stalls; profiles sharing a time slot are chained into one job and run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — farming resumes per URL (`--resume`). Per-profile run logs land in `profiles/<name>/data/runs/<date>/<HH-MM>/` (one folder per invocation, local start time); the launchd job's own stdout/stderr land in `~/Library/Logs/JobBunny/`.
 
 If your Mac regularly sleeps through a scheduled time, pre-wake it: `sudo pmset repeat wakeorpoweron MTWRF <HH:MM:SS>` a few minutes early (requires you to already be logged in — screen-locked is fine, logged out is not — and is most reliable on AC power with the lid closed).
 

@@ -38,7 +38,9 @@ function funnelLine(stage: RunResult['stages'][number]): string {
 export function formatDigest(result: RunResult, opts: { dryRun?: boolean } = {}): string {
   const passed = result.outcome === 'passed';
   const icon = passed ? '✅' : '🔴';
-  const banner = `${icon} Job Bunny${result.profile ? ` — ${result.profile}` : ''}`;
+  const banner =
+    `${icon} Job Bunny${result.profile ? ` — ${result.profile}` : ''}` +
+    ` (${result.date} ${result.time})`;
 
   const lines = [banner, SEPARATOR];
 

@@ -21,6 +21,7 @@ test('RunResultSchema parses a minimal passed result', () => {
   const result = RunResultSchema.parse({
     profile: 'rajni',
     date: '2026-07-21',
+    time: '09-00',
     outcome: 'passed',
     stages: [
       {

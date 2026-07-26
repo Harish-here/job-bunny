@@ -10,7 +10,17 @@ import type { StageDef, StagePayload } from './stage.ts';
 export interface RunnerOptions {
   runCapMs: number; // global cap — third watchdog layer
   stallMs: number;
-  resume: boolean; // same-day: skip stages ≤ latest checkpoint
+  /** Explicit resume seed, discovered by the CALLER (e.g. the `run` CLI
+   * command finding an earlier same-day run folder) — the runner itself
+   * never does folder discovery. Absent ⇒ start from stage 0 with the
+   * empty seed payload. `checkpointPath` (when known) is only used to
+   * populate `failure.json`'s `lastCheckpoint` if the very first resumed
+   * stage fails before this run writes a checkpoint of its own. */
+  resumeFrom?: {
+    startIndex: number;
+    payload: StagePayload;
+    checkpointPath?: string;
+  };
 }
 
 const SEED_PAYLOAD: StagePayload = { jobs: [], dropped: [] };
@@ -34,15 +44,11 @@ export async function runPipeline(
 
   let startIndex = 0;
   let input: StagePayload = SEED_PAYLOAD;
-  let lastCheckpointPath: string | undefined;
+  let lastCheckpointPath: string | undefined = opts.resumeFrom?.checkpointPath;
 
-  if (opts.resume) {
-    const latest = await folder.readLatestCheckpoint();
-    if (latest) {
-      startIndex = latest.index + 1;
-      input = latest.payload as StagePayload;
-      lastCheckpointPath = folder.checkpointPath(latest.index, latest.stage);
-    }
+  if (opts.resumeFrom) {
+    startIndex = opts.resumeFrom.startIndex;
+    input = opts.resumeFrom.payload;
   }
 
   const resultStages: RunResult['stages'] = [];
@@ -82,6 +88,7 @@ export async function runPipeline(
       const result: RunResult = {
         profile: ctx.profile,
         date: folder.date,
+        time: folder.time,
         outcome: 'failed',
         failedStage: stage.name,
         stages: resultStages,
@@ -94,6 +101,7 @@ export async function runPipeline(
   const result: RunResult = {
     profile: ctx.profile,
     date: folder.date,
+    time: folder.time,
     outcome: 'passed',
     stages: resultStages,
   };

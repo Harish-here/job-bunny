@@ -27,7 +27,12 @@ import { runChecks } from '../../ops/doctor/aggregate.ts';
 import { formatDigest } from '../../ops/observability/digest.ts';
 import { JsonlLogger } from '../../ops/observability/logger.ts';
 import type { RunResult } from '../../ops/observability/result.ts';
-import { RunFolder } from '../../ops/observability/run_folder.ts';
+import {
+  formatRunTime,
+  latestTimeDir,
+  nextTimeDir,
+  RunFolder,
+} from '../../ops/observability/run_folder.ts';
 import {
   type AcquireLockResult,
   acquireRunLock,
@@ -159,7 +164,8 @@ export async function runCommand(
 ): Promise<number> {
   const resolved: RunDeps = { ...defaultDeps(), ...deps };
 
-  const date = resolved.now().toISOString().slice(0, 10);
+  const now = resolved.now();
+  const date = now.toISOString().slice(0, 10);
   const { ctx, stages, routines, checks } = await resolved.wire(
     opts.profile,
     opts.dryRun
@@ -213,18 +219,42 @@ export async function runCommand(
       return 1;
     }
 
-    const folder = new RunFolder(
-      join(resolved.root, 'profiles', opts.profile, 'data'),
-      date,
-    );
+    // This invocation always gets its OWN fresh time folder — checkpoints,
+    // run.log, heartbeat, result.json and failure.json are per-run, never
+    // last-writer-wins per day (see `RunFolder`, `formatRunTime`,
+    // `nextTimeDir`). `time` is the LOCAL clock's HH-MM, matching
+    // `schedule.times`'s own local-clock convention.
+    const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
+    const time = await nextTimeDir(dataDir, date, formatRunTime(now));
+    const folder = new RunFolder(dataDir, date, time);
     ctx.logger = new JsonlLogger(folder.logPath());
+
+    // `--resume`: seed from the latest EARLIER same-day folder's latest
+    // checkpoint (never this run's own — it doesn't exist on disk yet, so
+    // `latestTimeDir` naturally excludes it). Folder discovery lives here,
+    // not in `runPipeline`, which only ever sees the resolved seed.
+    let resumeFrom: RunnerOptions['resumeFrom'];
+    if (opts.resume ?? false) {
+      const priorTime = await latestTimeDir(dataDir, date);
+      if (priorTime !== undefined) {
+        const priorFolder = new RunFolder(dataDir, date, priorTime);
+        const latest = await priorFolder.readLatestCheckpoint();
+        if (latest) {
+          resumeFrom = {
+            startIndex: latest.index + 1,
+            payload: latest.payload as StagePayload,
+            checkpointPath: priorFolder.checkpointPath(latest.index, latest.stage),
+          };
+        }
+      }
+    }
 
     await runRoutines(routines, 'pre-run', ctx);
 
     const result = await resolved.runPipeline(stages, ctx, folder, {
       runCapMs: opts.runCapMs ?? computeRunCapMs(stages),
       stallMs: DEFAULT_STALL_MS,
-      resume: opts.resume ?? false,
+      ...(resumeFrom ? { resumeFrom } : {}),
     });
 
     if (result.outcome === 'passed') {
