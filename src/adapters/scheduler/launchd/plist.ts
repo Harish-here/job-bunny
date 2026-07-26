@@ -59,6 +59,13 @@ export interface BuildPlistsOptions {
   /** Home directory — used to build the `~/Library/Logs/JobBunny` log
    * paths. Caller-supplied; never read from `os.homedir()` here. */
   home?: string;
+  /** Absolute path to the node binary each profile run is invoked with.
+   * launchd hands the job a minimal login shell where neither `jobbunny`
+   * nor nvm's Node 24 is on PATH — a bare command exits 127 with no digest
+   * — so `launchd.ts` supplies `process.execPath` (the Node the install
+   * itself ran under, ≥ 24 by `engines`). Caller-supplied here; never read
+   * from `process` in this pure module. */
+  nodeBin?: string;
 }
 
 export interface BuiltPlist {
@@ -129,15 +136,20 @@ function parseTime(time: string): { hour: number; minute: number } {
 }
 
 /** Builds the `/bin/bash -lc` command string: cd repo root, then every
- * profile's `jobbunny run --profile <p> --headless` chained with `; ` (in
- * input order) so one profile failing never aborts the rest (v0's
- * `run_scheduled.sh` loop is deliberately not `set -e`), run as a
- * background process group so the watchdog below can signal the whole
- * tree, then a coarse SIGTERM-then-SIGKILL backstop above the runner's own
- * run cap. */
-function buildCommand(root: string, profiles: string[], backstopSeconds: number): string {
+ * profile's `'<nodeBin>' src/cli/main.ts run --profile <p> --headless`
+ * chained with `; ` (in input order) so one profile failing never aborts
+ * the rest (v0's `run_scheduled.sh` loop is deliberately not `set -e`),
+ * run as a background process group so the watchdog below can signal the
+ * whole tree, then a coarse SIGTERM-then-SIGKILL backstop above the
+ * runner's own run cap. */
+function buildCommand(
+  root: string,
+  nodeBin: string,
+  profiles: string[],
+  backstopSeconds: number,
+): string {
   const chained = profiles
-    .map((p) => `jobbunny run --profile ${p} --headless`)
+    .map((p) => `'${nodeBin}' src/cli/main.ts run --profile ${p} --headless`)
     .join('; ');
   return [
     'set -uo pipefail',
@@ -173,6 +185,7 @@ export function buildPlists(
   const runCapMs = opts.runCapMs ?? DEFAULT_RUN_CAP_MS;
   const root = opts.root ?? '';
   const home = opts.home ?? '';
+  const nodeBin = opts.nodeBin ?? 'node';
   const backstopSeconds = Math.ceil(runCapMs / 1000) + 300;
 
   const profilesByTime = new Map<string, string[]>();
@@ -191,7 +204,7 @@ export function buildPlists(
     const { hour, minute } = parseTime(time);
     const hhmm = time.replace(':', '');
     const label = `com.jobbunny.${hhmm}`;
-    const cmd = buildCommand(root, profiles, backstopSeconds);
+    const cmd = buildCommand(root, nodeBin, profiles, backstopSeconds);
     const startCalendarInterval = [1, 2, 3, 4, 5].map((weekday) => ({
       Weekday: weekday,
       Hour: hour,

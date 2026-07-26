@@ -11,6 +11,7 @@ import { buildPlists } from './plist.ts';
 
 const ROOT = '/repo';
 const HOME = '/Users/tester';
+const NODE = '/fake/nvm/v24/bin/node';
 
 function jobs(...pairs: Array<[string, string]>): ScheduledJob[] {
   return pairs.map(([profile, time]) => ({ profile, time }));
@@ -60,36 +61,54 @@ test('buildPlists: profiles are chained in input order in the command', () => {
   assert.ok(zetaIdx < alphaIdx, 'zeta (input order) should appear before alpha');
 });
 
-test('buildPlists: each profile invocation is jobbunny run --profile <p> --headless', () => {
+test('buildPlists: each profile invocation runs main.ts via the absolute node binary', () => {
+  // A launchd login shell has neither `jobbunny` nor nvm's node on PATH —
+  // the command must not depend on PATH resolution at fire time.
   const result = buildPlists(jobs(['rajni', '09:00'], ['harish', '09:00']), {
     root: ROOT,
     home: HOME,
+    nodeBin: NODE,
   });
   const xml = result[0]?.xml ?? '';
-  assert.match(xml, /jobbunny run --profile rajni --headless/);
-  assert.match(xml, /jobbunny run --profile harish --headless/);
+  assert.match(
+    xml,
+    new RegExp(`&apos;${NODE}&apos; src/cli/main\\.ts run --profile rajni --headless`),
+  );
+  assert.match(
+    xml,
+    new RegExp(`&apos;${NODE}&apos; src/cli/main\\.ts run --profile harish --headless`),
+  );
+  assert.doesNotMatch(xml, /jobbunny run/);
 });
 
 test('buildPlists: cd into the repo root before running profiles', () => {
-  const result = buildPlists(jobs(['rajni', '09:00']), { root: ROOT, home: HOME });
+  const result = buildPlists(jobs(['rajni', '09:00']), {
+    root: ROOT,
+    home: HOME,
+    nodeBin: NODE,
+  });
   const xml = result[0]?.xml ?? '';
   // Single quotes are XML-escaped (&apos;) since this substring lives inside
   // a <string> element's text content.
   const cdIdx = xml.indexOf(`cd &apos;${ROOT}&apos;`);
-  const runIdx = xml.indexOf('jobbunny run --profile rajni --headless');
+  const runIdx = xml.indexOf('run --profile rajni --headless');
   assert.ok(cdIdx >= 0, 'expected a cd into ROOT');
-  assert.ok(cdIdx < runIdx, 'cd must happen before the profile run');
+  assert.ok(
+    cdIdx >= 0 && runIdx >= 0 && cdIdx < runIdx,
+    'cd must happen before the profile run',
+  );
 });
 
 test('buildPlists: one profile failing does not abort the others (semicolon-joined, not &&)', () => {
   const result = buildPlists(jobs(['rajni', '09:00'], ['harish', '09:00']), {
     root: ROOT,
     home: HOME,
+    nodeBin: NODE,
   });
   const xml = result[0]?.xml ?? '';
   assert.match(
     xml,
-    /jobbunny run --profile rajni --headless; jobbunny run --profile harish --headless/,
+    /run --profile rajni --headless; &apos;.*&apos; src\/cli\/main\.ts run --profile harish --headless/,
   );
 });
 

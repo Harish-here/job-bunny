@@ -11,6 +11,7 @@ import { LaunchdScheduler } from './launchd.ts';
 const ROOT = '/repo';
 const HOME = '/Users/tester';
 const UID = 501;
+const NODE = '/fake/nvm/v24/bin/node';
 const LAUNCH_AGENTS_DIR = `${HOME}/Library/LaunchAgents`;
 
 interface RunCall {
@@ -21,7 +22,15 @@ interface RunCall {
 /** In-memory fake filesystem: a flat Map<path, content>, enough for
  * write/read/exists/readdir/unlink/mkdir over one directory tree. */
 function makeFakeFs(initial: Record<string, string> = {}) {
-  const files = new Map<string, string>(Object.entries(initial));
+  // Seeded with the node binary and CLI entry point install()'s fail-loud
+  // resolution check looks for — tests that exercise the check delete them.
+  const files = new Map<string, string>(
+    Object.entries({
+      [NODE]: 'node-binary',
+      [`${ROOT}/src/cli/main.ts`]: '// entry',
+      ...initial,
+    }),
+  );
   return {
     files,
     existsSync: (path: string) =>
@@ -59,7 +68,14 @@ function makeScheduler(
   fs: ReturnType<typeof makeFakeFs>,
   run: ReturnType<typeof makeRunner>['run'],
 ) {
-  return new LaunchdScheduler({ run, fs, root: ROOT, home: HOME, uid: UID });
+  return new LaunchdScheduler({
+    run,
+    fs,
+    root: ROOT,
+    home: HOME,
+    uid: UID,
+    nodeBin: NODE,
+  });
 }
 
 test('install: writes a plist file per distinct time', async () => {
@@ -104,6 +120,37 @@ test('install: tolerates a failing bootout (not-loaded on first install)', async
 
   await assert.doesNotReject(scheduler.install([{ profile: 'rajni', time: '09:00' }]));
   assert.ok(fs.files.has(`${LAUNCH_AGENTS_DIR}/com.jobbunny.0900.plist`));
+});
+
+test('install: throws loudly when the node binary the plist embeds does not exist', async () => {
+  const fs = makeFakeFs();
+  fs.files.delete(NODE);
+  const { run } = makeRunner();
+  const scheduler = makeScheduler(fs, run);
+
+  await assert.rejects(scheduler.install([{ profile: 'rajni', time: '09:00' }]), /node/);
+  assert.ok(
+    !fs.files.has(`${LAUNCH_AGENTS_DIR}/com.jobbunny.0900.plist`),
+    'must not install a plist whose command cannot resolve',
+  );
+});
+
+test('install: throws loudly when the CLI entry point does not exist under root', async () => {
+  const fs = makeFakeFs();
+  fs.files.delete(`${ROOT}/src/cli/main.ts`);
+  const { run } = makeRunner();
+  const scheduler = makeScheduler(fs, run);
+
+  await assert.rejects(scheduler.install([{ profile: 'rajni', time: '09:00' }]));
+});
+
+test('install: an empty desired set skips the resolution check (remove-to-empty works anywhere)', async () => {
+  const fs = makeFakeFs();
+  fs.files.delete(NODE);
+  fs.files.delete(`${ROOT}/src/cli/main.ts`);
+  const { run } = makeRunner();
+  const scheduler = makeScheduler(fs, run);
+  await assert.doesNotReject(scheduler.install([]));
 });
 
 test('install: throws loudly when bootstrap fails', async () => {

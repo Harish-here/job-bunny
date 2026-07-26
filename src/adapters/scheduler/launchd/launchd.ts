@@ -95,6 +95,10 @@ export interface LaunchdSchedulerDeps {
   /** Forwarded to `buildPlists` — see `plist.ts`'s `DEFAULT_RUN_CAP_MS` doc
    * comment for why the default is 4.5h, not v0's 30 minutes. */
   runCapMs?: number;
+  /** Absolute node binary embedded in every plist's command (see
+   * `BuildPlistsOptions.nodeBin`). Default: `process.execPath` — the Node
+   * this install itself is running under, which `engines` pins to ≥ 24. */
+  nodeBin?: string;
 }
 
 export class LaunchdScheduler implements Scheduler {
@@ -105,6 +109,7 @@ export class LaunchdScheduler implements Scheduler {
   private readonly home: string;
   private readonly uid: number;
   private readonly runCapMs: number | undefined;
+  private readonly nodeBin: string;
 
   constructor(deps: LaunchdSchedulerDeps) {
     this.run = deps.run;
@@ -113,6 +118,7 @@ export class LaunchdScheduler implements Scheduler {
     this.home = deps.home ?? homedir();
     this.uid = deps.uid ?? process.getuid?.() ?? 0;
     this.runCapMs = deps.runCapMs;
+    this.nodeBin = deps.nodeBin ?? process.execPath;
   }
 
   private launchAgentsDir(): string {
@@ -124,7 +130,12 @@ export class LaunchdScheduler implements Scheduler {
   }
 
   private buildOpts(): BuildPlistsOptions {
-    return { root: this.root, home: this.home, runCapMs: this.runCapMs };
+    return {
+      root: this.root,
+      home: this.home,
+      runCapMs: this.runCapMs,
+      nodeBin: this.nodeBin,
+    };
   }
 
   /** Best-effort unload — tolerates a job that was never loaded (v0's
@@ -154,6 +165,24 @@ export class LaunchdScheduler implements Scheduler {
     const desiredLabels = new Set(desired.map((p) => p.label));
     const dir = this.launchAgentsDir();
     this.fs.mkdirSync(dir, { recursive: true });
+
+    // Fail loudly NOW if the command a plist would embed cannot resolve —
+    // otherwise every scheduled fire exits 127 with no digest, a silent
+    // daily failure. Skipped for an empty desired set so remove-to-empty
+    // still prunes on a machine where the toolchain has moved.
+    if (desired.length > 0) {
+      const entry = join(this.root, 'src', 'cli', 'main.ts');
+      if (!this.fs.existsSync(this.nodeBin)) {
+        throw new Error(
+          `launchd: node binary not found at ${this.nodeBin} — refusing to install plists whose command cannot resolve`,
+        );
+      }
+      if (!this.fs.existsSync(entry)) {
+        throw new Error(
+          `launchd: CLI entry point not found at ${entry} — refusing to install plists whose command cannot resolve`,
+        );
+      }
+    }
 
     for (const plist of desired) {
       const plistPath = this.plistPath(plist.label);
