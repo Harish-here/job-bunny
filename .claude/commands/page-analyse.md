@@ -28,8 +28,8 @@ This stage is **browser-driven and runs inline — you (Claude Code) do it direc
 }
 ```
 
-`pageType` is `details-page` when the JD opens via a fresh `/jobs/view/<id>/` navigation, `popup` when it opens in-place in a side panel. Every `selectors` key except `pagination` is required and non-empty — the zod schema itself is the completeness gate: a missing/empty required selector fails `loadInventory()` (thrown loudly at `/doctor`/`/run` time), never silently. `behaviors` carries everything else the lane's harvest/gate logic reads as config (pagination cadence, page-size, JD-settled signal, char caps, etc.) — mirror an existing file's keys rather than inventing new ones unless the lane code actually reads a new key.
+`pageType` is `details-page` when the JD opens via a fresh `/jobs/view/<id>/` navigation, `popup` when it opens in-place in a side panel. Every `selectors` key except `pagination` is required and non-empty — the zod schema itself is the completeness gate: a missing/empty required selector fails `loadInventory()` (thrown loudly at `jobbunny doctor`/`jobbunny run` time), never silently. `behaviors` carries everything else the lane's harvest/gate logic reads as config (pagination cadence, page-size, JD-settled signal, char caps, etc.) — mirror an existing file's keys rather than inventing new ones unless the lane code actually reads a new key.
 
 ## After
 
-Run `/doctor` — the inventory-freshness check (`src/adapters/lanes/linkedin/inventory.ts`'s `inventoryFreshnessCheck`, default staleness ceiling 30 days) must be green before `/run`.
+Run `jobbunny doctor --profile <name>` — the inventory-freshness check (`src/adapters/lanes/linkedin/inventory.ts`'s `inventoryFreshnessCheck`, default staleness ceiling 30 days) must be green before `jobbunny run`.
