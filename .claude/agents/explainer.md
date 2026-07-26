@@ -233,7 +233,7 @@ Three watchdog layers:
 **Known limitations / open P9 items:**
 1. LinkedIn `jdRoot` doesn't match direct-nav `/jobs/view/` pages — JD text via `behaviors.jdAnchorText` fallback; lane warns every run.
 2. `farm` funnel reports `jobsIn: 0` — cosmetic.
-3. `profiles/harish/` carries inert legacy v0 files (migration confirmed complete 2026-07-26).
+3. `profiles/harish/` is fully migrated — v0 migration confirmed complete and legacy v0 config files (incl. `avoid.md`, its aliases folded into `filter.json` `companies.avoid`) deleted 2026-07-26. Still real user data: never run the pipeline against it.
 4. P9 open: Notion WRITE path never exercised live; undiagnosed farm 0-job harvest 2026-07-25; cutover not started; v0 deletion gated on ≥7-day green soak.
 5. Gate ordering (title/avoid → seen/cache → cap) deliberately diverges from v0 — cheapest-first.
 6. No stale-seen pruning — `api_seen.json` only grows (deliberate).
