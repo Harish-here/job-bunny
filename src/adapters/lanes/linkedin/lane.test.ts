@@ -15,7 +15,7 @@ import type { Storage } from '../../../ports/storage.ts';
 import { CAPTURE_PATH } from './capture_store.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { jitterMs, LinkedInLane, parseSearchUrls } from './lane.ts';
+import { buildPageUrl, jitterMs, LinkedInLane, parseSearchUrls } from './lane.ts';
 import { RESUME_STATE_PATH } from './resume_state.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -27,6 +27,28 @@ async function realInventory(): Promise<Inventory> {
   const inv = InventorySchema.parse(raw);
   assert.equal(inv.pageType, 'details-page');
   return inv;
+}
+
+/** The real committed inventory pinned to `maxPages: '1'` — used by every
+ * test in this file that is NOT about pagination itself. The committed
+ * `page_inventory/linkedin__jobs-search.json` declares real (now-live)
+ * pagination behaviors, so leaving it unpinned would make every one of
+ * those tests silently attempt a page 2 (and beyond) against a fixture
+ * `Script` that never scripted one, which is unrelated noise for tests
+ * whose whole point is something else (jitter counts, dedup, cap, resume
+ * state, etc.). The pagination-specific tests below use `realInventory()`
+ * directly and set their own `maxPages` via `pagedInventory`. */
+async function singlePageInventory(): Promise<Inventory> {
+  return pagedInventory(await realInventory(), { maxPages: '1' });
+}
+
+/** Clones a real inventory with `behaviors` overridden/extended — used by
+ * the pagination tests to pin `maxPages`/`minJobCards`/etc without needing
+ * a second on-disk fixture file per scenario. `behaviors: {}` (no spread)
+ * models an inventory with no pagination declared at all (backward-compat
+ * test). */
+function pagedInventory(inv: Inventory, overrides: Record<string, string>): Inventory {
+  return { ...inv, behaviors: { ...inv.behaviors, ...overrides } };
 }
 
 const noopLogger: Logger = {
@@ -105,6 +127,12 @@ function newScript(): Script {
 class FakePage implements PageHandle {
   lastUrl = '';
   closed = false;
+  /** Every url passed to goto(), in order — used by the pagination tests
+   * to assert each page's request went to the correctly-built url (a
+   * single page instance is reused across a url's pages, so `lastUrl`
+   * alone can't distinguish "page 2 was fetched" from "page 2 was never
+   * fetched, page 1's url is just still the last one read"). */
+  readonly gotoCalls: string[] = [];
   private readonly script: Script;
 
   constructor(script: Script) {
@@ -113,6 +141,7 @@ class FakePage implements PageHandle {
 
   async goto(url: string): Promise<void> {
     this.lastUrl = url;
+    this.gotoCalls.push(url);
     if (this.script.gotoThrows.has(url)) {
       throw new Error(`goto failed for ${url}`);
     }
@@ -290,7 +319,7 @@ function seedHappyPathScript(script: Script): void {
 }
 
 test('happy path: 2 urls, some cards gated out, surviving JDs opened, companiesSeen deduped, beat() ticked', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -334,7 +363,7 @@ test('happy path: 2 urls, some cards gated out, surviving JDs opened, companiesS
 });
 
 test("one url's goto/harvest throws: logged and skipped, the other url is still processed, source() does not throw (partial failure isn't aggregate failure)", async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
@@ -376,7 +405,7 @@ test("one url's goto/harvest throws: logged and skipped, the other url is still 
 });
 
 test("one card's openJd throws (empty text): that card is skipped, other cards in the same url are still captured", async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/'); // Acme in url1 fails to open
@@ -416,7 +445,7 @@ test("one card's openJd throws (empty text): that card is skipped, other cards i
 });
 
 test('every card JD-open failing for a url leaves it un-marked-done (resumable) and does not throw when another url still succeeds', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   // Delete BOTH surviving cards' jd text for url1 (Acme li-1001, Globex
@@ -473,7 +502,7 @@ test('every card JD-open failing for a url leaves it un-marked-done (resumable) 
 });
 
 test('lane-wide "no JD ever opened" guard: url A attempts 2 cards and fails both, url B has zero cards survive gating — not every url is marked failed, but the lane still throws (2026-07-25 incident)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   // url1: both surviving cards (Acme li-1001, Globex li-1003) fail to open.
@@ -516,7 +545,7 @@ test('lane-wide "no JD ever opened" guard: url A attempts 2 cards and fails both
 });
 
 test('lane-wide "no JD ever opened" guard preserves prior same-day captures instead of throwing them away (review finding 4)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   // Same shape as the 2026-07-25 incident test above: url1's surviving
@@ -567,7 +596,7 @@ test('lane-wide "no JD ever opened" guard preserves prior same-day captures inst
 });
 
 test('lane-wide "no JD ever opened" guard does not fire when nothing survives title-gating anywhere (legitimate empty result)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   // Every card on every url is avoid-listed — a clean "nothing to
   // capture" run, not an outage.
@@ -605,7 +634,7 @@ test('lane-wide "no JD ever opened" guard does not fire when nothing survives ti
 });
 
 test('lane-wide "no JD ever opened" guard does not fire when at least one JD-open succeeds somewhere', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   // url1's cards both fail to open; url2 is untouched and still succeeds.
@@ -629,7 +658,7 @@ test('lane-wide "no JD ever opened" guard does not fire when at least one JD-ope
 });
 
 test('anchor-fallback extractions are counted and surfaced as one lane-level warning (review finding 7)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   for (const url of script.jdTextByUrl.keys()) script.anchorOnlyUrls.add(url);
@@ -663,7 +692,7 @@ test('anchor-fallback extractions are counted and surfaced as one lane-level war
 });
 
 test('resume: a url already marked done in ResumeState is skipped entirely — its page is never opened', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -688,7 +717,7 @@ test('resume: a url already marked done in ResumeState is skipped entirely — i
 });
 
 test('resume: captures already flushed by an earlier fire today are reloaded, so a skipped (already-done) url still contributes its jobs (finding 2c)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -720,7 +749,7 @@ test('resume: captures already flushed by an earlier fire today are reloaded, so
 });
 
 test('same-day second fire: when ResumeState already has ALL urls marked done, source() rescan-resets and re-opens/harvests every url instead of skipping them, and clears stale captures (finding 2)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -751,7 +780,7 @@ test('same-day second fire: when ResumeState already has ALL urls marked done, s
 });
 
 test('browser.launch throwing is a loud lane failure: source() rejects', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   const provider = new FakeBrowserProvider(script, true);
   const storage = new FakeStorage();
@@ -769,7 +798,7 @@ test('browser.launch throwing is a loud lane failure: source() rejects', async (
 });
 
 test('every attempted url failing is a loud aggregate failure (finding 3) — goto failures report as "other reasons", NOT an asserted expired session', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
@@ -804,7 +833,7 @@ test('every attempted url failing is a loud aggregate failure (finding 3) — go
 });
 
 test('every attempted url failing with zero cards harvested reports a DOM/authwall-shaped message, distinct from field-validation failures', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   // No cards scripted for either url at all — harvestCards' own min-count
   // guard (harvest.ts) throws "... is below min N ...", the genuine
@@ -841,7 +870,7 @@ test('every attempted url failing with zero cards harvested reports a DOM/authwa
 });
 
 test('every attempted url failing with cards found but empty title/company reports a field-extraction message and does NOT claim the session expired', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   // Cards ARE found in the DOM and the JD pane DOES open with real text —
   // but title/company extracted as empty strings, so JDSchema.parse's Zod
@@ -889,7 +918,7 @@ test('every attempted url failing with cards found but empty title/company repor
 });
 
 test('zero attempted urls (empty url list) does not trip the aggregate-failure check', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   const provider = new FakeBrowserProvider(script);
   const storage = new FakeStorage();
@@ -902,7 +931,7 @@ test('zero attempted urls (empty url list) does not trip the aggregate-failure c
 });
 
 test("newPage() throwing (dead CDP context) is this url's SoftError alone, not a whole-lane failure (finding 4)", async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   // url1 is the first newPage() call (index 0); url2 is the second (index 1).
@@ -938,7 +967,7 @@ test("newPage() throwing (dead CDP context) is this url's SoftError alone, not a
 });
 
 test('resumeState.persist is called after EVERY url (success or failure), not once at the end (finding 2a)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
@@ -964,7 +993,7 @@ test('resumeState.persist is called after EVERY url (success or failure), not on
 });
 
 test('captured JDs are flushed incrementally (per-JD), not batched at end-of-run (finding 2c)', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -988,7 +1017,7 @@ test('captured JDs are flushed incrementally (per-JD), not batched at end-of-run
 });
 
 test('handle.close() is always called, including when a url fails, and every opened page is closed', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
@@ -1014,7 +1043,7 @@ test('handle.close() is always called, including when a url fails, and every ope
 });
 
 test('a url group with no matching inventory is logged and skipped, not thrown', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   const provider = new FakeBrowserProvider(script);
   const storage = new FakeStorage();
@@ -1049,7 +1078,7 @@ test('a url group with no matching inventory is logged and skipped, not thrown',
 // ---------- cache-skip / cross-url dedup / per-url cap (Task B) ----------
 
 test('cache-skip: a card whose id is already in the Notion cache never gets a JD open', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   script.harvestByUrl.set(URL_1, [
     {
@@ -1099,7 +1128,7 @@ test('cache-skip: a card whose id is already in the Notion cache never gets a JD
 });
 
 test('cross-url run-dedup: the same job id harvested under two different search urls is JD-opened only once', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   // Both urls harvest the exact same job (same href -> same id li-9001).
   script.harvestByUrl.set(URL_1, [
@@ -1145,7 +1174,7 @@ test('cross-url run-dedup: the same job id harvested under two different search 
 });
 
 test('per-url cap: more gate-passed cards than maxCardsPerUrl for one url -> only the cap gets a JD open, cap fires loud with a DroppedRecord per truncated card', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   const hrefs = ['5001', '5002', '5003', '5004', '5005'];
   script.harvestByUrl.set(
@@ -1198,6 +1227,354 @@ test('per-url cap: more gate-passed cards than maxCardsPerUrl for one url -> onl
   assert.ok(warnings.some((w) => w.msg.includes('maxCardsPerUrl cap hit')));
 });
 
+// ---------- pagination ----------
+
+test('buildPageUrl: page 1 returns baseUrl byte-unchanged (no start=0 added)', () => {
+  const base = 'https://www.linkedin.com/jobs/search/?keywords=Engineer&sortBy=R';
+  assert.equal(buildPageUrl(base, 1, 'start', 25), base);
+});
+
+test('buildPageUrl: page 2 sets the param to (pageIndex-1)*pageSize', () => {
+  const base = 'https://www.linkedin.com/jobs/search/?keywords=Engineer';
+  const result = buildPageUrl(base, 2, 'start', 25);
+  const url = new URL(result);
+  assert.equal(url.searchParams.get('start'), '25');
+});
+
+test('buildPageUrl: overrides an existing start param rather than duplicating it', () => {
+  const base = 'https://www.linkedin.com/jobs/search/?keywords=Engineer&start=999';
+  const result = buildPageUrl(base, 3, 'start', 25);
+  const url = new URL(result);
+  assert.equal(url.searchParams.get('start'), '50');
+  assert.equal(url.searchParams.getAll('start').length, 1);
+});
+
+test('buildPageUrl: preserves every other query param already on the base url', () => {
+  const base =
+    'https://www.linkedin.com/jobs/search/?keywords=Engineer&f_TPR=r86400&sortBy=R';
+  const result = buildPageUrl(base, 2, 'start', 25);
+  const url = new URL(result);
+  assert.equal(url.searchParams.get('keywords'), 'Engineer');
+  assert.equal(url.searchParams.get('f_TPR'), 'r86400');
+  assert.equal(url.searchParams.get('sortBy'), 'R');
+  assert.equal(url.searchParams.get('start'), '25');
+});
+
+test('pagination: 2 pages of distinct cards are both harvested, goto uses the correct per-page urls, jitter runs once per page load plus once per JD open, one log line per page reports harvested/gated counts', async () => {
+  const inv = await realInventory();
+  const paged = pagedInventory(inv, { maxPages: '2' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=Pagination+Test';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+
+  script.harvestByUrl.set(baseUrl, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/7001/',
+    },
+  ]);
+  script.harvestByUrl.set(page2Url, [
+    {
+      title: 'Backend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/7002/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/7001/', 'JD text — 7001');
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/7002/', 'JD text — 7002');
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+  const infos: Array<{ msg: string; data?: unknown }> = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, info: (msg, data) => infos.push({ msg, data }) },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    1_000,
+    2_000,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+  );
+
+  const { jobs } = await lane.source(ctx);
+
+  const ids = jobs.map((jd) => jd.identity.id).sort();
+  assert.deepEqual(ids, ['li-7001', 'li-7002']);
+
+  // A single page (browser tab) is reused across a url's pages — goto is
+  // also called for each card's JD open on that same page, so filter down
+  // to just the listing-page navigations to check page order.
+  assert.equal(provider.handle?.pages.length, 1);
+  const listingGotoCalls = (provider.handle?.pages[0]?.gotoCalls ?? []).filter(
+    (u) => u === baseUrl || u === page2Url,
+  );
+  assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
+
+  // 2 page-load jitters + 2 JD-open jitters = 4.
+  assert.equal(sleepCalls.length, 4);
+
+  const pageLogs = infos.filter(
+    (i) => i.msg === 'linkedin lane: page harvested',
+  ) as Array<{
+    data: { page: number; harvested: number; gated: number };
+  }>;
+  assert.equal(pageLogs.length, 2);
+  assert.deepEqual(
+    pageLogs.map((l) => l.data.page),
+    [1, 2],
+  );
+  assert.ok(pageLogs.every((l) => l.data.harvested === 1 && l.data.gated === 1));
+});
+
+test('pagination: stop-on-empty — page 2 harvests 0 cards, the loop stops and page 3 is never fetched', async () => {
+  const inv = await realInventory();
+  const paged = pagedInventory(inv, { maxPages: '5', minJobCards: '0' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=Stop+Empty';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+  const page3Url = buildPageUrl(baseUrl, 3, 'start', 25);
+
+  script.harvestByUrl.set(baseUrl, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/8001/',
+    },
+  ]);
+  script.harvestByUrl.set(page2Url, []);
+  script.harvestByUrl.set(page3Url, [
+    {
+      title: 'Should Not Fetch',
+      company: 'Nope',
+      location: 'Remote',
+      href: '/jobs/view/8003/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/8001/', 'JD text — 8001');
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(fakeCtx());
+
+  assert.deepEqual(
+    jobs.map((jd) => jd.identity.id),
+    ['li-8001'],
+  );
+  const listingGotoCalls = (provider.handle?.pages[0]?.gotoCalls ?? []).filter(
+    (u) => u === baseUrl || u === page2Url || u === page3Url,
+  );
+  assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
+});
+
+test('pagination: stop-on-repeat — page 2 harvests the identical card set as page 1 (LinkedIn repeating its last page), the loop stops without double-processing', async () => {
+  const inv = await realInventory();
+  const paged = pagedInventory(inv, { maxPages: '5' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=Stop+Repeat';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+  const page3Url = buildPageUrl(baseUrl, 3, 'start', 25);
+
+  const repeatedCard = {
+    title: 'Frontend Engineer',
+    company: 'Acme',
+    location: 'Remote',
+    href: '/jobs/view/9001/',
+  };
+  script.harvestByUrl.set(baseUrl, [repeatedCard]);
+  script.harvestByUrl.set(page2Url, [repeatedCard]);
+  script.harvestByUrl.set(page3Url, [
+    {
+      title: 'Should Not Fetch',
+      company: 'Nope',
+      location: 'Remote',
+      href: '/jobs/view/9003/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9001/', 'JD text — 9001');
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(fakeCtx());
+
+  // Captured once (page 1) — page 2's repeat hits the run-dedup set, not a
+  // second capture, and stops the loop before page 3.
+  assert.deepEqual(
+    jobs.map((jd) => jd.identity.id),
+    ['li-9001'],
+  );
+  const listingGotoCalls = (provider.handle?.pages[0]?.gotoCalls ?? []).filter(
+    (u) => u === baseUrl || u === page2Url || u === page3Url,
+  );
+  assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
+});
+
+test('pagination: stop-on-cap — maxCardsPerUrl reached on page 1 means page 2 is never fetched', async () => {
+  const inv = await realInventory();
+  const paged = pagedInventory(inv, { maxPages: '5' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=Stop+Cap';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+  const hrefs = ['9101', '9102', '9103'];
+  script.harvestByUrl.set(
+    baseUrl,
+    hrefs.map((id) => ({
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: `/jobs/view/${id}/`,
+    })),
+  );
+  for (const id of hrefs) {
+    script.jdTextByUrl.set(
+      `https://www.linkedin.com/jobs/view/${id}/`,
+      `JD text — ${id}`,
+    );
+  }
+  script.harvestByUrl.set(page2Url, [
+    {
+      title: 'Should Not Fetch',
+      company: 'Nope',
+      location: 'Remote',
+      href: '/jobs/view/9104/',
+    },
+  ]);
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+    2, // maxCardsPerUrl
+  );
+
+  const { jobs } = await lane.source(fakeCtx());
+
+  assert.equal(jobs.length, 2);
+  const listingGotoCalls = (provider.handle?.pages[0]?.gotoCalls ?? []).filter(
+    (u) => u === baseUrl || u === page2Url,
+  );
+  assert.deepEqual(listingGotoCalls, [baseUrl]);
+});
+
+test('pagination: an inventory with no pagination behaviors fetches exactly one page per url (backward compat)', async () => {
+  const inv = await realInventory();
+  const noPagination = pagedInventory(inv, {});
+  noPagination.behaviors = {};
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  const lane = new LinkedInLane(
+    provider,
+    [noPagination],
+    [{ page: noPagination.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(fakeCtx());
+
+  const ids = jobs.map((jd) => jd.identity.id).sort();
+  assert.deepEqual(ids, ['li-1001', 'li-1003', 'li-2001', 'li-2002']);
+  // Exactly one listing-page navigation per url — the rest of each page's
+  // gotoCalls are its cards' JD opens (same PageHandle, reused), not
+  // further pagination.
+  for (const page of provider.handle?.pages ?? []) {
+    const listingGotoCalls = page.gotoCalls.filter((u) => u === URL_1 || u === URL_2);
+    assert.equal(listingGotoCalls.length, 1);
+  }
+});
+
+test('pagination: a page-2 navigation failure records a SoftError and stops paginating that url, but keeps page-1 captures and does not fail the whole url', async () => {
+  const inv = await realInventory();
+  const paged = pagedInventory(inv, { maxPages: '5' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=Page+2+Fails';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+  script.harvestByUrl.set(baseUrl, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/9201/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9201/', 'JD text — 9201');
+  script.gotoThrows.add(page2Url);
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+
+  // Page 1's capture survives even though page 2 failed.
+  assert.deepEqual(
+    jobs.map((jd) => jd.identity.id),
+    ['li-9201'],
+  );
+
+  const pageFailWarning = warnings.find(
+    (w) =>
+      w.msg ===
+      'linkedin lane: pagination page failed — stopping pagination for this url, keeping earlier captures',
+  ) as { data: { page: number; message: string } } | undefined;
+  assert.ok(pageFailWarning);
+  assert.equal(pageFailWarning.data.page, 2);
+  assert.match(pageFailWarning.data.message, /goto failed/);
+
+  // A page-2+ soft failure does not fail the whole url retroactively
+  // (page 1 succeeded) — the url is still marked done.
+  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  assert.ok(Object.hasOwn(persisted.done, baseUrl));
+});
+
 // ---------- jitter (P9 tail: v0->v2 parity regression fix) ----------
 
 test('jitterMs: rand=0 returns exactly minMs (inclusive lower bound)', () => {
@@ -1233,7 +1610,7 @@ function spySleepFn(calls: number[]): (ms: number, signal: AbortSignal) => Promi
 }
 
 test('jitter: applied once before every JD open (card loop) and once per attempted url (url loop), never a real multi-second wait', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -1271,7 +1648,7 @@ test('jitter: applied once before every JD open (card loop) and once per attempt
 });
 
 test('jitter: a zero-length range (jitterMinMs === jitterMaxMs === 0) is a no-op — the sleepFn is never called', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
@@ -1297,7 +1674,7 @@ test('jitter: a zero-length range (jitterMinMs === jitterMaxMs === 0) is a no-op
 });
 
 test('jitter: an already-aborted ctx.signal makes the (real, default) jitter reject immediately — the run fails fast rather than hanging for seconds', async () => {
-  const inv = await realInventory();
+  const inv = await singlePageInventory();
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);

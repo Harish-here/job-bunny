@@ -13,7 +13,7 @@ import type { RunContext } from '../../../ports/context.ts';
 import type { FarmingLane } from '../../../ports/lane.ts';
 import type { Storage } from '../../../ports/storage.ts';
 import { CaptureStore } from './capture_store.ts';
-import { gateCards, harvestCards } from './harvest.ts';
+import { gateCards, type HarvestedCard, harvestCards } from './harvest.ts';
 import type { Inventory } from './inventory.ts';
 import { openJd } from './jd_open.ts';
 import { ResumeState } from './resume_state.ts';
@@ -63,6 +63,77 @@ export function jitterMs(
   rand: () => number = Math.random,
 ): number {
   return minMs + Math.floor(rand() * (maxMs - minMs));
+}
+
+/** PURE — builds the url for page `pageIndex` (1-based) of a paginated
+ * LinkedIn search. Page 1 returns `baseUrl` byte-unchanged — no `start=0`
+ * is ever added, matching the pre-pagination behavior exactly. Page N>=2
+ * sets/overrides the query param named by `param` to
+ * `(pageIndex - 1) * pageSize`, via the WHATWG URL API so every other
+ * query param already on `baseUrl` is preserved untouched. */
+export function buildPageUrl(
+  baseUrl: string,
+  pageIndex: number,
+  param: string,
+  pageSize: number,
+): string {
+  if (pageIndex <= 1) return baseUrl;
+  const url = new URL(baseUrl);
+  url.searchParams.set(param, String((pageIndex - 1) * pageSize));
+  return url.toString();
+}
+
+/** Parsed pagination behaviors off a page inventory (`behaviors.
+ * paginationType/paginationParam/paginationPageSize/maxPages` — all
+ * inventory-declared strings, `inventory.ts`'s `InventorySchema` keeps
+ * `behaviors` as a free-form string record). Falls back to a single page
+ * (the exact pre-pagination behavior) whenever `paginationType` isn't
+ * `"url-pages"` or any needed field is missing/unparseable, rather than
+ * guessing a default range. */
+interface PaginationConfig {
+  param: string;
+  pageSize: number;
+  maxPages: number;
+}
+
+const SINGLE_PAGE_PAGINATION: PaginationConfig = {
+  param: 'start',
+  pageSize: 0,
+  maxPages: 1,
+};
+
+function resolvePagination(inv: Inventory, ctx: RunContext): PaginationConfig {
+  const b = inv.behaviors;
+  if (b.paginationType !== 'url-pages') return SINGLE_PAGE_PAGINATION;
+  const param = b.paginationParam;
+  const pageSize = Number.parseInt(b.paginationPageSize ?? '', 10);
+  const maxPages = Number.parseInt(b.maxPages ?? '', 10);
+  if (
+    !param ||
+    !Number.isFinite(pageSize) ||
+    pageSize <= 0 ||
+    !Number.isFinite(maxPages) ||
+    maxPages <= 0
+  ) {
+    ctx.logger.debug(
+      'linkedin lane: pagination behaviors missing/unparseable — treating url as single-page',
+      { page: inv.page },
+    );
+    return SINGLE_PAGE_PAGINATION;
+  }
+  return { param, pageSize, maxPages };
+}
+
+/** PURE — true when two harvested-card id sets are identical (order-
+ * independent). Detects LinkedIn repeating its last page of results once
+ * `start` overshoots the true result count — the same id/link key
+ * (`HarvestedCard.id`) the run-dedup Set (`processedIds`) uses. */
+function sameCardIdSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) {
+    if (!b.has(id)) return false;
+  }
+  return true;
 }
 
 /**
@@ -291,6 +362,11 @@ export class LinkedInLane implements FarmingLane {
           continue;
         }
 
+        // Pagination behaviors are per-inventory (per page group), not
+        // per-url — resolved once per group rather than re-parsed for
+        // every url in it.
+        const pagination = resolvePagination(inv, ctx);
+
         for (const url of group.urls) {
           if (resumeState.shouldSkip(url)) {
             ctx.logger.info('linkedin lane: skipping already-done url', { url });
@@ -312,122 +388,121 @@ export class LinkedInLane implements FarmingLane {
             // LinkedIn killing a tab) is this url's failure alone, not a
             // whole-lane crash.
             page = await handle.newPage();
-            await page.goto(url, { timeoutMs: DEFAULT_GOTO_TIMEOUT_MS });
-            // v0 parity placement: jitter comes AFTER goto, BEFORE the
-            // page is read (scripts/pipeline/extract/cards.js:187/:204 —
-            // `await gotoWithRetry(...); await jitterFn();`, immediately
-            // preceding runAssertions/collectCards, harvestCards' v2
-            // counterpart).
-            await this.jitter(ctx);
-            const cards = await harvestCards(page, inv, ctx);
-            const { pass, dropped: gateDropped } = gateCards(cards, this.filterCfg);
-            dropped.push(...gateDropped);
 
-            // companiesSeen = post-gate (passing) card companies, deduped
-            // — recorded regardless of whether this card's JD open below
-            // later succeeds (spec: card-gate decides "seen", not scrape
-            // success).
-            for (const card of pass) companiesSeen.add(card.company);
-
-            // Cheapest-first below (P9 closure register §1, Task B): the
-            // card gate already ran (gateCards, above); next comes the
-            // cache-skip and cross-url dedup (cheap Set lookups), then
-            // the per-url cap (backstop, loud when it fires), and only
-            // then the expensive JD open.
+            // capLoggedThisUrl/previousCardIds are per-URL, accumulated
+            // across that url's pages (not reset per page).
             let capLoggedThisUrl = false;
-            for (const card of pass) {
-              if (cacheIds.has(card.id)) {
-                continue;
-              }
-              if (processedIds.has(card.id)) {
-                continue;
-              }
-              if (stat.cardsAttempted >= this.maxCardsPerUrl) {
-                if (!capLoggedThisUrl) {
-                  capLoggedThisUrl = true;
-                  ctx.logger.warn(
-                    'linkedin lane: maxCardsPerUrl cap hit — dropping remainder for this url',
-                    { url, maxCardsPerUrl: this.maxCardsPerUrl },
-                  );
-                }
-                dropped.push({
-                  jd: JDSchema.parse({
-                    identity: {
-                      id: card.id,
-                      lane: 'linkedin',
-                      url: card.url,
-                      company: card.company,
-                      title: card.title,
-                      scrapedAt: new Date().toISOString(),
-                    },
-                  }),
-                  reasons: [
-                    {
-                      rule: 'linkedin.maxCardsPerUrlCap',
-                      severity: 'hard',
-                      pass: false,
-                      detail: `maxCardsPerUrl=${this.maxCardsPerUrl} reached for url "${url}"`,
-                    },
-                  ],
-                });
-                continue;
+            let previousCardIds: Set<string> | null = null;
+
+            for (let pageIndex = 1; pageIndex <= pagination.maxPages; pageIndex++) {
+              const pageUrl = buildPageUrl(
+                url,
+                pageIndex,
+                pagination.param,
+                pagination.pageSize,
+              );
+
+              let cards: HarvestedCard[];
+              try {
+                await page.goto(pageUrl, { timeoutMs: DEFAULT_GOTO_TIMEOUT_MS });
+                // v0 parity placement: jitter comes AFTER goto, BEFORE the
+                // page is read (scripts/pipeline/extract/cards.js:187/:204 —
+                // `await gotoWithRetry(...); await jitterFn();`, immediately
+                // preceding runAssertions/collectCards, harvestCards' v2
+                // counterpart). Applied per page, not just once per url.
+                await this.jitter(ctx);
+                cards = await harvestCards(page, inv, ctx);
+              } catch (err) {
+                // Page 1's navigation/harvest failure keeps its existing
+                // whole-url semantics (rethrow into the outer catch below,
+                // unchanged classification/evidence, unchanged not-done
+                // resume state). Page N>=2 is a narrower casualty — this
+                // url already has real captures from earlier pages, so
+                // record a SoftError and stop paginating rather than
+                // failing the whole url retroactively.
+                if (pageIndex === 1) throw err;
+                const soft = toSoftError('url', pageUrl, err);
+                ctx.logger.warn(
+                  'linkedin lane: pagination page failed — stopping pagination for this url, keeping earlier captures',
+                  { url, page: pageIndex, message: soft.message },
+                );
+                break;
               }
 
-              processedIds.add(card.id);
-              stat.cardsAttempted += 1;
-              ctx.beat();
-              try {
-                // v0 parity placement: jitter before every JD open
-                // (scripts/pipeline/extract.js:282 — `await jitter();`
-                // immediately preceding captureJd). Inside this card's
-                // own try (a deviation from v0, which has no abort
-                // concept): an aborted jitter is this one card's
-                // SoftError, same as any other openJd failure below, not
-                // an uncaught throw out of the whole card loop.
-                await this.jitter(ctx);
-                const { text: rawText, source } = await openJd(page, card, inv, ctx);
-                if (source === 'anchor') stat.anchorExtractions += 1;
-                const jd = JDSchema.parse({
-                  identity: {
-                    id: card.id,
-                    lane: 'linkedin',
-                    url: card.url,
-                    company: card.company,
-                    title: card.title,
-                    scrapedAt: new Date().toISOString(),
-                  },
-                  content: { rawText },
-                });
-                await captureStore.append(this.storage, jd);
-                stat.captured += 1;
-              } catch (err) {
-                // Distinguish "JD pane genuinely failed to open" (openJd
-                // already wraps that as a SoftError) from "the card's own
-                // identity fields — title/company — came back empty and
-                // JDSchema.parse rejected them" (a plain ZodError, thrown
-                // here rather than inside openJd). These are different bugs
-                // with different fixes, so they must not be folded into one
-                // failure kind below.
-                stat.failures.push(
-                  err instanceof z.ZodError
-                    ? { kind: 'field-validation', message: zodIssuesMessage(err) }
-                    : {
-                        kind: 'jd-open',
-                        message: err instanceof Error ? err.message : String(err),
+              const { pass, dropped: gateDropped } = gateCards(cards, this.filterCfg);
+              dropped.push(...gateDropped);
+
+              // companiesSeen = post-gate (passing) card companies, deduped
+              // — recorded regardless of whether this card's JD open below
+              // later succeeds (spec: card-gate decides "seen", not scrape
+              // success).
+              for (const card of pass) companiesSeen.add(card.company);
+
+              ctx.logger.info('linkedin lane: page harvested', {
+                url,
+                page: pageIndex,
+                harvested: cards.length,
+                gated: pass.length,
+              });
+
+              // Cheapest-first below (P9 closure register §1, Task B): the
+              // card gate already ran (gateCards, above); next comes the
+              // cache-skip and cross-url dedup (cheap Set lookups), then
+              // the per-url cap (backstop, loud when it fires), and only
+              // then the expensive JD open.
+              for (const card of pass) {
+                if (cacheIds.has(card.id)) {
+                  continue;
+                }
+                if (processedIds.has(card.id)) {
+                  continue;
+                }
+                if (stat.cardsAttempted >= this.maxCardsPerUrl) {
+                  if (!capLoggedThisUrl) {
+                    capLoggedThisUrl = true;
+                    ctx.logger.warn(
+                      'linkedin lane: maxCardsPerUrl cap hit — dropping remainder for this url',
+                      { url, maxCardsPerUrl: this.maxCardsPerUrl },
+                    );
+                  }
+                  dropped.push({
+                    jd: JDSchema.parse({
+                      identity: {
+                        id: card.id,
+                        lane: 'linkedin',
+                        url: card.url,
+                        company: card.company,
+                        title: card.title,
+                        scrapedAt: new Date().toISOString(),
                       },
-                );
-                const soft = toSoftError('url', card.url, err);
-                ctx.logger.warn('linkedin lane: card JD open failed', {
-                  url: card.url,
-                  message: soft.message,
-                });
-                // A per-card JD-open failure must still show up in the
-                // funnel — an identity-only JD (no content yet, same
-                // shape as gateCards' card-gate drops) paired with the
-                // failure reason, so it can always answer "why did this
-                // disappear?" instead of only a log line.
-                dropped.push({
-                  jd: JDSchema.parse({
+                    }),
+                    reasons: [
+                      {
+                        rule: 'linkedin.maxCardsPerUrlCap',
+                        severity: 'hard',
+                        pass: false,
+                        detail: `maxCardsPerUrl=${this.maxCardsPerUrl} reached for url "${url}"`,
+                      },
+                    ],
+                  });
+                  continue;
+                }
+
+                processedIds.add(card.id);
+                stat.cardsAttempted += 1;
+                ctx.beat();
+                try {
+                  // v0 parity placement: jitter before every JD open
+                  // (scripts/pipeline/extract.js:282 — `await jitter();`
+                  // immediately preceding captureJd). Inside this card's
+                  // own try (a deviation from v0, which has no abort
+                  // concept): an aborted jitter is this one card's
+                  // SoftError, same as any other openJd failure below, not
+                  // an uncaught throw out of the whole card loop.
+                  await this.jitter(ctx);
+                  const { text: rawText, source } = await openJd(page, card, inv, ctx);
+                  if (source === 'anchor') stat.anchorExtractions += 1;
+                  const jd = JDSchema.parse({
                     identity: {
                       id: card.id,
                       lane: 'linkedin',
@@ -436,17 +511,73 @@ export class LinkedInLane implements FarmingLane {
                       title: card.title,
                       scrapedAt: new Date().toISOString(),
                     },
-                  }),
-                  reasons: [
-                    {
-                      rule: 'linkedin.jdOpenFailed',
-                      severity: 'hard',
-                      pass: false,
-                      detail: soft.message,
-                    },
-                  ],
-                });
+                    content: { rawText },
+                  });
+                  await captureStore.append(this.storage, jd);
+                  stat.captured += 1;
+                } catch (err) {
+                  // Distinguish "JD pane genuinely failed to open" (openJd
+                  // already wraps that as a SoftError) from "the card's own
+                  // identity fields — title/company — came back empty and
+                  // JDSchema.parse rejected them" (a plain ZodError, thrown
+                  // here rather than inside openJd). These are different bugs
+                  // with different fixes, so they must not be folded into one
+                  // failure kind below.
+                  stat.failures.push(
+                    err instanceof z.ZodError
+                      ? { kind: 'field-validation', message: zodIssuesMessage(err) }
+                      : {
+                          kind: 'jd-open',
+                          message: err instanceof Error ? err.message : String(err),
+                        },
+                  );
+                  const soft = toSoftError('url', card.url, err);
+                  ctx.logger.warn('linkedin lane: card JD open failed', {
+                    url: card.url,
+                    message: soft.message,
+                  });
+                  // A per-card JD-open failure must still show up in the
+                  // funnel — an identity-only JD (no content yet, same
+                  // shape as gateCards' card-gate drops) paired with the
+                  // failure reason, so it can always answer "why did this
+                  // disappear?" instead of only a log line.
+                  dropped.push({
+                    jd: JDSchema.parse({
+                      identity: {
+                        id: card.id,
+                        lane: 'linkedin',
+                        url: card.url,
+                        company: card.company,
+                        title: card.title,
+                        scrapedAt: new Date().toISOString(),
+                      },
+                    }),
+                    reasons: [
+                      {
+                        rule: 'linkedin.jdOpenFailed',
+                        severity: 'hard',
+                        pass: false,
+                        detail: soft.message,
+                      },
+                    ],
+                  });
+                }
               }
+
+              // Stop-condition check (spec §2): (a) this page harvested
+              // zero cards, (b) this page's harvested card-id set is
+              // identical to the previous page's (LinkedIn repeats its
+              // last page once `start` overshoots the true result count),
+              // or (c) the per-url processed-card cap has already been
+              // reached — no point fetching a page whose cards can't be
+              // processed anyway.
+              const cardIds = new Set(cards.map((card) => card.id));
+              const stop =
+                cards.length === 0 ||
+                (previousCardIds !== null && sameCardIdSet(previousCardIds, cardIds)) ||
+                stat.cardsAttempted >= this.maxCardsPerUrl;
+              if (stop) break;
+              previousCardIds = cardIds;
             }
 
             // Every attempted card's JD-open failed: this url's harvest

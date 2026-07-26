@@ -17,7 +17,7 @@
     "paginationType": "url-pages",
     "paginationParam": "start",
     "paginationPageSize": "25",
-    "maxPages": "4",
+    "maxPages": "6",
     "jdSettledSignal": "selector-visible",
     "urlPatternOfJob": "https://www.linkedin.com/jobs/view/<id>/",
     "jdAnchorText": "About the job",
