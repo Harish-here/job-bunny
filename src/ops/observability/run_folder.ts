@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { RunResult } from './result.ts';
 
@@ -67,6 +67,13 @@ export class RunFolder {
     lastCheckpoint?: string;
   }): Promise<void> {
     await this.writeAtomic(join(this.dir, 'failure.json'), f);
+  }
+
+  /** Removes a stale failure.json (e.g. left by an earlier same-day failed
+   * run) so a later passed run doesn't leave a contradictory failure
+   * artifact beside its result.json. A no-op if none exists. */
+  async clearFailure(): Promise<void> {
+    await rm(join(this.dir, 'failure.json'), { force: true });
   }
 
   async writeResult(r: RunResult): Promise<void> {

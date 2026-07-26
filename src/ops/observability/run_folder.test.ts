@@ -92,6 +92,20 @@ test('writeResult writes the run result', async () => {
   assert.deepEqual(JSON.parse(raw), result);
 });
 
+test('clearFailure removes an existing failure.json', async () => {
+  const folder = new RunFolder(join(root, 'p9'), '2026-07-21');
+  await folder.writeFailure({ stage: 'extract', error: 'boom', elapsedMs: 42 });
+  await folder.clearFailure();
+  await assert.rejects(() =>
+    readFile(join(root, 'p9', 'runs', '2026-07-21', 'failure.json'), 'utf8'),
+  );
+});
+
+test('clearFailure is a no-op when failure.json does not exist', async () => {
+  const folder = new RunFolder(join(root, 'p10'), '2026-07-21');
+  await assert.doesNotReject(() => folder.clearFailure());
+});
+
 test('logPath returns run.log under the run folder', () => {
   const folder = new RunFolder(join(root, 'p8'), '2026-07-21');
   assert.equal(folder.logPath(), join(root, 'p8', 'runs', '2026-07-21', 'run.log'));

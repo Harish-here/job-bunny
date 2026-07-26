@@ -172,6 +172,34 @@ test('happy path: 3 stages checkpoint, funnel populates, result passes', async (
   assert.equal(resultJson.outcome, 'passed');
 });
 
+test('passed run clears a stale failure.json left by an earlier same-day failed run', async () => {
+  const dataDir = join(root, 'clears-stale-failure');
+  const folder = new RunFolder(dataDir, '2026-07-21');
+  const { ctx } = fakeCtx();
+
+  await folder.writeFailure({ stage: 'earlier-stage', error: 'boom', elapsedMs: 1 });
+
+  const stage: StageDef<StagePayload, StagePayload> = fakeStage({
+    name: 'stage',
+    async run(input) {
+      return input;
+    },
+  });
+
+  const result = await runPipeline([stage], ctx, folder, {
+    runCapMs: 5_000,
+    stallMs: 5_000,
+    resume: false,
+  });
+
+  assert.equal(result.outcome, 'passed');
+
+  const resultJson = JSON.parse(await readFile(join(folder.dir, 'result.json'), 'utf8'));
+  assert.equal(resultJson.outcome, 'passed');
+
+  await assert.rejects(() => readFile(join(folder.dir, 'failure.json'), 'utf8'));
+});
+
 test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does not throw', async () => {
   const dataDir = join(root, 'mid-failure');
   const folder = new RunFolder(dataDir, '2026-07-21');

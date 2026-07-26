@@ -97,6 +97,7 @@ export async function runPipeline(
     outcome: 'passed',
     stages: resultStages,
   };
+  await folder.clearFailure();
   await folder.writeResult(result);
   return result;
 }

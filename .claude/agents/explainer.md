@@ -110,7 +110,7 @@ Notable internals:
 
 ### 2.4 The runner & watchdogs
 
-`src/pipeline/runner/run.ts`'s `runPipeline` runs stages sequentially, checkpoints after each success, and **never throws** — failures become `failure.json` + a `'failed'` `RunResult`; exit code is the caller's. Resume reads the latest same-day checkpoint, restarts from index+1.
+`src/pipeline/runner/run.ts`'s `runPipeline` runs stages sequentially, checkpoints after each success, and **never throws** — failures become `failure.json` + a `'failed'` `RunResult`; exit code is the caller's. Resume reads the latest same-day checkpoint, restarts from index+1. A `'passed'` outcome clears any stale `failure.json` left by an earlier same-day failed run (`RunFolder.clearFailure`), so a green rerun never leaves a contradictory failure artifact beside `result.json`.
 
 Three watchdog layers:
 1. **per-stage timeout** — `guardStage` composes `AbortSignal.any([ctx.signal, AbortSignal.timeout(stage.timeoutMs)])`; each retry gets a fresh budget
