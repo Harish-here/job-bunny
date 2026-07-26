@@ -2,7 +2,15 @@
   <img src="assets/job-bunny-logo.svg" alt="Job Bunny" width="120" />
 </p>
 
-# Job Bunny 🐇
+```text
+█████  ███  ████      ████  █   █ █   █ █   █ █   █
+   █  █   █ █   █     █   █ █   █ ██  █ ██  █ █   █
+   █  █   █ █   █     █   █ █   █ ██  █ ██  █  █ █
+   █  █   █ ████      ████  █   █ █ █ █ █ █ █   █
+   █  █   █ █   █     █   █ █   █ █  ██ █  ██   █
+█  █  █   █ █   █     █   █ █   █ █  ██ █  ██   █
+ ██    ███  ████      ████   ███  █   █ █   █   █
+```
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-1.6.0-blue" alt="version" />
