@@ -5,10 +5,9 @@ description: Repo-specific recipe for driving Job Bunny's v2 pipeline stages at 
 
 # Verifying Job Bunny changes
 
-v2 stages are driven through the `jobbunny` CLI, always under Node 24:
+v2 stages are driven through the `jobbunny` CLI, always under Node 24 (the machine default; `.nvmrc` pins the repo — if `node -v` ever shows < 24, run `source ~/.nvm/nvm.sh && nvm use 24`):
 
 ```bash
-source ~/.nvm/nvm.sh && nvm use 24
 node src/cli/main.ts stage <name> --profile <profile>   # single stage, e.g. filter/dedup/rank/sync/farm/source
 node src/cli/main.ts run --profile <profile>             # full pipeline
 node src/cli/main.ts reconcile --profile <profile>

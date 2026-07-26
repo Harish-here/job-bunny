@@ -212,7 +212,7 @@ Three watchdog layers:
 - **3-runtime-dep cap** — `@notionhq/client`, `playwright`, `zod` (+ de-facto `dotenv`).
 - **Docs are code** — per-module contracts, this KB, and the executor agent's rules updated in the same change that alters behavior.
 - **The gate**: `npm run check` = typecheck && lint && boundaries && test. CI's `test` check is exactly this. `main` protected — land via PR.
-- **Node 24 prefix mandatory**: `source ~/.nvm/nvm.sh && nvm use 24 && <command>`.
+- **Node 24 is the machine default** (since 2026-07-26; `nvm alias default 24`) and `.nvmrc` pins the repo, so plain commands just work; fall back to `source ~/.nvm/nvm.sh && nvm use 24 && <command>` only if `node -v` ever regresses below 24.
 
 ---
 

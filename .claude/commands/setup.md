@@ -10,10 +10,7 @@ description: Onboarding wizard — one command from a fresh clone to a running p
   Confirm the user has both ready before moving on. (If they already have another Job Bunny profile, these likely already exist — ask first.)
 
 **1. Dependencies.**
-```bash
-source ~/.nvm/nvm.sh && nvm use 24
-```
-Node ≥ 24 is required (v2 runs TypeScript natively, no build step). If `node_modules/` is missing (fresh clone), run `npm install` first.
+Node ≥ 24 is required (v2 runs TypeScript natively, no build step); the machine default is 24 and `.nvmrc` pins the repo, so this is normally a no-op — if `node -v` ever shows < 24, run `source ~/.nvm/nvm.sh && nvm use 24`. If `node_modules/` is missing (fresh clone), run `npm install` first.
 
 **2. Scaffold + status check.**
 ```bash

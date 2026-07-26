@@ -110,7 +110,6 @@ Draft a concise summary: what shipped, why it matters, any known gaps. Show for 
 
 **5. Run the release command**
 ```bash
-source ~/.nvm/nvm.sh && nvm use 24
 node src/cli/main.ts release X.Y.Z [--dry-run] [--no-merge] [--yes]
 ```
 This owns: preflight (clean tree, on `main`, up to date with origin, tag doesn't already exist, CHANGELOG block present), `npm version --no-git-tag-version`, the README badge update, the `release/vX.Y.Z` branch, commit, push, `gh pr create`, waiting for the `test` check, then a pause for your typed go-ahead once checks are green before it merges. It is idempotent — re-running it after any failure resumes from wherever it left off rather than erroring or duplicating work. Needs LIVE stdin for the merge confirmation — never run it backgrounded or detached.

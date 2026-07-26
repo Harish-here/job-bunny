@@ -8,11 +8,7 @@ Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches wi
 
 ## Mandatory: Node 24
 
-Node ≥ 24 (native TypeScript type-stripping, no build step). The machine default is older and fails immediately, so prefix every command:
-
-```bash
-source ~/.nvm/nvm.sh && nvm use 24 && <command>
-```
+Node ≥ 24 required (native type-stripping, no build step); the machine default is now Node 24 (`nvm alias default 24`, 2026-07-26) and the repo pins it via `.nvmrc`, so plain `node`/`npm` commands just work; if `node -v` ever shows < 24, run `source ~/.nvm/nvm.sh && nvm use 24`.
 
 ## Commands
 

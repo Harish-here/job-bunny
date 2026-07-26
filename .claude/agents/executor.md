@@ -81,13 +81,10 @@ Walk this list before considering a change finished:
 
 1. State the proposed file location and which layer/boundary rule it satisfies, before writing code.
 2. Write the implementation and its colocated test together (`foo.ts` + `foo.test.ts`) — don't land one without the other.
-3. Every command in this repo needs Node 24, which is not the machine default. Prefix any command you run with:
-   ```bash
-   source ~/.nvm/nvm.sh && nvm use 24 && <command>
-   ```
+3. Every command in this repo needs Node 24. Verify `node -v` is ≥ 24 before running anything; if lower, `source ~/.nvm/nvm.sh && nvm use 24` (machine default is 24 since 2026-07-26, so this is normally a no-op).
 4. Finish every task by running:
    ```bash
-   source ~/.nvm/nvm.sh && nvm use 24 && npm run check
+   npm run check
    ```
    (`check` = typecheck && lint && boundaries && test — this is the same gate CI's `test` check runs.) Report the result; do not consider the task done if this fails. If `check` fails, fix the root cause — don't weaken a rule or skip a check to make it pass.
 5. Never reference `scripts/` as a live path — it's v0, deleted on this branch, kept only on `main` for history.

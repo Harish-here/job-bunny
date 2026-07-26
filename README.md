@@ -38,7 +38,7 @@ Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage deta
 ## Requirements
 
 - macOS (scheduling uses launchd; Chrome is expected at its standard path)
-- **Node.js ≥ 24** — v2 runs TypeScript natively with zero build step; older Node fails immediately. If you use nvm: `source ~/.nvm/nvm.sh && nvm use 24` before any `jobbunny`/`npm` command.
+- **Node.js ≥ 24** (pinned by `.nvmrc`; `nvm install 24 && nvm alias default 24` on a fresh machine) — v2 runs TypeScript natively with zero build step; older Node fails immediately.
 - Google Chrome with a logged-in LinkedIn session (kept in a dedicated `.chrome-debug/` browser profile) — driven via CDP, not `playwright install`
 - [Claude Code](https://claude.com/claude-code) CLI
 - A [Notion internal integration](https://www.notion.so/my-integrations) token
@@ -57,7 +57,6 @@ The interactive wizard walks you through onboarding (Notion adopt-or-create, sec
 Then:
 
 ```bash
-source ~/.nvm/nvm.sh && nvm use 24
 node src/cli/main.ts doctor --profile <name>   # preflight: secrets, Chrome/CDP, page inventories, cache
 node src/cli/main.ts run --profile <name>      # full pipeline, end to end
 ```
@@ -99,7 +98,6 @@ If your Mac regularly sleeps through a scheduled time, pre-wake it: `sudo pmset 
 ## Development
 
 ```bash
-source ~/.nvm/nvm.sh && nvm use 24
 npm run check                                # the gate: typecheck + lint + boundaries + tests
 node --test src/core/filter/engine.test.ts   # one file
 ```
