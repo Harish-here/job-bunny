@@ -1,0 +1,270 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { afterEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { JDSchema } from '../../../core/jd/index.ts';
+import type { Logger, RunContext } from '../../../ports/context.ts';
+import { BOARDS_API } from './api.ts';
+import { candidateTokens, GreenhouseLane, verifyBoardName } from './lane.ts';
+
+const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
+
+async function loadFixture(name: string): Promise<unknown> {
+  return JSON.parse(await readFile(`${FIXTURES}${name}`, 'utf8'));
+}
+
+const noopLogger: Logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
+
+function fakeCtx(): RunContext {
+  return {
+    profile: 'rajni',
+    signal: new AbortController().signal,
+    logger: noopLogger,
+    beat() {},
+  };
+}
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+test('candidateTokens: squashed, hyphenated, raw-squashed guesses', () => {
+  assert.deepEqual(candidateTokens('Acme Robotics Pvt Ltd'), [
+    'acmerobotics',
+    'acme-robotics',
+    'acmeroboticspvtltd',
+  ]);
+});
+
+test('verifyBoardName: exact + containment match after normalization', () => {
+  assert.equal(verifyBoardName('Acme Robotics', 'Acme Robotics Pvt Ltd'), true);
+  assert.equal(verifyBoardName('Acme Robotics', 'Totally Different Co'), false);
+  assert.equal(verifyBoardName('Acme Robotics', undefined), false);
+});
+
+test('probe: 200 + name match on first candidate → found', async () => {
+  const boardInfo = await loadFixture('board-info.json'); // name: "Acme Robotics"
+  const calledUrls: string[] = [];
+  globalThis.fetch = (async (input: string | URL) => {
+    calledUrls.push(String(input));
+    return new Response(JSON.stringify(boardInfo), { status: 200 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.deepEqual(result, { status: 'found', boardRef: 'acmerobotics' });
+  assert.equal(calledUrls[0], `${BOARDS_API}/acmerobotics`);
+});
+
+test('probe: 404 for every candidate → not-found', async () => {
+  globalThis.fetch = (async () => new Response('nope', { status: 404 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Totally Unlisted Co', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('probe: 410 for every candidate → not-found', async () => {
+  globalThis.fetch = (async () => new Response('gone', { status: 410 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Totally Unlisted Co', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('probe: 429 for every candidate → error, not not-found (rate-limited, not absent)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('slow down', { status: 429 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /HTTP 429/);
+});
+
+test('probe: 503 for every candidate → error, not not-found (server trouble, not absent)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('unavailable', { status: 503 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /HTTP 503/);
+});
+
+test('probe: 429 on one candidate then a definitive 404 on another → not-found (real evidence wins)', async () => {
+  let call = 0;
+  globalThis.fetch = (async () => {
+    call += 1;
+    return call === 1
+      ? new Response('slow down', { status: 429 })
+      : new Response('nope', { status: 404 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('probe: aborted ctx.signal propagates instead of being folded into an error/not-found probe result', async () => {
+  const controller = new AbortController();
+  globalThis.fetch = (async () => {
+    controller.abort(new Error('run cancelled'));
+    const err = new Error('The operation was aborted');
+    err.name = 'AbortError';
+    throw err;
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const ctx: RunContext = { ...fakeCtx(), signal: controller.signal };
+  await assert.rejects(() => lane.probe('Acme Robotics', ctx));
+});
+
+test('probe: fetch throws for every candidate → error', async () => {
+  globalThis.fetch = (async () => {
+    throw new Error('network down');
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') assert.match(result.message, /network down/);
+});
+
+test('probe: 200 but name mismatch on every candidate → not-found', async () => {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ name: 'Completely Unrelated Inc' }), {
+      status: 200,
+    })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const result = await lane.probe('Acme Robotics', fakeCtx());
+  assert.deepEqual(result, { status: 'not-found' });
+});
+
+test('fetchBoard: fixture jobs → valid JDs, gh- ids, malformed job skipped', async () => {
+  const boardInfo = await loadFixture('board-info.json');
+  const jobsResponse = await loadFixture('jobs-response.json');
+
+  globalThis.fetch = (async (input: string | URL) => {
+    const url = String(input);
+    if (url.endsWith('/jobs?content=true')) {
+      return new Response(JSON.stringify(jobsResponse), { status: 200 });
+    }
+    return new Response(JSON.stringify(boardInfo), { status: 200 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const { jobs: jds } = await lane.fetchBoard('acmerobotics', fakeCtx());
+
+  // fixture has 3 raw jobs, one with an empty title (JDSchema-invalid) — dropped.
+  assert.equal(jds.length, 2);
+  for (const jd of jds) {
+    JDSchema.parse(jd); // re-validates without throwing
+    assert.match(jd.identity.id, /^gh-/);
+    assert.equal(jd.identity.lane, 'greenhouse');
+    assert.equal(jd.identity.company, 'Acme Robotics');
+    assert.ok(jd.content?.rawText.length);
+  }
+  assert.equal(jds[0]?.identity.id, 'gh-5738292');
+  assert.equal(jds[0]?.identity.postedAt, '2026-07-15');
+  assert.ok(jds[0]?.content?.rawText.includes('Senior Backend Engineer'));
+  // fixture's location.name maps straight onto identity.location.
+  assert.equal(jds[0]?.identity.location, 'Remote - US');
+  assert.equal(jds[1]?.identity.location, 'San Francisco, CA');
+});
+
+test('fetchBoard: board-info lookup failing falls back to boardRef as company', async () => {
+  const jobsResponse = await loadFixture('jobs-response.json');
+
+  globalThis.fetch = (async (input: string | URL) => {
+    const url = String(input);
+    if (url.endsWith('/jobs?content=true')) {
+      return new Response(JSON.stringify(jobsResponse), { status: 200 });
+    }
+    return new Response('server error', { status: 500 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const { jobs: jds } = await lane.fetchBoard('acmerobotics', fakeCtx());
+  assert.equal(jds.length, 2);
+  assert.equal(jds[0]?.identity.company, 'acmerobotics');
+});
+
+test('fetchBoard: a job passing GreenhouseJobSchema but failing JDSchema (empty content -> empty rawText) is returned in the dropped array', async () => {
+  const boardInfo = await loadFixture('board-info.json');
+  // GreenhouseJobSchema-valid (non-empty title, valid absolute_url), but
+  // `content: null` -> htmlToText('') -> rawText fails JDSchema's min(1) —
+  // this is the JDSchema-failure branch, distinct from the
+  // GreenhouseJobSchema.safeParse failure the other fixture test covers.
+  const jobsResponse = {
+    jobs: [
+      {
+        id: 999,
+        title: 'Empty Content Role',
+        absolute_url: 'https://boards.greenhouse.io/acmerobotics/jobs/999',
+        content: null,
+      },
+    ],
+  };
+
+  globalThis.fetch = (async (input: string | URL) => {
+    const url = String(input);
+    if (url.endsWith('/jobs?content=true')) {
+      return new Response(JSON.stringify(jobsResponse), { status: 200 });
+    }
+    return new Response(JSON.stringify(boardInfo), { status: 200 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const { jobs: jds, dropped } = await lane.fetchBoard('acmerobotics', fakeCtx());
+
+  assert.equal(jds.length, 0);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]?.jd.identity.id, 'gh-999');
+  assert.equal(dropped[0]?.jd.identity.title, 'Empty Content Role');
+  assert.equal(dropped[0]?.jd.identity.company, 'Acme Robotics');
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'greenhouse.jdSchema');
+  assert.equal(dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(dropped[0]?.reasons[0]?.pass, false);
+});
+
+test('fetchBoard: a JDSchema-dropped job never appears in the returned jobs array', async () => {
+  const boardInfo = await loadFixture('board-info.json');
+  const jobsResponse = {
+    jobs: [
+      {
+        id: 999,
+        title: 'Empty Content Role',
+        absolute_url: 'https://boards.greenhouse.io/acmerobotics/jobs/999',
+        content: null,
+      },
+    ],
+  };
+
+  globalThis.fetch = (async (input: string | URL) => {
+    const url = String(input);
+    if (url.endsWith('/jobs?content=true')) {
+      return new Response(JSON.stringify(jobsResponse), { status: 200 });
+    }
+    return new Response(JSON.stringify(boardInfo), { status: 200 });
+  }) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  const { jobs: jds } = await lane.fetchBoard('acmerobotics', fakeCtx());
+  assert.equal(jds.length, 0);
+});
+
+test('fetchBoard: whole-board fetch failure throws (caller/source-stage turns it into a SoftError)', async () => {
+  globalThis.fetch = (async () =>
+    new Response('server error', { status: 500 })) as typeof fetch;
+
+  const lane = new GreenhouseLane();
+  await assert.rejects(() => lane.fetchBoard('acmerobotics', fakeCtx()));
+});

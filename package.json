@@ -4,23 +4,31 @@
   "description": "Personal job-search companion — aggregates LinkedIn jobs daily, filters/ranks against your profile, syncs to Notion.",
   "type": "module",
   "private": true,
+  "bin": {
+    "jobbunny": "src/cli/main.ts"
+  },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
-    "test": "node --test scripts/",
-    "init": "node scripts/setup/init.js",
-    "meta": "node scripts/setup/generate_meta.js",
-    "reconcile": "node scripts/notion/cache.js",
-    "filter": "node scripts/pipeline/filter.js",
-    "dedup": "node scripts/pipeline/dedup.js",
-    "rank": "node scripts/pipeline/rank.js",
-    "sync": "node scripts/notion/notion_sync.js",
-    "release": "node scripts/ops/release.js"
+    "test": "node --test \"src/**/*.test.ts\" \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src",
+    "boundaries": "depcruise src",
+    "check": "npm run typecheck && npm run lint && npm run boundaries && npm test",
+    "release": "node src/cli/main.ts release"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",
     "dotenv": "^16.4.5",
-    "playwright": "^1.60.0"
+    "playwright": "^1.60.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@swc/core": "^1.15.46",
+    "@types/node": "^24.13.3",
+    "dependency-cruiser": "^18.1.0",
+    "typescript": "^7.0.2"
   }
 }

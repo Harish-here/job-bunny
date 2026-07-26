@@ -3,6 +3,34 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [2.0.0] — 2026-07-26
+
+### Added
+- The v2 pipeline, end to end: 10 typed stages (reconcile → sync) with per-stage
+  checkpoints, three-layer watchdogs, cross-process run lock, and doctor preflight.
+- LinkedIn listing pagination driven by inventory behaviors (up to maxPages per
+  search URL, early stop on end-of-results / repeated page / per-URL cap).
+- As-posted location carried from every lane into the structure stage; the LLM
+  prefers it for city/country and infers country from city.
+- Per-run time subfolders (runs/<date>/<HH-MM>/) — checkpoints, log, and result
+  are per-invocation; digests carry the run time.
+- Cleanup routine: archives Passed/untouched Notion jobs and prunes local run
+  folders on per-profile TTLs (settings.cleanup, default 30 days).
+
+### Changed
+- **Breaking:** the v0 JavaScript pipeline is deleted; `src/` (TypeScript, Node
+  ≥ 24) is the only pipeline. v0 survives on branch `main` history only.
+- page_inventory/ moved into the owning adapter (src/adapters/lanes/linkedin/).
+- Node 24 is the machine default (.nvmrc added); the nvm prefix is retired.
+- Docs consolidated: README is usage-only, CLAUDE.md is operational law, the
+  explainer agent's KB is the canonical architecture record.
+
+### Fixed
+- Empty tail pages end pagination quietly instead of recording a SoftError.
+- A passed run clears the previous same-day failure.json.
+- Dedup no longer folds same-title/company jobs that differ by city.
+- JD-open, CDP session, and scheduler hardening from the cutover review.
+
 ## [1.6.0] — 2026-07-20
 
 ### Added

@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "id": 5738292,
+      "title": "Senior Backend Engineer",
+      "updated_at": "2026-07-15T09:12:33-05:00",
+      "location": { "name": "Remote - US" },
+      "absolute_url": "https://boards.greenhouse.io/acmerobotics/jobs/5738292",
+      "content": "&lt;p&gt;We are looking for a &lt;b&gt;Senior Backend Engineer&lt;/b&gt; to join our platform team.&lt;/p&gt;&lt;p&gt;5+ years of experience with distributed systems.&lt;/p&gt;"
+    },
+    {
+      "id": 5738301,
+      "title": "Staff Site Reliability Engineer",
+      "updated_at": "2026-07-14T14:02:10-05:00",
+      "location": { "name": "San Francisco, CA" },
+      "absolute_url": "https://boards.greenhouse.io/acmerobotics/jobs/5738301",
+      "content": "&lt;p&gt;Own our production infrastructure and on-call rotation.&lt;/p&gt;"
+    },
+    {
+      "id": 5738310,
+      "title": "",
+      "updated_at": "2026-07-13T08:00:00-05:00",
+      "location": { "name": "Remote" },
+      "absolute_url": "https://boards.greenhouse.io/acmerobotics/jobs/5738310",
+      "content": "&lt;p&gt;Malformed entry: empty title should be dropped.&lt;/p&gt;"
+    }
+  ],
+  "meta": { "total": 3 }
+}

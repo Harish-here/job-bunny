@@ -1,0 +1,258 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { CacheEntry, JD, SyncedJD } from '../../core/jd/index.ts';
+import type { ArchivePolicy, Connector, RunContext } from '../../ports/index.ts';
+import type { StageContext, StagePayload } from '../runner/stage.ts';
+import { makeSyncStage } from './sync.ts';
+
+function fakeCtx(): StageContext {
+  return {
+    profile: 'rajni',
+    signal: AbortSignal.timeout(30_000),
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    beat() {},
+    storage: {
+      async readJson() {
+        return undefined;
+      },
+      async writeJson() {},
+      async listSubdirs() {
+        return [];
+      },
+      async removeTree() {},
+    },
+  };
+}
+
+function fakeJob(id: string): JD {
+  return {
+    identity: {
+      id,
+      lane: 'linkedin',
+      url: `https://example.com/jobs/${id}`,
+      company: 'Acme Corp',
+      title: 'Frontend Engineer',
+      scrapedAt: '2026-07-21T09:00:00.000Z',
+    },
+  };
+}
+
+function fakeConnector(overrides?: Partial<Connector>): Connector {
+  return {
+    name: 'fake',
+    async rebuildCache(_ctx: RunContext): Promise<CacheEntry[]> {
+      return [];
+    },
+    async syncJobs(jobs: JD[]): Promise<SyncedJD[]> {
+      return jobs.map((jd) => ({
+        ...jd,
+        sync: { pageId: `page-${jd.identity.id}`, syncedAt: 'now' },
+      }));
+    },
+    async archiveStale(_policy: ArchivePolicy) {
+      return { archived: 0, dropped: [] };
+    },
+    ...overrides,
+  };
+}
+
+test('makeSyncStage: name/timeout/retries', () => {
+  const stage = makeSyncStage(fakeConnector());
+  assert.equal(stage.name, 'sync');
+  assert.equal(
+    stage.retries,
+    0,
+    'whole-stage retry is unsafe until syncJobs is retry-idempotent',
+  );
+  assert.ok(stage.timeoutMs > 0);
+  assert.ok(
+    stage.timeoutMs >= 900_000,
+    'sync timeout must be generous enough for real write volume (Notion client retries per call)',
+  );
+});
+
+test('delegates the payload jobs to connector.syncJobs and returns the SyncedJD[] as the payload', async () => {
+  const stage = makeSyncStage(fakeConnector());
+  const input: StagePayload = { jobs: [fakeJob('li-1'), fakeJob('li-2')], dropped: [] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.deepEqual(
+    out.jobs.map((j) => j.sync?.pageId),
+    ['page-li-1', 'page-li-2'],
+  );
+});
+
+test('preserves dropped records untouched', async () => {
+  const priorDrop = { jd: fakeJob('li-0'), reasons: [] };
+  const stage = makeSyncStage(fakeConnector());
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [priorDrop] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.deepEqual(out.dropped, [priorDrop]);
+});
+
+test('a per-page SoftError is already handled inside the connector — a batch that drops one job silently just returns fewer jobs, and the stage records a DroppedRecord for it', async () => {
+  const stage = makeSyncStage(
+    fakeConnector({
+      async syncJobs(jobs: JD[]): Promise<SyncedJD[]> {
+        // Simulates the connector's own internal SoftError handling: job
+        // li-2's write failed and was dropped from the returned batch —
+        // the stage wrapper must not need to know or care about this
+        // per-job detail, only that li-2 vanished from what came back.
+        return jobs
+          .filter((jd) => jd.identity.id !== 'li-2')
+          .map((jd) => ({
+            ...jd,
+            sync: { pageId: `page-${jd.identity.id}`, syncedAt: 'now' },
+          }));
+      },
+    }),
+  );
+  const input: StagePayload = { jobs: [fakeJob('li-1'), fakeJob('li-2')], dropped: [] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.deepEqual(
+    out.jobs.map((j) => j.identity.id),
+    ['li-1'],
+  );
+  assert.equal(out.dropped.length, 1);
+  assert.equal(out.dropped[0]?.jd.identity.id, 'li-2');
+  assert.equal(out.dropped[0]?.reasons[0]?.rule, 'sync.failed');
+  assert.equal(out.dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(out.dropped[0]?.reasons[0]?.pass, false);
+  assert.match(out.dropped[0]?.reasons[0]?.detail ?? '', /page write failed/);
+});
+
+test('multiple jobs silently dropped by the connector each get exactly one DroppedRecord, appended after any prior drops', async () => {
+  const priorDrop = { jd: fakeJob('li-0'), reasons: [] };
+  const stage = makeSyncStage(
+    fakeConnector({
+      async syncJobs(jobs: JD[]): Promise<SyncedJD[]> {
+        // Only li-3 succeeds — li-1 and li-2 both silently vanish.
+        return jobs
+          .filter((jd) => jd.identity.id === 'li-3')
+          .map((jd) => ({
+            ...jd,
+            sync: { pageId: `page-${jd.identity.id}`, syncedAt: 'now' },
+          }));
+      },
+    }),
+  );
+  const input: StagePayload = {
+    jobs: [fakeJob('li-1'), fakeJob('li-2'), fakeJob('li-3')],
+    dropped: [priorDrop],
+  };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.deepEqual(
+    out.jobs.map((j) => j.identity.id),
+    ['li-3'],
+  );
+  assert.equal(out.dropped.length, 3, 'the prior drop plus exactly one per missing job');
+  assert.equal(out.dropped[0], priorDrop);
+  assert.deepEqual(
+    out.dropped.slice(1).map((d) => d.jd.identity.id),
+    ['li-1', 'li-2'],
+  );
+  for (const d of out.dropped.slice(1)) {
+    assert.equal(d.reasons[0]?.rule, 'sync.failed');
+  }
+});
+
+// --- dry-run (P8 Task 7) ---
+
+test('dry-run: never calls connector.syncJobs', async () => {
+  const stage = makeSyncStage(
+    fakeConnector({
+      async syncJobs(): Promise<SyncedJD[]> {
+        throw new Error('syncJobs must not be called in dry-run mode');
+      },
+    }),
+    { dryRunPath: 'runs/2026-07-25/sync_dryrun.json' },
+  );
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
+
+  await assert.doesNotReject(() => stage.run(input, fakeCtx()));
+});
+
+test('dry-run: writes the would-write set at the given path with the right count and fields', async () => {
+  const written: Array<{ path: string; value: unknown }> = [];
+  const ctx: StageContext = {
+    ...fakeCtx(),
+    storage: {
+      async readJson() {
+        return undefined;
+      },
+      async writeJson(path: string, value: unknown) {
+        written.push({ path, value });
+      },
+      async listSubdirs() {
+        return [];
+      },
+      async removeTree() {},
+    },
+  };
+  const stage = makeSyncStage(fakeConnector(), {
+    dryRunPath: 'runs/2026-07-25/sync_dryrun.json',
+  });
+  const input: StagePayload = { jobs: [fakeJob('li-1'), fakeJob('li-2')], dropped: [] };
+
+  await stage.run(input, ctx);
+
+  assert.equal(written.length, 1);
+  assert.equal(written[0]?.path, 'runs/2026-07-25/sync_dryrun.json');
+  const payload = written[0]?.value as {
+    generatedAt: string;
+    profile: string;
+    count: number;
+    jobs: Array<{ id: string; company: string; title: string; url: string }>;
+  };
+  assert.equal(payload.profile, 'rajni');
+  assert.equal(payload.count, 2);
+  assert.deepEqual(
+    payload.jobs.map((j) => j.id),
+    ['li-1', 'li-2'],
+  );
+  assert.equal(payload.jobs[0]?.company, 'Acme Corp');
+  assert.equal(payload.jobs[0]?.title, 'Frontend Engineer');
+  assert.ok(typeof payload.generatedAt === 'string' && payload.generatedAt.length > 0);
+});
+
+test('dry-run: returns input unchanged — same jobs, same dropped, no sync.failed drops', async () => {
+  const priorDrop = { jd: fakeJob('li-0'), reasons: [] };
+  const stage = makeSyncStage(fakeConnector(), {
+    dryRunPath: 'runs/2026-07-25/sync_dryrun.json',
+  });
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [priorDrop] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.equal(out.jobs, input.jobs);
+  assert.deepEqual(out.dropped, [priorDrop]);
+});
+
+test('non-dry-run path is unaffected when opts is omitted', async () => {
+  const stage = makeSyncStage(fakeConnector());
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
+
+  const out = await stage.run(input, fakeCtx());
+
+  assert.equal(out.jobs[0]?.sync?.pageId, 'page-li-1');
+});
+
+test('a non-SoftError connector rejection propagates loudly (not caught/re-wrapped here)', async () => {
+  const stage = makeSyncStage(
+    fakeConnector({
+      async syncJobs(): Promise<SyncedJD[]> {
+        throw new Error('auth failure');
+      },
+    }),
+  );
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
+
+  await assert.rejects(() => stage.run(input, fakeCtx()), /auth failure/);
+});

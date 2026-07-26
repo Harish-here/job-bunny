@@ -85,7 +85,7 @@ Formatted per **Log entry formatting** above: `(session <N> — <short label>)` 
 
 ## Mode: `/wrap ship`
 
-Dedicated release flow. Run after code work is done and ready to tag. `main` is protected (PR + green `test` check required, admins included) — feature work is assumed to have already landed via its own PRs; ship itself adds only the version-sync chore, via a short release PR, and then pushes the tag. The mechanical git/GitHub choreography (branch, version-sync commit, push, PR, checks, merge, tag-the-merged-HEAD) is owned by `scripts/ops/release.js` — you (Claude) do not run raw `git`/`gh` commands for it anymore; you run the script and react to its output.
+Dedicated release flow. Run after code work is done and ready to tag. `main` is protected (PR + green `test` check required, admins included) — feature work is assumed to have already landed via its own PRs; ship itself adds only the version-sync chore, via a short release PR, and then pushes the tag. The mechanical git/GitHub choreography (branch, version-sync commit, push, PR, checks, merge, tag-the-merged-HEAD) is owned by `jobbunny release` (`src/cli/commands/release.ts`) — you (Claude) do not run raw `git`/`gh` commands for it anymore; you run the command and react to its output.
 
 **1. Read git history since last tag**
 Run:
@@ -108,11 +108,11 @@ Draft a concise summary: what shipped, why it matters, any known gaps. Show for 
 **4. Validate Design Versions table (before the PR merges)**
 `notion-fetch` the main "Job Bunny" page. Confirm exactly one 🟢 Active row. If not → stop and ask the user to fix it before proceeding. Do not run the release script until this check passes.
 
-**5. Run the release script**
+**5. Run the release command**
 ```bash
-node scripts/ops/release.js X.Y.Z
+node src/cli/main.ts release X.Y.Z [--dry-run] [--no-merge] [--yes]
 ```
-This owns: preflight (clean tree, on `main`, up to date with origin, tag doesn't already exist, CHANGELOG block present), `npm version --no-git-tag-version`, the README badge update, the `release/vX.Y.Z` branch, commit, push, `gh pr create`, waiting for the `test` check, then a pause for your typed go-ahead once checks are green before it merges. It is idempotent — re-running it after any failure resumes from wherever it left off rather than erroring or duplicating work.
+This owns: preflight (clean tree, on `main`, up to date with origin, tag doesn't already exist, CHANGELOG block present), `npm version --no-git-tag-version`, the README badge update, the `release/vX.Y.Z` branch, commit, push, `gh pr create`, waiting for the `test` check, then a pause for your typed go-ahead once checks are green before it merges. It is idempotent — re-running it after any failure resumes from wherever it left off rather than erroring or duplicating work. Needs LIVE stdin for the merge confirmation — never run it backgrounded or detached.
 - **If it exits non-zero: stop and surface exactly what it printed.** No Notion writes happen until it reports success.
 - The script pauses on a `y/N` prompt before merging — relay that prompt to the user and answer it; do not pass `--yes` unless the user has already told you explicitly to skip the pause for this run.
 - On a major bump: confirm the `vMAJOR.0.0` convention with the user before running it.

@@ -1,0 +1,88 @@
+{
+  "cache": [
+    {
+      "id": "111",
+      "company": "Acme Corp",
+      "title": "Staff Frontend Engineer",
+      "pageId": "page-c1"
+    },
+    {
+      "id": "",
+      "company": "Widget Ltd",
+      "title": "Backend Engineer",
+      "pageId": "page-c2"
+    }
+  ],
+  "jobs": [
+    {
+      "identity": {
+        "id": "111",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/111",
+        "company": "Acme Corp",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      }
+    },
+    {
+      "identity": {
+        "id": "222",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/222",
+        "company": "Acme Corp",
+        "title": "Staff Frontend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      }
+    },
+    {
+      "identity": {
+        "id": "555",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/555",
+        "company": "Widget Ltd",
+        "title": "Backend Engineer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      }
+    },
+    {
+      "identity": {
+        "id": "333",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/333",
+        "company": "Nova Labs",
+        "title": "Senior Product Designer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      }
+    },
+    {
+      "identity": {
+        "id": "444",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/444",
+        "company": "Nova Labs",
+        "title": "Senior Product Designer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      }
+    },
+    {
+      "identity": {
+        "id": "666",
+        "lane": "linkedin",
+        "url": "https://www.linkedin.com/jobs/view/666",
+        "company": "Nova Labs",
+        "title": "Senior Product Designer",
+        "scrapedAt": "2026-07-18T00:00:00.000Z"
+      }
+    }
+  ],
+  "v0": {
+    "keptIds": ["333"],
+    "dropped": [
+      { "id": "111", "rule": "dedup.id" },
+      { "id": "222", "rule": "dedup.repost" },
+      { "id": "555", "rule": "dedup.repost" },
+      { "id": "444", "rule": "dedup.repost", "duplicateOf": "333" },
+      { "id": "666", "rule": "dedup.repost", "duplicateOf": "333" }
+    ]
+  }
+}

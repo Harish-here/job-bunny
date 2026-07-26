@@ -1,0 +1,340 @@
+/**
+ * archive.ts tests — always against a stubbed `NotionSdkClientLike` (via
+ * `NotionApi({ client: stub })`), never the real SDK, never the network.
+ */
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { ArchivePolicy } from '../../../ports/connector.ts';
+import type { Logger, RunContext } from '../../../ports/context.ts';
+import { archiveStale, cutoffISO } from './archive.ts';
+import { NotionApi, type NotionSdkClientLike } from './client.ts';
+import { PROPERTIES } from './schema.ts';
+
+const noopLogger: Logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
+
+function fakeCtx(overrides: Partial<RunContext> = {}): RunContext {
+  return {
+    profile: 'rajni',
+    signal: new AbortController().signal,
+    logger: noopLogger,
+    beat() {},
+    ...overrides,
+  };
+}
+
+// Mirrors cutoffISO's own local-date-component construction (not
+// `toISOString()`, which serializes in UTC and would drift a day off from
+// production's cutoff in any timezone ahead of UTC — see the dedicated
+// regression tests below for that exact bug).
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function page(id: string, status: string | undefined, dateFound: string | undefined) {
+  return {
+    id,
+    properties: {
+      [PROPERTIES.status.name]: status ? { select: { name: status } } : { select: null },
+      [PROPERTIES.dateFound.name]: dateFound
+        ? { date: { start: dateFound } }
+        : { date: null },
+    },
+  };
+}
+
+const POLICY: ArchivePolicy = { passedOlderThanDays: 7, untouchedOlderThanDays: 30 };
+
+function fixturePages() {
+  return [
+    page('passed-old', 'Passed', isoDaysAgo(10)), // stale: Passed, older than 7d
+    page('passed-recent', 'Passed', isoDaysAgo(2)), // not stale: Passed but recent
+    page('no-status-old', undefined, isoDaysAgo(40)), // stale: no status, older than 30d
+    page('no-status-recent', undefined, isoDaysAgo(5)), // not stale: no status but recent
+    page('applied-old', 'Applied', isoDaysAgo(100)), // never stale: neither rule applies
+    page('passed-no-date', 'Passed', undefined), // never stale: no Date Found to compare
+  ];
+}
+
+function stubWithPages(
+  pages: unknown[],
+  onUpdate?: (args: { page_id: string; archived?: boolean }) => void,
+): NotionSdkClientLike {
+  return {
+    databases: {
+      query: async () => ({ results: pages, has_more: false, next_cursor: null }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async (args) => {
+        onUpdate?.(args);
+        return { id: args.page_id };
+      },
+    },
+  };
+}
+
+test('archiveStale: dry-run (default posture) returns the would-archive count and performs zero writes', async () => {
+  const updateCalls: unknown[] = [];
+  const api = new NotionApi({
+    client: stubWithPages(fixturePages(), (args) => updateCalls.push(args)),
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, true, fakeCtx());
+
+  assert.equal(count, 2, 'passed-old + no-status-old are the only two stale rows');
+  assert.equal(updateCalls.length, 0, 'dry-run must perform zero writes');
+});
+
+test('archiveStale: apply mode archives exactly the stale rows by flipping `archived: true` (never a delete)', async () => {
+  const updateCalls: { page_id: string; archived?: boolean }[] = [];
+  const api = new NotionApi({
+    client: stubWithPages(fixturePages(), (args) => updateCalls.push(args)),
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
+
+  assert.equal(count, 2);
+  assert.deepEqual(updateCalls.map((c) => c.page_id).sort(), [
+    'no-status-old',
+    'passed-old',
+  ]);
+  for (const call of updateCalls) {
+    assert.deepEqual(Object.keys(call).sort(), ['archived', 'page_id']);
+    assert.equal(call.archived, true);
+  }
+});
+
+test('archiveStale: regression — the write call is exactly `{ page_id, archived: true }`, no `properties` key at all (v0 cleanup.js parity: `notion.pages.update({ page_id, archived: true })`, never a Status property change)', async () => {
+  const updateCalls: Record<string, unknown>[] = [];
+  const pages = [page('passed-old', 'Passed', isoDaysAgo(10))]; // the one stale row
+  const api = new NotionApi({
+    client: stubWithPages(pages, (args) => updateCalls.push(args)),
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
+
+  assert.equal(count, 1);
+  assert.equal(updateCalls.length, 1);
+  assert.deepEqual(updateCalls[0], { page_id: 'passed-old', archived: true });
+});
+
+test('archiveStale: a page missing Date Found is never archived under either rule', async () => {
+  const api = new NotionApi({ client: stubWithPages(fixturePages()) });
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, true, fakeCtx());
+  // passed-no-date is Passed but has no date — must not count toward the 2.
+  assert.equal(count, 2);
+});
+
+test('archiveStale: one page failing after exhausted retries (SoftError) is recorded and the batch continues', async () => {
+  let updateCalls = 0;
+  const client: NotionSdkClientLike = {
+    databases: {
+      query: async () => ({
+        results: fixturePages(),
+        has_more: false,
+        next_cursor: null,
+      }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async (args) => {
+        updateCalls++;
+        if (args.page_id === 'passed-old') {
+          const err = new Error('HTTP 429') as Error & { status: number };
+          err.status = 429;
+          throw err;
+        }
+        return { id: args.page_id };
+      },
+    },
+  };
+  const api = new NotionApi({ client, maxAttempts: 1 });
+
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, ctx);
+
+  assert.equal(
+    count,
+    1,
+    'only the successfully-archived page counts; the failed one is a recorded casualty',
+  );
+  assert.equal(warnings.length, 1);
+  assert.equal(
+    updateCalls,
+    2,
+    'both stale pages were attempted despite the first failing',
+  );
+});
+
+test('archiveStale: a page failing after exhausted retries is returned as a DroppedRecord (funnel visibility, mirrors sync.ts)', async () => {
+  const client: NotionSdkClientLike = {
+    databases: {
+      query: async () => ({
+        results: fixturePages(),
+        has_more: false,
+        next_cursor: null,
+      }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async (args) => {
+        if (args.page_id === 'passed-old') {
+          const err = new Error('HTTP 429') as Error & { status: number };
+          err.status = 429;
+          throw err;
+        }
+        return { id: args.page_id };
+      },
+    },
+  };
+  const api = new NotionApi({ client, maxAttempts: 1 });
+
+  const { archived: count, dropped } = await archiveStale(
+    api,
+    'db1',
+    POLICY,
+    false,
+    fakeCtx(),
+  );
+
+  assert.equal(count, 1, 'no-status-old still archived; passed-old is the casualty');
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]?.jd.identity.id, 'passed-old');
+  assert.equal(dropped[0]?.reasons[0]?.rule, 'archive.failed');
+  assert.equal(dropped[0]?.reasons[0]?.severity, 'hard');
+  assert.equal(dropped[0]?.reasons[0]?.pass, false);
+  assert.match(dropped[0]?.reasons[0]?.detail ?? '', /HTTP 429/);
+});
+
+test('archiveStale: the warn-and-continue behavior is unaffected by the dropped array being returned', async () => {
+  const client: NotionSdkClientLike = {
+    databases: {
+      query: async () => ({
+        results: fixturePages(),
+        has_more: false,
+        next_cursor: null,
+      }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async (args) => {
+        if (args.page_id === 'passed-old') {
+          const err = new Error('HTTP 429') as Error & { status: number };
+          err.status = 429;
+          throw err;
+        }
+        return { id: args.page_id };
+      },
+    },
+  };
+  const api = new NotionApi({ client, maxAttempts: 1 });
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, ctx);
+
+  assert.equal(count, 1);
+  assert.equal(
+    warnings.length,
+    1,
+    'the existing warn log is unaffected by the returned dropped array',
+  );
+});
+
+test('archiveStale: a non-retryable error (e.g. 400) propagates and fails the whole call', async () => {
+  const client: NotionSdkClientLike = {
+    databases: {
+      query: async () => ({
+        results: fixturePages(),
+        has_more: false,
+        next_cursor: null,
+      }),
+    },
+    pages: {
+      create: async () => ({ id: 'x' }),
+      update: async () => {
+        const err = new Error('bad request') as Error & { status: number };
+        err.status = 400;
+        throw err;
+      },
+    },
+  };
+  const api = new NotionApi({ client });
+
+  await assert.rejects(
+    () => archiveStale(api, 'db1', POLICY, false, fakeCtx()),
+    /bad request/,
+  );
+});
+
+test('archiveStale: no rows to archive returns 0 and performs zero writes', async () => {
+  const updateCalls: unknown[] = [];
+  const noneStale = [
+    page('recent-passed', 'Passed', isoDaysAgo(1)),
+    page('recent-no-status', undefined, isoDaysAgo(1)),
+  ];
+  const api = new NotionApi({
+    client: stubWithPages(noneStale, (args) => updateCalls.push(args)),
+  });
+
+  const { archived: count } = await archiveStale(api, 'db1', POLICY, false, fakeCtx());
+  assert.equal(count, 0);
+  assert.equal(updateCalls.length, 0);
+});
+
+test('cutoffISO: exact date string from local components, pinned against a frozen `now`', () => {
+  const now = new Date(2026, 6, 23, 10, 0, 0); // 2026-07-23T10:00 local, daytime (unambiguous)
+  assert.equal(cutoffISO(7, now), '2026-07-16');
+  assert.equal(cutoffISO(30, now), '2026-06-23');
+});
+
+test('cutoffISO: local-date correctness at an early-morning boundary — regression for the UTC-round-trip off-by-one', () => {
+  // 00:15 local time in a timezone ahead of UTC (this suite runs in
+  // Asia/Calcutta, UTC+5:30) is still the PREVIOUS day in UTC. The old
+  // implementation (`new Date(); setDate(); toISOString().slice(0, 10)`)
+  // would serialize this instant's UTC date, landing the cutoff one day
+  // early ('2026-07-15' instead of the correct local '2026-07-16').
+  const now = new Date(2026, 6, 23, 0, 15, 0); // 2026-07-23T00:15 local
+  assert.equal(cutoffISO(7, now), '2026-07-16');
+});
+
+test('archiveStale: honors an injected `now` and is correct at the early-morning boundary (regression for the timezone off-by-one)', async () => {
+  // With the buggy UTC-serialized cutoff this would have computed
+  // '2026-07-15' as the passed-cutoff, and 'just-stale' (Date Found
+  // 2026-07-15) would NOT have been < that cutoff — i.e. it would have been
+  // wrongly kept instead of archived.
+  const now = new Date(2026, 6, 23, 0, 15, 0); // 2026-07-23T00:15 local
+  const pages = [page('just-stale', 'Passed', '2026-07-15')];
+  const api = new NotionApi({ client: stubWithPages(pages) });
+
+  const { archived: count } = await archiveStale(
+    api,
+    'db1',
+    POLICY,
+    true,
+    fakeCtx(),
+    now,
+  );
+
+  assert.equal(
+    count,
+    1,
+    'a page one day before the correct local cutoff must be counted as stale',
+  );
+});
