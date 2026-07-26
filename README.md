@@ -103,7 +103,7 @@ node --test src/core/filter/engine.test.ts   # one file
 ```
 
 - `profiles/rajni/` is a committed synthetic fixture profile for runtime verification — use it instead of real profiles when testing stages, never `profiles/harish/` (real user data).
-- Architecture notes, hard rules, and per-stage detail live in [CLAUDE.md](CLAUDE.md); the decision record is in `.claude/agents/explainer.md` and the spec is under `docs/superpowers/specs/`.
+- Architecture notes, hard rules, and per-stage detail live in [CLAUDE.md](CLAUDE.md); the decision record is in `.claude/agents/explainer.md` (the original specs and plans are in git history).
 - Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Layout
