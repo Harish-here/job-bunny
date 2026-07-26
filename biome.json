@@ -2,8 +2,7 @@
   "$schema": "https://biomejs.dev/schemas/2.1.0/schema.json",
   "files": {
     "includes": [
-      "src/**",
-      "scripts-v2-migrate/**"
+      "src/**"
     ]
   },
   "formatter": {

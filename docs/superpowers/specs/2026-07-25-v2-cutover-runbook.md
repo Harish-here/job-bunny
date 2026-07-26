@@ -16,9 +16,9 @@ Before touching any real profile or launchd job, all of the following must be tr
       `jobbunny run --profile rajni` end-to-end against that scratch DB, cutover has zero
       evidence the P7 Notion adapter (`src/adapters/db/notion/`) can talk to the real
       Notion API — every test to date is stub-driven.
-- [ ] Real profiles (`profiles/harish/`, `profiles/uvashree/`) have been migrated with
-      `scripts-v2-migrate/migrate.ts --write` (§4) and `jobbunny doctor --profile <p>`
-      is green for each.
+- [x] Real profiles have been migrated (§4 — done 2026-07-26; `harish` was the only v0
+      profile, `uvashree` was never created) and `jobbunny doctor --profile harish`
+      is green.
 - [ ] User has given explicit go for the specific step being executed — Task 7's plan
       requires this per bullet, not once for the whole cutover.
 
@@ -72,48 +72,14 @@ Compare the job identity set (title+company+id) in `sync_dryrun.json` against th
 v0 didn't, or vice versa) is a real divergence — investigate before trusting v2's output
 for that profile.
 
-## 4. Migration
+## 4. Migration — DONE 2026-07-26
 
-Dry run first, always:
-
-```bash
-node scripts-v2-migrate/migrate.ts --profile <name>
-```
-
-Review the printed diff and the `UNMAPPED v0 FIELDS` list. Only once satisfied:
-
-**Before running `--write` on any real profile, take a manual backup — profile config
-files under `profiles/harish/` (and `profiles/uvashree/`) are NOT git-tracked
-(`profiles/` is entirely `.gitignore`d), so `--write` there is NOT git-recoverable.**
-
-```bash
-mkdir -p ~/jobbunny-backups
-cp -a /Users/harishamutha/Job-bunny/profiles/harish "~/jobbunny-backups/harish-$(date +%Y%m%dT%H%M%S)"
-```
-
-(Repeat per profile being migrated — substitute `uvashree`, etc. Destination is outside
-the repo tree on purpose.)
-
-Then apply:
-
-```bash
-node scripts-v2-migrate/migrate.ts --profile <name> --write
-```
-
-`profile.json` is merged, never replaced (v0 and v2 key sets are disjoint); `filter.json`
-is newly created; a company registry is created only if a boards file exists. The
-migrator is idempotent — a second `--write` produces byte-identical output — so re-running
-it after a partial failure is safe, but the backup above is still the only recovery path
-if `--write` corrupts something the migrator's own idempotency check doesn't catch.
-
-Verify after each profile:
-
-```bash
-jobbunny doctor --profile <name>
-```
-
-Must be green (no `red` finding — a `warn` doesn't block, per `doctorCommand`'s exit-code
-rule) before that profile is considered migrated.
+Completed and closed out. `profiles/harish/` (the only v0 profile — `uvashree` was never
+created; any future profile is born v2 via `jobbunny setup`) was migrated, a final
+dry-run confirmed no missing v2 keys, `avoid.md`'s alias variants were folded into
+`filter.json` `companies.avoid`, and the five legacy v0 config files were deleted. The
+migrator itself (`scripts-v2-migrate/`) is deleted from the repo — recover it from git
+history if ever needed.
 
 ## 5. Cutover
 

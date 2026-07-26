@@ -121,7 +121,6 @@ src/cli/             jobbunny entry point + commands + wire.ts (the one composit
 .claude/skills/      /verify
 page_inventory/      runtime selector configs per page-type
 profiles/<name>/     per-person config + per-run data/ intermediates (gitignored)
-scripts-v2-migrate/  one-off migrator for profiles still shaped like the deleted v0 config
 ```
 
 Private project — not published to npm.
