@@ -411,7 +411,15 @@ export class LinkedInLane implements FarmingLane {
                 // preceding runAssertions/collectCards, harvestCards' v2
                 // counterpart). Applied per page, not just once per url.
                 await this.jitter(ctx);
-                cards = await harvestCards(page, inv, ctx);
+                // Page 1 keeps harvestCards' strict emptiness assertions —
+                // DOM drift there must stay loud. Page N>=2 tolerates a
+                // genuinely empty page (allowEmpty): end-of-results looks
+                // exactly like an empty page, and that's normal, not a
+                // failure — the `stop` check below is what should end
+                // pagination for it, not a thrown SoftError.
+                cards = await harvestCards(page, inv, ctx, {
+                  allowEmpty: pageIndex >= 2,
+                });
               } catch (err) {
                 // Page 1's navigation/harvest failure keeps its existing
                 // whole-url semantics (rethrow into the outer catch below,
@@ -572,6 +580,17 @@ export class LinkedInLane implements FarmingLane {
               // reached — no point fetching a page whose cards can't be
               // processed anyway.
               const cardIds = new Set(cards.map((card) => card.id));
+              // A page harvesting zero cards is ordinary end-of-results
+              // (harvestCards' allowEmpty already turned "container never
+              // attached" and "read came back empty" into a plain []
+              // return for pages >= 2) — informational, never a warn, and
+              // never a SoftError.
+              if (cards.length === 0) {
+                ctx.logger.info('linkedin lane: end of results — stopping pagination', {
+                  url,
+                  page: pageIndex,
+                });
+              }
               const stop =
                 cards.length === 0 ||
                 (previousCardIds !== null && sameCardIdSet(previousCardIds, cardIds)) ||

@@ -609,6 +609,51 @@ test('harvestCards throws when the page yields fewer cards than minJobCards', as
   await assert.rejects(() => harvestCards(page, inv, fakeCtx()), /0 card\(s\).*min/);
 });
 
+// --- allowEmpty (tail-page quiet end-of-results) ---
+
+test('harvestCards with allowEmpty: true returns [] instead of throwing when the page yields zero cards', async () => {
+  const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
+  const page = fakePage({ evaluate: async () => [] as never });
+
+  const cards = await harvestCards(page, inv, fakeCtx(), { allowEmpty: true });
+
+  assert.deepEqual(cards, []);
+});
+
+test('harvestCards with allowEmpty: false (the default) still throws when the page yields zero cards', async () => {
+  const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
+  const page = fakePage({ evaluate: async () => [] as never });
+
+  await assert.rejects(() => harvestCards(page, inv, fakeCtx()), /0 card\(s\).*min/);
+});
+
+test('harvestCards with allowEmpty: true returns [] instead of throwing when the readiness selector never attaches (container missing entirely)', async () => {
+  const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+  });
+
+  const cards = await harvestCards(page, inv, fakeCtx(), { allowEmpty: true });
+
+  assert.deepEqual(cards, []);
+});
+
+test('harvestCards with allowEmpty: true does not suppress a genuinely unexpected evaluate error', async () => {
+  const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
+  const page = fakePage({
+    evaluate: async () => {
+      throw new Error('evaluate crashed: execution context was destroyed');
+    },
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, inv, fakeCtx(), { allowEmpty: true }),
+    /execution context was destroyed/,
+  );
+});
+
 test('harvestCards tolerates an empty page when minJobCards is 0, but says so loudly', async () => {
   const inv = componentkeyInventory({
     behaviors: {

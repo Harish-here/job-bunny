@@ -107,6 +107,10 @@ interface RawCardFixture {
  * evaluate/goto) stay consistent across the whole run. */
 interface Script {
   gotoThrows: Set<string>;
+  /** Listing urls whose readiness wait (harvestCards' `page.waitFor`)
+   * throws — models a container/mustExist selector that matches nothing
+   * at all on that page. */
+  waitForThrows: Set<string>;
   harvestByUrl: Map<string, RawCardFixture[]>;
   jdTextByUrl: Map<string, string>;
   /** JD urls whose configured-selector (jdRoot) read comes back empty so
@@ -118,6 +122,7 @@ interface Script {
 function newScript(): Script {
   return {
     gotoThrows: new Set(),
+    waitForThrows: new Set(),
     harvestByUrl: new Map(),
     jdTextByUrl: new Map(),
     anchorOnlyUrls: new Set(),
@@ -173,7 +178,11 @@ class FakePage implements PageHandle {
 
   async click(): Promise<void> {}
 
-  async waitFor(): Promise<void> {}
+  async waitFor(): Promise<void> {
+    if (this.script.waitForThrows.has(this.lastUrl)) {
+      throw new Error(`waitFor failed for ${this.lastUrl}`);
+    }
+  }
 
   async content(): Promise<string> {
     return '';
@@ -1337,7 +1346,7 @@ test('pagination: 2 pages of distinct cards are both harvested, goto uses the co
   assert.ok(pageLogs.every((l) => l.data.harvested === 1 && l.data.gated === 1));
 });
 
-test('pagination: stop-on-empty — page 2 harvests 0 cards, the loop stops and page 3 is never fetched', async () => {
+test('pagination: stop-on-empty (minJobCards 0) — page 2 harvests 0 cards, the loop stops and page 3 is never fetched', async () => {
   const inv = await realInventory();
   const paged = pagedInventory(inv, { maxPages: '5', minJobCards: '0' });
   const script = newScript();
@@ -1385,6 +1394,161 @@ test('pagination: stop-on-empty — page 2 harvests 0 cards, the loop stops and 
     (u) => u === baseUrl || u === page2Url || u === page3Url,
   );
   assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
+});
+
+test('pagination: an end-of-results tail page (minJobCards 1, the real inventory default) is a quiet stop, not a SoftError — page 1 captures kept, page 3 never fetched', async () => {
+  const inv = await realInventory();
+  // Deliberately NOT overriding minJobCards — this is the real committed
+  // inventory's default (1), the exact shape that used to route an
+  // ordinary empty tail page through harvestCards' minJobCards throw and
+  // the outer catch's SoftError-and-warn path.
+  const paged = pagedInventory(inv, { maxPages: '5' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=End+Of+Results';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+  const page3Url = buildPageUrl(baseUrl, 3, 'start', 25);
+
+  script.harvestByUrl.set(baseUrl, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/8101/',
+    },
+  ]);
+  script.harvestByUrl.set(page2Url, []);
+  script.harvestByUrl.set(page3Url, [
+    {
+      title: 'Should Not Fetch',
+      company: 'Nope',
+      location: 'Remote',
+      href: '/jobs/view/8103/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/8101/', 'JD text — 8101');
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const infos: Array<{ msg: string; data?: unknown }> = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn: (msg, data) => warnings.push({ msg, data }),
+      info: (msg, data) => infos.push({ msg, data }),
+    },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+
+  // Page 1's capture survives, page 3 is never fetched.
+  assert.deepEqual(
+    jobs.map((jd) => jd.identity.id),
+    ['li-8101'],
+  );
+  const listingGotoCalls = (provider.handle?.pages[0]?.gotoCalls ?? []).filter(
+    (u) => u === baseUrl || u === page2Url || u === page3Url,
+  );
+  assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
+
+  // No pagination/harvest-failure warn — this is the whole point of the
+  // fix: an ordinary end-of-results tail page must not be logged as a
+  // failure. (The "no Notion cache found" warn is unrelated noise from
+  // this FakeStorage not seeding cache/entries.json — filtered out here.)
+  const relevantWarnings = warnings.filter(
+    (w) =>
+      w.msg !==
+      'linkedin lane: no Notion cache found — cache gate disabled, known jobs may reach the LLM stage',
+  );
+  assert.deepEqual(relevantWarnings, []);
+  // The quiet-stop path logs at info level instead.
+  const endOfResultsLog = infos.find(
+    (i) => i.msg === 'linkedin lane: end of results — stopping pagination',
+  ) as { data: { url: string; page: number } } | undefined;
+  assert.ok(endOfResultsLog);
+  assert.equal(endOfResultsLog.data.url, baseUrl);
+  assert.equal(endOfResultsLog.data.page, 2);
+
+  // The url still succeeded and was marked done — no SoftError, no
+  // dropped/failure evidence recorded for it.
+  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  assert.ok(Object.hasOwn(persisted.done, baseUrl));
+});
+
+test('pagination: a page 2 whose container/mustExist selector matches nothing at all is the same quiet stop as a harvested-empty page', async () => {
+  const inv = await realInventory();
+  const paged = pagedInventory(inv, { maxPages: '5' });
+  const script = newScript();
+  const baseUrl = 'https://www.linkedin.com/jobs/search/?keywords=No+Container';
+  const page2Url = buildPageUrl(baseUrl, 2, 'start', 25);
+  const page3Url = buildPageUrl(baseUrl, 3, 'start', 25);
+
+  script.harvestByUrl.set(baseUrl, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/8201/',
+    },
+  ]);
+  // Page 2's readiness selector never attaches at all (container missing
+  // entirely) — no harvestByUrl entry is even needed for page2Url since
+  // harvestCards returns before ever reaching the in-page read.
+  script.waitForThrows.add(page2Url);
+  script.harvestByUrl.set(page3Url, [
+    {
+      title: 'Should Not Fetch',
+      company: 'Nope',
+      location: 'Remote',
+      href: '/jobs/view/8203/',
+    },
+  ]);
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/8201/', 'JD text — 8201');
+
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const ctx = fakeCtx({
+    logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [paged],
+    [{ page: paged.page, urls: [baseUrl] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs } = await lane.source(ctx);
+
+  assert.deepEqual(
+    jobs.map((jd) => jd.identity.id),
+    ['li-8201'],
+  );
+  const listingGotoCalls = (provider.handle?.pages[0]?.gotoCalls ?? []).filter(
+    (u) => u === baseUrl || u === page2Url || u === page3Url,
+  );
+  assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
+  // No pagination/harvest-failure warn (the "no Notion cache found" warn is
+  // unrelated noise from this FakeStorage not seeding cache/entries.json).
+  const relevantWarnings = warnings.filter(
+    (w) =>
+      w.msg !==
+      'linkedin lane: no Notion cache found — cache gate disabled, known jobs may reach the LLM stage',
+  );
+  assert.deepEqual(relevantWarnings, []);
+
+  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  assert.ok(Object.hasOwn(persisted.done, baseUrl));
 });
 
 test('pagination: stop-on-repeat — page 2 harvests the identical card set as page 1 (LinkedIn repeating its last page), the loop stops without double-processing', async () => {
