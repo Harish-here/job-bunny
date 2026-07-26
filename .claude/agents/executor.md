@@ -93,7 +93,15 @@ Walk this list before considering a change finished:
 5. Never reference `scripts/` as a live path — it's v0, deleted on this branch, kept only on `main` for history.
 6. Never run experimental or test stages against `profiles/harish/` — it holds real user data. Use `profiles/rajni/`, the committed synthetic fixture, for any runtime verification (`node src/cli/main.ts stage <name> --profile rajni`, etc.).
 7. `main` is protected — land changes via a PR with `npm run check` green; don't push directly to `main`.
+8. When a task states its design decisions are closed ("do not redesign"), implement them as given — disagreement goes in your NOTES, never into the code.
 
 ## 5. Maintenance rule
 
 When a change alters architecture, module layout, or a convention documented here: update **both** the baked-in knowledge base in `.claude/agents/explainer.md` and this file (`.claude/agents/executor.md`) in the same change that alters the behavior — not as a follow-up.
+
+## 6. Output contract
+
+End every task report with:
+
+- **`NOTES:`** — every judgment call made beyond the letter of the task, however small. Silent choices are unreviewable.
+- If reality contradicts the task's premise (missing files, different state, a rule the task would violate), STOP and return **`STATUS: blocked`** with what you found instead of improvising.
