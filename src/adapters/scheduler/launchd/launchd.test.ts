@@ -134,6 +134,35 @@ test('install: prunes a stale plist not in the desired set', async () => {
   assert.ok(bootoutStale, 'expected a bootout call for the stale label');
 });
 
+test('install: prunes a stranded v0 com.jobbunny.run.HHMM plist', async () => {
+  // v0 labeled its agents com.jobbunny.run.<HHMM> and pointed them at the
+  // now-deleted scripts/ops/run_scheduled.sh — they must be reaped too.
+  const legacyXml = '<plist>bash /repo/scripts/ops/run_scheduled.sh</plist>';
+  const fs = makeFakeFs({
+    [`${LAUNCH_AGENTS_DIR}/com.jobbunny.run.0900.plist`]: legacyXml,
+  });
+  const { run, calls } = makeRunner();
+  const scheduler = makeScheduler(fs, run);
+
+  await scheduler.install([{ profile: 'rajni', time: '09:00' }]);
+
+  assert.ok(!fs.files.has(`${LAUNCH_AGENTS_DIR}/com.jobbunny.run.0900.plist`));
+  const bootoutLegacy = calls.find(
+    (c) => c.args[0] === 'bootout' && c.args[1] === `gui/${UID}/com.jobbunny.run.0900`,
+  );
+  assert.ok(bootoutLegacy, 'expected a bootout call for the legacy v0 label');
+});
+
+test('list: ignores legacy v0 plists (no profile info to recover)', async () => {
+  const fs = makeFakeFs({
+    [`${LAUNCH_AGENTS_DIR}/com.jobbunny.run.0900.plist`]:
+      '<plist>bash /repo/scripts/ops/run_scheduled.sh</plist>',
+  });
+  const { run } = makeRunner();
+  const scheduler = makeScheduler(fs, run);
+  assert.deepEqual(await scheduler.list(), []);
+});
+
 test('install: does not touch a plist that is still desired', async () => {
   const { run } = makeRunner();
   const fs = makeFakeFs();

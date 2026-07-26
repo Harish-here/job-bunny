@@ -33,7 +33,7 @@ import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
 import { reconcileCommand } from './commands/reconcile.ts';
-import { releaseCommand } from './commands/release.ts';
+import { npmSwallowedFlags, releaseCommand } from './commands/release.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
 import { scheduleCommand } from './commands/schedule.ts';
@@ -82,6 +82,8 @@ export interface MainDeps {
    * called, since dispatch reaches exactly one). */
   commands?: Partial<CommandRegistry>;
   stderr?: (line: string) => void;
+  /** Environment for the npm swallowed-flag guard. Default: `process.env`. */
+  env?: Record<string, string | undefined>;
 }
 
 const USAGE = [
@@ -267,6 +269,19 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   if ('error' in built) {
     stderr(`${USAGE}\n${built.error}`);
     return 2;
+  }
+
+  // `npm run release <ver> --dry-run` without a `--` separator has npm eat
+  // the flags — a plan-only invocation would release for real. Refuse loudly.
+  if (commandName === 'release') {
+    const swallowed = npmSwallowedFlags(deps.env ?? process.env);
+    if (swallowed.length) {
+      stderr(
+        `npm swallowed ${swallowed.join(' ')} (no "--" separator) — ` +
+          `re-run as: npm run release -- ${built.version} ${swallowed.join(' ')}`,
+      );
+      return 2;
+    }
   }
 
   try {

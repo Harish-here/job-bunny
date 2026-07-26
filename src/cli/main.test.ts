@@ -371,3 +371,41 @@ test('main: a thrown error from a command is caught, printed to stderr, and retu
   assert.equal(code, 1);
   assert.ok(stderr.lines.some((l) => l.includes('boom')));
 });
+
+test('main: release refuses when npm swallowed the safety flags (no -- separator)', async () => {
+  let called = false;
+  const stderr = captureStderr();
+  const code = await main(['release', '1.3.0'], {
+    commands: {
+      release: (async () => {
+        called = true;
+        return 0;
+      }) as CommandFn,
+    },
+    stderr: stderr.write,
+    env: { npm_lifecycle_event: 'release', npm_config_dry_run: 'true' },
+  });
+  assert.equal(code, 2);
+  assert.equal(called, false, 'release must not run with silently-dropped flags');
+  assert.match(stderr.lines.join('\n'), /--/);
+});
+
+test('main: release dispatches normally when run via npm with a -- separator', async () => {
+  let received: unknown;
+  const code = await main(['release', '1.3.0', '--dry-run'], {
+    commands: {
+      release: (async (opts) => {
+        received = opts;
+        return 0;
+      }) as CommandFn,
+    },
+    env: { npm_lifecycle_event: 'release' },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(received, {
+    version: '1.3.0',
+    dryRun: true,
+    noMerge: false,
+    yes: false,
+  });
+});

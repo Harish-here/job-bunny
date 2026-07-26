@@ -33,7 +33,7 @@ node src/cli/main.ts stage <stage-name> --profile <name>
 node src/cli/main.ts routine <routine-name> --profile <name>
 ```
 
-`jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — same commands without the `node` prefix once installed/linked. Full usage: `src/cli/main.ts`'s `USAGE` string. `npm run release` runs `jobbunny release <X.Y.Z> [--dry-run] [--no-merge] [--yes]`. There is no separate lint/build step beyond what `npm run check` runs; CI's `test` check is exactly `npm run check`.
+`jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — same commands without the `node` prefix once installed/linked. Full usage: `src/cli/main.ts`'s `USAGE` string. `npm run release -- <X.Y.Z> [--dry-run] [--no-merge] [--yes]` runs `jobbunny release` — the `--` separator is mandatory (without it npm eats the flags; the CLI detects that and refuses to run). There is no separate lint/build step beyond what `npm run check` runs; CI's `test` check is exactly `npm run check`.
 
 **Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data, no Notion IDs) — see the `/verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
 

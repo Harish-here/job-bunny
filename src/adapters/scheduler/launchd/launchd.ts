@@ -40,6 +40,11 @@ import { type BuildPlistsOptions, buildPlists } from './plist.ts';
 const DEFAULT_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
 const LABEL_RE = /^com\.jobbunny\.(\d{4})\.plist$/;
+/** v0 labeled its agents `com.jobbunny.run.<HHMM>`, pointing at the deleted
+ * `scripts/ops/run_scheduled.sh` — install()'s reconcile prune must match
+ * them too, or they keep firing M–F forever with nothing left to run.
+ * `list()` still skips them (no `--profile` to recover from the plist). */
+const LEGACY_LABEL_RE = /^com\.jobbunny\.run\.\d{4}\.plist$/;
 const PROFILE_RE = /--profile (\S+) --headless/g;
 
 /** Minimal shape of an async `launchctl` (or equivalent) command runner —
@@ -140,7 +145,7 @@ export class LaunchdScheduler implements Scheduler {
     if (!this.fs.existsSync(dir)) return [];
     return this.fs
       .readdirSync(dir)
-      .filter((file) => LABEL_RE.test(file))
+      .filter((file) => LABEL_RE.test(file) || LEGACY_LABEL_RE.test(file))
       .map((file) => ({ label: file.replace(/\.plist$/, ''), path: join(dir, file) }));
   }
 

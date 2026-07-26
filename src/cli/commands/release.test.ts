@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   changelogHasVersionBlock,
+  npmSwallowedFlags,
   packageJsonVersion,
   parseVersion,
   type ReleaseDeps,
@@ -62,6 +63,29 @@ test('updateReadmeBadge reports found:false when the badge is missing entirely',
   const r = updateReadmeBadge('# README with no badge', '1.2.1');
   assert.equal(r.found, false);
   assert.equal(r.changed, false);
+});
+
+test('npmSwallowedFlags: detects flags npm consumed in a release lifecycle', () => {
+  assert.deepEqual(
+    npmSwallowedFlags({
+      npm_lifecycle_event: 'release',
+      npm_config_dry_run: 'true',
+      npm_config_yes: 'true',
+      npm_config_merge: '',
+    }),
+    ['--dry-run', '--no-merge', '--yes'],
+  );
+});
+
+test('npmSwallowedFlags: empty when the flags were forwarded via -- (env unset)', () => {
+  assert.deepEqual(npmSwallowedFlags({ npm_lifecycle_event: 'release' }), []);
+});
+
+test('npmSwallowedFlags: empty outside an npm release lifecycle', () => {
+  assert.deepEqual(
+    npmSwallowedFlags({ npm_config_dry_run: 'true', npm_config_yes: 'true' }),
+    [],
+  );
 });
 
 const baseResumeState = {
@@ -184,7 +208,16 @@ function makeExecCommand(state: FakeState) {
       const seq = state.checksSequence ?? [];
       const resp = seq[Math.min(checksCallIndex, seq.length - 1)] ?? [];
       checksCallIndex += 1;
-      return ok(JSON.stringify(resp));
+      // Mirrors real gh: `pr checks` exits non-zero when any check is
+      // failing (1) or still pending (8) — but ALWAYS prints the JSON.
+      const allPass =
+        resp.length > 0 &&
+        resp.every((c) => ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(c.state));
+      return {
+        ok: allPass,
+        stdout: JSON.stringify(resp),
+        error: allPass ? undefined : new Error(`fake: gh pr checks exited non-zero`),
+      };
     }
     if (cmd === 'gh' && joined.startsWith('pr merge')) return ok('');
     if (cmd === 'git' && joined === 'checkout main') return ok('');
@@ -386,16 +419,88 @@ test('without --yes, a "no" answer aborts without merging', async () => {
   assert.equal(merged, false);
 });
 
+// ---------- --no-merge ----------
+
+test('--no-merge stops after opening the PR on the fresh path', async () => {
+  const state = baseState();
+  let merged = false;
+  let checksPolled = false;
+  const deps = makeDeps(state);
+  const wrapped = deps.execCommand;
+  deps.execCommand = (cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') merged = true;
+    if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'checks') checksPolled = true;
+    return wrapped(cmd, args);
+  };
+  const code = await releaseCommand({ version: '1.3.0', noMerge: true }, deps);
+  assert.equal(code, 0);
+  assert.equal(merged, false);
+  assert.equal(checksPolled, false);
+});
+
+test('--no-merge stops when resuming an already-open release PR (AWAITING_MERGE)', async () => {
+  const state = baseState({
+    pr: { number: 7, state: 'OPEN', url: 'https://example/pr/7' },
+  });
+  let merged = false;
+  let checksPolled = false;
+  // Fast-forwarding clock so a buggy fall-through to waitForChecks times
+  // out immediately instead of spinning for a real 10 minutes.
+  let elapsed = 0;
+  const deps = makeDeps(state, {
+    now: () => elapsed,
+    sleep: async () => {
+      elapsed += 11 * 60 * 1000;
+    },
+  });
+  const wrapped = deps.execCommand;
+  deps.execCommand = (cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') merged = true;
+    if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'checks') checksPolled = true;
+    return wrapped(cmd, args);
+  };
+  const code = await releaseCommand({ version: '1.3.0', noMerge: true, yes: true }, deps);
+  assert.equal(code, 0);
+  assert.equal(merged, false, '--no-merge must never merge, even on resume');
+  assert.equal(checksPolled, false, '--no-merge must not wait for checks on resume');
+});
+
 // ---------- waitForChecks failure paths ----------
 
-test('fails loudly when the "test" check reports FAILURE', async () => {
+test('fails loudly when the "test" check reports FAILURE (gh exits non-zero)', async () => {
   const state = baseState({
     pr: { number: 7, state: 'OPEN', url: 'https://example/pr/7' },
     checksSequence: [[{ name: 'test', state: 'FAILURE' }]],
   });
-  const deps = makeDeps(state, { confirm: async () => 'y' });
+  const warnings: string[] = [];
+  const deps = makeDeps(state, {
+    confirm: async () => 'y',
+    warn: (line) => warnings.push(line),
+  });
   const code = await releaseCommand({ version: '1.3.0' }, deps);
   assert.equal(code, 1);
+  assert.ok(
+    warnings.some((w) => w.includes('check(s) failed')),
+    `expected a failed-checks message, got: ${warnings.join(' | ')}`,
+  );
+});
+
+test('treats SKIPPED and NEUTRAL checks as non-blocking when the rest pass', async () => {
+  const state = baseState({
+    pr: { number: 7, state: 'OPEN', url: 'https://example/pr/7' },
+    checksSequence: [
+      [
+        { name: 'test', state: 'SUCCESS' },
+        { name: 'docs-only', state: 'SKIPPED' },
+        { name: 'advisory', state: 'NEUTRAL' },
+      ],
+    ],
+    mergeCommitSha: 'deadbeef',
+    mainHeadAfterMerge: 'deadbeef',
+  });
+  const deps = makeDeps(state);
+  const code = await releaseCommand({ version: '1.3.0', yes: true }, deps);
+  assert.equal(code, 0);
 });
 
 test('fails loudly when checks time out (never reach SUCCESS)', async () => {

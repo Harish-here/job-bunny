@@ -76,7 +76,12 @@ function defaultDeps(): ReleaseDeps {
         const stdout = execFileSync(cmd, args, { encoding: 'utf8', cwd: process.cwd() });
         return { ok: true, stdout };
       } catch (error) {
-        return { ok: false, stdout: '', error };
+        // execFileSync throws on a non-zero exit but still carries the
+        // child's stdout (a string, since `encoding` is set) — surface it
+        // so callers can parse output from commands that exit non-zero by
+        // design (`gh pr checks` exits 1 on failing checks, 8 while pending).
+        const stdout = (error as { stdout?: unknown }).stdout;
+        return { ok: false, stdout: typeof stdout === 'string' ? stdout : '', error };
       }
     },
     readFile: (p) => readFileSync(p, 'utf8'),
@@ -170,6 +175,22 @@ export function updateReadmeBadge(text: string, version: string): ReadmeBadgeRes
   if (!m) return { text, changed: false, found: false };
   if (m[2] === version) return { text, changed: false, found: true };
   return { text: text.replace(re, `$1${version}$3`), changed: true, found: true };
+}
+
+/** Without a `--` separator, `npm run release <ver> --dry-run` has npm
+ * consume the flags itself and forward only the version — the "plan-only"
+ * invocation would perform the real release. npm does record each swallowed
+ * flag in the script's environment (verified on npm 10.8.2:
+ * `npm_config_dry_run`/`npm_config_yes` become `'true'`, `--no-merge` sets
+ * `npm_config_merge` to `''`; all three stay unset when the flags are
+ * forwarded via `--`), so the CLI can detect the drop and refuse to run. */
+export function npmSwallowedFlags(env: Record<string, string | undefined>): string[] {
+  if (env.npm_lifecycle_event !== 'release') return [];
+  const swallowed: string[] = [];
+  if (env.npm_config_dry_run === 'true') swallowed.push('--dry-run');
+  if (env.npm_config_merge === '') swallowed.push('--no-merge');
+  if (env.npm_config_yes === 'true') swallowed.push('--yes');
+  return swallowed;
 }
 
 export const STAGE = {
@@ -381,26 +402,41 @@ interface ChecksResult {
   timedOut?: boolean;
 }
 
+/** A check in one of these states can never block the merge. */
+const PASSING_CHECK_STATES = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
+const FAILED_CHECK_STATES = new Set([
+  'FAILURE',
+  'ERROR',
+  'CANCELLED',
+  'TIMED_OUT',
+  'ACTION_REQUIRED',
+  'STARTUP_FAILURE',
+]);
+
 async function waitForChecks(deps: ReleaseDeps, prNumber: number): Promise<ChecksResult> {
   const deadline = deps.now() + CHECK_TIMEOUT_MS;
   while (deps.now() < deadline) {
-    const out = runOk(deps, 'gh', [
+    // `gh pr checks` exits non-zero while checks are pending (8) or failing
+    // (1) but still prints the JSON — so the exit code is ignored and the
+    // stdout parsed regardless; an unparseable/empty response (gh itself
+    // broke) is treated as "still pending" and polled again.
+    const r = deps.execCommand('gh', [
       'pr',
       'checks',
       String(prNumber),
       '--json',
       'name,state',
     ]);
-    if (out.ok) {
-      const checks = JSON.parse(out.out || '[]') as Array<{
-        name: string;
-        state: string;
-      }>;
-      const failed = checks.filter((c) => c.state === 'FAILURE' || c.state === 'ERROR');
-      if (failed.length) return { ok: false, failed };
-      if (checks.length && checks.every((c) => c.state === 'SUCCESS'))
-        return { ok: true };
+    let checks: Array<{ name: string; state: string }> = [];
+    try {
+      checks = JSON.parse(r.stdout.trim() || '[]');
+    } catch {
+      checks = [];
     }
+    const failed = checks.filter((c) => FAILED_CHECK_STATES.has(c.state));
+    if (failed.length) return { ok: false, failed };
+    if (checks.length && checks.every((c) => PASSING_CHECK_STATES.has(c.state)))
+      return { ok: true };
     await sleep(deps, CHECK_POLL_MS);
   }
   return { ok: false, timedOut: true };
@@ -596,18 +632,21 @@ export async function releaseCommand(
       const created = ensurePrCreated(deps, branch, version);
       prNumber = created.number;
       prUrl = created.url;
+    }
 
-      if (NO_MERGE) {
-        deps.write(`--no-merge: stopping after PR #${prNumber} (${prUrl})`);
-        printResult(deps, {
-          status: 'stopped',
-          version,
-          prNumber,
-          prUrl,
-          stage: 'no-merge',
-        });
-        return 0;
-      }
+    // Checked here — after the PR exists on every path, including an
+    // AWAITING_MERGE resume — so `--no-merge` on a re-run can never fall
+    // through to the checks/merge/tag pipeline.
+    if (NO_MERGE) {
+      deps.write(`--no-merge: stopping after PR #${prNumber} (${prUrl})`);
+      printResult(deps, {
+        status: 'stopped',
+        version,
+        prNumber,
+        prUrl,
+        stage: 'no-merge',
+      });
+      return 0;
     }
 
     deps.write(`waiting for checks on PR #${prNumber}...`);
