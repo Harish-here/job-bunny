@@ -31,7 +31,7 @@ node src/cli/main.ts routine <routine-name> --profile <name>
 
 ## Profiles
 
-`--profile <name>` is required on every command except `schedule install` (cross-profile by design). `src/cli/wire.ts` is the only place that instantiates adapters: it zod-validates `profiles/<name>/profile.json` (`PipelineConfigSchema` — lanes, connector, notifiers, routines, schedule) and `filter.json` (`FilterConfigSchema`) and wires the enabled names to constructors; a missing/invalid `profile.json` throws at wire time (`doctor` reports the same failure without throwing).
+`--profile <name>` is required on every command except `schedule install` (cross-profile by design). `src/cli/wire.ts` is the only adapter-instantiation point: it validates `profile.json` and `filter.json` and wires the enabled names to constructors; a missing/invalid `profile.json` throws at wire time (`doctor` reports the same failure without throwing).
 
 Per profile: `profile.json`, `filter.json` (the sole geo/skills/rank authority), `resume.json` (hand-maintained), `search_urls.md` (drives `lane add-url`/`/page-analyse`). `avoid.md` is scaffolded but read by no runtime code — edit `filter.json`'s `title`/`companies` blocks instead. Greenhouse/Keka company state is auto-managed in `data/registry/companies.json`; there are no hand-maintained board watchlists. Per-run intermediates in `profiles/<name>/data/` are gitignored except the two tracked rajni fixture files.
 
@@ -45,18 +45,7 @@ One CLI drives a frozen 10-stage in-process pipeline (`src/cli/wire.ts`); the ru
 reconcile → farm → source → compress → structure → assemble → filter → dedup → rank → sync
 ```
 
-| Stage | Role |
-|---|---|
-| reconcile | rebuilds the dedup cache from the live Notion DB (read-only) |
-| farm | runs each `FarmingLane` (currently LinkedIn; auto-launches/kills debug Chrome unless `JOBBUNNY_KEEP_BROWSER=1`); writes `registry/companies_seen.json` |
-| source | drives every `ApiLane` (Greenhouse, Keka) against the company registry; `curated: true` entries are never re-probed/expired; `maxNewPerLane` capped |
-| compress | truncates raw JD text (2500 chars), emits the LLM's markdown input table |
-| structure | LLM stage via `ports/llm.ts` (`ClaudeCliProvider` wraps `claude -p`); 25-row batches, per-batch checkpoint |
-| assemble | zod-parses structured output into `StructuredJD`; unparseable rows → `DroppedRecord` |
-| filter | `core/filter` engine: title/company/location/timezone/skills rules, hard/soft verdicts |
-| dedup | drops reposts/intra-run dupes against the reconciled cache |
-| rank | 100-pt scale, 5 axes, excitement banding |
-| sync | pushes to Notion, automated fields only |
+Per-stage roles, timeouts, and failure semantics live in the explainer KB (§2.1).
 
 Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline/` + `routines/` + `ops/` + `cli/`. `npm run boundaries` (dependency-cruiser) mechanically enforces:
 

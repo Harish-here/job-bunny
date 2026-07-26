@@ -10,7 +10,7 @@
 
 A personal job-search companion that runs on your own Mac. Several times a day it scrapes your saved LinkedIn job searches, pulls fresh postings from company career APIs (Greenhouse, Keka), filters and ranks everything against your resume, and syncs the survivors to a Notion board — with an optional Telegram digest so you know what landed.
 
-This repo went through a clean-room TypeScript rewrite (v2, under `src/`); the original plain-JavaScript pipeline (v0, `scripts/`) has since been deleted from this branch and is preserved for history only on `main`. `src/` is the pipeline, full stop. See [CLAUDE.md](CLAUDE.md) for the full architecture detail; the decision rationale behind why it's shaped this way is recorded in `.claude/agents/explainer.md` (the original `main-v2.md` decision log is in git history).
+This is a clean-room TypeScript rewrite (v2, under `src/`) of the original plain-JavaScript pipeline (v0); v0 has been deleted from this branch and lives on `main` for history only. `src/` is the pipeline, full stop — see [CLAUDE.md](CLAUDE.md) for the full architecture detail.
 
 Built to be driven by [Claude Code](https://claude.com/claude-code): a few workflow steps (onboarding, page-selector maintenance, the LLM structuring stage, session close-out) run as Claude Code slash commands; the rest is a single `jobbunny` CLI.
 
@@ -28,7 +28,7 @@ Greenhouse / Keka APIs ────────────────┼─►
 
 Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage detail is in [CLAUDE.md](CLAUDE.md).
 
-- **Config-driven scraping.** Selectors live in `src/adapters/lanes/linkedin/page_inventory/*.md` files, read at runtime. When LinkedIn changes its DOM, you regenerate the inventory with `/page-analyse` — no code changes.
+- **Config-driven scraping.** Selectors are config, not code. When LinkedIn changes its DOM, regenerate the page inventory with `/page-analyse` — no code changes needed.
 - **Fail-soft, but loud on total outage.** A broken search page, a dead careers API, or one bad job card is skipped and logged; the run keeps going. But if a whole lane comes back completely empty (e.g. an expired LinkedIn login), that's treated as a real failure, not silence.
 - **Notion is the source of truth.** The local cache is rebuilt from your Notion database on every run, and sync only ever touches automated fields — your notes and statuses are safe.
 - **Multi-profile.** Each person gets a `profiles/<name>/` directory with their own resume, search URLs, filters, Notion database, and schedule. One machine can run several profiles back to back.
@@ -103,24 +103,7 @@ node --test src/core/filter/engine.test.ts   # one file
 ```
 
 - `profiles/rajni/` is a committed synthetic fixture profile for runtime verification — use it instead of real profiles when testing stages, never `profiles/harish/` (real user data).
-- Architecture notes, hard rules, and per-stage detail live in [CLAUDE.md](CLAUDE.md); the decision record is in `.claude/agents/explainer.md` (the original specs and plans are in git history).
+- Architecture, internals, and per-stage detail live in [CLAUDE.md](CLAUDE.md) and `.claude/agents/explainer.md`.
 - Release history: [CHANGELOG.md](CHANGELOG.md).
-
-## Layout
-
-```
-src/core/            pure domain logic — JD schema, filter/dedup/rank engines, config (no I/O)
-src/ports/           TS interfaces (connector, lane, llm, notifier, browser, scheduler, storage, doctor)
-src/adapters/        implementations: db/notion, lanes/{linkedin,greenhouse,keka}, llm/claude-cli,
-                     notify/telegram, browser/cdp-chrome, scheduler/launchd
-                     (lanes/linkedin/page_inventory/ — runtime selector configs per page-type)
-src/pipeline/        the 10 stages + the checkpointing runner
-src/routines/        recurring maintenance (e.g. cleanup)
-src/ops/             doctor, observability (run folder, logger, digest)
-src/cli/             jobbunny entry point + commands + wire.ts (the one composition point)
-.claude/commands/    /setup, /page-analyse, /structure, /wrap — everything else is a jobbunny subcommand
-.claude/skills/      /verify
-profiles/<name>/     per-person config + per-run data/ intermediates (gitignored)
-```
 
 Private project — not published to npm.
