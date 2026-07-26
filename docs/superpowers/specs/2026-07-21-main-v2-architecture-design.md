@@ -1,9 +1,8 @@
 # Job Bunny v2 — Architecture Design
 
 Date: 2026-07-21 · Branch: `main-v2` · Status: approved (brainstorm complete)
-Decision log: [`main-v2.md`](../../../main-v2.md) — the living, numbered record;
-this spec is the consolidated narrative. If they ever disagree, fix both in the
-same change.
+Decision log: `main-v2.md` — deleted 2026-07-26 (in git history); its record now
+lives in `.claude/agents/explainer.md`. This spec is the consolidated narrative.
 
 ## 1. Context & goals
 

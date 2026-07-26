@@ -10,7 +10,7 @@
 
 A personal job-search companion that runs on your own Mac. Several times a day it scrapes your saved LinkedIn job searches, pulls fresh postings from company career APIs (Greenhouse, Keka), filters and ranks everything against your resume, and syncs the survivors to a Notion board — with an optional Telegram digest so you know what landed.
 
-This repo went through a clean-room TypeScript rewrite (v2, under `src/`); the original plain-JavaScript pipeline (v0, `scripts/`) has since been deleted from this branch and is preserved for history only on `main`. `src/` is the pipeline, full stop. See [CLAUDE.md](CLAUDE.md) for the full architecture detail and `main-v2.md` for the decision log behind why it's shaped the way it is.
+This repo went through a clean-room TypeScript rewrite (v2, under `src/`); the original plain-JavaScript pipeline (v0, `scripts/`) has since been deleted from this branch and is preserved for history only on `main`. `src/` is the pipeline, full stop. See [CLAUDE.md](CLAUDE.md) for the full architecture detail; the decision rationale behind why it's shaped this way is recorded in `.claude/agents/explainer.md` (the original `main-v2.md` decision log is in git history).
 
 Built to be driven by [Claude Code](https://claude.com/claude-code): a few workflow steps (onboarding, page-selector maintenance, the LLM structuring stage, session close-out) run as Claude Code slash commands; the rest is a single `jobbunny` CLI.
 
@@ -103,7 +103,7 @@ node --test src/core/filter/engine.test.ts   # one file
 ```
 
 - `profiles/rajni/` is a committed synthetic fixture profile for runtime verification — use it instead of real profiles when testing stages, never `profiles/harish/` (real user data).
-- Architecture notes, hard rules, and per-stage detail live in [CLAUDE.md](CLAUDE.md); the full decision log is [main-v2.md](main-v2.md) and the spec is under `docs/superpowers/specs/`.
+- Architecture notes, hard rules, and per-stage detail live in [CLAUDE.md](CLAUDE.md); the decision record is in `.claude/agents/explainer.md` and the spec is under `docs/superpowers/specs/`.
 - Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Layout

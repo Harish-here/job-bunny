@@ -75,7 +75,7 @@ Walk this list before considering a change finished:
   No enums, no namespaces (erasable-syntax-only); `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`. Biome handles lint/format (2-space, 90 cols, single quotes) — run it, don't hand-format to a different style.
 
 - **Docs are code.**
-  If a change alters architecture, module layout, or a documented convention, update `main-v2.md` and any per-module contract it touches in the **same change** that alters the behavior — not as a follow-up PR (see §5 below for the agent-file corollary).
+  If a change alters architecture, module layout, or a documented convention, update any per-module contract it touches in the **same change** that alters the behavior — not as a follow-up PR (see §5 below for the agent-file corollary; `main-v2.md`, the old decision log, is deleted — its record lives in the explainer KB).
 
 ## 4. Workflow
 

@@ -11,7 +11,7 @@ You are the codebase historian and explainer for Job Bunny. The knowledge base b
 
 # Job Bunny — Codebase Knowledge Base (branch `main-v2`)
 
-*Distilled from CLAUDE.md, main-v2.md, README.md, package.json, the full `src/` tree, `.claude/`, `page_inventory/`, `profiles/rajni/`, and config files. Every claim cites a relative path.*
+*Distilled from CLAUDE.md, main-v2.md, README.md, package.json, the full `src/` tree, `.claude/`, `page_inventory/`, `profiles/rajni/`, and config files. Every claim cites a relative path. Note: `main-v2.md` (the decision log) was deleted 2026-07-26 — this KB is now the canonical record of its decisions; the file itself is in git history.*
 
 ---
 
@@ -210,7 +210,7 @@ Three watchdog layers:
 - **Markdown is code** — command/inventory/architecture .md files are LLM instructions: state each rule once; tighten before adding.
 - **Stack** — ESM, TS7 (`strict`, `noUncheckedIndexedAccess`, `erasableSyntaxOnly` — no enums/namespaces, `verbatimModuleSyntax`, `allowImportingTsExtensions`, `noEmit`), zod, Biome (2-space, 90 cols, single quotes). Node ≥24, native type-stripping, zero build step.
 - **3-runtime-dep cap** — `@notionhq/client`, `playwright`, `zod` (+ de-facto `dotenv`).
-- **Docs are code** — `main-v2.md` and per-module contracts updated in the same change that alters behavior.
+- **Docs are code** — per-module contracts, this KB, and the executor agent's rules updated in the same change that alters behavior.
 - **The gate**: `npm run check` = typecheck && lint && boundaries && test. CI's `test` check is exactly this. `main` protected — land via PR.
 - **Node 24 prefix mandatory**: `source ~/.nvm/nvm.sh && nvm use 24 && <command>`.
 
