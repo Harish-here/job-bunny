@@ -365,7 +365,7 @@ export function hhMmToMinutes(hhMm: string): number;
   node --test src/core/schedule/types.test.ts
   ```
 
-  Expected: `# pass 9`, `# fail 0`.
+  Expected: `# pass 8`, `# fail 0`.
 
 - [ ] **Step 5: Create the module's public surface.**
 
@@ -1095,11 +1095,17 @@ export interface DaemonAttempt {
   slot: string;  // "HH:MM" local
 }
 
+export interface DaemonInFlight {
+  pid: number;         // pid of the child run currently executing
+  profile: string;
+  startedAt: string;   // ISO 8601
+}
+
 export interface DaemonPidfile {
   pid: number;
   startedAt: string;   // ISO 8601
   lastTickAt: string;  // ISO 8601
-  inFlight?: number;   // pid of the child run currently executing
+  inFlight?: DaemonInFlight;
   attempts: DaemonAttempt[];
 }
 
@@ -1255,11 +1261,17 @@ Rules:
     slot: string; // "HH:MM" local
   }
 
+  export interface DaemonInFlight {
+    pid: number; // pid of the child run currently executing
+    profile: string;
+    startedAt: string; // ISO 8601
+  }
+
   export interface DaemonPidfile {
     pid: number;
     startedAt: string; // ISO 8601
     lastTickAt: string; // ISO 8601
-    inFlight?: number; // pid of the child run currently executing
+    inFlight?: DaemonInFlight;
     attempts: DaemonAttempt[];
   }
 
@@ -1313,6 +1325,23 @@ Rules:
     return deps.writeFileSyncExclusive(path, JSON.stringify(initial));
   }
 
+  /** Shape-checks a parsed `inFlight` value: either absent, or the full
+   * `DaemonInFlight` object (`pid`/`profile`/`startedAt`) — never the old
+   * bare-number form. A partially-shaped object is treated the same as
+   * absent (malformed ⇒ safe to drop, not safe to trust). */
+  function parseInFlight(value: unknown): DaemonInFlight | undefined {
+    if (typeof value !== 'object' || value === null) return undefined;
+    const candidate = value as Partial<DaemonInFlight>;
+    if (
+      typeof candidate.pid === 'number' &&
+      typeof candidate.profile === 'string' &&
+      typeof candidate.startedAt === 'string'
+    ) {
+      return { pid: candidate.pid, profile: candidate.profile, startedAt: candidate.startedAt };
+    }
+    return undefined;
+  }
+
   function parsePidfile(raw: string): DaemonPidfile | undefined {
     try {
       const parsed = JSON.parse(raw) as Partial<DaemonPidfile>;
@@ -1326,7 +1355,7 @@ Rules:
           pid: parsed.pid,
           startedAt: parsed.startedAt,
           lastTickAt: parsed.lastTickAt,
-          inFlight: typeof parsed.inFlight === 'number' ? parsed.inFlight : undefined,
+          inFlight: parseInFlight(parsed.inFlight),
           attempts: parsed.attempts as DaemonAttempt[],
         };
       }
@@ -1528,9 +1557,10 @@ Rules:
         deps.renameSync(from, to);
       },
     };
-    updateDaemonPidfile(ROOT, (current) => ({ ...current, inFlight: 4242 }), tracked);
+    const inFlight = { pid: 4242, profile: 'harish', startedAt: '2026-07-27T14:00:00.000Z' };
+    updateDaemonPidfile(ROOT, (current) => ({ ...current, inFlight }), tracked);
     assert.deepEqual(calls, [`write:${path}.tmp`, `rename:${path}.tmp->${path}`]);
-    assert.equal(readDaemonPidfile(ROOT, deps)?.inFlight, 4242);
+    assert.deepEqual(readDaemonPidfile(ROOT, deps)?.inFlight, inFlight);
   });
 
   test('updateDaemonPidfile: appends an attempts-ledger entry', () => {
@@ -1813,13 +1843,13 @@ Asymmetry (relied on by Task 7 and the eventual `serve start` CLI command, out o
   }
   ```
 
-- [ ] **Step 4: Run it and see all four tests pass.**
+- [ ] **Step 4: Run it and see all three tests pass.**
 
   ```bash
   node --test src/ops/daemon/logs/logs.test.ts
   ```
 
-  Expected: `# pass 4`, `# fail 0`.
+  Expected: `# pass 3`, `# fail 0`.
 
 - [ ] **Step 5: Write the remaining tests.**
 
@@ -1856,13 +1886,13 @@ Asymmetry (relied on by Task 7 and the eventual `serve start` CLI command, out o
   });
   ```
 
-- [ ] **Step 6: Run it and see all eight tests pass.**
+- [ ] **Step 6: Run it and see all seven tests pass.**
 
   ```bash
   node --test src/ops/daemon/logs/logs.test.ts
   ```
 
-  Expected: `# pass 8`, `# fail 0` — no implementation change needed.
+  Expected: `# pass 7`, `# fail 0` — no implementation change needed.
 
 - [ ] **Step 7: Create the module's public surface.**
 
@@ -1943,8 +1973,8 @@ MANDATORY ORDERING RULES — each stated once, each covered by a test:
 2. The heartbeat write is wrapped so a failure (ENOSPC, EACCES) is logged and swallowed, never thrown out of the timer callback — an uncaught throw there would kill the daemon, a domain-1 blast radius for a domain-2 problem. Accepted consequence: repeated write failures leave `lastTickAt` frozen, so the daemon is eventually judged stale and stolen from, which is correct for a daemon that cannot persist its own state.
 3. Only after the heartbeat does the in-memory reentrancy guard run: `if (ticking) return; ticking = true; try { ... } finally { ticking = false; }`. `setInterval` does not skip a firing merely because the previous callback's promise is still pending.
 4. History passed to `isRunOwed` is the MERGE of two sources: `RunRecord`s scanned from disk (Task 4) AND one synthetic `RunRecord{profile, date, startedAt: slot}` per today's entry in the pidfile `attempts` ledger. This is what prevents a respawn storm: run folders are created lazily (first checkpoint write, after stage 1), so a run that aborts in `wire()`, on a held run lock, or on a red doctor preflight leaves no folder at all — without the ledger such a slot would stay owed and respawn every 30 seconds for the full grace window.
-5. Attempts are filtered to today's local date when folded, which is also what "cleared on date rollover" means — there is no separate clearing job.
-6. Per owed entry, in this exact order: REVALIDATE `now <= slot + graceMinutes` → append to the attempts ledger → spawn. A revalidation failure SKIPS the entry, logs the skip, and does NOT append to the ledger (it was never attempted, and `isRunOwed` will not return it again because its own grace has expired). Reason: a sequential child can run for hours, so a later batch entry's grace window may be long expired by the time its turn comes.
+5. Attempts are filtered to today's local date when folded, which is also what "cleared on date rollover" means — there is no separate clearing job. The ledger append itself enforces the same rule on write, not just on read: every write PRUNES the in-memory `attempts` array to only today's entries before appending the new one (spec A9 — the pidfile is rewritten with only-today entries whenever it is written), so the ledger never grows unbounded across days.
+6. Per owed entry, in this exact order: REVALIDATE `now <= slot + graceMinutes` → append to the attempts ledger → spawn. A revalidation failure SKIPS the entry, logs the skip, and does NOT append to the ledger (it was never attempted, and `isRunOwed` will not return it again because its own grace has expired). Reason: a sequential child can run for hours, so a later batch entry's grace window may be long expired by the time its turn comes. The revalidation slot moment is built from the OWED ENTRY's OWN `date` + `slot` (not from `now`'s own calendar date) — a batch that runs past local midnight must still evaluate each entry against the date it was actually scheduled for, not the date the revalidation happens to occur on.
 7. Entries are processed SEQUENTIALLY, awaiting each child before starting the next, in ascending `(slot, profileName)` order. Reason: exactly one Chrome/CDP session exists (one port, one user-data-dir), so two concurrent runs would fight over it. This ordering is the daemon's own explicit sort — it no longer inherits ordering from `collectScheduledJobs`'s sorted-profile-name convention in `cli/commands/schedule.ts`, which a later CLI task deletes.
 
 - [ ] **Step 1: Write the first failing test.**
@@ -2134,13 +2164,20 @@ MANDATORY ORDERING RULES — each stated once, each covered by a test:
     now(): Date;
   }
 
-  function slotMomentOn(reference: Date, slot: string): Date {
-    const parts = slot.split(':');
-    const hh = Number(parts[0]);
-    const mm = Number(parts[1]);
-    const moment = new Date(reference);
-    moment.setHours(hh, mm, 0, 0);
-    return moment;
+  /** Local wall-clock moment for `slot` ("HH:MM") ON `date` ("YYYY-MM-DD")
+   * — built from the OWED ENTRY's OWN date, never from `now`'s own
+   * calendar date (mirrors owed.ts's own `parseLocal`). A batch that runs
+   * past local midnight must still evaluate each entry against the date it
+   * was actually scheduled for. */
+  function parseSlotMoment(date: string, slot: string): Date {
+    const dateParts = date.split('-');
+    const timeParts = slot.split(':');
+    const year = Number(dateParts[0]);
+    const month = Number(dateParts[1]);
+    const day = Number(dateParts[2]);
+    const hour = Number(timeParts[0]);
+    const minute = Number(timeParts[1]);
+    return new Date(year, month - 1, day, hour, minute, 0, 0);
   }
 
   export function createDaemon(deps: DaemonDeps): {
@@ -2187,7 +2224,7 @@ MANDATORY ORDERING RULES — each stated once, each covered by a test:
         // this same batch may have consumed this entry's own grace window
         // while it waited its turn.
         const revalidateAt = deps.now();
-        const slotMoment = slotMomentOn(revalidateAt, owed.slot);
+        const slotMoment = parseSlotMoment(owed.date, owed.slot);
         const graceEndMoment = new Date(slotMoment.getTime() + graceMinutes * 60_000);
         if (revalidateAt > graceEndMoment) {
           deps.log('slot-expired-skipped', { profile: owed.profile, slot: owed.slot });
@@ -2195,13 +2232,15 @@ MANDATORY ORDERING RULES — each stated once, each covered by a test:
         }
 
         // Ledger BEFORE spawning — a crash between this write and the
-        // spawn call still counts the slot as attempted (D19).
+        // spawn call still counts the slot as attempted (D19). A9: prune to
+        // only today's entries on every write, not just on read (rule 5) —
+        // the pidfile itself never accumulates yesterday's attempts.
         updateDaemonPidfile(
           deps.root,
           (current) => ({
             ...current,
             attempts: [
-              ...current.attempts,
+              ...current.attempts.filter((a) => a.date === owed.date),
               { profile: owed.profile, date: owed.date, slot: owed.slot },
             ],
           }),
@@ -2243,6 +2282,11 @@ MANDATORY ORDERING RULES — each stated once, each covered by a test:
     return {
       tick,
       start(): void {
+        // §5.2/A15.2: an immediate first tick, BEFORE arming the interval —
+        // replay evaluates at daemon start, not TICK_MS after it, and a
+        // live daemon must heartbeat within 35s of being observed (the
+        // steal-recheck window `serve start` uses).
+        void tick();
         timer = setInterval(() => {
           void tick();
         }, TICK_MS);
@@ -2524,7 +2568,7 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
 - Records the child's pid into the pidfile `inFlight` field AFTER `spawn()` returns (the pid does not exist before that call). Accepted gap: a daemon crash in that window orphans an unrecorded child.
 - Attaches an `error` handler. An `error` event (ENOENT, EMFILE) is treated exactly as a nonzero child exit — it must NOT throw, because an uncaught throw here kills the daemon: a domain-1 blast radius for a domain-2 problem. The ledger-append-before-spawn from Task 7 already prevents a retry storm in this case.
 - Arms a `setTimeout` backstop at `runCapMs + BACKSTOP_MARGIN_MS`. On expiry: `SIGTERM`, then after `SIGKILL_GRACE_MS`, `SIGKILL`. This is a faithful port of the embedded bash watchdog the retired plist carried inside `buildCommand` (sleep → `kill -0` → SIGTERM → sleep 20 → SIGKILL), using the SAME +300s margin, not a new policy. Windows caveat: Node emulates both signals as an unconditional terminate there, so the escalation collapses to a single hard kill, which is acceptable (D10).
-- The backstop timer is cleared when the child exits normally.
+- The backstop timer AND its own nested SIGKILL timer (armed inside the backstop's callback once SIGTERM fires) are BOTH cleared when the child exits — the nested timer is tracked in the enclosing scope, not local to the backstop callback, specifically so a child that exits between SIGTERM and SIGKILL_GRACE_MS doesn't leave it dangling.
 - Clears `inFlight` from the pidfile on exit, whatever the exit code.
 - `runCapMs` is passed IN, derived by the caller from `computeRunCapMs()` (Task 9). It must never be hardcoded here — stage timeouts change, and a hardcoded figure goes stale silently (A12).
 
@@ -2736,8 +2780,9 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
    * here, in CI, rather than silently in a running daemon.
    *
    * Spiritually the successor to `test/invariants/run_cap_backstop.
-   * test.ts` (deleted by Task 12, which imports `DEFAULT_RUN_CAP_MS`
-   * from the doomed `adapters/scheduler/launchd/plist.ts`) — same intent
+   * test.ts` (deleted when the launchd scheduler was removed — it
+   * imported `DEFAULT_RUN_CAP_MS` from the doomed
+   * `adapters/scheduler/launchd/plist.ts`) — same intent
    * (catch a stage-budget drift before it reaches production), same
    * `test/invariants/` home, different mechanism (a static table plus
    * this construction-based guard, rather than a hand-copied launchd
@@ -3035,7 +3080,10 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
     const child = fakeChild(9001);
     const { deps, pidfile } = baseDeps({ spawn: child.spawnArg });
     const promise = createSpawnRun(deps)(OWED);
-    assert.equal(readDaemonPidfile(ROOT, pidfile)?.inFlight, 9001);
+    const inFlight = readDaemonPidfile(ROOT, pidfile)?.inFlight;
+    assert.equal(inFlight?.pid, 9001);
+    assert.equal(inFlight?.profile, OWED.profile);
+    assert.equal(typeof inFlight?.startedAt, 'string');
     child.emit('exit', 0);
     const code = await promise;
     assert.equal(code, 0);
@@ -3099,8 +3147,9 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
    * the append fd, records/clears the daemon pidfile's `inFlight` pid, and
    * arms a SIGTERM→SIGKILL backstop that is a faithful PORT of the embedded
    * bash watchdog the retired plist carried inside `buildCommand`
-   * (`adapters/scheduler/launchd/plist.ts`, deleted by Task 12) — the same
-   * +300s margin, the same 20s SIGKILL grace, not a new policy (§6.5).
+   * (`adapters/scheduler/launchd/plist.ts`, deleted when the launchd
+   * scheduler was removed) — the same +300s margin, the same 20s SIGKILL
+   * grace, not a new policy (§6.5).
    *
    * This module knows nothing about pipeline stages, the CLI, or the
    * daemon's own tick loop — it only knows how to spawn and supervise ONE
@@ -3171,18 +3220,34 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
         deps.logs.closeSync(fd);
 
         // S1: the pid does not exist until spawn() returns, so recording
-        // it is necessarily AFTER, not before, the call above.
+        // it is necessarily AFTER, not before, the call above. C1: inFlight
+        // is the full DaemonInFlight object — pid, profile, and startedAt —
+        // not a bare pid, so `serve status` can report which profile is
+        // running and for how long, not just a number.
         if (typeof child.pid === 'number') {
           const childPid = child.pid;
           updateDaemonPidfile(
             deps.root,
-            (current) => ({ ...current, inFlight: childPid }),
+            (current) => ({
+              ...current,
+              inFlight: {
+                pid: childPid,
+                profile: owed.profile,
+                startedAt: deps.pidfile.now().toISOString(),
+              },
+            }),
             deps.pidfile,
           );
         }
 
         let settled = false;
         let backstop: ReturnType<SuperviseDeps['setTimeout']> | undefined;
+        // Tracked in this ENCLOSING scope, not local to the backstop's own
+        // callback below — otherwise a child that exits between SIGTERM and
+        // SIGKILL_GRACE_MS leaves this nested timer dangling: `finish()`
+        // would clear `backstop` (already fired, a no-op) but have no
+        // reference to the still-pending SIGKILL timer to clear.
+        let killTimer: ReturnType<SuperviseDeps['setTimeout']> | undefined;
 
         const clearInFlight = (): void => {
           updateDaemonPidfile(
@@ -3196,6 +3261,7 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
           if (settled) return;
           settled = true;
           if (backstop) deps.clearTimeout(backstop);
+          if (killTimer) deps.clearTimeout(killTimer);
           clearInFlight();
           resolve(code);
         };
@@ -3208,7 +3274,7 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
         backstop = deps.setTimeout(() => {
           deps.log('backstop-expired', { profile: owed.profile, slot: owed.slot });
           child.kill('SIGTERM');
-          const killTimer = deps.setTimeout(() => {
+          killTimer = deps.setTimeout(() => {
             child.kill('SIGKILL');
           }, SIGKILL_GRACE_MS);
           killTimer.unref?.();
@@ -3326,6 +3392,27 @@ Behavior rules for `createSpawnRun`, each stated once and tested:
     child.emit('exit', 0);
     await promise;
     assert.equal(timers.pending.length, 0); // cleared, not merely never fired.
+  });
+
+  test('the nested SIGKILL timer is also cleared when the child exits between SIGTERM and SIGKILL_GRACE_MS', async () => {
+    const child = fakeChild(9001);
+    const timers = fakeTimers();
+    const { deps } = baseDeps({
+      spawn: child.spawnArg,
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout,
+      runCapMs: 1_000,
+    });
+    const promise = createSpawnRun(deps)(OWED);
+    assert.equal(timers.pending.length, 1); // just the backstop, so far.
+
+    timers.fireEarliest(); // backstop expires: SIGTERM sent, the nested SIGKILL timer arms.
+    assert.deepEqual(child.killCalls, ['SIGTERM']);
+    assert.equal(timers.pending.length, 1); // the nested SIGKILL timer, now pending.
+
+    child.emit('exit', 0); // the child dies from SIGTERM before SIGKILL_GRACE_MS elapses.
+    await promise;
+    assert.equal(timers.pending.length, 0); // the nested timer was cleared too, not left dangling.
   });
   ```
 
@@ -3474,10 +3561,10 @@ export function serveCommand(
 
 Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
 
-1. **`serve start` (no `--daemon-child`, the parent).** On darwin, scans `~/Library/LaunchAgents/` for `^com\.jobbunny\.\d{4}\.plist$` (four digits — deliberately excludes `com.jobbunny.autostart.plist`, Task 10's file). Any match ⇒ refuse (exit 1), printing a ready-to-paste `launchctl bootout gui/<uid>/<label>` + `rm <path>` block, one pair per plist, sorted by filename. No `launchd` code is retained for this — a directory read plus printed strings. Then acquires the daemon pidfile with `acquireDaemonPidfile(root, pid, pidfileDeps)`, writing the PARENT's own pid as the placeholder. On acquisition failure: read the existing pidfile; if it is NOT stale, print the holder's pid/`startedAt` and exit 1 without touching it. If it IS stale (`isDaemonPidfileStale`) and the recorded pid is alive, wait `STEAL_RECHECK_WAIT_MS` (35s — one 30s tick plus a 5s margin) and re-read: if `lastTickAt` advanced, it was just woken from sleep, not dead — refuse, exit 1. Only when the pid is confirmed dead (immediately, no wait) or the re-check still shows no advance does it release and re-acquire. Then rotates `daemon.log` (start-only rotation, per Task 6/D21), opens its append fd, spawns `spawn(nodeBin, [cliEntry, 'serve', 'start', '--daemon-child'], { stdio: ['ignore', fd, fd], detached: true })`, closes its own fd copy, records the child's pid into the pidfile (overwriting the placeholder — necessarily after `spawn()` returns), attaches an `error` handler (same already-dead path below), waits 2s, and confirms liveness via `pidIsAlive`. Alive ⇒ print success, exit 0. Dead (or errored) ⇒ remove the pidfile it created, print the tail of `daemon.log`, exit 1.
-2. **`serve start --daemon-child`.** Does NOT touch the pidfile's create step — the parent already owns and populated it. Derives `runCapMs` via `computeRunCapMs()` (see the design note above), builds `SuperviseDeps` and `DaemonDeps`, calls `createDaemon(daemonDeps).start()`, and resolves its own returned promise only once a `SIGINT`/`SIGTERM` handler fires `daemon.stop()` + `releaseDaemonPidfile()` — this is what makes the process a genuine foreground daemon rather than a one-shot command.
+1. **`serve start` (no `--daemon-child`, the parent).** On darwin, scans `~/Library/LaunchAgents/` for `^com\.jobbunny\.\d{4}\.plist$` (four digits — deliberately excludes `com.jobbunny.autostart.plist`, Task 10's file). Any match ⇒ refuse (exit 1), printing a ready-to-paste `launchctl bootout gui/<uid>/<label>` + `rm <path>` block, one pair per plist, sorted by filename. No `launchd` code is retained for this — a directory read plus printed strings. Then acquires the daemon pidfile with `acquireDaemonPidfile(root, pid, pidfileDeps)`, writing the PARENT's own pid as the placeholder. On acquisition failure: read the existing pidfile; if it is NOT stale, print the holder's pid/`startedAt` and exit 1 without touching it. If it IS stale (`isDaemonPidfileStale`) and the recorded pid is alive, wait `STEAL_RECHECK_WAIT_MS` (35s — one 30s tick plus a 5s margin) and re-read: if `lastTickAt` advanced, it was just woken from sleep, not dead — refuse, exit 1. Only when the pid is confirmed dead (immediately, no wait) or the re-check still shows no advance does it release and re-acquire. Then rotates `daemon.log` (start-only rotation, per Task 6/D21), opens its append fd, spawns `spawn(nodeBin, [cliEntry, 'serve', 'start', '--daemon-child'], { stdio: ['ignore', fd, fd], detached: true })`, closes its own fd copy, records the child's pid into the pidfile (overwriting the placeholder — necessarily after `spawn()` returns), attaches an `error` handler (same already-dead path below), waits 2s, and confirms liveness via `pidIsAlive`. Alive ⇒ print success, exit 0. Dead (or errored) ⇒ remove the pidfile it created, print the tail of `daemon.log`, exit 1. B3: the staleness probe consulted by `isDaemonPidfileStale` is the PIDFILE deps' OWN `pidIsAlive` (`deps.pidfile.pidIsAlive`), a distinct injection point from `ServeDeps.pidIsAlive` (used only for the separate post-steal-decision liveness check, and for the 2s alive-confirm below) — `defaultServeDeps` wires both to the SAME real `process.kill` probe so they never disagree in production, but a test that overrides one without the other will exercise a code path that doesn't match its intent; tests must keep the two views consistent.
+2. **`serve start --daemon-child`.** Does NOT touch the pidfile's create step — the parent already owns and populated it. Derives `runCapMs` via `computeRunCapMs()` (see the design note above), builds `SuperviseDeps` and `DaemonDeps`, calls `createDaemon(daemonDeps).start()`, and resolves its own returned promise only once a `SIGINT`/`SIGTERM` handler fires `daemon.stop()` — this is what makes the process a genuine foreground daemon rather than a one-shot command. B1: the shutdown handler does NOT also release the pidfile — pidfile removal belongs exclusively to `serve stop` (item 3 below), after it has confirmed BOTH the daemon and any `inFlight` child are dead. A child that releases its own pidfile on SIGTERM would delete it out from under `serve stop`'s re-read, so the in-flight child it's supposed to also kill would never be found; a daemon that dies any other way just leaves a dead-pid pidfile that D22's staleness rule self-heals.
 3. **`serve stop`.** Reads the pidfile for the daemon pid. `SIGTERM`, poll (not a fixed sleep) until dead or `SIGKILL_GRACE_MS` (20s, reused from Task 8 — same constant, not a second one), then `SIGKILL`, poll again. If still alive: exit 1, leave the pidfile, print the pid. Only then RE-READS the pidfile for `inFlight` (safe: a dead daemon cannot write again) and applies the identical escalation to it if a pid is recorded and alive. Only once both are confirmed dead: remove the pidfile, exit 0. `ESRCH` anywhere is already-dead, not an error (`pidIsAlive`/`killPid` absorb it).
-4. **`serve status`.** Read-only — never mutates the pidfile. Reports running/not-running, pid + uptime, `lastTickAt` + a "wedged" flag when older than `HEARTBEAT_STALE_MS`, the `inFlight` pid (if any), the next scheduled slot(s) via `nextFireAt`, and any currently-owed runs via `isRunOwed` fed the SAME disk-history-plus-ledger merge `daemon.ts`'s own tick uses (D19) — not disk history alone, which would over-report a slot that a synthetic ledger entry already served.
+4. **`serve status`.** Read-only — never mutates the pidfile. Reports running/not-running, pid + uptime, `lastTickAt` + a "wedged" flag when older than `HEARTBEAT_STALE_MS`, the `inFlight` child (if any — C1: pid, profile, AND elapsed time, not a bare pid), the next scheduled slot(s) via `nextFireAt`, and any currently-owed runs via `isRunOwed` fed the SAME disk-history-plus-ledger merge `daemon.ts`'s own tick uses (D19) — not disk history alone, which would over-report a slot that a synthetic ledger entry already served.
 
 `serve` takes NO `--profile` — cross-profile by design (D6), the same posture `schedule install` has today. `--daemon-child` is internal-only, deliberately omitted from `USAGE`.
 
@@ -3780,6 +3867,13 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
   function defaultServeDeps(): ServeDeps {
     const root = process.cwd();
     const home = homedir();
+    // B3: built once, then reused for BOTH `pidfile.pidIsAlive` (the
+    // staleness probe `isDaemonPidfileStale` actually consults) and the
+    // top-level `pidIsAlive` below (the separate post-steal-decision and
+    // 2s-alive-confirm checks) — the SAME `process.kill`-based probe wired
+    // to both injection points, never two independently-written copies
+    // that could silently drift apart.
+    const pidfileDeps = defaultDaemonPidfileDeps();
     return {
       root,
       home,
@@ -3787,7 +3881,7 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
       uid: process.getuid?.(),
       pid: process.pid,
       profilesDir: path.join(root, 'profiles'),
-      pidfile: defaultDaemonPidfileDeps(),
+      pidfile: pidfileDeps,
       logs: defaultLogDeps(),
       scan: defaultScanDeps(),
       listLaunchAgentFiles: () => {
@@ -3804,14 +3898,7 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
         }) as unknown as SpawnHandle,
       nodeBin: process.execPath,
       cliEntry: fileURLToPath(new URL('../main.ts', import.meta.url)),
-      pidIsAlive: (pid) => {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch (err) {
-          return !hasCode(err, 'ESRCH');
-        }
-      },
+      pidIsAlive: pidfileDeps.pidIsAlive,
       killPid: (pid, signal) => {
         try {
           process.kill(pid, signal as NodeJS.Signals);
@@ -3881,8 +3968,8 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
       // 35s later, before stealing — a machine that just woke from sleep
       // legitimately shows a stale heartbeat for up to one tick. A dead
       // pid steals immediately, no wait.
+      const observedHeartbeat = existing?.lastTickAt;
       if (existing && deps.pidIsAlive(existing.pid)) {
-        const observedHeartbeat = existing.lastTickAt;
         await deps.sleep(STEAL_RECHECK_WAIT_MS);
         const recheck = readDaemonPidfile(deps.root, deps.pidfile);
         if (recheck && recheck.lastTickAt !== observedHeartbeat) {
@@ -3891,6 +3978,22 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
           );
           return 1;
         }
+      }
+      // S3: `releaseDaemonPidfile` below is an unconditional unlink, so two
+      // `serve start`s that both reach this point (both passed the 35s
+      // re-check, or both observed the same dead pid) could otherwise
+      // release/acquire over each other — the second unlinking the
+      // first's freshly-created pidfile. One more re-read, immediately
+      // before the release, narrows that window to a residual
+      // microsecond-scale race (accepted, the same posture as
+      // `run_lock`'s own bounded steal) rather than the multi-tens-of-
+      // seconds window the 35s wait alone would leave open.
+      const finalCheck = readDaemonPidfile(deps.root, deps.pidfile);
+      if (finalCheck && finalCheck.lastTickAt !== observedHeartbeat) {
+        deps.writeErr(
+          `serve start: a daemon is already running (pid ${finalCheck.pid}, started ${finalCheck.startedAt})`,
+        );
+        return 1;
       }
       releaseDaemonPidfile(deps.root, deps.pidfile);
       acquired = acquireDaemonPidfile(deps.root, deps.pid, deps.pidfile);
@@ -3978,11 +4081,19 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
 
     // §6.1: the child's only job is the tick loop — it never touches the
     // pidfile's create step (the parent already did) and resolves only on
-    // a shutdown signal.
+    // a shutdown signal. B1: the shutdown handler does NOT release the
+    // pidfile — removal belongs exclusively to `serve stop`, and only
+    // after BOTH the daemon and any in-flight child are confirmed dead
+    // (`runServeStop` below). Releasing it here would delete the pidfile
+    // the instant SIGTERM lands, so `serve stop`'s own re-read (which
+    // finds the `inFlight` child to kill) would find nothing and a
+    // still-running child would survive a successful stop. A daemon that
+    // dies any other way (crash, kill -9) simply leaves a dead-pid pidfile
+    // behind — D22's staleness rule (`isDaemonPidfileStale`) self-heals
+    // that on the next `serve start`.
     return new Promise<number>((resolve) => {
       const shutdown = (): void => {
         daemon.stop();
-        releaseDaemonPidfile(deps.root, deps.pidfile);
         resolve(0);
       };
       process.once('SIGINT', shutdown);
@@ -4032,13 +4143,16 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
     }
 
     // Safe to re-read now: a dead daemon cannot spawn or write to the
-    // pidfile again, so its last write is authoritative.
+    // pidfile again, so its last write is authoritative. B1: this re-read
+    // is exactly why the daemon child's own shutdown handler must NOT
+    // release the pidfile on SIGTERM — if it did, this read would find
+    // nothing and the in-flight child below would never be found or killed.
     const after = readDaemonPidfile(deps.root, deps.pidfile);
     if (after?.inFlight !== undefined) {
-      const childDead = await killAndConfirmDead(after.inFlight, deps);
+      const childDead = await killAndConfirmDead(after.inFlight.pid, deps);
       if (!childDead) {
         deps.writeErr(
-          `serve stop: in-flight child (pid ${after.inFlight}) survived SIGKILL`,
+          `serve stop: in-flight child (pid ${after.inFlight.pid}) survived SIGKILL`,
         );
         return 1;
       }
@@ -4067,8 +4181,14 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
       `  last tick: ${file.lastTickAt} (${formatDuration(heartbeatAgeMs)} ago)` +
         (wedged ? ' — appears wedged' : ''),
     );
+    // §6.1: reports the profile and elapsed time, not just the pid — the
+    // bare `pid ${n}` form told an operator nothing about WHICH profile
+    // was running or for how long.
     deps.write(
-      file.inFlight !== undefined ? `  in flight: pid ${file.inFlight}` : '  in flight: none',
+      file.inFlight !== undefined
+        ? `  in flight: pid ${file.inFlight.pid} (profile ${file.inFlight.profile}, running ` +
+            `${formatDuration(now.getTime() - Date.parse(file.inFlight.startedAt))})`
+        : '  in flight: none',
     );
 
     const schedules = scanProfileSchedules(deps.profilesDir, deps.scan);
@@ -4124,7 +4244,7 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
 
   Expected: `# pass 3`, `# fail 0`.
 
-- [ ] **Step 5: Write the remaining three tests.**
+- [ ] **Step 5: Write the remaining five tests.**
 
   Append to `serve.test.ts`:
 
@@ -4132,6 +4252,12 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
   test('start: a dead pid steals immediately — no 35s re-check wait', async () => {
     const pidfile = fakePidfileDeps();
     acquireDaemonPidfile(ROOT, 999, pidfile); // the "other" daemon's placeholder.
+    // B3: staleness is decided by isDaemonPidfileStale(existing,
+    // deps.pidfile) inside runServeStartParent — the PIDFILE deps' OWN
+    // pidIsAlive, not ServeDeps.pidIsAlive (a separate, later check). Both
+    // must agree pid 999 is dead, or the code takes the "still running,
+    // refuse" branch before ever reaching the steal path.
+    pidfile.pidIsAlive = (pid) => pid !== 999;
     const { deps, sleeps } = baseServeDeps({
       pidfile,
       pidIsAlive: (pid) => pid !== 999, // 999 is dead; the spawned child (9001) is alive.
@@ -4145,7 +4271,14 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
   test('stop: kills the daemon before the in-flight child, re-reading the pidfile between them', async () => {
     const pidfile = fakePidfileDeps();
     acquireDaemonPidfile(ROOT, 1000, pidfile);
-    updateDaemonPidfile(ROOT, (c) => ({ ...c, inFlight: 2000 }), pidfile);
+    updateDaemonPidfile(
+      ROOT,
+      (c) => ({
+        ...c,
+        inFlight: { pid: 2000, profile: 'harish', startedAt: pidfile.now().toISOString() },
+      }),
+      pidfile,
+    );
     const killOrder: string[] = [];
     const alive = new Set([1000, 2000]);
     const { deps } = baseServeDeps({
@@ -4175,12 +4308,54 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
     assert.notEqual(readDaemonPidfile(ROOT, pidfile), undefined); // left in place.
   });
 
-  test('status: renders pid/uptime, last-tick, in-flight, and next-fire lines', async () => {
+  test('stop: the pidfile still contains inFlight after the daemon process has already exited, and stop kills that pid (B1)', async () => {
     const pidfile = fakePidfileDeps();
     acquireDaemonPidfile(ROOT, 1000, pidfile);
     updateDaemonPidfile(
       ROOT,
-      (c) => ({ ...c, inFlight: 3000, lastTickAt: new Date(2026, 6, 27, 14, 3).toISOString() }),
+      (c) => ({
+        ...c,
+        inFlight: { pid: 4000, profile: 'harish', startedAt: pidfile.now().toISOString() },
+      }),
+      pidfile,
+    );
+    // Simulates the daemon having already exited (crashed, or its own
+    // SIGTERM shutdown handler already ran) WITHOUT releasing the
+    // pidfile — per B1, release belongs exclusively to `serve stop`. Only
+    // the in-flight child (4000) is alive; the daemon (1000) is already
+    // dead, so `stop` must still find and kill the surviving child from
+    // the persisted file rather than short-circuit on "no pidfile found".
+    const alive = new Set([4000]);
+    const killOrder: string[] = [];
+    const { deps } = baseServeDeps({
+      pidfile,
+      pidIsAlive: (pid) => alive.has(pid),
+      killPid: (pid, signal) => {
+        killOrder.push(`${pid}:${signal}`);
+        if (signal === 'SIGTERM') alive.delete(pid);
+      },
+    });
+    assert.equal(readDaemonPidfile(ROOT, pidfile)?.inFlight?.pid, 4000); // still present pre-stop.
+    const code = await serveCommand({ action: 'stop' }, deps);
+    assert.equal(code, 0);
+    assert.ok(killOrder.includes('4000:SIGTERM')); // the in-flight child was found and killed.
+    assert.equal(readDaemonPidfile(ROOT, pidfile), undefined);
+  });
+
+  test('status: renders pid/uptime, last-tick, in-flight (profile + elapsed), and next-fire lines', async () => {
+    const pidfile = fakePidfileDeps();
+    acquireDaemonPidfile(ROOT, 1000, pidfile);
+    updateDaemonPidfile(
+      ROOT,
+      (c) => ({
+        ...c,
+        inFlight: {
+          pid: 3000,
+          profile: 'harish',
+          startedAt: new Date(2026, 6, 27, 14, 0).toISOString(),
+        },
+        lastTickAt: new Date(2026, 6, 27, 14, 3).toISOString(),
+      }),
       pidfile,
     );
     const scan: ScanDeps = {
@@ -4209,18 +4384,18 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
     const printed = writes.join('\n');
     assert.match(printed, /running \(pid 1000, uptime/);
     assert.match(printed, /last tick:/);
-    assert.match(printed, /in flight: pid 3000/);
+    assert.match(printed, /in flight: pid 3000 \(profile harish, running/); // C1: profile + elapsed, not just a pid.
     assert.match(printed, /next fire:.*harish/);
   });
   ```
 
-- [ ] **Step 6: Run it and see all seven tests pass.**
+- [ ] **Step 6: Run it and see all eight tests pass.**
 
   ```bash
   node --test src/cli/commands/serve.test.ts
   ```
 
-  Expected: `# pass 7`, `# fail 0` — no implementation change needed.
+  Expected: `# pass 8`, `# fail 0` — no implementation change needed.
 
 - [ ] **Step 7: Wire `serve` into `main.ts` — USAGE, `CommandName`, `COMMAND_NAMES`, `buildOptions`, `defaultCommands`, dispatch, and the `--daemon-child` flag.**
 
@@ -4507,10 +4682,10 @@ export interface AutostartDeps {
   platform: NodeJS.Platform;
   home: string;
   uid: number | undefined;
+  root: string;
   nodeBin: string;
   cliEntry: string;
   listLaunchAgentFiles(): string[];
-  readFile(path: string): Promise<string>;
   writeFile(path: string, data: string): Promise<void>;
   unlink(path: string): Promise<void>;
   runLaunchctl(args: string[]): Promise<{ exitCode: number; stdout: string }>;
@@ -4518,7 +4693,7 @@ export interface AutostartDeps {
   writeErr(line: string): void;
 }
 
-export function renderAutostartPlist(nodeBin: string, cliEntry: string): string;
+export function renderAutostartPlist(nodeBin: string, cliEntry: string, root: string): string;
 
 export function autostartCommand(
   opts: AutostartCommandOptions,
@@ -4529,6 +4704,7 @@ export function autostartCommand(
 Behavior:
 
 - Writes exactly one LaunchAgent, `~/Library/LaunchAgents/com.jobbunny.autostart.plist`, with `RunAtLoad: true` and NO `StartCalendarInterval`, program `<nodeBin> <cliEntry> serve start`. It carries ZERO schedule knowledge — the daemon's tick loop remains the only interpreter of `times`/`weekdays`/`graceMinutes` (§6.7).
+- B2: the plist ALSO sets `WorkingDirectory` to the repo root (`AutostartDeps.root`, defaulting to `process.cwd()` at enable time). Without it, launchd runs `serve start` with cwd `/`: the pidfile becomes `/.jobbunny-daemon.pid`, `profilesDir` becomes `/profiles`, and `main.ts`'s `dotenv/config` load finds no `.env` — autostart would be broken on every login. The retired plist embedded `cd '${root}'` in its own `buildCommand` for exactly this reason; `WorkingDirectory` is the LaunchAgent-native equivalent.
 - `enable` performs the SAME legacy-plist migration scan `serve start` does (the `^com\.jobbunny\.\d{4}\.plist$` regex, reused from `./serve.ts`) and refuses with the identical ready-to-paste cleanup block on any match — BEFORE writing anything. Without this, a user who runs `autostart enable` before ever running `serve start` would only discover the conflict at the NEXT login, when the LaunchAgent's own `serve start` invocation refuses and the refusal lands only in `daemon.log`.
 - `enable` writes the plist, then runs `launchctl bootstrap gui/<uid> <plist>`; `disable` runs `launchctl bootout gui/<uid>/com.jobbunny.autostart` and removes the plist. Both tolerate a not-loaded/already-loaded state — a nonzero `launchctl` exit is logged, not fatal, since the plist file itself (written/removed successfully) is the source of truth for whether autostart is configured.
 - On non-darwin, both subcommands exit nonzero with a message naming the documented manual alternative (Task Scheduler on Windows, a systemd `--user` unit on Linux, both pointing at `jobbunny serve start` with no arguments) — a platform asymmetry, stated explicitly, not implied parity (D20).
@@ -4573,17 +4749,20 @@ Behavior:
   import { autostartCommand, renderAutostartPlist } from './autostart.ts';
   import type { AutostartDeps } from './autostart.ts';
 
-  test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval', () => {
-    const xml = renderAutostartPlist('/usr/local/bin/node', '/repo/src/cli/main.ts');
+  test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval, sets WorkingDirectory', () => {
+    const xml = renderAutostartPlist('/usr/local/bin/node', '/repo/src/cli/main.ts', '/repo');
     assert.match(xml, /<key>RunAtLoad<\/key>\s*<true\/>/);
     assert.doesNotMatch(xml, /StartCalendarInterval/);
     assert.match(xml, /<string>com\.jobbunny\.autostart<\/string>/);
     assert.match(xml, /<string>serve<\/string>/);
     assert.match(xml, /<string>start<\/string>/);
+    // B2: WorkingDirectory must be set, or launchd runs `serve start` with
+    // cwd `/` — wrong pidfile, wrong profilesDir, no .env loaded.
+    assert.match(xml, /<key>WorkingDirectory<\/key>\s*<string>\/repo<\/string>/);
   });
 
   test('renderAutostartPlist: XML-escapes an interpolated path containing "&"', () => {
-    const xml = renderAutostartPlist('/Users/a & b/node', '/repo/src/cli/main.ts');
+    const xml = renderAutostartPlist('/Users/a & b/node', '/repo/src/cli/main.ts', '/repo');
     assert.match(xml, /a &amp; b/);
     assert.doesNotMatch(xml, /a & b/);
   });
@@ -4605,10 +4784,10 @@ Behavior:
       platform: 'darwin',
       home: '/fake/home',
       uid: 501,
+      root: '/fake/root',
       nodeBin: 'node',
       cliEntry: '/repo/src/cli/main.ts',
       listLaunchAgentFiles: () => [],
-      readFile: async (p) => written.get(p) ?? '',
       writeFile: async (p, data) => {
         written.set(p, data);
       },
@@ -4626,11 +4805,13 @@ Behavior:
     return { deps, written, unlinked, launchctlCalls, writes, errs };
   }
 
-  test('enable: writes the plist and bootstraps it', async () => {
+  test('enable: writes the plist (with WorkingDirectory) and bootstraps it', async () => {
     const { deps, written, launchctlCalls } = fakeDeps();
     const code = await autostartCommand({ action: 'enable' }, deps);
     assert.equal(code, 0);
-    assert.ok(written.has('/fake/home/Library/LaunchAgents/com.jobbunny.autostart.plist'));
+    const plist = written.get('/fake/home/Library/LaunchAgents/com.jobbunny.autostart.plist');
+    assert.ok(plist);
+    assert.match(plist, /<key>WorkingDirectory<\/key>\s*<string>\/fake\/root<\/string>/);
     assert.deepEqual(launchctlCalls[0], [
       'bootstrap',
       'gui/501',
@@ -4664,12 +4845,7 @@ Behavior:
    * takes.
    */
   import { execFile } from 'node:child_process';
-  import {
-    readFile as fsReadFile,
-    readdirSync as fsReaddirSync,
-    unlink as fsUnlink,
-    writeFile as fsWriteFile,
-  } from 'node:fs';
+  import { readdirSync as fsReaddirSync, unlink as fsUnlink, writeFile as fsWriteFile } from 'node:fs';
   import { homedir } from 'node:os';
   import path from 'node:path';
   import { fileURLToPath } from 'node:url';
@@ -4677,7 +4853,6 @@ Behavior:
   import { LEGACY_PLIST_REGEX, migrationCleanupBlock } from './serve.ts';
 
   const execFileAsync = promisify(execFile);
-  const fsReadFileAsync = promisify(fsReadFile);
   const fsWriteFileAsync = promisify(fsWriteFile);
   const fsUnlinkAsync = promisify(fsUnlink);
 
@@ -4693,10 +4868,10 @@ Behavior:
     platform: NodeJS.Platform;
     home: string;
     uid: number | undefined;
+    root: string;
     nodeBin: string;
     cliEntry: string;
     listLaunchAgentFiles(): string[];
-    readFile(path: string): Promise<string>;
     writeFile(path: string, data: string): Promise<void>;
     unlink(path: string): Promise<void>;
     runLaunchctl(args: string[]): Promise<{ exitCode: number; stdout: string }>;
@@ -4719,8 +4894,14 @@ Behavior:
 
   /** `RunAtLoad: true`, deliberately NO `StartCalendarInterval` (§6.7): this
    * LaunchAgent's only job is starting `jobbunny serve start` at login —
-   * the daemon's own tick loop, not launchd, decides WHEN a run fires. */
-  export function renderAutostartPlist(nodeBin: string, cliEntry: string): string {
+   * the daemon's own tick loop, not launchd, decides WHEN a run fires.
+   * B2: also sets `WorkingDirectory` to `root` — without it, launchd runs
+   * the program with cwd `/`, so the pidfile lands at `/.jobbunny-daemon.
+   * pid`, `profilesDir` resolves to `/profiles`, and `main.ts`'s
+   * `dotenv/config` load finds no `.env`. The retired plist embedded `cd
+   * '${root}'` in its own `buildCommand` for exactly this reason —
+   * `WorkingDirectory` is the LaunchAgent-native equivalent. */
+  export function renderAutostartPlist(nodeBin: string, cliEntry: string, root: string): string {
     const argsXml = [nodeBin, cliEntry, 'serve', 'start']
       .map((a) => `      <string>${escapeXml(a)}</string>`)
       .join('\n');
@@ -4737,6 +4918,8 @@ Behavior:
       '    </array>',
       '    <key>RunAtLoad</key>',
       '    <true/>',
+      '    <key>WorkingDirectory</key>',
+      `    <string>${escapeXml(root)}</string>`,
       '  </dict>',
       '</plist>',
     ].join('\n');
@@ -4757,6 +4940,7 @@ Behavior:
       platform: process.platform,
       home,
       uid: process.getuid?.(),
+      root: process.cwd(), // B2: WorkingDirectory, captured at enable time.
       nodeBin: process.execPath,
       cliEntry: fileURLToPath(new URL('../main.ts', import.meta.url)),
       listLaunchAgentFiles: () => {
@@ -4766,7 +4950,6 @@ Behavior:
           return [];
         }
       },
-      readFile: (p) => fsReadFileAsync(p, 'utf8'),
       writeFile: (p, data) => fsWriteFileAsync(p, data, 'utf8'),
       unlink: (p) => fsUnlinkAsync(p),
       runLaunchctl: async (args) => {
@@ -4804,7 +4987,7 @@ Behavior:
     }
 
     const target = plistPath(deps.home);
-    await deps.writeFile(target, renderAutostartPlist(deps.nodeBin, deps.cliEntry));
+    await deps.writeFile(target, renderAutostartPlist(deps.nodeBin, deps.cliEntry, deps.root));
 
     const result = await deps.runLaunchctl(['bootstrap', `gui/${deps.uid ?? ''}`, target]);
     if (result.exitCode !== 0) {
@@ -5582,12 +5765,15 @@ Behavior:
 - Delete: `/Users/harishamutha/Job-bunny/test/invariants/run_cap_backstop.test.ts` (see the gap note directly below — a real gap found while writing this task, not part of the original decomposition, fixed here because leaving it would break `npm run check` the moment Step 1 runs)
 - Modify: `/Users/harishamutha/Job-bunny/src/cli/wire.ts`
 - Modify: `/Users/harishamutha/Job-bunny/src/cli/main.ts`
+- Modify: `/Users/harishamutha/Job-bunny/src/cli/main.test.ts` (B4 — see the second gap note below: four `schedule`-touching tests survive `main.ts`'s own edits above and must be deleted here, or Step 7's `npm run check` cannot pass)
 
 This task comes LAST among the code tasks because `serve` (Task 9) must exist before `schedule` is removed — there is no gap where neither triggering surface is wired.
 
 **Gap found while writing this task, fixed here (not a redesign):** `test/invariants/run_cap_backstop.test.ts` (outside `src/`, one of the two documented boundary exceptions) statically imports `DEFAULT_RUN_CAP_MS` from `src/adapters/scheduler/launchd/plist.ts` specifically to assert it exceeds `computeRunCapMs()`'s live-derived value — guarding against exactly the class of bug D3's revision log describes (a hand-copied literal that silently drifts from the real stage table). Deleting `plist.ts` without also deleting this test would leave a dangling import that fails `node --test "test/**/*.test.ts"` the moment Step 1 runs, breaking `npm run check` for the rest of this task's own steps. The invariant this test guards is not carried forward to a new location — it is structurally eliminated by Task 8's design: `createSpawnRun`'s backstop is armed at `deps.runCapMs + BACKSTOP_MARGIN_MS`, where `runCapMs` is `computeRunCapMs()`'s OWN live-derived value (never a separate hardcoded constant), so the backstop margin can no longer drift below the derived cap by construction — there is nothing left for a regression test to catch. Deleted, not migrated, per this task's own "deletes tests rather than adding them" framing.
 
 **Rationale for deleting the PORT and not replacing it, stated once:** the `Scheduler` interface's `install`/`remove`/`list` semantics describe registering jobs with an external OS registry, which a live daemon is not. No successor port exists; `src/ops/daemon/` is orchestration (D2/D14), not a `Scheduler` implementation — it never registers anything with an external scheduler, it spawns child processes directly.
+
+**B4 — second gap found while writing this task, fixed here (not a redesign):** `src/cli/main.test.ts` has four tests exercising the now-deleted `schedule` action (`'main: "schedule install" needs NO --profile — it is cross-profile'`, `'"schedule remove" does require --profile'`, `'"schedule remove" without --profile returns 2'`, `'an unknown schedule action returns 2'`, around lines 239–271 of the file as it stands after Tasks 9–11). Step 5 above removes `schedule`'s own `buildOptions` case, `CommandName` member, and `defaultCommands`/`COMMAND_NAMES` entries — all four of these tests would then fail (dispatching an action `buildOptions` no longer recognizes), so `npm run check` cannot pass until they too are deleted. Fixed here, in the same task that deletes their subject, per the same principle as the `run_cap_backstop.test.ts` gap above: a test for deleted behavior does not survive the deletion. Coverage does not merely shrink, though — Step 6 below adds the `serve`/`autostart` usage-error equivalents the `schedule`-era tests never had counterparts for.
 
 **Interfaces:** none produced or consumed — this task only deletes and mechanically re-derives the diff against the composed state Tasks 9–11 already put `main.ts`/`wire.ts` in.
 
@@ -5939,7 +6125,73 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
       case 'serve': {
   ```
 
-- [ ] **Step 6: Run `npm run boundaries` explicitly — deleting a port and an adapter family is exactly the kind of change dependency-cruiser catches.**
+- [ ] **Step 6: Update `main.test.ts` (B4) — delete the four now-dead `schedule` tests, add `serve`/`autostart` unknown-action equivalents so coverage does not shrink.**
+
+  In `/Users/harishamutha/Job-bunny/src/cli/main.test.ts`, replace:
+
+  ```ts
+  test('main: "schedule install" needs NO --profile — it is cross-profile', async () => {
+    const s = spy();
+    const code = await main(['schedule', 'install'], {
+      commands: { schedule: s.make('schedule') },
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(s.calls, [['schedule', { action: 'install' }]]);
+  });
+
+  test('main: "schedule remove" does require --profile', async () => {
+    const s = spy();
+    const code = await main(['schedule', 'remove', '--profile', 'rajni'], {
+      commands: { schedule: s.make('schedule') },
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(s.calls, [['schedule', { action: 'remove', profile: 'rajni' }]]);
+  });
+
+  test('main: "schedule remove" without --profile returns 2', async () => {
+    const code = await main(['schedule', 'remove'], {
+      commands: { schedule: async () => 0 },
+      stderr: () => {},
+    });
+    assert.equal(code, 2);
+  });
+
+  test('main: an unknown schedule action returns 2', async () => {
+    const code = await main(['schedule', 'bogus'], {
+      commands: { schedule: async () => 0 },
+      stderr: () => {},
+    });
+    assert.equal(code, 2);
+  });
+  ```
+
+  with:
+
+  ```ts
+  test('main: an unknown serve action returns 2, naming "start", "stop", or "status"', async () => {
+    const stderr = captureStderr();
+    const code = await main(['serve', 'bogus'], {
+      commands: { serve: async () => 0 },
+      stderr: stderr.write,
+    });
+    assert.equal(code, 2);
+    assert.match(stderr.lines.join('\n'), /"start", "stop", or "status"/);
+  });
+
+  test('main: an unknown autostart action returns 2, naming "enable" or "disable"', async () => {
+    const stderr = captureStderr();
+    const code = await main(['autostart', 'bogus'], {
+      commands: { autostart: async () => 0 },
+      stderr: stderr.write,
+    });
+    assert.equal(code, 2);
+    assert.match(stderr.lines.join('\n'), /"enable" or "disable"/);
+  });
+  ```
+
+  Net effect: four tests for deleted behavior removed, two new usage-error tests added for the surfaces that actually ship now — coverage for a malformed action string moves from `schedule` to `serve`/`autostart`, it does not shrink. Run `node --test src/cli/main.test.ts` and confirm `# fail 0` before moving on.
+
+- [ ] **Step 7: Run `npm run boundaries` explicitly — deleting a port and an adapter family is exactly the kind of change dependency-cruiser catches.**
 
   ```bash
   npm run boundaries
@@ -5947,26 +6199,26 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
 
   Expected: green — no dangling edge into the deleted `src/ports/scheduler.ts` or `src/adapters/scheduler/**` remains anywhere in `src/`. If this fails, it names the exact file that still imports one of the deleted paths; fix that import (it was almost certainly meant to be removed by Step 4 or 5 and was missed) before proceeding.
 
-- [ ] **Step 7: Run the full gate.**
+- [ ] **Step 8: Run the full gate.**
 
   ```bash
   npm run check
   ```
 
-  Expected: green — no unused-import lint errors (both `execFile`/`promisify` in `wire.ts` were removed alongside their only callers in Step 4), no dangling type errors from the deleted `Scheduler`/`LaunchdScheduler` symbols, and no dangling-import failure from the deleted `run_cap_backstop.test.ts` (Step 3).
+  Expected: green — no unused-import lint errors (both `execFile`/`promisify` in `wire.ts` were removed alongside their only callers in Step 4), no dangling type errors from the deleted `Scheduler`/`LaunchdScheduler` symbols, no dangling-import failure from the deleted `run_cap_backstop.test.ts` (Step 3), and no failure from `main.test.ts`'s four now-dead `schedule` tests (Step 6 — without that edit, this step cannot pass).
 
-- [ ] **Step 8: Verify the deletion is complete.**
+- [ ] **Step 9: Verify the deletion is complete.**
 
   ```bash
   grep -rn "launchctl\|LaunchAgents\|StartCalendarInterval" src/
   ```
 
-  Expected: only matches inside `src/cli/commands/autostart.ts` (Task 10) — the migration-scan regex and cleanup-block text in `serve.ts` (also Task 9/10-owned, still legitimately present) plus `autostart.ts`'s own `launchctl bootstrap`/`bootout` calls. No match anywhere under `src/ports/`, `src/adapters/scheduler/`, or `src/cli/commands/schedule.ts` (both gone). This task deletes tests rather than adding them — Steps 6–7 (plus this grep) ARE the verification.
+  Expected: only matches inside `src/cli/commands/autostart.ts` (Task 10) — the migration-scan regex and cleanup-block text in `serve.ts` (also Task 9/10-owned, still legitimately present) plus `autostart.ts`'s own `launchctl bootstrap`/`bootout` calls. No match anywhere under `src/ports/`, `src/adapters/scheduler/`, or `src/cli/commands/schedule.ts` (both gone). This task deletes tests rather than adding them — Steps 7–8 (plus this grep) ARE the verification.
 
-- [ ] **Step 9: Commit.**
+- [ ] **Step 10: Commit.**
 
   ```bash
-  git add src/cli/wire.ts src/cli/main.ts
+  git add src/cli/wire.ts src/cli/main.ts src/cli/main.test.ts
   git commit -m "$(cat <<'EOF'
   refactor(scheduler): delete the launchd Scheduler port and adapter family
 
@@ -5984,7 +6236,9 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
   vs-computeRunCapMs() guard is structurally obsolete: Task 8's
   backstop is armed at runCapMs + BACKSTOP_MARGIN_MS using the SAME
   live-derived runCapMs, so the hand-copied-literal drift this test
-  guarded against can no longer occur.
+  guarded against can no longer occur. main.test.ts's four schedule-
+  action tests go with it, replaced by unknown-action equivalents for
+  serve/autostart so coverage does not shrink (B4).
 
   Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
   EOF
@@ -6004,6 +6258,8 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
 **Rationale, stated once:** CLAUDE.md's own hard rule — "Markdown is code here" — requires architecture docs to be updated in the SAME change that alters behavior, not as a follow-up; this port deletes an entire adapter family (Task 12) and changes documented platform scope (Tasks 9/10), so D23 makes the obligation explicit rather than assumed. Every edit below is shown as a concrete before/after block against the file's REAL current text (verified by reading each file), not described in prose.
 
 **Scope discipline, stated once:** this plan (the scheduling daemon) does NOT touch Chrome discovery — that is the companion `2026-07-27-cross-platform-foundation.md` plan's job (see this plan's own Global Constraints). Every edit below is careful to say "scheduling is now cross-platform" without overclaiming "Chrome discovery is now cross-platform" — the pipeline remains macOS-only in practice until the companion plan ships, and the wording says so explicitly rather than implying more than Tasks 1–12 actually deliver.
+
+**S4 — cross-plan doc sequencing:** every "Chrome discovery is still hardcoded to macOS paths" pending-clause below assumes `2026-07-27-cross-platform-foundation.md` has NOT yet merged. If it HAS already merged by the time this task executes, drop those pending-clauses from Steps 2, 3, and 5 below and state cross-platform support outright instead — check that plan's own status (e.g. whether `src/adapters/browser/cdp-chrome/discovery/` already exists cross-platform on this branch) before copying any of this task's before/after blocks verbatim.
 
 - [ ] **Step 1: Check whether `executor.md` references the scheduler port or adapter family, before editing anything.**
 
@@ -6261,6 +6517,25 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
   - [Claude Code](https://claude.com/claude-code) CLI — the `claude` binary must resolve on `PATH`; `jobbunny doctor` checks this directly. Claude Code itself is cross-platform, so this is a prerequisite to install, not an OS blocker.
   ```
 
+  **S1** — replace the day-2 command table's now-dead `schedule install` row:
+
+  ```markdown
+  | `jobbunny lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
+  | `/page-analyse` | Rebuild a page inventory from live DOM analysis |
+  | `jobbunny schedule install` | Install launchd jobs from every profile's `schedule` in `profile.json` |
+  | `jobbunny reconcile --profile <name>` | Rebuild the local cache from your Notion database |
+  ```
+
+  with:
+
+  ```markdown
+  | `jobbunny lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
+  | `/page-analyse` | Rebuild a page inventory from live DOM analysis |
+  | `jobbunny serve start\|stop\|status` | Start/stop/check the in-process scheduling daemon (cross-profile) |
+  | `jobbunny autostart enable\|disable` | Register/remove a login LaunchAgent that runs `serve start` at boot (darwin only) |
+  | `jobbunny reconcile --profile <name>` | Rebuild the local cache from your Notion database |
+  ```
+
   Replace the entire "Scheduled runs" section:
 
   ````markdown
@@ -6319,13 +6594,121 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
   CLAUDE.md's platform line and cross-profile exception, the
   explainer.md baked-in KB's scheduling/CLI-surface/adapter-inventory
   sections, executor.md's placement decision tree (scheduler port and
-  adapter family both gone), and README's Scheduled runs section
-  (serve/autostart, the Windows/Linux manual alternative, and the
-  claude CLI prerequisite) all move together. Scope is deliberately
+  adapter family both gone), and README's day-2 command table plus its
+  Scheduled runs section (serve/autostart, the Windows/Linux manual
+  alternative, and the claude CLI prerequisite) all move together. Scope is deliberately
   narrow to what Tasks 1-12 actually shipped: scheduling is now
   cross-platform, Chrome discovery is not (that is the companion
   cross-platform-foundation plan's job) — every edit says so rather
   than overclaiming.
+
+  Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+  EOF
+  )"
+  ```
+
+---
+
+### Task 14: CI smoke test for the daemon lifecycle (S2)
+
+**Files:**
+- Modify: `/Users/harishamutha/Job-bunny/.github/workflows/test.yml`
+
+**Interfaces:** N/A — this task edits a GitHub Actions workflow, not TypeScript.
+
+**Placed here, last, deliberately:** every prior task's coverage is injected-dependency unit tests — nothing in Tasks 1–13 spawns a REAL detached child process, writes a REAL pidfile, or sends a REAL OS signal. This task is the one place that happens, on all three target OSes, closing that gap. It depends on `serve start|stop|status` (Task 9) existing and wired, so it cannot land any earlier; it depends on nothing from Tasks 1–13 beyond that CLI surface, so it is not itself part of the numbered spec-coverage table above.
+
+**Rationale, stated once:** `.github/workflows/test.yml`'s `check` job (created by the companion `2026-07-27-cross-platform-foundation.md` plan's Task 1) already runs `npm run check`-equivalent steps (`npm run typecheck`/`lint`/`boundaries`/`npm test`) across a `macos-latest`/`ubuntu-latest`/`windows-latest` matrix. This task appends TWO more steps to that SAME job — it does not add a new job, and does not touch the matrix itself (that stays the foundation plan's concern). One `shell: bash` step is used deliberately so a single script works on all three runners — `shell: bash` resolves to Git Bash on the Windows runner, which is available there without any extra setup.
+
+**A child run MAY be spawned during this test, and that is fine, not a defect:** `profiles/rajni/profile.json` (the committed fixture, present in every checkout) carries a real `schedule` block. If this step's few seconds of daemon uptime happen to overlap one of that schedule's slots (grace window included), the daemon WILL spawn `jobbunny run --profile rajni --headless` as a real child process on a CI runner with no Chrome, no Notion, and no `.env`. That child MUST fail fast — a red `doctor` preflight finding, or a `wire()` config throw before any stage runs — and it MUST NOT fail this job: the daemon supervises it as an ordinary nonzero-exit child (Task 8's `createSpawnRun`), logs the exit, and moves on. If it happens, treat it as a BONUS signal that the daemon correctly survives a failing child under real OS process semantics, not as something this task needs to prevent.
+
+- [ ] **Step 1: Append the smoke-test step and its `if: always()` cleanup step to the `check` job.**
+
+  In `/Users/harishamutha/Job-bunny/.github/workflows/test.yml`, replace the `check` job's final step:
+
+  ```yaml
+        - run: npm run boundaries
+        - run: npm test
+
+    test:
+  ```
+
+  with:
+
+  ```yaml
+        - run: npm run boundaries
+        - run: npm test
+        - name: daemon lifecycle smoke test (serve start/status/stop)
+          shell: bash
+          run: |
+            node src/cli/main.ts serve start
+
+            attempt=0
+            running=""
+            while [ "$attempt" -lt 10 ]; do
+              if node src/cli/main.ts serve status; then
+                running="1"
+                break
+              fi
+              attempt=$((attempt + 1))
+              sleep 1
+            done
+
+            if [ -z "$running" ]; then
+              echo "serve status never reported a running daemon after 10 attempts (1s apart)" >&2
+              exit 1
+            fi
+
+            # bash's default -e (errexit, GitHub Actions' default for
+            # `shell: bash`) is the assertion here: a nonzero `serve stop`
+            # exit fails this step without an explicit check.
+            node src/cli/main.ts serve stop
+        - name: daemon lifecycle cleanup (always)
+          if: always()
+          shell: bash
+          # A leaked daemon from a step that failed BEFORE its own
+          # `serve stop` line above must not poison the runner (or, for
+          # self-hosted-style reuse, a future run) — `|| true` because a
+          # cleanly-stopped daemon means this is expected to no-op.
+          run: node src/cli/main.ts serve stop || true
+
+    test:
+  ```
+
+  The existing `check` job's `strategy`/`matrix`/`runs-on: ${{ matrix.os }}` lines (foundation plan's Task 1) are untouched — both new steps run on all three OSes as part of the same job, same matrix.
+
+- [ ] **Step 2: Verify by eye — same posture as the foundation plan's own Task 1 Step 2 (no local YAML-parsing tool in this repo).**
+
+  ```bash
+  git diff .github/workflows/test.yml
+  ```
+
+  Confirm by eye that the diff adds exactly the two new steps shown above, in that order, after the existing `npm test` step and before the `test:` job — nothing else in the file changes.
+
+- [ ] **Step 3: Real verification, deferred to the first push — there is no local equivalent.**
+
+  This task's actual proof is not local: the first push to a branch carrying this change must show, in each of the three `check (<os>)` runs, a green "daemon lifecycle smoke test" step (`serve start` succeeds, `serve status` reports running within 10 attempts, `serve stop` exits 0) and a green "daemon lifecycle cleanup" step that no-ops (the daemon is already stopped by the prior step in the success case). A transient spawn of `jobbunny run --profile rajni --headless` failing fast inside the daemon's own logs is expected and does not fail either step (see the rationale above) — only the daemon's own start/status/stop lifecycle is asserted.
+
+- [ ] **Step 4: Commit.**
+
+  ```bash
+  git add .github/workflows/test.yml
+  git commit -m "$(cat <<'EOF'
+  ci: add a per-OS serve start/status/stop smoke test (S2)
+
+  Every prior task's coverage is injected-dependency unit tests — none
+  of them spawn a real detached child process, write a real pidfile, or
+  send a real OS signal. This appends two steps to the existing `check`
+  job's matrix (macOS/Linux/Windows): one shell: bash script that starts
+  the daemon, polls `serve status` up to 10 times (1s apart) for a
+  running report, then stops it (bash's default errexit asserts a zero
+  exit); and an `if: always()` cleanup step so a step that fails before
+  reaching its own `serve stop` line can't leak a daemon onto the
+  runner. profiles/rajni's real `schedule` block means a run MAY
+  transiently spawn during the test window — it will fail fast with no
+  Chrome/Notion/.env on the runner, and must not fail the job; that is
+  a bonus signal the daemon survives a failing child, not a risk this
+  step needs to guard against.
 
   Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
   EOF
@@ -6349,6 +6732,7 @@ This task comes LAST among the code tasks because `serve` (Task 9) must exist be
   ```
 
   Expected: `doctor` reports the two new checks (`claude-cli-on-path`, `daemon-liveness`) alongside the existing four, with an overall status unaffected by scheduling (a `red` on `claude-cli-on-path` here would be a pre-existing environment fact — no `claude` on this machine's `PATH` — not a regression this plan introduces); `stage reconcile` still runs unmodified, since nothing in Tasks 1–13 touches the pipeline stages themselves, only what triggers `jobbunny run`.
+- Task 14's CI smoke test (`serve start` → poll `serve status` → `serve stop`, plus its `if: always()` cleanup) is green on all three `check (<os>)` matrix runs — this is the end-to-end proof for the daemon lifecycle (real detached spawn, real pidfile, real OS signals) per OS, the one thing no injected-dependency unit test in Tasks 1–13 can reach.
 
 ## Self-review
 
@@ -6379,7 +6763,7 @@ Per the writing-plans skill, three checks, run against the finished Tasks 1–13
 | D22 Heartbeat staleness, steal re-check | 5/7 (pre-existing), 9 (`serve start`'s 35s re-check), 11 (`daemonLivenessCheck`) | Yes |
 | D23 Same-change docs | 13 | Yes |
 
-D11 (Chrome discovery), D12 (pid-file-based Chrome ownership), D17 (CI matrix/hermetic testing) are explicitly excluded per the launching agent's own instruction — confirmed out of scope for this plan (D11/D12 belong to the companion cross-platform-foundation plan per this plan's Global Constraints; D17's CI matrix is a foundation-plan `.github/workflows/test.yml` change, not something Tasks 8–13 touch). **Gap found and fixed**: none of D1–D23 (excluding D11/D12/D17) was missing a task — the one real gap found during this pass was NOT a missing decision-to-task mapping but an internal consistency bug: `test/invariants/run_cap_backstop.test.ts` (pre-existing, outside `src/`) statically imports `DEFAULT_RUN_CAP_MS` from the file Task 12 deletes. Fixed by adding its deletion to Task 12 (Step 3) with a rationale for why the invariant it guarded is structurally subsumed by Task 8's `runCapMs + BACKSTOP_MARGIN_MS` construction, not silently dropped.
+D11 (Chrome discovery), D12 (pid-file-based Chrome ownership), D17 (CI matrix/hermetic testing) are explicitly excluded per the launching agent's own instruction — confirmed out of scope for this plan (D11/D12 belong to the companion cross-platform-foundation plan per this plan's Global Constraints; D17's CI matrix ITSELF is a foundation-plan `.github/workflows/test.yml` change, not something Tasks 8–13 touch — a later consolidated-review pass added Task 14, which appends two steps to that same file's existing `check` job without touching the matrix, still leaving matrix ownership with the foundation plan). **Gap found and fixed**: none of D1–D23 (excluding D11/D12/D17) was missing a task — the one real gap found during this pass was NOT a missing decision-to-task mapping but an internal consistency bug: `test/invariants/run_cap_backstop.test.ts` (pre-existing, outside `src/`) statically imports `DEFAULT_RUN_CAP_MS` from the file Task 12 deletes. Fixed by adding its deletion to Task 12 (Step 3) with a rationale for why the invariant it guarded is structurally subsumed by Task 8's `runCapMs + BACKSTOP_MARGIN_MS` construction, not silently dropped.
 
 **2. Placeholder scan.**
 
