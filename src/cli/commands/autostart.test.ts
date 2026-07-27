@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { daemonLogPath } from '../../ops/daemon/logs/index.ts';
 import type { AutostartDeps } from './autostart.ts';
 import { autostartCommand, renderAutostartPlist } from './autostart.ts';
+
+const HOME = '/fake/home';
+const PLIST_PATH = join(HOME, 'Library', 'LaunchAgents', 'com.jobbunny.autostart.plist');
 
 test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval, sets WorkingDirectory', () => {
   const xml = renderAutostartPlist(
     '/usr/local/bin/node',
     '/repo/src/cli/main.ts',
     '/repo',
+    '/usr/local/bin:/usr/bin:/bin',
+    HOME,
   );
   assert.match(xml, /<key>RunAtLoad<\/key>\s*<true\/>/);
   assert.doesNotMatch(xml, /StartCalendarInterval/);
@@ -19,8 +26,50 @@ test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval, sets Worki
   assert.match(xml, /<key>WorkingDirectory<\/key>\s*<string>\/repo<\/string>/);
 });
 
+test('renderAutostartPlist: carries the enabling shell PATH in EnvironmentVariables (F1)', () => {
+  // Without this, launchd hands the daemon /usr/bin:/bin:/usr/sbin:/sbin,
+  // `claude` (in ~/.local/bin) is off PATH, and every scheduled run dies
+  // on the run child's own preflight.
+  const xml = renderAutostartPlist(
+    '/usr/local/bin/node',
+    '/repo/src/cli/main.ts',
+    '/repo',
+    '/Users/rajni/.local/bin:/usr/bin:/bin',
+    HOME,
+  );
+  assert.match(
+    xml,
+    /<key>EnvironmentVariables<\/key>\s*<dict>\s*<key>PATH<\/key>\s*<string>\/Users\/rajni\/\.local\/bin:\/usr\/bin:\/bin<\/string>\s*<\/dict>/,
+  );
+});
+
+test('renderAutostartPlist: escapes the PATH and points both log streams at daemon.log (F4)', () => {
+  const xml = renderAutostartPlist(
+    '/usr/local/bin/node',
+    '/repo/src/cli/main.ts',
+    '/repo',
+    '/Users/a & b/.local/bin:/usr/bin',
+    HOME,
+  );
+  assert.match(xml, /<string>\/Users\/a &amp; b\/\.local\/bin:\/usr\/bin<\/string>/);
+  assert.doesNotMatch(xml, /a & b/);
+  // F4: the PARENT `serve start` launchd executes prints its refusals to
+  // stdout/stderr; without these keys launchd discards them.
+  const logPath = daemonLogPath(HOME);
+  assert.ok(xml.includes(`<key>StandardOutPath</key>\n    <string>${logPath}</string>`));
+  assert.ok(
+    xml.includes(`<key>StandardErrorPath</key>\n    <string>${logPath}</string>`),
+  );
+});
+
 test('renderAutostartPlist: XML-escapes an interpolated path containing "&"', () => {
-  const xml = renderAutostartPlist('/Users/a & b/node', '/repo/src/cli/main.ts', '/repo');
+  const xml = renderAutostartPlist(
+    '/Users/a & b/node',
+    '/repo/src/cli/main.ts',
+    '/repo',
+    '/usr/bin:/bin',
+    HOME,
+  );
   assert.match(xml, /a &amp; b/);
   assert.doesNotMatch(xml, /a & b/);
 });
@@ -40,9 +89,10 @@ function fakeDeps(overrides: Partial<AutostartDeps> = {}): {
   const errs: string[] = [];
   const deps: AutostartDeps = {
     platform: 'darwin',
-    home: '/fake/home',
+    home: HOME,
     uid: 501,
     root: '/fake/root',
+    envPath: '/fake/home/.local/bin:/usr/bin:/bin',
     nodeBin: 'node',
     cliEntry: '/repo/src/cli/main.ts',
     listLaunchAgentFiles: () => [],
@@ -63,20 +113,17 @@ function fakeDeps(overrides: Partial<AutostartDeps> = {}): {
   return { deps, written, unlinked, launchctlCalls, writes, errs };
 }
 
-test('enable: writes the plist (with WorkingDirectory) and bootstraps it', async () => {
+test('enable: writes the plist (with WorkingDirectory and PATH) and bootstraps it', async () => {
   const { deps, written, launchctlCalls } = fakeDeps();
   const code = await autostartCommand({ action: 'enable' }, deps);
   assert.equal(code, 0);
-  const plist = written.get(
-    '/fake/home/Library/LaunchAgents/com.jobbunny.autostart.plist',
-  );
+  const plist = written.get(PLIST_PATH);
   assert.ok(plist);
   assert.match(plist, /<key>WorkingDirectory<\/key>\s*<string>\/fake\/root<\/string>/);
-  assert.deepEqual(launchctlCalls[0], [
-    'bootstrap',
-    'gui/501',
-    '/fake/home/Library/LaunchAgents/com.jobbunny.autostart.plist',
-  ]);
+  // F1: the enable-time PATH really reaches the written file, not just the
+  // renderer's own arguments.
+  assert.match(plist, /<string>\/fake\/home\/\.local\/bin:\/usr\/bin:\/bin<\/string>/);
+  assert.deepEqual(launchctlCalls[0], ['bootstrap', 'gui/501', PLIST_PATH]);
 });
 
 test('enable: refuses when a legacy launchd plist is found, without writing the plist', async () => {

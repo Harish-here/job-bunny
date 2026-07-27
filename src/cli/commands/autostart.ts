@@ -19,6 +19,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { daemonLogPath } from '../../ops/daemon/logs/index.ts';
 import { LEGACY_PLIST_REGEX, migrationCleanupBlock } from './serve.ts';
 
 const execFileAsync = promisify(execFile);
@@ -38,6 +39,11 @@ export interface AutostartDeps {
   home: string;
   uid: number | undefined;
   root: string;
+  /** F1: the PATH the daemon (and therefore every run child it spawns)
+   * inherits, captured at `enable` time from the interactive shell that
+   * ran the command — launchd's own default is `/usr/bin:/bin:/usr/sbin:
+   * /sbin`, which contains no `claude`. */
+  envPath: string;
   nodeBin: string;
   cliEntry: string;
   listLaunchAgentFiles(): string[];
@@ -69,15 +75,32 @@ function escapeXml(value: string): string {
  * pid`, `profilesDir` resolves to `/profiles`, and `main.ts`'s
  * `dotenv/config` load finds no `.env`. The retired plist embedded `cd
  * '${root}'` in its own `buildCommand` for exactly this reason —
- * `WorkingDirectory` is the LaunchAgent-native equivalent. */
+ * `WorkingDirectory` is the LaunchAgent-native equivalent.
+ *
+ * F1: `EnvironmentVariables.PATH` is equally load-bearing. launchd hands
+ * an agent a bare `/usr/bin:/bin:/usr/sbin:/sbin`, and `claude` lives in
+ * `~/.local/bin` — so every autostarted daemon spawned a run child whose
+ * `claude`-on-PATH preflight went red, and EVERY scheduled run died
+ * silently. `envPath` is the enabling shell's own PATH, captured at
+ * `enable` time.
+ *
+ * F4: `StandardOutPath`/`StandardErrorPath` both point at daemon.log. The
+ * CHILD's output is already redirected to that file by the parent's own
+ * `spawn` (§6.1), but the PARENT — the `serve start` launchd actually
+ * executes — writes its refusals (legacy-plist migration block, "a daemon
+ * is already running", "daemon child died immediately") to stdout/stderr,
+ * which launchd discards without these keys. */
 export function renderAutostartPlist(
   nodeBin: string,
   cliEntry: string,
   root: string,
+  envPath: string,
+  home: string,
 ): string {
   const argsXml = [nodeBin, cliEntry, 'serve', 'start']
     .map((a) => `      <string>${escapeXml(a)}</string>`)
     .join('\n');
+  const logPath = escapeXml(daemonLogPath(home));
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -93,6 +116,15 @@ export function renderAutostartPlist(
     '    <true/>',
     '    <key>WorkingDirectory</key>',
     `    <string>${escapeXml(root)}</string>`,
+    '    <key>EnvironmentVariables</key>',
+    '    <dict>',
+    '      <key>PATH</key>',
+    `      <string>${escapeXml(envPath)}</string>`,
+    '    </dict>',
+    '    <key>StandardOutPath</key>',
+    `    <string>${logPath}</string>`,
+    '    <key>StandardErrorPath</key>',
+    `    <string>${logPath}</string>`,
     '  </dict>',
     '</plist>',
   ].join('\n');
@@ -114,6 +146,7 @@ function defaultAutostartDeps(): AutostartDeps {
     home,
     uid: process.getuid?.(),
     root: process.cwd(), // B2: WorkingDirectory, captured at enable time.
+    envPath: process.env.PATH ?? '', // F1: captured at enable time, same as root.
     nodeBin: process.execPath,
     cliEntry: fileURLToPath(new URL('../main.ts', import.meta.url)),
     listLaunchAgentFiles: () => {
@@ -164,7 +197,7 @@ async function runEnable(deps: AutostartDeps): Promise<number> {
   const target = plistPath(deps.home);
   await deps.writeFile(
     target,
-    renderAutostartPlist(deps.nodeBin, deps.cliEntry, deps.root),
+    renderAutostartPlist(deps.nodeBin, deps.cliEntry, deps.root, deps.envPath, deps.home),
   );
 
   const result = await deps.runLaunchctl(['bootstrap', `gui/${deps.uid ?? ''}`, target]);
