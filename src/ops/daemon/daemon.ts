@@ -150,7 +150,15 @@ export function createDaemon(deps: DaemonDeps): {
     ticking = true;
     try {
       await runOwedBatch();
+    } catch (err) {
+      // Same containment rationale as the heartbeat swallow above: in
+      // production this runs inside a bare setInterval callback, where an
+      // escaping rejection kills the daemon (domain 1) over a single bad
+      // batch (domain 2). Log it and let the next tick re-evaluate.
+      deps.log('tick-failed', { error: String(err) });
     } finally {
+      // Released whether the batch succeeded, threw, or was skipped — a
+      // stuck `ticking` would silently retire the daemon.
       ticking = false;
     }
   }
@@ -158,6 +166,10 @@ export function createDaemon(deps: DaemonDeps): {
   return {
     tick,
     start(): void {
+      // Idempotent: a second start() must not leak the first interval —
+      // that one would keep firing with no handle left to clear it, and
+      // stop() would only ever cancel the second.
+      if (timer) return;
       // §5.2/A15.2: an immediate first tick, BEFORE arming the interval —
       // replay evaluates at daemon start, not TICK_MS after it, and a
       // live daemon must heartbeat within 35s of being observed (the

@@ -403,3 +403,37 @@ test('revalidation measures grace from the entry OWN date, so a past-midnight ba
     ['alpha'],
   );
 });
+
+test('a rejecting spawn does not escape the tick, and the next tick still runs', async () => {
+  const base = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let profileScans = 0;
+  const scan: ScanDeps = {
+    ...base,
+    readdirSync: (p) => {
+      if (p === PROFILES_DIR) profileScans += 1;
+      return base.readdirSync(p);
+    },
+  };
+
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    throw new Error('boom');
+  };
+
+  const { deps, events } = baseDeps({ scan, spawnRun });
+  const daemon = createDaemon(deps);
+
+  // A throwing batch must not reject out of what is, in production, a bare
+  // setInterval callback — an unhandled rejection there kills the daemon.
+  await assert.doesNotReject(() => daemon.tick());
+  assert.ok(events.some((e) => e.event === 'tick-failed'));
+  assert.deepEqual(spawnCalls, ['harish']);
+
+  await assert.doesNotReject(() => daemon.tick());
+  assert.equal(profileScans, 2); // the guard was released by the finally.
+  assert.deepEqual(spawnCalls, ['harish']); // ledgered pre-spawn — not retried.
+});
