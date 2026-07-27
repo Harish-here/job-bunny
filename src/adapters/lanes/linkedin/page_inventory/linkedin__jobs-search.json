@@ -1,7 +1,7 @@
 {
   "page": "linkedin__jobs-search",
   "pageType": "details-page",
-  "generatedAt": "2026-06-18",
+  "generatedAt": "2026-07-27",
   "selectors": {
     "cardList": ".scaffold-layout__list",
     "card": "li[data-occludable-job-id]",
@@ -9,7 +9,7 @@
     "cardCompany": ".artdeco-entity-lockup__subtitle",
     "cardLocation": ".artdeco-entity-lockup__caption",
     "cardLink": "a.job-card-container__link",
-    "jdRoot": "#job-details"
+    "jdRoot": "[componentkey^=\"JobDetails_AboutTheJob\"]"
   },
   "behaviors": {
     "interactionModel": "new-page",
@@ -30,6 +30,7 @@
     "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
     "mustExist": ".scaffold-layout__list",
     "minJobCards": "1",
+    "selectorsVerifiedAt": "2026-07-27 (jdRoot replaced: direct-nav /jobs/view/ pages use hashed class names and #job-details does not exist there; JD body verified as the unique [componentkey^=\"JobDetails_AboutTheJob\"] element on 2 live jobs, text identical to the jdAnchorText fallback; card selectors re-verified on a live /jobs/search/ page the same day)",
     "sourceInventory": "linkedin__jobs-search.md (v0, verified live DOM 2026-06-18, Chrome 149, logged-in session, https://www.linkedin.com/jobs/search/)"
   }
 }

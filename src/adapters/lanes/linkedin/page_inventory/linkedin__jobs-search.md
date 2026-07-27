@@ -31,8 +31,13 @@ Filled from live DOM analysis on 2026-06-18 (Chrome 149, logged-in session) agai
 - jd_container: .jobs-search__job-details--container
 - jd_title: .job-details-jobs-unified-top-card__job-title
 - jd_company: .job-details-jobs-unified-top-card__company-name
-- jd_body: #job-details
+- jd_body: [componentkey^="JobDetails_AboutTheJob"]
 - jd_metadata: .job-details-jobs-unified-top-card__primary-description-container
+
+2026-07-27: direct-nav `/jobs/view/` pages render under hashed CSS class
+names — `#job-details` does not exist on that surface. The stable hook is
+the `componentkey` attribute `JobDetails_AboutTheJob_<jobId>` (also mirrored
+as the element's `id`); `jd_body` above was updated to match on that prefix.
 
 ## 3. Assertions (derived from selectors above)
 - must_exist: [".scaffold-layout__list"]

@@ -101,5 +101,4 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 
 ## Known limitations
 
-- **LinkedIn's `#job-details` (`jdRoot`) selector doesn't match direct-nav `/jobs/view/` pages** — JD text currently comes from the anchor-text fallback (`behaviors.jdAnchorText` in the inventory), and the lane warns every run this happens. Regenerate the inventory (`/page-analyse`) against a live `/jobs/view/` page to fix properly.
 - **`farm`'s funnel reports `jobsIn: 0`** — the funnel helper measures jobs before/after a stage and `farm` is additive. Cosmetic; `dropsByRule` reconciles correctly.
