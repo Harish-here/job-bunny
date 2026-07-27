@@ -26,7 +26,7 @@ import {
  * Ownership (D12): launchChrome writes `.jobbunny-chrome.json` (see
  * ownership/pidfile.ts) into userDataDir immediately after spawn() returns
  * a pid — { pid, port, startedAt }. killChrome clears that file once the
- * process is confirmed dead. This is the pid liveness/age is now decided
+ * process is confirmed dead. This is what pid liveness/age is now decided
  * from, replacing the old lsof/ps-based resolveListenerPid/getProcessAgeMs
  * (deleted): the pid file records exactly the pid THIS codebase spawned,
  * so ownership is "is that exact pid alive and recorded", not "whoever the

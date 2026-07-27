@@ -13,7 +13,7 @@ Node ≥ 24 required (native type-stripping, no build step); the machine default
 ## Commands
 
 ```bash
-npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI's `test` check is exactly this
+npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI runs it as a 3-OS `check` matrix (macos/ubuntu/windows) behind a `needs`-wrapper job named `test`, which keeps the branch-protection check name
 node --test src/core/filter/engine.test.ts        # single test file
 node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]
 node src/cli/main.ts doctor --profile <name>
