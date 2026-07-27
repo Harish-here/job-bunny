@@ -404,6 +404,91 @@ test('revalidation measures grace from the entry OWN date, so a past-midnight ba
   );
 });
 
+test('stop() during an in-flight child halts the batch: the NEXT owed entry is never spawned or ledgered', async () => {
+  const scan = fakeScanDeps(
+    {
+      // Same slot, two profiles — one batch, alpha first (A13's
+      // (slot, profileName) order), zeta queued behind it.
+      [profilePath('alpha')]: profileJson({ times: ['14:00'] }),
+      [profilePath('zeta')]: profileJson({ times: ['14:00'] }),
+    },
+    { [PROFILES_DIR]: ['alpha', 'zeta'] },
+  );
+
+  const spawnCalls: string[] = [];
+  let resolveInFlight: ((code: number) => void) | undefined;
+  const spawnRun: SpawnRun = (owed) => {
+    spawnCalls.push(owed.profile);
+    // Only the FIRST child is held pending; a second one (which is the
+    // bug this pins) resolves immediately, so a regression fails on the
+    // assertions below rather than hanging the suite on a promise whose
+    // resolver was overwritten.
+    if (spawnCalls.length > 1) return Promise.resolve(0);
+    return new Promise((resolve) => {
+      resolveInFlight = resolve;
+    });
+  };
+
+  const { deps, events } = baseDeps({ scan, spawnRun });
+  const daemon = createDaemon(deps);
+
+  const ticking = daemon.tick();
+  await Promise.resolve();
+  await Promise.resolve(); // let the ledger append and first spawn settle.
+  assert.deepEqual(spawnCalls, ['alpha']); // alpha in flight; zeta still queued.
+
+  // SIGTERM lands while alpha is still running. `serve stop` kills the
+  // daemon first and the in-flight child second, so alpha's own promise
+  // still settles here — the hazard being closed is what happens NEXT.
+  daemon.stop();
+  resolveInFlight?.(0);
+  await ticking;
+
+  assert.deepEqual(spawnCalls, ['alpha']); // zeta was never spawned.
+  assert.deepEqual(
+    readDaemonPidfile(deps.root, deps.pidfile)?.attempts.map((a) => a.profile),
+    ['alpha'], // and never ledgered — the slot stays genuinely unattempted.
+  );
+  assert.ok(
+    events.some(
+      (e) => e.event === 'stop-requested-batch-halted' && e.data?.profile === 'zeta',
+    ),
+  );
+});
+
+test('a tick that fires after stop() writes its heartbeat but opens no batch', async () => {
+  const base = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let profileScans = 0;
+  const scan: ScanDeps = {
+    ...base,
+    readdirSync: (p) => {
+      if (p === PROFILES_DIR) profileScans += 1;
+      return base.readdirSync(p);
+    },
+  };
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+
+  let nowMs = new Date(2026, 6, 27, 14, 4).getTime();
+  const { deps } = baseDeps({ scan, spawnRun, now: () => new Date(nowMs) });
+  const daemon = createDaemon(deps);
+
+  daemon.stop();
+  const beforeTick = readLastTickAt(deps);
+  nowMs += 1000;
+  await daemon.tick();
+
+  assert.notEqual(readLastTickAt(deps), beforeTick); // A15.1: heartbeat still ran.
+  assert.equal(profileScans, 0); // ...but the batch never opened.
+  assert.deepEqual(spawnCalls, []);
+});
+
 test('a rejecting spawn does not escape the tick, and the next tick still runs', async () => {
   const base = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },

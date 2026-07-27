@@ -59,6 +59,16 @@ export function createDaemon(deps: DaemonDeps): {
   stop(): void;
 } {
   let ticking = false;
+  // D10, relocated: `serve stop` kills the daemon BEFORE the in-flight
+  // child precisely so the daemon's own `await deps.spawnRun(...)` can
+  // never resolve and spawn the NEXT owed entry. That ordering only holds
+  // while the daemon is dying from an actual signal; a `stop()` that
+  // merely clears the interval would still leave an already-running batch
+  // free to march on to its next entry. This flag closes that window:
+  // once stop() is called the CURRENT child is left to finish (or be
+  // escalated past by `serve stop`'s own SIGTERM/SIGKILL), but no further
+  // entry is ever begun.
+  let stopping = false;
   let timer: NodeJS.Timeout | undefined;
 
   async function runOwedBatch(): Promise<void> {
@@ -92,6 +102,18 @@ export function createDaemon(deps: DaemonDeps): {
     });
 
     for (const owed of sorted) {
+      // Checked BEFORE this entry's revalidate/ledger/spawn sequence, so a
+      // stop() that lands mid-batch neither ledgers nor spawns the entry it
+      // interrupts — that slot stays genuinely unattempted and is owed again
+      // (grace permitting) whenever a daemon next runs.
+      if (stopping) {
+        deps.log('stop-requested-batch-halted', {
+          profile: owed.profile,
+          slot: owed.slot,
+        });
+        break;
+      }
+
       const schedule = schedules.find((s) => s.profile === owed.profile);
       const graceMinutes = schedule?.graceMinutes ?? 0;
 
@@ -146,6 +168,11 @@ export function createDaemon(deps: DaemonDeps): {
       deps.log('heartbeat-write-failed', { error: String(err) });
     }
 
+    // Placed AFTER the heartbeat write (A15.1 is untouchable: the
+    // heartbeat runs on every firing, whatever the guards below decide)
+    // and alongside the reentrancy guard: a tick that fires between
+    // stop() and process exit must not open a new batch.
+    if (stopping) return;
     if (ticking) return;
     ticking = true;
     try {
@@ -180,6 +207,11 @@ export function createDaemon(deps: DaemonDeps): {
       }, TICK_MS);
     },
     stop(): void {
+      // Set BEFORE clearing the interval: an in-flight batch must observe
+      // it at its very next entry boundary, and a tick already queued on
+      // the event loop must short-circuit rather than start a batch the
+      // cleared interval can no longer be blamed for.
+      stopping = true;
       if (timer) clearInterval(timer);
       timer = undefined;
     },
