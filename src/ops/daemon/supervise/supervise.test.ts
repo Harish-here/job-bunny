@@ -160,6 +160,41 @@ test('rotates runs.log (size check) then spawns, then closes its own fd copy, in
   ]);
 });
 
+/**
+ * The three arguments the tests above forward without ever reading. Left
+ * unasserted, dropping `--headless` (a daemon-spawned run must never try to
+ * open a visible browser) or regressing `stdio` to `'inherit'` (which sends
+ * the child's output to the daemon's own stdout instead of runs.log, losing
+ * exactly the early-abort diagnostics the fd capture exists to preserve)
+ * would leave this whole suite green.
+ */
+test('spawns <nodeBin> <cliEntry> run --profile <p> --headless, with stdio wired to the fd', async () => {
+  const child = fakeChild(9001);
+  let seen:
+    | { command: string; args: readonly string[]; opts: { stdio: readonly unknown[] } }
+    | undefined;
+  const spawn: SuperviseDeps['spawn'] = (command, args, opts) => {
+    seen = { command, args, opts };
+    return child.spawnArg(command, args, opts);
+  };
+  const { deps } = baseDeps({ spawn });
+  const promise = createSpawnRun(deps)(OWED);
+  child.emit('exit', 0);
+  await promise;
+
+  assert.equal(seen?.command, deps.nodeBin);
+  assert.deepEqual(seen?.args, [
+    deps.cliEntry,
+    'run',
+    '--profile',
+    OWED.profile,
+    '--headless',
+  ]);
+  // 42 is fakeLogDeps()'s openSync return — the SAME fd on both stdout and
+  // stderr, so a child's output and its stack traces interleave in one file.
+  assert.deepEqual(seen?.opts.stdio, ['ignore', 42, 42]);
+});
+
 test('a spawn error event resolves to a nonzero code without throwing (A5/A7)', async () => {
   const child = fakeChild(undefined); // spawn() never produced a pid (ENOENT-shaped).
   const { deps, events } = baseDeps({ spawn: child.spawnArg });
@@ -228,8 +263,16 @@ test('the backstop fires SIGTERM, then SIGKILL after SIGKILL_GRACE_MS, on expiry
   timers.fireEarliest(); // SIGKILL_GRACE_MS elapses.
   assert.deepEqual(child.killCalls, ['SIGTERM', 'SIGKILL']);
 
-  child.emit('exit', 137);
-  await promise;
+  // Node's real shape for a signal-killed child is ('exit', null, 'SIGKILL')
+  // — the exit CODE is null, not 137 (that number is the shell's own
+  // 128+SIGKILL convention, which the 'exit' event never reports). This is
+  // therefore the exact payload the backstop's own kill produces, and it
+  // exercises the implementation's `typeof code === 'number' ? code : 1`
+  // guard: a signal death must be reported as a failure, never as a 0 that
+  // would let the daemon record the slot as a clean run. The numeric branch
+  // stays covered by the exit-0 emits in the tests around this one.
+  child.emit('exit', null);
+  assert.equal(await promise, 1);
 });
 
 test('the backstop timer is cleared when the child exits normally', async () => {

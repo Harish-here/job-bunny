@@ -28,13 +28,13 @@
  * here, in CI, rather than silently in a running daemon.
  *
  * Spiritually the successor to `test/invariants/run_cap_backstop.
- * test.ts` (deleted when the launchd scheduler was removed — it
- * imported `DEFAULT_RUN_CAP_MS` from the doomed
- * `adapters/scheduler/launchd/plist.ts`) — same intent
- * (catch a stage-budget drift before it reaches production), same
- * `test/invariants/` home, different mechanism (a static table plus
- * this construction-based guard, rather than a hand-copied launchd
- * literal).
+ * test.ts`, which still exists today and which Task 12 retires
+ * alongside the launchd scheduler — it imports `DEFAULT_RUN_CAP_MS`
+ * from `adapters/scheduler/launchd/plist.ts`, so it cannot outlive
+ * that file. Same intent (catch a stage-budget drift before it reaches
+ * production), same `test/invariants/` home, different mechanism (a
+ * static table plus this construction-based guard, rather than a
+ * hand-copied launchd literal).
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
