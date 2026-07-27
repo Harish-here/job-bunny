@@ -334,9 +334,12 @@ test('main: the usage line names every dispatchable command', async () => {
     'reconcile',
     'stage',
     'routine',
+    'serve',
+    'autostart',
     'lane',
     'profile',
     'setup',
+    'release',
   ]) {
     assert.match(usage, new RegExp(name), `usage should mention "${name}"`);
   }

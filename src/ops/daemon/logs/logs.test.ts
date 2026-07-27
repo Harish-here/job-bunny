@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   daemonLogPath,
@@ -38,13 +39,18 @@ function fakeDeps(sizes: Record<string, number> = {}): LogDeps & { _calls: strin
   };
 }
 
+// A home directory is an argument here, not an expectation — the composed
+// expectations below go through `join`, which is what the 3-OS CI matrix
+// requires (a POSIX literal fails on windows-latest).
+const HOME = '/Users/rajni';
+
 test('jobbunnyLogDir composes <home>/.jobbunny/logs', () => {
-  assert.equal(jobbunnyLogDir('/Users/rajni'), '/Users/rajni/.jobbunny/logs');
+  assert.equal(jobbunnyLogDir(HOME), join(HOME, '.jobbunny', 'logs'));
 });
 
 test('daemonLogPath and runsLogPath compose under jobbunnyLogDir', () => {
-  assert.equal(daemonLogPath('/Users/rajni'), '/Users/rajni/.jobbunny/logs/daemon.log');
-  assert.equal(runsLogPath('/Users/rajni'), '/Users/rajni/.jobbunny/logs/runs.log');
+  assert.equal(daemonLogPath(HOME), join(HOME, '.jobbunny', 'logs', 'daemon.log'));
+  assert.equal(runsLogPath(HOME), join(HOME, '.jobbunny', 'logs', 'runs.log'));
 });
 
 test('rotateIfLarge is a no-op when the file is under the threshold', () => {

@@ -57,6 +57,26 @@ import {
 import type { Connector } from '../../src/ports/connector.ts';
 import type { LlmProvider } from '../../src/ports/llm.ts';
 
+/** The frozen 10-stage order (CLAUDE.md's pipeline contract). Spelled out
+ * here rather than derived from either side of the comparison: the length
+ * check below catches a stage REMOVED from the pipeline, but an ADDED
+ * stage mirrored into STAGE_BUDGETS in the same edit would slip past both
+ * the length check and the per-index name comparison — the two arrays
+ * would simply agree on eleven stages. This literal is the thing that
+ * cannot be edited by accident. */
+const FROZEN_STAGE_ORDER = [
+  'reconcile',
+  'farm',
+  'source',
+  'compress',
+  'structure',
+  'assemble',
+  'filter',
+  'dedup',
+  'rank',
+  'sync',
+];
+
 function buildWiredStages() {
   const stubConnector: Connector = {
     name: 'stub',
@@ -83,6 +103,14 @@ function buildWiredStages() {
     makeSyncStage(stubConnector, {}),
   ];
 }
+
+test('the wired stage factories are exactly the frozen ten-stage order', () => {
+  assert.deepEqual(
+    buildWiredStages().map((stage) => stage.name),
+    FROZEN_STAGE_ORDER,
+    'the pipeline stage order is frozen — adding, removing, or reordering a stage needs explicit sign-off',
+  );
+});
 
 test("STAGE_BUDGETS mirrors every wired stage's name/timeoutMs/retries exactly, in order", () => {
   const wired = buildWiredStages();
