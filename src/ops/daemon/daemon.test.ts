@@ -5,7 +5,11 @@ import type { ProfileSchedule } from '../../core/schedule/index.ts';
 import type { DaemonDeps, SpawnRun } from './daemon.ts';
 import { createDaemon } from './daemon.ts';
 import type { DaemonPidfileDeps } from './pidfile.ts';
-import { acquireDaemonPidfile, readDaemonPidfile } from './pidfile.ts';
+import {
+  acquireDaemonPidfile,
+  readDaemonPidfile,
+  updateDaemonPidfile,
+} from './pidfile.ts';
 import type { ScanDeps } from './scan/index.ts';
 
 const ROOT = '/fake/root';
@@ -13,10 +17,6 @@ const PROFILES_DIR = '/fake/profiles';
 
 function profilePath(name: string): string {
   return join(PROFILES_DIR, name, 'profile.json');
-}
-
-function runsDirPath(name: string, date: string): string {
-  return join(PROFILES_DIR, name, 'data', 'runs', date);
 }
 
 function profileJson(schedule: Partial<ProfileSchedule> & { times: string[] }): string {
@@ -266,4 +266,140 @@ test('two owed entries run sequentially in (slot, profileName) order', async () 
   await createDaemon(deps).tick();
 
   assert.deepEqual(order, ['start:alpha', 'end:alpha', 'start:zeta', 'end:zeta']);
+});
+
+test('the reentrancy guard short-circuits a tick BEFORE it rescans, while the heartbeat still runs', async () => {
+  let nowMs = new Date(2026, 6, 27, 14, 4).getTime();
+  const now = () => new Date(nowMs);
+
+  const base = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  // Counting the profiles-dir readdir is what distinguishes "the guard
+  // short-circuited" from "the batch ran again and found nothing owed" —
+  // the ledger alone would mask a missing guard.
+  let profileScans = 0;
+  const scan: ScanDeps = {
+    ...base,
+    readdirSync: (p) => {
+      if (p === PROFILES_DIR) profileScans += 1;
+      return base.readdirSync(p);
+    },
+  };
+
+  let resolveSpawn: ((code: number) => void) | undefined;
+  const spawnRun: SpawnRun = () =>
+    new Promise((resolve) => {
+      resolveSpawn = resolve;
+    });
+
+  const { deps } = baseDeps({ scan, spawnRun, now });
+  const daemon = createDaemon(deps);
+
+  const firstTick = daemon.tick();
+  await Promise.resolve();
+  await Promise.resolve(); // let the heartbeat write and ledger append settle.
+  assert.equal(profileScans, 1); // the first tick scanned once and is now in flight.
+
+  const beforeSecondTick = readLastTickAt(deps);
+  nowMs += 1000;
+  await daemon.tick();
+
+  assert.equal(profileScans, 1); // guard short-circuited BEFORE the rescan.
+  assert.notEqual(readLastTickAt(deps), beforeSecondTick); // heartbeat still advanced.
+
+  resolveSpawn?.(0);
+  await firstTick;
+});
+
+test("yesterday's ledger entry does not serve today's identical slot", async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] }, // no run folders at all.
+  );
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+  const { deps } = baseDeps({ scan, spawnRun });
+
+  // A stale attempt from the previous local day, same profile and slot.
+  updateDaemonPidfile(
+    deps.root,
+    (current) => ({
+      ...current,
+      attempts: [{ profile: 'harish', date: '2026-07-26', slot: '14:00' }],
+    }),
+    deps.pidfile,
+  );
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(spawnCalls, ['harish']); // today's 14:00 is still owed.
+});
+
+test('appending an attempt prunes ledger entries from other days', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const { deps } = baseDeps({ scan });
+
+  updateDaemonPidfile(
+    deps.root,
+    (current) => ({
+      ...current,
+      attempts: [{ profile: 'harish', date: '2026-07-26', slot: '14:00' }],
+    }),
+    deps.pidfile,
+  );
+
+  await createDaemon(deps).tick();
+
+  // Rollover clearing IS the append's own prune — no separate job.
+  assert.deepEqual(readDaemonPidfile(deps.root, deps.pidfile)?.attempts, [
+    { profile: 'harish', date: '2026-07-27', slot: '14:00' },
+  ]);
+});
+
+test('revalidation measures grace from the entry OWN date, so a past-midnight batch skips a stale entry', async () => {
+  let nowMs = new Date(2026, 6, 27, 23, 55).getTime();
+  const now = () => new Date(nowMs);
+
+  const scan = fakeScanDeps(
+    {
+      // Both slots are inside their grace window at 23:55, so both enter
+      // the same batch: alpha 23:00+90m ends 00:30, beta 23:50+90m ends 01:20.
+      [profilePath('alpha')]: profileJson({ times: ['23:00'], graceMinutes: 90 }),
+      [profilePath('beta')]: profileJson({ times: ['23:50'], graceMinutes: 90 }),
+    },
+    { [PROFILES_DIR]: ['alpha', 'beta'] },
+  );
+
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    if (owed.profile === 'alpha') {
+      // alpha runs overnight; beta's turn comes the NEXT calendar day.
+      nowMs = new Date(2026, 6, 28, 9, 0).getTime();
+    }
+    return 0;
+  };
+
+  const { deps, events } = baseDeps({ scan, spawnRun, now });
+  await createDaemon(deps).tick();
+
+  // beta's own window (2026-07-27 23:50 -> 2026-07-28 01:20) is long past.
+  // Measuring from now's date instead would compare against 2026-07-28
+  // 23:50 and wrongly spawn it.
+  assert.deepEqual(spawnCalls, ['alpha']);
+  assert.ok(
+    events.some((e) => e.event === 'slot-expired-skipped' && e.data?.profile === 'beta'),
+  );
+  assert.deepEqual(
+    readDaemonPidfile(deps.root, deps.pidfile)?.attempts.map((a) => a.profile),
+    ['alpha'],
+  );
 });
