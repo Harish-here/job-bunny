@@ -27,6 +27,7 @@ function fakeDeps(overrides: Partial<ChromePidfileDeps> = {}): ChromePidfileDeps
       throw new Error('no file');
     },
     writeFileSync: () => {},
+    mkdirSync: () => {},
     unlinkSync: () => {},
     pidIsAlive: () => true,
     now: () => new Date('2026-07-27T12:00:00.000Z'),
@@ -51,6 +52,47 @@ test('writeChromePidfile writes the info as JSON to chromePidfilePath', () => {
   assert.equal(writeCalls.length, 1);
   assert.equal(writeCalls[0]?.path, PIDFILE_PATH);
   assert.deepEqual(JSON.parse(writeCalls[0]?.data ?? '{}'), info);
+});
+
+test('writeChromePidfile creates userDataDir before writing (fresh clone has no .chrome-debug/)', () => {
+  const order: string[] = [];
+  const mkdirPaths: string[] = [];
+  const deps = fakeDeps({
+    mkdirSync: (path) => {
+      order.push('mkdir');
+      mkdirPaths.push(path);
+    },
+    writeFileSync: () => {
+      order.push('write');
+    },
+  });
+
+  writeChromePidfile(
+    '/repo/.chrome-debug',
+    { pid: 4242, port: 9222, startedAt: '2026-07-27T12:00:00.000Z' },
+    deps,
+  );
+
+  assert.deepEqual(order, ['mkdir', 'write']);
+  assert.deepEqual(mkdirPaths, ['/repo/.chrome-debug']);
+});
+
+test('writeChromePidfile propagates a write failure instead of swallowing it', () => {
+  const deps = fakeDeps({
+    writeFileSync: () => {
+      throw new Error('EACCES');
+    },
+  });
+
+  assert.throws(
+    () =>
+      writeChromePidfile(
+        '/repo/.chrome-debug',
+        { pid: 4242, port: 9222, startedAt: '2026-07-27T12:00:00.000Z' },
+        deps,
+      ),
+    /EACCES/,
+  );
 });
 
 test('round-trip: readChromePidfile returns exactly what writeChromePidfile wrote, for a live pid', () => {
@@ -175,6 +217,9 @@ test('defaultChromePidfileDeps builds working deps against the real fs/process',
   assert.equal(typeof deps.existsSync, 'function');
   assert.equal(typeof deps.readFileSync, 'function');
   assert.equal(typeof deps.writeFileSync, 'function');
+  // Not invoked — a real mkdirSync here would create a directory on the
+  // machine running the suite.
+  assert.equal(typeof deps.mkdirSync, 'function');
   assert.equal(typeof deps.unlinkSync, 'function');
   assert.equal(deps.pidIsAlive(process.pid), true);
   assert.ok(deps.now() instanceof Date);

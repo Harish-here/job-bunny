@@ -480,6 +480,7 @@ function fakePidfileDepsForLauncher(): {
     writeFileSync: (_path, data) => {
       written.push(JSON.parse(data) as ChromePidfile);
     },
+    mkdirSync: () => {},
     unlinkSync: () => {
       unlinked += 1;
     },

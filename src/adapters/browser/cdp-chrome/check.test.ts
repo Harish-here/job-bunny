@@ -9,6 +9,7 @@ function fakePidfileDeps(hasPidfile: boolean): ChromePidfileDeps {
     readFileSync: () =>
       JSON.stringify({ pid: 4242, port: 9222, startedAt: '2026-07-27T12:00:00.000Z' }),
     writeFileSync: () => {},
+    mkdirSync: () => {},
     unlinkSync: () => {},
     pidIsAlive: () => true,
     now: () => new Date('2026-07-27T12:00:00.000Z'),

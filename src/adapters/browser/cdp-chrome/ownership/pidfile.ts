@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -20,6 +20,12 @@ export interface ChromePidfileDeps {
   existsSync(path: string): boolean;
   readFileSync(path: string): string;
   writeFileSync(path: string, data: string): void;
+  /** Recursive mkdir of the pid file's parent (userDataDir). Needed because
+   * on a fresh clone nothing has created `.chrome-debug/` yet — Chrome
+   * creates it asynchronously, well after spawn() returns the pid we want
+   * to record — so an unguarded writeFileSync throws ENOENT and orphans the
+   * Chrome we just launched. */
+  mkdirSync(path: string): void;
   unlinkSync(path: string): void;
   pidIsAlive(pid: number): boolean;
   now(): Date;
@@ -86,11 +92,22 @@ export function readChromePidfile(
   return parsed;
 }
 
+/**
+ * Writes the pid file, creating `userDataDir` first — on a fresh clone that
+ * directory does not exist yet (Chrome creates it asynchronously, after
+ * spawn() has already returned), so writing straight into it throws ENOENT
+ * and the just-spawned Chrome is orphaned: never recorded, never owned,
+ * never recycled. Both calls are deliberately unguarded — a failure to
+ * record ownership of a process we just spawned is a loud failure, not a
+ * soft one, and the caller (launchChrome) must not proceed as if the pid
+ * were recorded when it wasn't.
+ */
 export function writeChromePidfile(
   userDataDir: string,
   info: ChromePidfile,
   deps: ChromePidfileDeps,
 ): void {
+  deps.mkdirSync(userDataDir);
   deps.writeFileSync(chromePidfilePath(userDataDir), JSON.stringify(info));
 }
 
@@ -119,6 +136,9 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps {
     existsSync: (path) => existsSync(path),
     readFileSync: (path) => readFileSync(path, 'utf8'),
     writeFileSync: (path, data) => writeFileSync(path, data, 'utf8'),
+    mkdirSync: (path) => {
+      mkdirSync(path, { recursive: true });
+    },
     unlinkSync: (path) => unlinkSync(path),
     pidIsAlive: (pid) => {
       try {

@@ -95,6 +95,7 @@ function fakePidfileDeps(
     existsSync: () => exists,
     readFileSync: () => JSON.stringify({ pid, port: 9222, startedAt }),
     writeFileSync: () => {},
+    mkdirSync: () => {},
     unlinkSync: () => {},
     pidIsAlive: () => true,
     now: () => now,
