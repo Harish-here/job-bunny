@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ChromePidfileDeps } from './ownership/index.ts';
 import { cdpReachableCheck } from './check.ts';
+import type { ChromePidfileDeps } from './ownership/index.ts';
 
 function fakePidfileDeps(hasPidfile: boolean): ChromePidfileDeps {
   return {
