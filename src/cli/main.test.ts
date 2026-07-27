@@ -236,38 +236,24 @@ test('main: "routine cleanup" passes the positional through as the routine name'
   assert.deepEqual(s.calls, [['routine', { profile: 'rajni', routine: 'cleanup' }]]);
 });
 
-test('main: "schedule install" needs NO --profile — it is cross-profile', async () => {
-  const s = spy();
-  const code = await main(['schedule', 'install'], {
-    commands: { schedule: s.make('schedule') },
-  });
-  assert.equal(code, 0);
-  assert.deepEqual(s.calls, [['schedule', { action: 'install' }]]);
-});
-
-test('main: "schedule remove" does require --profile', async () => {
-  const s = spy();
-  const code = await main(['schedule', 'remove', '--profile', 'rajni'], {
-    commands: { schedule: s.make('schedule') },
-  });
-  assert.equal(code, 0);
-  assert.deepEqual(s.calls, [['schedule', { action: 'remove', profile: 'rajni' }]]);
-});
-
-test('main: "schedule remove" without --profile returns 2', async () => {
-  const code = await main(['schedule', 'remove'], {
-    commands: { schedule: async () => 0 },
-    stderr: () => {},
+test('main: an unknown serve action returns 2, naming "start", "stop", or "status"', async () => {
+  const stderr = captureStderr();
+  const code = await main(['serve', 'bogus'], {
+    commands: { serve: async () => 0 },
+    stderr: stderr.write,
   });
   assert.equal(code, 2);
+  assert.match(stderr.lines.join('\n'), /"start", "stop", or "status"/);
 });
 
-test('main: an unknown schedule action returns 2', async () => {
-  const code = await main(['schedule', 'bogus'], {
-    commands: { schedule: async () => 0 },
-    stderr: () => {},
+test('main: an unknown autostart action returns 2, naming "enable" or "disable"', async () => {
+  const stderr = captureStderr();
+  const code = await main(['autostart', 'bogus'], {
+    commands: { autostart: async () => 0 },
+    stderr: stderr.write,
   });
   assert.equal(code, 2);
+  assert.match(stderr.lines.join('\n'), /"enable" or "disable"/);
 });
 
 test('main: "lane add-url <url> [label]" passes url and label positionally', async () => {
@@ -348,7 +334,6 @@ test('main: the usage line names every dispatchable command', async () => {
     'reconcile',
     'stage',
     'routine',
-    'schedule',
     'lane',
     'profile',
     'setup',

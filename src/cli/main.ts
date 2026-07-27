@@ -10,17 +10,18 @@
  * Dispatch is `<command> [sub-action] [positionals] [--flags]`. All argv →
  * options translation lives in `buildOptions`, which hands each command ONLY
  * the keys it reads (never an irrelevant key set to `undefined`) and returns
- * a usage error when a required piece is missing. `schedule install`,
- * `serve` (all three sub-actions), and `release` are cross-profile by
- * design and take no `--profile`.
+ * a usage error when a required piece is missing. `serve` (all three
+ * sub-actions), `autostart` (darwin only), and `release` are cross-profile
+ * by design and take no `--profile`.
  *
  * Functions RETURN their exit code; only the bin-entry guard at the bottom
  * ever touches `process.exitCode`, so `main` itself is safe to call from a
  * test without side effects on the real process.
  *
  * `dotenv/config` is imported FIRST, for its side effect only: `NOTION_TOKEN`
- * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and launchd hands a
- * scheduled run a minimal environment that does not include them. Without this
+ * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and a daemon-spawned
+ * scheduled run (`ops/daemon/supervise`) inherits a minimal environment that
+ * does not include them. Without this
  * a scheduled run would wire a throwing-stub connector, die at sync, and then
  * fail to send the digest that would have reported it — a silent daily
  * failure. v0 does the same thing per entry point (`scripts/notion/client.js`,
@@ -43,7 +44,6 @@ import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
-import { scheduleCommand } from './commands/schedule.ts';
 import { serveCommand } from './commands/serve.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
@@ -77,7 +77,6 @@ export type CommandName =
   | 'reconcile'
   | 'stage'
   | 'routine'
-  | 'schedule'
   | 'serve'
   | 'autostart'
   | 'lane'
@@ -133,8 +132,6 @@ const USAGE = [
   '  reconcile --profile <name>',
   '  stage <stage-name> --profile <name>',
   '  routine <routine-name> --profile <name>',
-  '  schedule install                     (cross-profile — no --profile)',
-  '  schedule remove --profile <name>',
   '  serve start|stop|status              (cross-profile — no --profile)',
   '  autostart enable|disable             (cross-profile — darwin only)',
   '  lane add-url <url> [label] --profile <name>',
@@ -151,7 +148,6 @@ function defaultCommands(): CommandRegistry {
     reconcile: reconcileCommand as unknown as CommandFn,
     stage: stageCommand as unknown as CommandFn,
     routine: routineCommand as unknown as CommandFn,
-    schedule: scheduleCommand as unknown as CommandFn,
     serve: (async (opts: CommandOptions) =>
       serveCommand({
         action: (opts.action ?? 'status') as 'start' | 'stop' | 'status',
@@ -187,7 +183,6 @@ const COMMAND_NAMES = new Set<string>([
   'reconcile',
   'stage',
   'routine',
-  'schedule',
   'serve',
   'autostart',
   'lane',
@@ -252,16 +247,6 @@ function buildOptions(
       const routine = rest[0];
       if (!routine) return { error: 'missing routine name' };
       return needsProfile() ?? { profile, routine };
-    }
-    case 'schedule': {
-      const action = rest[0];
-      if (action !== 'install' && action !== 'remove') {
-        return { error: 'schedule takes "install" or "remove"' };
-      }
-      // `install` is deliberately cross-profile: it reads every profile's
-      // schedule and installs one launchd job per distinct time.
-      if (action === 'install') return { action };
-      return needsProfile() ?? { action, profile };
     }
     case 'serve': {
       const action = rest[0];

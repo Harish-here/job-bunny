@@ -5,5 +5,4 @@ export * from './doctor.ts';
 export * from './lane.ts';
 export * from './llm.ts';
 export * from './notifier.ts';
-export * from './scheduler.ts';
 export * from './storage.ts';
