@@ -426,6 +426,8 @@ Then re-run: jobbunny serve start
 
 ## 9. Error handling
 
+### 9.1 Fail-soft / fail-loud scenarios
+
 | Situation | Fail-soft or fail-loud | Behavior |
 |---|---|---|
 | One profile's `profile.json` is unreadable/invalid during the daemon's schedule scan | Fail-soft | That profile is skipped for this tick (logged), the rest of the schedule scan and tick proceed — mirrors today's `collectScheduledJobs` per-profile skip. |
@@ -436,6 +438,48 @@ Then re-run: jobbunny serve start
 | Chrome is unreachable when a spawned `jobbunny run` child reaches its `launch()` call | Fail-soft at the Chrome-provider level, then fail-loud only if launch itself fails | Unchanged from today: `decideChromeAction` returns `launch`, `launchChrome` spawns fresh. If even a fresh spawn can't be connected to within `connectMaxWaitMs`, `CdpChromeProvider.launch` throws (existing behavior, `provider.ts` — this is a whole-stage/whole-run failure, which is correct: a run with no browser cannot source LinkedIn jobs at all). The daemon does not distinguish this from any other nonzero child exit (previous row). |
 | The grace window expires for a slot with no matching run folder | Fail-soft, by design (not an error) | `isRunOwed` simply stops returning that `OwedRun` once `now > slot + graceMinutes` — no error, no notification beyond whatever the next tick's `serve status` would show as "no next fire until <next slot>". This is the direct fix for the 2026-07-27 incident's failure mode changing from "silent, unrecorded skip" to "the daemon attempted it within its grace window, or explicitly stopped trying after 90 minutes" — still silent past the window, but only because the daemon was down the whole time, which `serve status` (§6.1) surfaces on demand. |
 | A daemon's `inFlight` child pid in the pidfile is stale (daemon died mid-run, e.g. hard machine crash) | Fail-soft, self-healing | A subsequent `serve start` (after the stale-pidfile-recovery path above) simply does not know about the old `inFlight` entry — it was part of the now-discarded stale pidfile. The orphaned child (if it happens to still be running — the daemon dying does not itself kill its spawned child, since `spawn` for the child is **not** `detached` per §6.1, so on POSIX it would normally die with its parent's process group; on Windows job-object behavior can differ) is not specially hunted down by the new daemon; `ops/scheduling/run_lock.ts`'s existing per-run lock still prevents that orphan and a fresh daemon-spawned run from executing concurrently. |
+
+### 9.2 The four failure domains
+
+Errors are absorbed at the lowest domain that can still make progress, and escalate only when progress is impossible.
+
+| Domain | Unit | What fails | What bounds it | What recovers it | Blast radius |
+|---|---|---|---|---|---|
+| 1. Daemon (new) | the clock | daemon process dies; machine off | `setInterval` tick; reentrancy guard (§6.6) | catch-up on next tick (§5); `serve status` reports down | all future runs |
+| 2. Child run | one `jobbunny run` process | wedged process; OOM kill | `computeRunCapMs` internally, plus the daemon's `setTimeout` backstop (§6.5) | checkpoint + `--resume`; the next slot | one run |
+| 3. Stage | one of the 10 pipeline stages | stage throws | per-stage timeout; per-stage retry attempts | checkpoint written after every stage | the remaining stages |
+| 4. Adapter call | one URL, card, probe or request | bad selector; 404; call timeout | `ctx.signal` (AbortSignal) | `SoftError` — recorded, loop continues | one item |
+
+Domain 4 is where CLAUDE.md's "fail-soft where breadth matters" rule lives.
+
+The escalation rule: a stage that attempted work and captured NOTHING throws loud, because zero-from-everything is shaped like an expired login, not like one bad card.
+
+`ctx.signal` is the spine of the whole model. CLAUDE.md's invariant — every CDP, network and LLM call is bound by it, no unbounded `await` in any adapter — is what makes domain 2's deadline actually enforceable: a cancel at the top propagates all the way down. This invariant is load-bearing for the daemon design and must not be weakened by this port.
+
+### 9.3 The three hang classes
+
+Each needs a different bound, and conflating them is how a hang escapes every guard:
+
+1. **Silent stall** — process alive, event loop turning, no progress (e.g. a page whose ready selector never fires). Bounded by the stall watchdog in `pipeline/runner/guard.ts`: stages call `ctx.beat()`, and the absence of beats trips the abort. Timeouts alone do not catch this, because the process looks healthy.
+2. **Blocked await** — a single call never returns. Bounded by `ctx.signal` at every I/O site. The invariant holds only while no bare `await` exists in an adapter, which is why CLAUDE.md states it as a hard rule rather than a convention.
+3. **Wedged process** — the process can no longer help itself (OOM thrash, a native-layer Chrome hang, a subprocess ignoring signals). Nothing inside the process can fix this. This class is the entire justification for the daemon-side external backstop in §6.5 — `computeRunCapMs` is a promise the child makes to itself, and a wedged child cannot keep promises.
+
+### 9.4 Heavy stages, ranked
+
+Hang risk and memory pressure are not evenly distributed across the 10 stages; this ranking is what the backstop and the checkpoint boundaries are sized against. Evidence below is observed from the 2026-07-27 09:00 and 11:30 run folders.
+
+1. **`farm` — LinkedIn over CDP. The highest-risk stage by a wide margin.** The only stage driving a real browser against a drifting, hostile DOM. Observed `01-farm.json` = 2.1 MB. The 2026-07-27 11:30 run died here on an invalid `p:nth(1)` selector. Config-driven selectors (`page_inventory/*.json`) mean DOM drift is a data fix, not a code fix — but drift lands here first.
+2. **`source` → `compress` — the memory peak.** Observed `02-source.json` and `03-compress.json` both 5.6 MB — every job's JD text resident at once. This is why CLAUDE.md caps JD text at 2500 chars and why the structure stage passes markdown tables rather than JSON. Chrome is likely still alive across this window; if so, peak memory is Chrome's working set plus the Node heap, and Chrome dominates. This is the OOM neighbourhood.
+3. **`structure` — the slowest external dependency.** Spawns the `claude` CLI as a subprocess. The 2026-07-27 09:00 run spent ~10.7 minutes and failed here after 2 attempts. A subprocess is a distinct hang class from an HTTP call: a CLI waiting on auth produces no bytes and no error.
+4. **`sync` — Notion.** Many round trips, rate limits, and the only stage that mutates external state. Byte-exact select options mean schema drift throws rather than degrades.
+5. **`reconcile`, `assemble`, `filter`, `dedup`, `rank` — near-zero risk.** Observed `00-reconcile.json` = 34 bytes. The four middle stages are pure core logic with no I/O; they fail only on programmer error, and they fail instantly.
+
+### 9.5 What the daemon must NOT do
+
+- **The daemon must not retry a failed child.** When a child exits nonzero the daemon records the outcome and moves on. Retry belongs inside the run, where the per-stage policy and the checkpoint live. A daemon that retries failed runs hammers a broken pipeline; D7 ("failed runs count as served") exists to prevent exactly this.
+- **The daemon must not know about stages.** It knows the clock, the run-folder ledger, and how to spawn and kill a child. It has no pipeline knowledge, which is what keeps domain 1 small enough to be obviously correct.
+- **`run_lock` still covers the human.** The daemon's sequential loop (§6.4) prevents self-collision by construction; `ops/scheduling/run_lock.ts` remains the defense against a user running `jobbunny run` manually while the daemon has a child in flight.
+- **This port must not weaken the `ctx.signal` invariant.** Any new adapter code introduced by the Chrome-discovery work (§7) is bound by the same no-unbounded-await rule.
 
 ## 10. Testing strategy
 
