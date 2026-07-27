@@ -26,8 +26,15 @@ jobs:
       - run: npm run boundaries
       - run: npm test
 
+  # Branch protection pins the check name `test`. `if: always()` is load-bearing:
+  # without it a failing matrix leaves this job SKIPPED, and a skipped required
+  # check can satisfy protection vacuously. Run always, then fail explicitly
+  # unless every `check` matrix leg succeeded.
   test:
+    if: always()
     needs: [check]
     runs-on: ubuntu-latest
     steps:
       - run: echo ok
+      - if: needs.check.result != 'success'
+        run: exit 1
