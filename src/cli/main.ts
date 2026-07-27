@@ -30,6 +30,11 @@ import 'dotenv/config';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import {
+  defaultDaemonPidfileDeps,
+  HEARTBEAT_STALE_MS,
+  readDaemonPidfile,
+} from '../ops/daemon/index.ts';
 import { autostartCommand } from './commands/autostart.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
@@ -90,6 +95,34 @@ export interface MainDeps {
   stderr?: (line: string) => void;
   /** Environment for the npm swallowed-flag guard. Default: `process.env`. */
   env?: Record<string, string | undefined>;
+  /** §6.8 — the per-command daemon-liveness warning. Returns the warning
+   * line to print, or `undefined` for silence. Injected so no test here
+   * touches a real pidfile on disk. Default: `defaultCheckDaemonLiveness`
+   * below, which is silent when the pidfile is absent OR unparseable
+   * (`readDaemonPidfile` already collapses both to `undefined` — §6.2's
+   * reader rule) and warns only when it EXISTS and shows a dead pid or a
+   * stale heartbeat — deliberately narrower than `daemonLivenessCheck`
+   * (`ops/doctor/aggregate.ts`), which also warns on a missing pidfile as
+   * useful information on that opt-in surface; a blanket per-command nag
+   * for "you've never run `serve start`" would be unwelcome noise here. */
+  checkDaemonLiveness?: () => string | undefined;
+}
+
+function defaultCheckDaemonLiveness(): string | undefined {
+  const pidfileDeps = defaultDaemonPidfileDeps();
+  const file = readDaemonPidfile(process.cwd(), pidfileDeps);
+  if (!file) return undefined; // absent or unparseable — both silent.
+  if (!pidfileDeps.pidIsAlive(file.pid)) {
+    return (
+      'warning: jobbunny daemon is not running (stale pidfile) — scheduled runs will not ' +
+      "fire until 'jobbunny serve start'"
+    );
+  }
+  const heartbeatAgeMs = pidfileDeps.now().getTime() - Date.parse(file.lastTickAt);
+  if (heartbeatAgeMs > HEARTBEAT_STALE_MS) {
+    return 'warning: jobbunny daemon appears wedged (no tick in over 5 minutes) — scheduled runs may not fire';
+  }
+  return undefined;
 }
 
 const USAGE = [
@@ -277,6 +310,12 @@ function buildOptions(
 export async function main(argv: string[], deps: MainDeps = {}): Promise<number> {
   const commands = { ...defaultCommands(), ...deps.commands };
   const stderr = deps.stderr ?? ((line: string) => console.error(line));
+
+  // §6.8: every command warns, first thing, when the daemon pidfile
+  // exists but shows no live daemon — before anything else runs.
+  const checkDaemonLiveness = deps.checkDaemonLiveness ?? defaultCheckDaemonLiveness;
+  const livenessWarning = checkDaemonLiveness();
+  if (livenessWarning) stderr(livenessWarning);
 
   const { values, positionals } = parseArgs({
     args: argv,

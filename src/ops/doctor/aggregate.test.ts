@@ -1,14 +1,75 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
+import type { DaemonPidfileDeps } from '../daemon/index.ts';
+import { acquireDaemonPidfile } from '../daemon/index.ts';
 import {
+  claudeOnPathCheck,
   coreChecks,
+  daemonLivenessCheck,
   emptyLanesCheck,
   envTokensCheck,
   filterParsesCheck,
   profileParsesCheck,
   runChecks,
 } from './aggregate.ts';
+
+function fakeDaemonPidfileDeps(nowMs: number): DaemonPidfileDeps {
+  const files = new Map<string, string>();
+  const notFound = (): never => {
+    const err = new Error('ENOENT') as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    throw err;
+  };
+  return {
+    existsSync: (p) => files.has(p),
+    readFileSync: (p) => files.get(p) ?? notFound(),
+    writeFileSync: (p, data) => {
+      files.set(p, data);
+    },
+    writeFileSyncExclusive: (p, data) => {
+      if (files.has(p)) return false;
+      files.set(p, data);
+      return true;
+    },
+    renameSync: (from, to) => {
+      const content = files.get(from) ?? notFound();
+      files.delete(from);
+      files.set(to, content);
+    },
+    unlinkSync: (p) => {
+      files.delete(p);
+    },
+    pidIsAlive: () => true,
+    now: () => new Date(nowMs),
+  };
+}
+
+test('daemonLivenessCheck: a fresh heartbeat on a live pid is ok', async () => {
+  const now = Date.parse('2026-07-27T14:04:00.000Z');
+  const daemonPidfile = fakeDaemonPidfileDeps(now);
+  acquireDaemonPidfile('/fake/root', 1000, daemonPidfile);
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('daemonLivenessCheck: a six-minute-old heartbeat on a live pid warns "wedged"', async () => {
+  const started = Date.parse('2026-07-27T14:04:00.000Z');
+  const daemonPidfile = fakeDaemonPidfileDeps(started);
+  acquireDaemonPidfile('/fake/root', 1000, daemonPidfile);
+  daemonPidfile.now = () => new Date(started + 6 * 60_000);
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /wedged/);
+});
 
 const VALID_PROFILE_JSON = JSON.stringify({
   lanes: ['linkedin'],
@@ -258,16 +319,42 @@ test('emptyLanesCheck: stays ok (silent) when profile.json fails schema validati
 
 // --- coreChecks ---
 
-test('coreChecks: returns the four core checks', () => {
+test('daemonLivenessCheck: a missing pidfile warns', async () => {
+  const daemonPidfile = fakeDaemonPidfileDeps(Date.now());
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /no daemon pidfile found/);
+});
+
+test('claudeOnPathCheck: present ⇒ ok, absent ⇒ red', async () => {
+  const present = await claudeOnPathCheck({
+    profileName: 'harish',
+    commandExists: async () => true,
+  }).run();
+  assert.equal(present.status, 'ok');
+
+  const absent = await claudeOnPathCheck({
+    profileName: 'harish',
+    commandExists: async () => false,
+  }).run();
+  assert.equal(absent.status, 'red');
+  assert.match(absent.detail, /not found on PATH/);
+});
+
+test('coreChecks: returns the six core checks', () => {
   const checks = coreChecks({
     profileName: 'rajni',
     root: '/repo',
     env: { NOTION_TOKEN: 't', TELEGRAM_BOT_TOKEN: 't' },
     readFile: fakeReadFile({}),
   });
-  assert.equal(checks.length, 4);
+  assert.equal(checks.length, 6);
   const names = checks.map((c) => c.name);
-  assert.equal(new Set(names).size, 4);
+  assert.equal(new Set(names).size, 6);
 });
 
 // --- runChecks ---

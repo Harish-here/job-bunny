@@ -409,3 +409,26 @@ test('main: release dispatches normally when run via npm with a -- separator', a
     yes: false,
   });
 });
+
+test('main: prints the daemon-liveness warning, first, when one is returned', async () => {
+  const stderr = captureStderr();
+  const code = await main(['doctor', '--profile', 'rajni'], {
+    commands: { doctor: async () => 0 },
+    stderr: stderr.write,
+    checkDaemonLiveness: () =>
+      'warning: jobbunny daemon appears wedged (no tick in over 5 minutes)',
+  });
+  assert.equal(code, 0);
+  assert.ok(stderr.lines[0]?.includes('appears wedged'));
+});
+
+test('main: prints nothing when checkDaemonLiveness returns undefined', async () => {
+  const stderr = captureStderr();
+  const code = await main(['doctor', '--profile', 'rajni'], {
+    commands: { doctor: async () => 0 },
+    stderr: stderr.write,
+    checkDaemonLiveness: () => undefined,
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(stderr.lines, []);
+});

@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { PipelineConfigSchema } from '../../core/config/schema.ts';
 import { FilterConfigSchema } from '../../core/filter/config.ts';
 import type {
@@ -8,6 +10,14 @@ import type {
   DoctorReport,
   DoctorStatus,
 } from '../../ports/doctor.ts';
+import type { DaemonPidfileDeps } from '../daemon/index.ts';
+import {
+  defaultDaemonPidfileDeps,
+  HEARTBEAT_STALE_MS,
+  readDaemonPidfile,
+} from '../daemon/index.ts';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * ops/doctor/aggregate.ts (P8) — the three profile/config/env "core" doctor
@@ -34,6 +44,13 @@ export interface CoreCheckOpts {
   root?: string;
   env?: NodeJS.ProcessEnv;
   readFile?: (path: string) => Promise<string>;
+  /** Probes whether a command resolves on PATH. Defaults to a real
+   * `execFile('claude', ['--version'])` probe. Injected so tests never
+   * shell out for real (D17's hermetic-test requirement). */
+  commandExists?: (command: string) => Promise<boolean>;
+  /** Daemon pidfile deps for `daemonLivenessCheck`. Defaults to
+   * `defaultDaemonPidfileDeps()`. */
+  daemonPidfile?: DaemonPidfileDeps;
 }
 
 function resolveReadFile(opts: CoreCheckOpts): (path: string) => Promise<string> {
@@ -279,15 +296,114 @@ export function envTokensCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
-/** coreChecks — the three profile/config/env checks above, in a fixed
- * order. Callers append adapter-contributed checks (e.g. Notion/Telegram
- * reachability) themselves before calling `runChecks`. */
+function resolveCommandExists(
+  opts: CoreCheckOpts,
+): (command: string) => Promise<boolean> {
+  return opts.commandExists ?? defaultCommandExists;
+}
+
+async function defaultCommandExists(command: string): Promise<boolean> {
+  try {
+    await execFileAsync(command, ['--version']);
+    return true;
+  } catch (err) {
+    // ENOENT ⇒ not on PATH. Any other failure (e.g. a nonzero exit)
+    // still means the binary itself was found and ran — present.
+    return !isNotFound(err);
+  }
+}
+
+/** claudeOnPathCheck (D13) — Claude Code's own `claude` CLI is the ONLY
+ * structure-stage LLM provider; this is a documented prerequisite to
+ * CHECK, not an OS blocker to work around (Claude Code itself is
+ * cross-platform). `red`, not `warn`: the structure stage cannot proceed
+ * at all without it, so failing fast at doctor/preflight time beats
+ * failing partway through a run. */
+export function claudeOnPathCheck(opts: CoreCheckOpts): DoctorCheck {
+  const name = 'claude-cli-on-path';
+  const commandExists = resolveCommandExists(opts);
+  return {
+    name,
+    async run(): Promise<DoctorFinding> {
+      const found = await commandExists('claude');
+      if (found) {
+        return { check: name, status: 'ok', detail: 'claude CLI found on PATH' };
+      }
+      return {
+        check: name,
+        status: 'red',
+        detail:
+          'claude CLI not found on PATH — the structure stage shells out to it directly; ' +
+          'install Claude Code (https://claude.com/claude-code) and ensure `claude` ' +
+          'resolves on PATH',
+      };
+    },
+  };
+}
+
+/** daemonLivenessCheck (§6.8, D22) — an opt-in diagnostic surface (only
+ * seen when the user explicitly runs `jobbunny doctor`), distinct from
+ * main.ts's blanket per-command stderr warning: this check DOES warn on
+ * a missing pidfile (useful information here), where the per-command
+ * warning deliberately stays silent for a user who has never run `serve
+ * start` at all (see main.ts's `defaultCheckDaemonLiveness`). Always
+ * `warn`, never `red` — a down/wedged daemon means scheduled runs won't
+ * fire, not that a manually-invoked `run`/`doctor` itself is broken. */
+export function daemonLivenessCheck(opts: CoreCheckOpts): DoctorCheck {
+  const name = 'daemon-liveness';
+  const root = resolveRoot(opts);
+  const deps = opts.daemonPidfile ?? defaultDaemonPidfileDeps();
+  return {
+    name,
+    async run(): Promise<DoctorFinding> {
+      const file = readDaemonPidfile(root, deps);
+      if (!file) {
+        return {
+          check: name,
+          status: 'warn',
+          detail:
+            "no daemon pidfile found — scheduled runs will not fire until 'jobbunny serve start'",
+        };
+      }
+      if (!deps.pidIsAlive(file.pid)) {
+        return {
+          check: name,
+          status: 'warn',
+          detail: `daemon pidfile found but pid ${file.pid} is not alive — run 'jobbunny serve start'`,
+        };
+      }
+      const heartbeatAgeMs = deps.now().getTime() - Date.parse(file.lastTickAt);
+      if (heartbeatAgeMs > HEARTBEAT_STALE_MS) {
+        return {
+          check: name,
+          status: 'warn',
+          detail:
+            `daemon (pid ${file.pid}) appears wedged — no tick in over ` +
+            `${Math.round(HEARTBEAT_STALE_MS / 60_000)} minutes. A machine that just woke ` +
+            'from sleep can trigger this transiently for up to one tick interval; this ' +
+            'check is advisory and deliberately does not re-check before reporting.',
+        };
+      }
+      return {
+        check: name,
+        status: 'ok',
+        detail: `daemon running (pid ${file.pid}), ticking normally`,
+      };
+    },
+  };
+}
+
+/** coreChecks — the five profile/config/env/daemon/claude checks above,
+ * in a fixed order. Callers append adapter-contributed checks (e.g.
+ * Notion/Telegram reachability) themselves before calling `runChecks`. */
 export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {
   return [
     profileParsesCheck(opts),
     filterParsesCheck(opts),
     emptyLanesCheck(opts),
     envTokensCheck(opts),
+    claudeOnPathCheck(opts),
+    daemonLivenessCheck(opts),
   ];
 }
 
