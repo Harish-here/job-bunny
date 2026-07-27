@@ -1,7 +1,6 @@
 /**
- * cli/commands/serve.ts (D2, D6) — `serve start|stop|status`, replacing
- * `schedule install`/`schedule remove` (Task 12 deletes the latter; both
- * commands coexist until then, per this plan's task ordering). NO
+ * cli/commands/serve.ts (D2, D6) — `serve start|stop|status`, which
+ * replaced the deleted `schedule install`/`schedule remove`. NO
  * `--profile` — cross-profile by design, the same posture `schedule
  * install` had. `start` splits into a PARENT (acquires the pidfile,
  * spawns a detached child, confirms it's alive, exits) and a CHILD
@@ -265,14 +264,14 @@ async function runServeStartParent(deps: ServeDeps): Promise<number> {
     spawnErrored = true;
   });
 
-  if (typeof child.pid === 'number') {
-    const childPid = child.pid;
-    updateDaemonPidfile(
-      deps.root,
-      (current) => ({ ...current, pid: childPid }),
-      deps.pidfile,
-    );
-  }
+  // F8: the parent does NOT write the child's pid here. It used to, which
+  // raced the child's own boot-time write of the same field — two writers,
+  // no ordering guarantee, and a losing parent write could leave the
+  // pidfile naming a process that has already exited. The parent's `wx`
+  // acquire above covers the boot window with its own pid (so a concurrent
+  // `serve start` still finds a live owner), the child overwrites it with
+  // its own pid as its first action, and the 2s alive-confirm below reads
+  // the spawn handle's pid rather than the file.
   child.unref?.();
 
   await deps.sleep(CHILD_ALIVE_CHECK_MS);
@@ -290,6 +289,18 @@ async function runServeStartParent(deps: ServeDeps): Promise<number> {
 }
 
 async function runServeStartChild(deps: ServeDeps): Promise<number> {
+  // F8: FIRST action — claim the pidfile's `pid` field for this process.
+  // The parent created the file under its OWN pid (an `wx` placeholder
+  // that keeps a concurrent `serve start` out during the boot window) and
+  // deliberately never overwrites it, so this is the single write that
+  // makes `serve stop`/`serve status`/staleness checks point at the
+  // process that actually runs the tick loop.
+  updateDaemonPidfile(
+    deps.root,
+    (current) => ({ ...current, pid: deps.pid }),
+    deps.pidfile,
+  );
+
   const runCapMs = computeRunCapMs();
   const log = (event: string, data?: Record<string, unknown>): void => {
     // Lands in daemon.log via the parent's stdio redirection (§6.1) —
@@ -341,6 +352,14 @@ async function runServeStartChild(deps: ServeDeps): Promise<number> {
     const shutdown = (): void => {
       daemon.stop();
       resolve(0);
+      // Exit NOW rather than unwinding: an in-flight run child's own
+      // handle keeps this process's event loop alive for the rest of that
+      // child's runtime (up to the full run cap), so `serve stop` would
+      // burn its entire 20s grace and then SIGKILL a daemon that had
+      // already shut down cleanly. The run child survives the parent's
+      // exit (POSIX), `inFlight` stays on disk, and `serve stop`'s own
+      // post-daemon re-read finds and kills it — the designed path.
+      process.exit(0);
     };
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
@@ -425,10 +444,10 @@ async function runServeStatus(deps: ServeDeps): Promise<number> {
   if (!Number.isFinite(heartbeatAgeMs)) {
     // An unparseable lastTickAt is suspicious, not benign: the operator
     // gets the raw value plus the wedged flag rather than `NaNhNaNmNaNs`,
-    // which reads as a rendering bug and hides the real problem. This is
-    // deliberately more conservative than `isDaemonPidfileStale`'s own
-    // rule (which requires a FINITE age to call a live pid stale), since
-    // status only reports while `serve start` actually steals.
+    // which reads as a rendering bug and hides the real problem. Same
+    // verdict `isDaemonPidfileStale` reaches for the same file (a
+    // non-finite age is stale) — status only REPORTS it, while `serve
+    // start` acts on it, one 35s re-check later.
     deps.write(`  last tick: ${file.lastTickAt} (age unknown) — appears wedged`);
   } else {
     const wedged = heartbeatAgeMs > HEARTBEAT_STALE_MS;

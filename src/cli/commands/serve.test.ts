@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { DaemonPidfileDeps } from '../../ops/daemon/index.ts';
 import {
@@ -14,6 +15,13 @@ import { serveCommand } from './serve.ts';
 
 const ROOT = '/fake/root';
 const HOME = '/fake/home';
+const PROFILES_DIR = '/fake/profiles';
+
+/** The scan helpers compose paths with `node:path.join`, so an expectation
+ * spelled as a POSIX literal fails on windows-latest. */
+function profilePath(name: string): string {
+  return join(PROFILES_DIR, name, 'profile.json');
+}
 
 function fakePidfileDeps(): DaemonPidfileDeps {
   const files = new Map<string, string>();
@@ -115,7 +123,7 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     platform: 'darwin',
     uid: 501,
     pid: 100,
-    profilesDir: '/fake/profiles',
+    profilesDir: PROFILES_DIR,
     pidfile: fakePidfileDeps(),
     logs: fakeLogDeps(),
     scan: fakeScanDeps(),
@@ -185,7 +193,10 @@ test('start: a dead pid steals immediately — no 35s re-check wait', async () =
   });
   const code = await serveCommand({ action: 'start' }, deps);
   assert.equal(code, 0);
-  assert.equal(readDaemonPidfile(ROOT, pidfile)?.pid, 9001); // stolen and re-recorded.
+  // F8: the parent re-acquires under its OWN pid and never overwrites the
+  // field afterwards — the spawned child claims it as its first action
+  // (see runServeStartChild), so the parent-side race is gone.
+  assert.equal(readDaemonPidfile(ROOT, pidfile)?.pid, deps.pid); // stolen and re-recorded.
   assert.ok(!sleeps.includes(35_000)); // no re-check wait for a dead pid.
 });
 
@@ -321,11 +332,10 @@ test('status: renders pid/uptime, last-tick, in-flight (profile + elapsed), and 
     // existsSync('<profilesDir>/<name>/profile.json'), so a fake that
     // only acknowledges the directory yields zero schedules and the
     // next-fire line below would silently read "none scheduled".
-    existsSync: (p) =>
-      p === '/fake/profiles' || p === '/fake/profiles/harish/profile.json',
-    readdirSync: (p) => (p === '/fake/profiles' ? ['harish'] : []),
+    existsSync: (p) => p === PROFILES_DIR || p === profilePath('harish'),
+    readdirSync: (p) => (p === PROFILES_DIR ? ['harish'] : []),
     readFileSync: (p) =>
-      p === '/fake/profiles/harish/profile.json'
+      p === profilePath('harish')
         ? JSON.stringify({
             connector: 'notion',
             schedule: {
@@ -341,11 +351,7 @@ test('status: renders pid/uptime, last-tick, in-flight (profile + elapsed), and 
             throw err;
           })(),
   };
-  const { deps, writes } = baseServeDeps({
-    pidfile,
-    scan,
-    profilesDir: '/fake/profiles',
-  });
+  const { deps, writes } = baseServeDeps({ pidfile, scan });
   const code = await serveCommand({ action: 'status' }, deps);
   assert.equal(code, 0);
   const printed = writes.join('\n');
