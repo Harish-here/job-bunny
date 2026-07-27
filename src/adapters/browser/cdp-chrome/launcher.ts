@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { join as nodeJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveCandidates } from './discovery/index.ts';
 
 /**
  * Chrome-over-CDP process lifecycle: find the local Chrome binary, build its
@@ -90,7 +91,7 @@ export function resolveChromePath(
   const found = candidates.find((path) => deps.existsSync(path));
   if (!found) {
     throw new Error(
-      `no Chrome executable found (checked: ${candidates.join(', ')}) — install Google Chrome`,
+      `no Chrome executable found (checked: ${candidates.join(', ')}) — install Google Chrome (or Microsoft Edge on Windows)`,
     );
   }
   return found;
@@ -297,11 +298,7 @@ export function launchChrome(
   options: LaunchChromeOptions,
   deps: LauncherDeps = {},
 ): ChromeProcessHandle {
-  const {
-    port,
-    userDataDir = DEFAULT_USER_DATA_DIR,
-    candidates = CHROME_PATH_CANDIDATES,
-  } = options;
+  const { port, userDataDir = DEFAULT_USER_DATA_DIR, candidates } = options;
   const existsSync = deps.existsSync ?? nodeExistsSync;
   const spawn = deps.spawn ?? (nodeSpawn as unknown as SpawnFn);
   const env = deps.env ?? process.env;
@@ -314,7 +311,8 @@ export function launchChrome(
     };
     clearSessionState(userDataDir, sessionClearDeps);
   }
-  const chromePath = resolveChromePath(candidates, { existsSync });
+  const resolvedCandidates = resolveCandidates(process.platform, env, candidates);
+  const chromePath = resolveChromePath(resolvedCandidates, { existsSync });
   const argv = buildLaunchArgv({ port, userDataDir });
   const child = spawn(chromePath, argv, { detached: true, stdio: 'ignore' });
   child.unref();

@@ -92,7 +92,7 @@ test('resolveChromePath prefers earlier candidates over later ones', () => {
 test('resolveChromePath throws a clear error naming every path checked when none exist', () => {
   assert.throws(
     () => resolveChromePath(['/a', '/b'], { existsSync: () => false }),
-    /no Chrome executable found \(checked: \/a, \/b\)/,
+    /no Chrome executable found \(checked: \/a, \/b\) — install Google Chrome \(or Microsoft Edge on Windows\)/,
   );
 });
 
@@ -182,6 +182,23 @@ test('launchChrome propagates the resolveChromePath error when no candidate exis
       ),
     /no Chrome executable found/,
   );
+});
+
+test('launchChrome resolves via JOBBUNNY_CHROME_PATH when set, ignoring the candidates option entirely', () => {
+  const spawnCalls: Array<{ command: string }> = [];
+  const proc = launchChrome(
+    { port: 9222, candidates: ['/configured/chrome'] },
+    {
+      existsSync: (path) => path === '/from/env/chrome',
+      spawn: (command) => {
+        spawnCalls.push({ command });
+        return { pid: 4242, unref: () => {} };
+      },
+      env: { JOBBUNNY_CHROME_PATH: '/from/env/chrome' },
+    },
+  );
+  assert.equal(proc.pid, 4242);
+  assert.equal(spawnCalls[0]?.command, '/from/env/chrome');
 });
 
 test('killChrome sends SIGTERM to the spawned pid by default', async () => {
