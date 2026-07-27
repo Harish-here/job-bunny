@@ -30,6 +30,7 @@ import 'dotenv/config';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { autostartCommand } from './commands/autostart.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
@@ -73,6 +74,7 @@ export type CommandName =
   | 'routine'
   | 'schedule'
   | 'serve'
+  | 'autostart'
   | 'lane'
   | 'profile'
   | 'setup'
@@ -101,6 +103,7 @@ const USAGE = [
   '  schedule install                     (cross-profile — no --profile)',
   '  schedule remove --profile <name>',
   '  serve start|stop|status              (cross-profile — no --profile)',
+  '  autostart enable|disable             (cross-profile — darwin only)',
   '  lane add-url <url> [label] --profile <name>',
   '  profile build --profile <name>',
   '  profile remove --profile <name> [--force]',
@@ -120,6 +123,10 @@ function defaultCommands(): CommandRegistry {
       serveCommand({
         action: (opts.action ?? 'status') as 'start' | 'stop' | 'status',
         daemonChild: opts.daemonChild ?? false,
+      })) as CommandFn,
+    autostart: (async (opts: CommandOptions) =>
+      autostartCommand({
+        action: (opts.action ?? 'enable') as 'enable' | 'disable',
       })) as CommandFn,
     lane: laneAddUrlCommand as unknown as CommandFn,
     // `profile` fans out to two commands; the sub-action picks which.
@@ -149,6 +156,7 @@ const COMMAND_NAMES = new Set<string>([
   'routine',
   'schedule',
   'serve',
+  'autostart',
   'lane',
   'profile',
   'setup',
@@ -228,6 +236,13 @@ function buildOptions(
         return { error: 'serve takes "start", "stop", or "status"' };
       }
       return { action, ...(values['daemon-child'] ? { daemonChild: true } : {}) };
+    }
+    case 'autostart': {
+      const action = rest[0];
+      if (action !== 'enable' && action !== 'disable') {
+        return { error: 'autostart takes "enable" or "disable"' };
+      }
+      return { action };
     }
     case 'lane': {
       if (rest[0] !== 'add-url') return { error: 'lane takes "add-url"' };

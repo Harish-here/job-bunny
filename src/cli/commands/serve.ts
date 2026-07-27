@@ -51,7 +51,7 @@ import {
 } from '../../ops/daemon/scan/index.ts';
 import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
 
-const LEGACY_PLIST_REGEX = /^com\.jobbunny\.\d{4}\.plist$/;
+export const LEGACY_PLIST_REGEX = /^com\.jobbunny\.\d{4}\.plist$/;
 /** One 30s tick plus a 5s margin (D22/A15.4) — see `isDaemonPidfileStale`'s
  * own doc comment for why an alive-but-stale-heartbeat pid isn't stolen
  * on first observation. */
@@ -168,8 +168,9 @@ function defaultServeDeps(): ServeDeps {
   };
 }
 
-/** D15/§8 — a directory read plus printed strings; no `launchd` code. */
-function migrationCleanupBlock(files: string[], uid: number | undefined): string {
+/** D15/§8 — a directory read plus printed strings; no `launchd` code.
+ * Exported so `autostart.ts`'s `enable` can reuse it verbatim (§6.7). */
+export function migrationCleanupBlock(files: string[], uid: number | undefined): string {
   const lines = [
     `serve start: found ${files.length} leftover launchd job(s) from the old scheduler. Run this first:`,
     '',
