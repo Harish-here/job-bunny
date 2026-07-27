@@ -68,11 +68,28 @@ export function createSpawnRun(deps: SuperviseDeps): SpawnRun {
       rotateIfLarge(logPath, deps.logs);
       const fd = openAppendFd(logPath, deps.logs);
 
-      const child = deps.spawn(
-        deps.nodeBin,
-        [deps.cliEntry, 'run', '--profile', owed.profile, '--headless'],
-        { stdio: ['ignore', fd, fd] },
-      );
+      // The try/catch covers the SYNCHRONOUS-throw path only (EMFILE at
+      // fork time, a bad `nodeBin` on some platforms) — a spawn failure
+      // reported the normal way, via the `error` event, is handled by the
+      // handler further down instead. Without this, the fd opened above
+      // is never closed on that path and the failure mode is
+      // self-reinforcing: EMFILE leaks one more fd per attempt, making
+      // the next EMFILE more certain on a daemon expected to live for
+      // months (D20). Rethrown rather than swallowed, so the promise
+      // still REJECTS — daemon.ts's tick already contains that (ee4e035),
+      // and turning it into a resolve(1) would falsely report a child
+      // that never existed as having run and exited.
+      let child: ReturnType<SuperviseDeps['spawn']>;
+      try {
+        child = deps.spawn(
+          deps.nodeBin,
+          [deps.cliEntry, 'run', '--profile', owed.profile, '--headless'],
+          { stdio: ['ignore', fd, fd] },
+        );
+      } catch (err) {
+        deps.logs.closeSync(fd);
+        throw err;
+      }
 
       // The child now holds its own reference to the fd via the stdio
       // hand-off above — this process's own copy must be closed here, or

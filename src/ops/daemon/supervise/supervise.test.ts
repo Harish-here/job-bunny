@@ -283,13 +283,29 @@ test('the nested SIGKILL timer is also cleared when the child exits between SIGT
  * rejection costs one logged `tick-failed` rather than the daemon's life.
  * Task 7's ledger append — which happens before this function is even called
  * — still counts the slot as attempted, so this cannot become a retry storm.
+ *
+ * The fd must still be closed on this path. `openAppendFd` has already run by
+ * the time `deps.spawn` throws, and nothing else will ever close that fd —
+ * so without the implementation's try/catch the failure mode is
+ * self-reinforcing: EMFILE (the most likely cause of a synchronous spawn
+ * throw) leaks one more fd on every attempt, making the next EMFILE more
+ * certain, on a daemon expected to live for months (D20).
  */
-test('a synchronous throw from deps.spawn rejects without leaving inFlight set', async () => {
+test('a synchronous throw from deps.spawn rejects, closes the fd, and leaves no inFlight', async () => {
+  const closed: number[] = [];
+  const logs: LogDeps = {
+    ...fakeLogDeps(),
+    closeSync: (fd) => {
+      closed.push(fd);
+    },
+  };
   const { deps, pidfile } = baseDeps({
+    logs,
     spawn: () => {
       throw new Error('EMFILE: too many open files');
     },
   });
   await assert.rejects(createSpawnRun(deps)(OWED), /EMFILE/);
+  assert.deepEqual(closed, [42]); // the fd openAppendFd handed out, released.
   assert.equal(readDaemonPidfile(ROOT, pidfile)?.inFlight, undefined);
 });
