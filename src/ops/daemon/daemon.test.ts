@@ -8,6 +8,7 @@ import type { DaemonPidfileDeps } from './pidfile.ts';
 import {
   acquireDaemonPidfile,
   readDaemonPidfile,
+  releaseDaemonPidfile,
   updateDaemonPidfile,
 } from './pidfile.ts';
 import type { ScanDeps } from './scan/index.ts';
@@ -205,6 +206,44 @@ test('a ledger entry suppresses a respawn for a slot with no run folder', async 
 
   await createDaemon(deps).tick(); // same slot, still no run folder.
   assert.deepEqual(spawnCalls, ['harish']); // NOT spawned again — the ledger entry served it.
+});
+
+test('a pidfile that vanishes mid-tick blocks the spawn instead of storming', async () => {
+  const base = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  // The pidfile disappears AFTER the heartbeat write, while the batch is
+  // scanning — so the pre-spawn ledger append silently no-ops. Without the
+  // append's return value being checked, the slot stays owed and every
+  // subsequent 30s tick respawns it: the D19 storm, reopened.
+  let pidfileDeps: DaemonPidfileDeps | undefined;
+  const scan: ScanDeps = {
+    ...base,
+    readdirSync: (p) => {
+      if (p === PROFILES_DIR && pidfileDeps) releaseDaemonPidfile(ROOT, pidfileDeps);
+      return base.readdirSync(p);
+    },
+  };
+
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+
+  const { deps, events } = baseDeps({ scan, spawnRun });
+  pidfileDeps = deps.pidfile;
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(spawnCalls, []); // no ledger, no spawn.
+  assert.ok(
+    events.some(
+      (e) => e.event === 'ledger-append-failed-skipping' && e.data?.profile === 'harish',
+    ),
+  );
+  assert.equal(events.filter((e) => e.event === 'spawn').length, 0);
 });
 
 test('an entry whose grace window expired during a predecessor run is skipped and NOT ledgered', async () => {

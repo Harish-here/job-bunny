@@ -159,20 +159,28 @@ export function readDaemonPidfile(
  * not run_folder.ts's async writeAtomic, so the heartbeat write Task 7
  * places outside the reentrancy guard can never interleave with this same
  * function's own guarded-body calls — Node's single-threaded event loop
- * runs a sync write-then-rename to completion without yielding. A no-op
- * if the pidfile is currently unreadable (nothing safe to mutate). */
+ * runs a sync write-then-rename to completion without yielding.
+ *
+ * Returns FALSE when the pidfile is currently unreadable (missing or
+ * corrupt) and the update was therefore a no-op — nothing safe to mutate.
+ * That return value is load-bearing for the D19 attempts ledger: a silent
+ * no-op there means the ledger append never lands, every tick re-derives
+ * the same slot as owed, and a doctor-red profile respawns a run every
+ * 30s. Callers whose write is genuinely best-effort (the heartbeat) may
+ * ignore it; `daemon.ts`'s pre-spawn ledger append must not. */
 export function updateDaemonPidfile(
   root: string,
   mutate: (current: DaemonPidfile) => DaemonPidfile,
   deps: DaemonPidfileDeps,
-): void {
+): boolean {
   const current = readDaemonPidfile(root, deps);
-  if (!current) return;
+  if (!current) return false;
   const next = mutate(current);
   const path = daemonPidfilePath(root);
   const tmpPath = `${path}.tmp`;
   deps.writeFileSync(tmpPath, JSON.stringify(next));
   deps.renameSync(tmpPath, path);
+  return true;
 }
 
 /** Removes the pidfile. Tolerates an already-absent file (nothing to do). */
@@ -189,7 +197,14 @@ export function releaseDaemonPidfile(root: string, deps: DaemonPidfileDeps): voi
  * (lastTickAt) is older than HEARTBEAT_STALE_MS — NOT run_lock.ts's
  * 4-hour DEFAULT_MAX_AGE_MS, which is the wrong rule for a long-lived
  * daemon (see HEARTBEAT_STALE_MS's doc comment above). An undefined
- * (missing or corrupt) pidfile is always stale. */
+ * (missing or corrupt) pidfile is always stale, and so is a lastTickAt
+ * that won't parse: a NON-FINITE age is a heartbeat this daemon can no
+ * longer prove is fresh, which is exactly what `serve status` already
+ * reports as wedged. Treating it as fresh instead would pin a wedged
+ * daemon in place forever — no `serve start` could ever steal it. The
+ * steal itself is still not immediate for a live pid: `serve start`'s own
+ * 35s re-check (which compares lastTickAt for CHANGE, not parseability)
+ * backs off the moment the incumbent heartbeats again. */
 export function isDaemonPidfileStale(
   file: DaemonPidfile | undefined,
   deps: DaemonPidfileDeps,
@@ -197,7 +212,7 @@ export function isDaemonPidfileStale(
   if (!file) return true;
   if (!deps.pidIsAlive(file.pid)) return true;
   const age = deps.now().getTime() - Date.parse(file.lastTickAt);
-  return Number.isFinite(age) && age > HEARTBEAT_STALE_MS;
+  return !Number.isFinite(age) || age > HEARTBEAT_STALE_MS;
 }
 
 /** Builds the real (non-test) DaemonPidfileDeps. Mirrors

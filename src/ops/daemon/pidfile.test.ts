@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   acquireDaemonPidfile,
@@ -60,7 +61,7 @@ function fakeDeps(): DaemonPidfileDeps & {
 }
 
 test('daemonPidfilePath: sibling to .jobbunny-run.lock', () => {
-  assert.equal(daemonPidfilePath('/fake/root'), '/fake/root/.jobbunny-daemon.pid');
+  assert.equal(daemonPidfilePath(ROOT), join(ROOT, '.jobbunny-daemon.pid'));
 });
 
 test('acquireDaemonPidfile: succeeds on a clean directory', () => {
@@ -120,6 +121,20 @@ test('isDaemonPidfileStale: a lastTickAt six minutes old on a live pid IS stale'
   assert.equal(isDaemonPidfileStale(file, deps), true);
 });
 
+test('isDaemonPidfileStale: an unparseable lastTickAt on a live pid IS stale', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  markAlive(deps, 1000);
+  // A corrupt heartbeat yields a NaN age. Calling that "not stale" would
+  // pin a wedged daemon in place forever — no `serve start` could steal
+  // it — and contradicts what `serve status` already prints for the same
+  // file ("age unknown — appears wedged").
+  updateDaemonPidfile(ROOT, (c) => ({ ...c, lastTickAt: 'not-a-date' }), deps);
+  const file = readDaemonPidfile(ROOT, deps);
+  assert.equal(file?.lastTickAt, 'not-a-date'); // it really is a parsed pidfile.
+  assert.equal(isDaemonPidfileStale(file, deps), true);
+});
+
 test('isDaemonPidfileStale: exactly at HEARTBEAT_STALE_MS is NOT yet stale', () => {
   const deps = fakeDeps();
   acquireDaemonPidfile(ROOT, 1000, deps);
@@ -155,10 +170,10 @@ test('updateDaemonPidfile: writes to a .tmp path then renames it over the real p
   assert.deepEqual(readDaemonPidfile(ROOT, deps)?.inFlight, inFlight);
 });
 
-test('updateDaemonPidfile: appends an attempts-ledger entry', () => {
+test('updateDaemonPidfile: appends an attempts-ledger entry and reports true', () => {
   const deps = fakeDeps();
   acquireDaemonPidfile(ROOT, 1000, deps);
-  updateDaemonPidfile(
+  const written = updateDaemonPidfile(
     ROOT,
     (current) => ({
       ...current,
@@ -169,9 +184,22 @@ test('updateDaemonPidfile: appends an attempts-ledger entry', () => {
     }),
     deps,
   );
+  assert.equal(written, true);
   assert.deepEqual(readDaemonPidfile(ROOT, deps)?.attempts, [
     { profile: 'harish', date: '2026-07-27', slot: '14:00' },
   ]);
+});
+
+test('updateDaemonPidfile: reports false (not silence) when the pidfile is unreadable', () => {
+  const deps = fakeDeps();
+  // Never acquired — nothing safe to mutate. The return value is what lets
+  // daemon.ts refuse to spawn a run whose ledger append never landed.
+  const missing = updateDaemonPidfile(ROOT, (c) => c, deps);
+  assert.equal(missing, false);
+
+  setRaw(deps, 'not json{{{');
+  const corrupt = updateDaemonPidfile(ROOT, (c) => c, deps);
+  assert.equal(corrupt, false);
 });
 
 test('readDaemonPidfile: unparseable content is treated as stale (undefined)', () => {

@@ -133,7 +133,7 @@ export function createDaemon(deps: DaemonDeps): {
       // spawn call still counts the slot as attempted (D19). A9: prune to
       // only today's entries on every write, not just on read (rule 5) —
       // the pidfile itself never accumulates yesterday's attempts.
-      updateDaemonPidfile(
+      const ledgered = updateDaemonPidfile(
         deps.root,
         (current) => ({
           ...current,
@@ -144,6 +144,19 @@ export function createDaemon(deps: DaemonDeps): {
         }),
         deps.pidfile,
       );
+      // A vanished or corrupt pidfile makes that append a silent no-op —
+      // and a no-op ledger reopens the exact respawn storm D19 closed: the
+      // slot stays owed, so a profile whose run dies before its first
+      // checkpoint would be respawned every 30s for its whole grace
+      // window. No ledger, no spawn: skip the entry instead. The next tick
+      // re-evaluates, and a pidfile restored by then serves it normally.
+      if (!ledgered) {
+        deps.log('ledger-append-failed-skipping', {
+          profile: owed.profile,
+          slot: owed.slot,
+        });
+        continue;
+      }
 
       deps.log('spawn', { profile: owed.profile, slot: owed.slot });
       const exitCode = await deps.spawnRun(owed);

@@ -35,6 +35,12 @@ structure_passthrough.json
 # Pipeline orchestration lock (local only)
 .jobbunny-run.lock
 
+# Daemon supervision state (local only) — the tick loop rewrites the pidfile
+# (via its .tmp sibling) every 30s, so an untracked pair here would make
+# `jobbunny release`'s clean-tree check fail whenever the daemon is running.
+.jobbunny-daemon.pid
+.jobbunny-daemon.pid.tmp
+
 # profiles/rajni/ is a committed, synthetic fixture profile for live-testing the
 # deterministic pipeline stages + onboarding reference (see profiles/rajni/README.md).
 # Must come after every blanket rule above that would otherwise re-shadow these paths
