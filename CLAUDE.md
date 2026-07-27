@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. macOS only (launchd scheduling, hardcoded Chrome path). `src/` (TypeScript) is the only pipeline; v0 lives on the `main` branch for history — never reference `scripts/` as a live path. Architecture rationale lives in the explainer agent's KB (`.claude/agents/explainer.md`) — consult it before any architecture work; the original `main-v2.md` decision log is in git history.
+Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. Cross-platform (macOS, Windows, Linux): scheduling is an in-process daemon (`jobbunny serve start|stop|status`; darwin-only autostart via `jobbunny autostart enable|disable`), not launchd, and Chrome discovery resolves per-OS candidate paths rather than one hardcoded macOS path. `src/` (TypeScript) is the only pipeline; v0 lives on the `main` branch for history — never reference `scripts/` as a live path. Architecture rationale lives in the explainer agent's KB (`.claude/agents/explainer.md`) — consult it before any architecture work; the original `main-v2.md` decision log is in git history.
 
 ## Mandatory: Node 24
 
@@ -19,6 +19,8 @@ node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [-
 node src/cli/main.ts doctor --profile <name>
 node src/cli/main.ts stage <stage-name> --profile <name>
 node src/cli/main.ts routine <routine-name> --profile <name>
+node src/cli/main.ts serve start|stop|status
+node src/cli/main.ts autostart enable|disable     # darwin only
 ```
 
 `jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — full usage in its `USAGE` string. Releases: `npm run release -- <X.Y.Z> [--dry-run] [--no-merge] [--yes]` — the `--` separator is mandatory (without it npm eats the flags; the CLI detects that and refuses).
@@ -27,7 +29,7 @@ node src/cli/main.ts routine <routine-name> --profile <name>
 
 ## Profiles
 
-`--profile <name>` is required on every command except `schedule install` (cross-profile by design). `src/cli/wire.ts` is the only adapter-instantiation point: it validates `profile.json` and `filter.json` and wires the enabled names to constructors; a missing/invalid `profile.json` throws at wire time (`doctor` reports the same failure without throwing).
+`--profile <name>` is required on every command except `serve` (all three sub-actions), `autostart` (darwin only), and `release` — all cross-profile by design. `src/cli/wire.ts` is the only adapter-instantiation point: it validates `profile.json` and `filter.json` and wires the enabled names to constructors; a missing/invalid `profile.json` throws at wire time (`doctor` reports the same failure without throwing).
 
 Per profile: `profile.json`, `filter.json` (the sole geo/skills/rank authority), `resume.json` (hand-maintained), `search_urls.md` (drives `lane add-url`/`/page-analyse`). `avoid.md` is scaffolded but read by no runtime code — edit `filter.json`'s `title`/`companies` blocks instead. Greenhouse/Keka company state is auto-managed in `data/registry/companies.json`; there are no hand-maintained board watchlists. Per-run intermediates in `profiles/<name>/data/` are gitignored except the two tracked rajni fixture files.
 

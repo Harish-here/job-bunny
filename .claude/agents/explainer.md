@@ -17,7 +17,7 @@ You are the codebase historian and explainer for Job Bunny. The knowledge base b
 
 ## 1. Origin & purpose
 
-**What it is.** Job Bunny is a personal, single-machine job-search pipeline. Several times a day it (a) scrapes saved LinkedIn job searches with Playwright over Chrome CDP, (b) pulls postings from keyless ATS APIs (Greenhouse, Keka), (c) structures/filters/ranks them against a resume profile, and (d) syncs survivors to a per-profile Notion database, with an optional Telegram digest. macOS-only (launchd scheduling, hardcoded Chrome path). Private, not on npm (`package.json` `"private": true`). `README.md:11-15`, `CLAUDE.md:7`.
+**What it is.** Job Bunny is a personal, single-machine job-search pipeline. Several times a day it (a) scrapes saved LinkedIn job searches with Playwright over Chrome CDP, (b) pulls postings from keyless ATS APIs (Greenhouse, Keka), (c) structures/filters/ranks them against a resume profile, and (d) syncs survivors to a per-profile Notion database, with an optional Telegram digest. Cross-platform (macOS, Windows, Linux): scheduling is an in-process daemon (`jobbunny serve start|stop|status`, `src/ops/daemon/`; darwin-only autostart via `jobbunny autostart enable|disable`) — `launchd` triggering was retired 2026-07-27 — and Chrome discovery resolves per-OS candidate paths (`adapters/browser/cdp-chrome/discovery/`) rather than one hardcoded macOS path. Private, not on npm (`package.json` `"private": true`). `README.md:11-15`, `CLAUDE.md:7`.
 
 **v0 vs v2.** v0 was plain JavaScript under `scripts/`, still on branch `main`. v2 is a **clean-room TypeScript rewrite** under `src/`, on `main-v2`. Rule: port implementation *know-how* (selectors, CDP handling, Notion schema quirks) by reading v0, never by copying its structure (`main-v2.md`, decision 2). `scripts/` is deleted on this branch — never reference it as a live path.
 
@@ -28,7 +28,7 @@ You are the codebase historian and explainer for Job Bunny. The knowledge base b
 | 1 | TypeScript; zod at ingress, TS types *inferred from* zod | one source of truth for the universal JD contract; compile-time enforcement + runtime validation only where data is untrusted |
 | 3 | In-process pipeline + checkpoints, not a job queue | keeps one process, but preserves resumability and post-mortem debugging; every stage also standalone-runnable |
 | 4 | LLM behind `ports/llm.ts`, first adapter wraps `claude -p` | zero API key needed; an Anthropic-API provider drops in later behind the same interface |
-| 5 | macOS now, Linux-*ready* | platform code confined to `adapters/scheduler/launchd`, `adapters/browser/cdp-chrome`; no speculative Linux code, just clean seams |
+| 5 | macOS now, Linux-*ready* | platform code confined to `adapters/browser/cdp-chrome` and (2026-07-27) `src/ops/daemon/` — the scheduling daemon is Node-stdlib-only and already cross-platform; no speculative Linux code, just clean seams. (`adapters/scheduler/launchd` — the original confinement point for scheduling — was deleted 2026-07-27; see §2.1/§6 below.) |
 | 6 | One `jobbunny` CLI; slash commands only where LLM interactivity truly matters | avoids v0 sprawl of per-stage slash commands |
 | 7 | Hexagonal-lite (core/ports/adapters/pipeline/routines/ops/cli) | testability + swap-ability; pipeline never names a concrete adapter |
 | 8 | Routines are first-class `{name, when, run(ctx)}` | recurring maintenance needs declared pipeline attachment points, not ad-hoc scripts |
@@ -93,12 +93,11 @@ Two documented exceptions inside `src/`: `cli/commands/stage.ts` imports `pipeli
 
 ### 2.3 How `wire.ts` works
 
-`src/cli/wire.ts` is the **single composition point** — the only file permitted to import `src/adapters/**`. Four independent things:
+`src/cli/wire.ts` is the **single composition point** — the only file permitted to import `src/adapters/**`. Three independent things (2026-07-27: `wireScheduler()`, a fourth, was deleted alongside the `Scheduler` port — see §2.1/§6):
 
 1. **Config loading** — `loadPipelineConfig` zod-validates `profiles/<name>/profile.json` (`PipelineConfigSchema`); `loadFilterConfig` same for `filter.json` (missing ⇒ `undefined`, invalid ⇒ throw). Fail-loud, deliberately redundant with doctor's `profileParsesCheck` (reports `red` without throwing).
 2. **Adapter-check assembly** — `assembleAdapterChecks(config, registry, deps)` is **pure**: maps `lanes`/`connector`/`notifiers` names onto a `CheckFactory` registry. Unknown name ⇒ loud throw.
 3. **Live composition** — builds `Lane[]`, `Connector`, `Notifier[]`, `Routine[]`, `LlmProvider`, `BrowserProvider`; returns `{ ctx, stages, routines, checks }`.
-4. **`wireScheduler()`** — separate composition point returning `LaunchdScheduler`; not on `PipelineCtx` (a scheduler has no role in a run).
 
 Notable internals:
 - **Two storage handles, deliberately**: `storage` at repo root (machine-shared `src/adapters/lanes/linkedin/page_inventory/`), `profileStorage` at `profiles/<name>/data`. A single repo-root handle (bug until 2026-07-25) made profiles share one cache/registry.
@@ -135,9 +134,9 @@ Three watchdog layers:
 | `core/errors` | `SoftError(scope, message)` + `isSoftError` | `soft_error.ts` |
 | `core/async` | `sleep` | `sleep.ts` |
 
-### `src/ports/` — 9 interfaces, no implementations
+### `src/ports/` — 8 interfaces, no implementations
 
-`browser.ts` (`BrowserProvider`/`BrowserHandle`/`PageHandle` — every method takes `timeoutMs`), `connector.ts` (`rebuildCache`/`syncJobs`/`archiveStale`, `ArchivePolicy`), `context.ts` (`Logger`, `RunContext { profile, signal, logger, beat() }`), `doctor.ts` (`DoctorCheck/Finding/Report`, `ok|warn|red`), `lane.ts` (`FarmingLane.source → {jobs, dropped, companiesSeen}`; `ApiLane.probe/fetchBoard`), `llm.ts` (`complete(prompt, {signal})`), `notifier.ts` (digest|alert), `scheduler.ts` (`install/remove/list`), `storage.ts` (`readJson<T>(rel, schema)`/`writeJson`/`listSubdirs`/`removeTree`).
+`browser.ts` (`BrowserProvider`/`BrowserHandle`/`PageHandle` — every method takes `timeoutMs`), `connector.ts` (`rebuildCache`/`syncJobs`/`archiveStale`, `ArchivePolicy`), `context.ts` (`Logger`, `RunContext { profile, signal, logger, beat() }`), `doctor.ts` (`DoctorCheck/Finding/Report`, `ok|warn|red`), `lane.ts` (`FarmingLane.source → {jobs, dropped, companiesSeen}`; `ApiLane.probe/fetchBoard`), `llm.ts` (`complete(prompt, {signal})`), `notifier.ts` (digest|alert), `storage.ts` (`readJson<T>(rel, schema)`/`writeJson`/`listSubdirs`/`removeTree`). (`scheduler.ts` — `install/remove/list` — was deleted 2026-07-27 alongside `adapters/scheduler/launchd/`; no successor port replaces it, since a live daemon isn't a `Scheduler`.)
 
 ### `src/adapters/`
 
@@ -150,7 +149,8 @@ Three watchdog layers:
 | `lanes/keka` | `ApiLane`: guess tenant subdomains → confirm via portal-info → resolve portal guid (JSON, fallback scraping `/careers/` HTML) → embedjobs. `kk-` prefix. `KekaJobSchema.jobLocations[0].city` → `identity.location` |
 | `llm/claude-cli` | `ClaudeCliProvider`: `claude -p --output-format text`, **prompt over stdin**, abort → SIGTERM → SIGKILL, stderr folded into error. No retry — that's the structure stage's job |
 | `notify/telegram` | Over global `fetch`. `chatId` validated at construction; **bot token read lazily from env at send time**. `botTokenCheck` hits `getMe` |
-| `scheduler/launchd` | `plist.ts` (pure XML; label `com.jobbunny.<HHMM>`, `["/bin/bash","-lc",cmd]`, `RunAtLoad: false`, logs `~/Library/Logs/JobBunny/`; embedded watchdog SIGTERM→20s→SIGKILL at `ceil(runCapMs/1000)+300`s; `DEFAULT_RUN_CAP_MS = 16_200_000`). `launchd.ts` (`install` = full **declarative reconcile** — stale plists booted+deleted; `remove` = list→drop→re-install; `list` parses profiles back from the plist command string) |
+
+(`scheduler/launchd` — the plist/`launchctl` adapter family, ~1012 lines — was deleted wholesale 2026-07-27 once the in-process daemon replaced launchd triggering; see §2.1/§6.)
 
 ### `src/pipeline/`
 
@@ -161,12 +161,13 @@ Three watchdog layers:
 `types.ts` — `Routine { name, when: 'pre-run'|'post-sync'|'standalone', run(ctx: PipelineCtx) }` (takes full `PipelineCtx`, unlike stages). `cleanup/` — archives via `connector.archiveStale`; `settings.cleanup` parsed on every run (defaults 7/30/30 days); dry-run deliberately not modeled here — it's the connector's; also prunes `ctx.storage`'s `runs/<date>/` folders strictly older than `settings.cleanup.runsOlderThanDays` via the pure `selectPrunableRunDirs` helper (never prunes today's folder, even at TTL 0), per-folder `removeTree` failure warns and continues.
 
 ### `src/ops/`
-- `doctor/aggregate.ts` — core checks + `runChecks`; never throws — failing check = `red` finding. Adapter checks passed in by `wire()`.
+- `doctor/aggregate.ts` — core checks + `runChecks`; never throws — failing check = `red` finding. 2026-07-27: gained `claudeOnPathCheck` (D13, `red` — the `claude` CLI on `PATH`) and `daemonLivenessCheck` (§6.8, `warn` — including on a missing pidfile). Adapter checks passed in by `wire()`.
+- `daemon/` (2026-07-27) — the scheduling daemon: `pidfile.ts` (heartbeat `lastTickAt`, an `attempts` ledger, synchronous atomic updates — deliberately NOT `run_lock.ts`'s 4h staleness rule below, since the daemon lives for days, not one bounded run), `daemon.ts` (the 30s tick loop — heartbeat write before the reentrancy guard, sequential per-`(slot,profile)` spawn), `scan/` (profile-schedule + run-history filesystem scanning), `logs/` (`~/.jobbunny/logs/`, asymmetric rotation), `supervise/` (the real child spawn — rotate-then-spawn, SIGTERM→20s→SIGKILL backstop at `runCapMs+300s`, a faithful port of the retired plist watchdog).
 - `observability/` — `run_folder.ts` (`RunFolder(profileDataDir, date, time)`: `NN-<stage>.json`, `readLatestCheckpoint`, atomic, rooted at `runs/<date>/<time>/`; plus the folder-discovery helpers `formatRunTime` (local `HH-MM`), `latestTimeDir` (greatest existing time-subdir for a date), `nextTimeDir` (collision-avoiding fresh slot)), `result.ts` (`RunResultSchema` — `date`+`time`+outcome+per-stage funnel, `buildFunnel` — counts only *newly* dropped records, grouped by first failing rule), `logger.ts` (`JsonlLogger` → `run.log`, echoes to stdout on TTY, `flush()`), `digest.ts` (`formatDigest(RunResult)` → plaintext ✅/🔴 banner incl. date+time + funnel lines; in `ops/` because `cli/` may import `ops/**` never `adapters/**`).
-- `scheduling/run_lock.ts` — cross-process, cross-profile exclusive lock at `<root>/.jobbunny-run.lock` via `wx` create. Second run **skipped, not queued**. Stale if pid dead OR older than 4h default.
+- `scheduling/run_lock.ts` — cross-process, cross-profile exclusive lock at `<root>/.jobbunny-run.lock` via `wx` create. Second run **skipped, not queued**. Stale if pid dead OR older than 4h default. (Distinct from `ops/daemon/pidfile.ts`'s own pidfile — same directory convention, a different file, and a deliberately different staleness rule: one is a single bounded run, the other a process meant to live for days.)
 
 ### `src/cli/`
-`main.ts` (bin entry; `import 'dotenv/config'` **first and only here** — launchd hands a minimal env), `wire.ts`, `commands/`: run, doctor, reconcile, stage, routine, schedule, lane, profile, setup, release. Commands **return** exit codes; only the bin guard touches `process.exitCode`.
+`main.ts` (bin entry; `import 'dotenv/config'` **first and only here** — a daemon-spawned scheduled run hands a minimal env), `wire.ts`, `commands/`: run, doctor, reconcile, stage, routine, serve, autostart, lane, profile, setup, release. (`schedule` was deleted 2026-07-27 — see §2.1/§6.) Commands **return** exit codes; only the bin guard touches `process.exitCode`.
 
 ---
 
@@ -218,11 +219,11 @@ Three watchdog layers:
 
 ## 6. Ops
 
-**CLI surface** (`src/cli/main.ts` USAGE): run / doctor / reconcile / stage / routine / schedule install (cross-profile) / schedule remove / lane add-url / profile build|remove / setup / release. `--profile` required except `schedule install` and `release`.
+**CLI surface** (`src/cli/main.ts` USAGE): run / doctor / reconcile / stage / routine / serve start|stop|status (cross-profile) / autostart enable|disable (cross-profile, darwin only) / lane add-url / profile build|remove / setup / release. `--profile` required except `serve`, `autostart`, and `release`.
 
 **`run` order**: acquire cross-process lock (skip, don't queue) → doctor preflight → pre-run routines → `runPipeline` → post-sync routines only if passed → digest exactly once → release lock. A crash before a `RunResult` exists exits 1 without notifying.
 
-**Scheduling (launchd).** Times in `profile.json` `schedule.times`. `schedule install` enumerates every profile, hands the whole `ScheduledJob[]` set to `Scheduler.install` as one declarative reconcile. Profiles sharing a slot chain with `;` (sequential, shared Chrome). Each firing: `jobbunny run --profile <p> --headless`. Logs → `~/Library/Logs/JobBunny/`. Mac sleep: `sudo pmset repeat wakeorpoweron MTWRF <HH:MM:SS>`.
+**Scheduling (in-process daemon, 2026-07-27).** Times/weekdays/grace live in `profile.json`'s `schedule` block (`times[]`, `enabled`, `weekdays[]` default Mon–Fri, `graceMinutes` default 90). `jobbunny serve start` splits into a parent (pidfile acquire, darwin legacy-plist migration refusal, detached spawn, 2s alive-confirm) and `--daemon-child` (the tick loop). Every 30s the daemon asks the pure `core/schedule/owed.ts`'s `isRunOwed(now, schedules, history)` which `(profile, slot)` pairs are owed — `history` merges real `runs/<date>/` folders with the pidfile's own `attempts` ledger, so a slot that crashed before its first checkpoint doesn't respawn every tick for the rest of its grace window. Owed slots run strictly sequentially, in `(slot, profileName)` order (one shared Chrome/CDP session), each firing `jobbunny run --profile <p> --headless` supervised by `ops/daemon/supervise/` (rotate `runs.log`, spawn, track `inFlight`, SIGTERM→20s→SIGKILL backstop at `runCapMs+300s` — a faithful port of the retired plist's embedded bash watchdog). `jobbunny serve stop` kills the daemon BEFORE any `inFlight` child (killing the child first could let the daemon spawn the next owed run before its own SIGTERM lands). `jobbunny serve status` reports liveness/uptime/wedged-heartbeat/next-fire, read-only. Darwin-only autostart: `jobbunny autostart enable` writes one `RunAtLoad`-only LaunchAgent (`com.jobbunny.autostart.plist`, no `StartCalendarInterval` — zero schedule knowledge) invoking `jobbunny serve start` at login; Windows/Linux autostart remain a documented manual step (README). Logs → `~/.jobbunny/logs/{daemon,runs}.log` (replaces the macOS-only `~/Library/Logs/JobBunny/`).
 
 **Release flow.** `npm run release -- <X.Y.Z> [--dry-run] [--no-merge] [--yes]` — the `--` is mandatory. Idempotent/resumable; pauses for explicit go-ahead before squash-merge unless `--yes`; does NOT write the CHANGELOG (that's `/wrap ship`). Never background/detach — merge prompt needs stdin.
 
@@ -238,7 +239,6 @@ Three watchdog layers:
 5. No stale-seen pruning — `api_seen.json` only grows (deliberate).
 7. LinkedIn cap is per-URL (`maxCardsPerUrl`, JD opens actually attempted), not per-page — pagination (`lane.ts`, `behaviors.maxPages`, now 6) multiplies the raw cards a url's card-gate sees before that cap applies, so ~21 URLs × up to 6 pages permit a larger harvested-card funnel than pre-pagination, though the per-url JD-open ceiling itself is unchanged; real numbers unmeasured.
 8. dedup cache index keyed on title+company — same-title+company different-city entries overwrite.
-9. `test/invariants/run_cap_backstop.test.ts` enforces launchd `DEFAULT_RUN_CAP_MS` > derived run cap via the real `wire()`.
 
 ---
 

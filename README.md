@@ -37,10 +37,10 @@ Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage deta
 
 ## Requirements
 
-- macOS (scheduling uses launchd; Chrome is expected at its standard path)
+- macOS, Windows, or Linux — scheduling is a cross-platform in-process daemon, not an OS-level scheduler, and Chrome discovery resolves per-OS candidate paths automatically; see "Scheduled runs" below for autostart-at-login support per OS.
 - **Node.js ≥ 24** (pinned by `.nvmrc`; `nvm install 24 && nvm alias default 24` on a fresh machine) — v2 runs TypeScript natively with zero build step; older Node fails immediately.
 - Google Chrome with a logged-in LinkedIn session (kept in a dedicated `.chrome-debug/` browser profile) — driven via CDP, not `playwright install`
-- [Claude Code](https://claude.com/claude-code) CLI
+- [Claude Code](https://claude.com/claude-code) CLI — the `claude` binary must resolve on `PATH`; `jobbunny doctor` checks this directly. Claude Code itself is cross-platform, so this is a prerequisite to install, not an OS blocker.
 - A [Notion internal integration](https://www.notion.so/my-integrations) token
 - Optional: a Telegram bot (via @BotFather) for run digests
 
@@ -69,7 +69,8 @@ Useful day-2 commands:
 |---|---|
 | `jobbunny lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
 | `/page-analyse` | Rebuild a page inventory from live DOM analysis |
-| `jobbunny schedule install` | Install launchd jobs from every profile's `schedule` in `profile.json` |
+| `jobbunny serve start\|stop\|status` | Start/stop/check the in-process scheduling daemon (cross-profile) |
+| `jobbunny autostart enable\|disable` | Register/remove a login LaunchAgent that runs `serve start` at boot (darwin only) |
 | `jobbunny reconcile --profile <name>` | Rebuild the local cache from your Notion database |
 | `jobbunny routine cleanup --profile <name>` | Archive stale Notion entries (dry-run by default) |
 | `jobbunny profile build --profile <name>` | Regenerate filter/rank config from an edited `resume.json` |
@@ -91,7 +92,14 @@ Set times in your profile's `profile.json`:
 "schedule": { "times": ["09:00", "14:00", "19:00"] }
 ```
 
-then run `jobbunny schedule install`. Each firing runs `jobbunny run --profile <name> --headless` with watchdogs for per-stage timeouts and stalls; profiles sharing a time slot are chained into one job and run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — farming resumes per URL (`--resume`). Per-profile run logs land in `profiles/<name>/data/runs/<date>/<HH-MM>/` (one folder per invocation, local start time); the launchd job's own stdout/stderr land in `~/Library/Logs/JobBunny/`.
+then start the daemon once: `jobbunny serve start`. It ticks a wall clock every 30 seconds and reasons about "is a run owed right now" against local time — so a reboot or a sleeping laptop produces a *late* run within `schedule.graceMinutes` (default 90) of the missed slot, never a silently skipped one. Each firing runs `jobbunny run --profile <name> --headless` with the same per-stage timeout/stall watchdogs as any other invocation, plus an external SIGTERM/SIGKILL backstop; profiles sharing a time slot run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — farming resumes per URL (`--resume`). Per-profile run logs land in `profiles/<name>/data/runs/<date>/<HH-MM>/` (one folder per invocation, local start time); the daemon's own log and every spawned run's captured stdout/stderr land in `~/.jobbunny/logs/`.
+
+- `jobbunny serve status` reports whether the daemon is running, its uptime, whether it appears wedged, and the next scheduled slot.
+- `jobbunny serve stop` shuts it down cleanly.
+- **macOS**: `jobbunny autostart enable` registers a login LaunchAgent that runs `jobbunny serve start` at login — the LaunchAgent carries no schedule knowledge itself; the daemon's own tick loop decides when a run actually fires. `jobbunny autostart disable` removes it.
+- **Windows / Linux**: autostart-at-login isn't automated yet — run `jobbunny serve start` once after each login/boot, or register the OS-native "run at login" mechanism by hand (Task Scheduler on Windows, a systemd `--user` unit on Linux) pointing at `jobbunny serve start` with no arguments.
+
+Every `jobbunny` command warns to stderr when the daemon pidfile shows no live daemon, so a down daemon is loud the next time you run anything, on any platform.
 
 If your Mac regularly sleeps through a scheduled time, pre-wake it: `sudo pmset repeat wakeorpoweron MTWRF <HH:MM:SS>` a few minutes early (requires you to already be logged in — screen-locked is fine, logged out is not — and is most reliable on AC power with the lid closed).
 
