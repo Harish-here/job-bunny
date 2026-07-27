@@ -621,7 +621,7 @@ export function resolveCandidates(
   node --test src/adapters/browser/cdp-chrome/launcher.test.ts
   ```
 
-  Expected failure: `Error: no Chrome executable found (checked: /configured/chrome) — install Google Chrome (or Microsoft Edge on Windows)` (uncaught, since the test doesn't wrap the call in `assert.throws`).
+  Expected failure: `Error: no Chrome executable found (checked: /configured/chrome) — install Google Chrome` (uncaught, since the test doesn't wrap the call in `assert.throws`).
 
 - [ ] **Step 9: Wire `resolveCandidates` into `launchChrome`.**
 
