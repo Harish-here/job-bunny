@@ -421,11 +421,21 @@ async function runServeStatus(deps: ServeDeps): Promise<number> {
   );
 
   const heartbeatAgeMs = now.getTime() - Date.parse(file.lastTickAt);
-  const wedged = heartbeatAgeMs > HEARTBEAT_STALE_MS;
-  deps.write(
-    `  last tick: ${file.lastTickAt} (${formatDuration(heartbeatAgeMs)} ago)` +
-      (wedged ? ' — appears wedged' : ''),
-  );
+  if (!Number.isFinite(heartbeatAgeMs)) {
+    // An unparseable lastTickAt is suspicious, not benign: the operator
+    // gets the raw value plus the wedged flag rather than `NaNhNaNmNaNs`,
+    // which reads as a rendering bug and hides the real problem. This is
+    // deliberately more conservative than `isDaemonPidfileStale`'s own
+    // rule (which requires a FINITE age to call a live pid stale), since
+    // status only reports while `serve start` actually steals.
+    deps.write(`  last tick: ${file.lastTickAt} (age unknown) — appears wedged`);
+  } else {
+    const wedged = heartbeatAgeMs > HEARTBEAT_STALE_MS;
+    deps.write(
+      `  last tick: ${file.lastTickAt} (${formatDuration(heartbeatAgeMs)} ago)` +
+        (wedged ? ' — appears wedged' : ''),
+    );
+  }
   // §6.1: reports the profile and elapsed time, not just the pid — the
   // bare `pid ${n}` form told an operator nothing about WHICH profile
   // was running or for how long.

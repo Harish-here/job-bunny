@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { DaemonPidfileDeps } from '../../ops/daemon/index.ts';
 import {
   acquireDaemonPidfile,
+  HEARTBEAT_STALE_MS,
   readDaemonPidfile,
   updateDaemonPidfile,
 } from '../../ops/daemon/index.ts';
@@ -188,6 +189,42 @@ test('start: a dead pid steals immediately — no 35s re-check wait', async () =
   assert.ok(!sleeps.includes(35_000)); // no re-check wait for a dead pid.
 });
 
+test('start: a stale heartbeat on a LIVE pid is re-checked after 35s and refused when it advanced', async () => {
+  const pidfile = fakePidfileDeps();
+  acquireDaemonPidfile(ROOT, 999, pidfile);
+  // Stale by the heartbeat rule, but pid 999 is ALIVE (the pidfile fake's
+  // own pidIsAlive says so, and B3 requires ServeDeps.pidIsAlive to agree)
+  // — exactly the shape a machine that just woke from sleep presents, and
+  // the one case that must NOT be stolen on first observation.
+  const staleTick = new Date(Date.now() - HEARTBEAT_STALE_MS - 60_000).toISOString();
+  updateDaemonPidfile(ROOT, (c) => ({ ...c, lastTickAt: staleTick }), pidfile);
+
+  const observedSleeps: number[] = [];
+  const { deps } = baseServeDeps({
+    pidfile,
+    pidIsAlive: () => true,
+    sleep: async (ms) => {
+      observedSleeps.push(ms);
+      // The other daemon wakes mid-wait and heartbeats — the re-check must
+      // see lastTickAt advance and back off rather than steal a live daemon.
+      if (ms === 35_000) {
+        updateDaemonPidfile(
+          ROOT,
+          (c) => ({ ...c, lastTickAt: new Date().toISOString() }),
+          pidfile,
+        );
+      }
+    },
+  });
+
+  const code = await serveCommand({ action: 'start' }, deps);
+  assert.equal(code, 1);
+  assert.ok(observedSleeps.includes(35_000)); // the re-check wait happened.
+  const after = readDaemonPidfile(ROOT, pidfile);
+  assert.equal(after?.pid, 999); // untouched — never stolen, never re-acquired.
+  assert.notEqual(after?.lastTickAt, staleTick); // it really was the woken daemon.
+});
+
 test('stop: kills the daemon before the in-flight child, re-reading the pidfile between them', async () => {
   const pidfile = fakePidfileDeps();
   acquireDaemonPidfile(ROOT, 1000, pidfile);
@@ -316,4 +353,17 @@ test('status: renders pid/uptime, last-tick, in-flight (profile + elapsed), and 
   assert.match(printed, /last tick:/);
   assert.match(printed, /in flight: pid 3000 \(profile harish, running/); // C1: profile + elapsed, not just a pid.
   assert.match(printed, /next fire:.*harish/);
+});
+
+test('status: an unparseable lastTickAt reports "age unknown" and wedged, never NaN', async () => {
+  const pidfile = fakePidfileDeps();
+  acquireDaemonPidfile(ROOT, 1000, pidfile);
+  updateDaemonPidfile(ROOT, (c) => ({ ...c, lastTickAt: 'not-a-date' }), pidfile);
+
+  const { deps, writes } = baseServeDeps({ pidfile });
+  const code = await serveCommand({ action: 'status' }, deps);
+  assert.equal(code, 0);
+  const printed = writes.join('\n');
+  assert.match(printed, /last tick: not-a-date \(age unknown\) — appears wedged/);
+  assert.doesNotMatch(printed, /NaN/);
 });
