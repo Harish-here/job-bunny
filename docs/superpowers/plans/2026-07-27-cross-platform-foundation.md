@@ -621,7 +621,7 @@ export function resolveCandidates(
   node --test src/adapters/browser/cdp-chrome/launcher.test.ts
   ```
 
-  Expected failure: `Error: no Chrome executable found (checked: /configured/chrome) — install Google Chrome` (uncaught, since the test doesn't wrap the call in `assert.throws`).
+  Expected failure: `Error: no Chrome executable found (checked: /configured/chrome) — install Google Chrome (or Microsoft Edge on Windows)` (uncaught, since the test doesn't wrap the call in `assert.throws`).
 
 - [ ] **Step 9: Wire `resolveCandidates` into `launchChrome`.**
 
@@ -662,7 +662,34 @@ export function resolveCandidates(
 
   Note precisely what changed: the `candidates = CHROME_PATH_CANDIDATES` default on the destructure is REMOVED (now just `candidates`, `undefined` when the caller passes none); `resolveChromePath` is now called with `resolvedCandidates` (the output of the three-tier resolution) instead of the raw `candidates` option. `resolveChromePath` itself (its own signature, its own `CHROME_PATH_CANDIDATES` default parameter, its own "checked every path" error message) is UNCHANGED — per this task's brief, only the source of the candidates array passed into it changes.
 
-- [ ] **Step 10: Run the new test and see it pass.**
+- [ ] **Step 10: Generalize `resolveChromePath`'s not-found error for Edge on Windows (spec §7.1, tier 3).**
+
+  In `/Users/harishamutha/Job-bunny/src/adapters/browser/cdp-chrome/launcher.ts`, change only the error message's suffix — the prefix (`no Chrome executable found (checked: ${candidates.join(', ')})`) stays BYTE-IDENTICAL:
+
+  ```ts
+  throw new Error(
+    `no Chrome executable found (checked: ${candidates.join(', ')}) — install Google Chrome (or Microsoft Edge on Windows)`,
+  );
+  ```
+
+  Update the one launcher test that asserts this message, `resolveChromePath throws a clear error naming every path checked when none exist`, in `/Users/harishamutha/Job-bunny/src/adapters/browser/cdp-chrome/launcher.test.ts`:
+
+  ```ts
+  test('resolveChromePath throws a clear error naming every path checked when none exist', () => {
+    assert.throws(
+      () => resolveChromePath(['/a', '/b'], { existsSync: () => false }),
+      /no Chrome executable found \(checked: \/a, \/b\) — install Google Chrome \(or Microsoft Edge on Windows\)/,
+    );
+  });
+  ```
+
+  ```bash
+  node --test src/adapters/browser/cdp-chrome/launcher.test.ts
+  ```
+
+  Expected: all pass.
+
+- [ ] **Step 11: Run the new `JOBBUNNY_CHROME_PATH` test and see it pass.**
 
   ```bash
   node --test src/adapters/browser/cdp-chrome/launcher.test.ts
@@ -670,7 +697,7 @@ export function resolveCandidates(
 
   Expected: all pass, including the new `JOBBUNNY_CHROME_PATH` test.
 
-- [ ] **Step 11: Run the full existing `launcher.test.ts` suite to confirm no regression** — every pre-existing test that passes an explicit `candidates` array (e.g. `launchChrome resolves the chrome path, builds argv, spawns detached+unref, and returns the pid`, which passes `candidates: ['/only/chrome']` and does not set `env`) must still pass unchanged, because with no `JOBBUNNY_CHROME_PATH` set, tier 2 (`configured` = the explicit `candidates` array) still wins.
+- [ ] **Step 12: Run the full existing `launcher.test.ts` suite to confirm no regression** — every pre-existing test that passes an explicit `candidates` array (e.g. `launchChrome resolves the chrome path, builds argv, spawns detached+unref, and returns the pid`, which passes `candidates: ['/only/chrome']` and does not set `env`) must still pass unchanged, because with no `JOBBUNNY_CHROME_PATH` set, tier 2 (`configured` = the explicit `candidates` array) still wins.
 
   ```bash
   node --test src/adapters/browser/cdp-chrome/launcher.test.ts
@@ -678,7 +705,7 @@ export function resolveCandidates(
 
   Expected: `# pass` count equal to the pre-Task-3 count plus 1 (the new test).
 
-- [ ] **Step 12: Commit.**
+- [ ] **Step 13: Commit.**
 
   ```bash
   git add src/adapters/browser/cdp-chrome/discovery/resolve.ts src/adapters/browser/cdp-chrome/discovery/resolve.test.ts src/adapters/browser/cdp-chrome/discovery/index.ts src/adapters/browser/cdp-chrome/launcher.ts src/adapters/browser/cdp-chrome/launcher.test.ts
@@ -741,14 +768,18 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
 
   ```ts
   import assert from 'node:assert/strict';
+  import { join } from 'node:path';
   import { test } from 'node:test';
   import { chromePidfilePath } from './pidfile.ts';
 
+  // Built via node:path's join (not a forward-slash literal) so the expected
+  // value tracks whatever separator the host platform's join() actually
+  // produces — chromePidfilePath is implemented with join too, so on the
+  // windows-latest CI runner (Task 1) both sides emit backslashes alike.
+  const PIDFILE_PATH = join('/repo/.chrome-debug', '.jobbunny-chrome.json');
+
   test('chromePidfilePath joins userDataDir with the fixed pidfile name', () => {
-    assert.equal(
-      chromePidfilePath('/repo/.chrome-debug'),
-      '/repo/.chrome-debug/.jobbunny-chrome.json',
-    );
+    assert.equal(chromePidfilePath('/repo/.chrome-debug'), PIDFILE_PATH);
   });
   ```
 
@@ -802,7 +833,10 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
     if (typeof value !== 'object' || value === null) return false;
     const v = value as Partial<ChromePidfile>;
     return (
-      typeof v.pid === 'number' && typeof v.port === 'number' && typeof v.startedAt === 'string'
+      typeof v.pid === 'number' &&
+      typeof v.port === 'number' &&
+      typeof v.startedAt === 'string' &&
+      Number.isFinite(Date.parse(v.startedAt))
     );
   }
 
@@ -948,7 +982,7 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
     writeChromePidfile('/repo/.chrome-debug', info, deps);
 
     assert.equal(writeCalls.length, 1);
-    assert.equal(writeCalls[0]?.path, '/repo/.chrome-debug/.jobbunny-chrome.json');
+    assert.equal(writeCalls[0]?.path, PIDFILE_PATH);
     assert.deepEqual(JSON.parse(writeCalls[0]?.data ?? '{}'), info);
   });
 
@@ -1005,7 +1039,7 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
     const result = readChromePidfile('/repo/.chrome-debug', deps);
 
     assert.equal(result, undefined);
-    assert.deepEqual(unlinkCalls, ['/repo/.chrome-debug/.jobbunny-chrome.json']);
+    assert.deepEqual(unlinkCalls, [PIDFILE_PATH]);
   });
   ```
 
@@ -1033,7 +1067,7 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
     const result = readChromePidfile('/repo/.chrome-debug', deps);
 
     assert.equal(result, undefined);
-    assert.deepEqual(unlinkCalls, ['/repo/.chrome-debug/.jobbunny-chrome.json']);
+    assert.deepEqual(unlinkCalls, [PIDFILE_PATH]);
   });
   ```
 
@@ -1043,7 +1077,35 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
 
   Expected: `# pass 5`.
 
-- [ ] **Step 8: Write and pass the missing-file test — the specific "no `unlinkSync` call" assertion.**
+- [ ] **Step 8: Write and pass the unparseable-`startedAt`-guard test — a well-formed-but-for-`startedAt` pid file self-heals the same way as invalid JSON.**
+
+  Append to `pidfile.test.ts`:
+
+  ```ts
+  test('readChromePidfile deletes a pid file with an unparseable startedAt and returns undefined', () => {
+    const unlinkCalls: string[] = [];
+    const deps = fakeDeps({
+      existsSync: () => true,
+      readFileSync: () => JSON.stringify({ pid: 4242, port: 9222, startedAt: 'garbage' }),
+      unlinkSync: (path) => {
+        unlinkCalls.push(path);
+      },
+    });
+
+    const result = readChromePidfile('/repo/.chrome-debug', deps);
+
+    assert.equal(result, undefined);
+    assert.deepEqual(unlinkCalls, [PIDFILE_PATH]);
+  });
+  ```
+
+  ```bash
+  node --test src/adapters/browser/cdp-chrome/ownership/pidfile.test.ts
+  ```
+
+  Expected: `# pass 6`.
+
+- [ ] **Step 9: Write and pass the missing-file test — the specific "no `unlinkSync` call" assertion.**
 
   Append to `pidfile.test.ts`:
 
@@ -1068,9 +1130,9 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
   node --test src/adapters/browser/cdp-chrome/ownership/pidfile.test.ts
   ```
 
-  Expected: `# pass 6`.
+  Expected: `# pass 7`.
 
-- [ ] **Step 9: Write and pass the `clearChromePidfile` tests.**
+- [ ] **Step 10: Write and pass the `clearChromePidfile` tests.**
 
   Append to `pidfile.test.ts`:
 
@@ -1086,7 +1148,7 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
 
     clearChromePidfile('/repo/.chrome-debug', deps);
 
-    assert.deepEqual(unlinkCalls, ['/repo/.chrome-debug/.jobbunny-chrome.json']);
+    assert.deepEqual(unlinkCalls, [PIDFILE_PATH]);
   });
 
   test('clearChromePidfile is a no-op when no pidfile exists', () => {
@@ -1108,9 +1170,9 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
   node --test src/adapters/browser/cdp-chrome/ownership/pidfile.test.ts
   ```
 
-  Expected: `# pass 8`.
+  Expected: `# pass 9`.
 
-- [ ] **Step 10: Write and pass a smoke test for `defaultChromePidfileDeps`.**
+- [ ] **Step 11: Write and pass a smoke test for `defaultChromePidfileDeps`.**
 
   Append to `pidfile.test.ts` (add `defaultChromePidfileDeps` to the existing import from `./pidfile.ts`):
 
@@ -1130,9 +1192,9 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
   node --test src/adapters/browser/cdp-chrome/ownership/pidfile.test.ts
   ```
 
-  Expected: `# pass 9`.
+  Expected: `# pass 10`.
 
-- [ ] **Step 11: Create the module's public surface.**
+- [ ] **Step 12: Create the module's public surface.**
 
   Create `/Users/harishamutha/Job-bunny/src/adapters/browser/cdp-chrome/ownership/index.ts`:
 
@@ -1147,7 +1209,7 @@ export function defaultChromePidfileDeps(): ChromePidfileDeps;
   } from './pidfile.ts';
   ```
 
-- [ ] **Step 12: Commit.**
+- [ ] **Step 13: Commit.**
 
   ```bash
   git add src/adapters/browser/cdp-chrome/ownership/pidfile.ts src/adapters/browser/cdp-chrome/ownership/pidfile.test.ts src/adapters/browser/cdp-chrome/ownership/index.ts
@@ -2035,7 +2097,6 @@ CRITICAL ordering constraint: the provider rewire (Steps 1–6 below) lands BEFO
 
     assert.equal(killCalls.length, 1);
     assert.equal(killCalls[0]?.pid, 4242);
-    assert.equal(killCalls[0]?.deps?.env, killCalls[0]?.deps?.env);
     assert.deepEqual(killCalls[0]?.deps?.env, {});
   });
   ```
@@ -2124,6 +2185,7 @@ CRITICAL ordering constraint: the provider rewire (Steps 1–6 below) lands BEFO
   export type {
     ChromeProcessHandle,
     FsDeps,
+    KillDeps,
     LaunchArgvOptions,
     LaunchChromeOptions,
     LauncherDeps,
@@ -2157,7 +2219,7 @@ CRITICAL ordering constraint: the provider rewire (Steps 1–6 below) lands BEFO
   export { chromeCandidates, resolveCandidates } from './discovery/index.ts';
   ```
 
-  Note: `KillDeps` and `ProcessProbeDeps` are removed from the launcher re-export list — `KillDeps` was never re-exported from `index.ts` before this task either (confirm against the pre-Task-5 file), and `ProcessProbeDeps` no longer exists.
+  Note: `ProcessProbeDeps` is removed from the launcher re-export list — it no longer exists after Step 7's deletion. `KillDeps` was already re-exported from `index.ts` before this task and stays in the list unchanged.
 
 - [ ] **Step 10: Run the full `launcher.test.ts` + `provider.test.ts` + `discovery` + `ownership` suites together, then confirm the shell-out grep is clean.**
 
@@ -2474,3 +2536,4 @@ Produces: no new exported function — `cdpReachableCheck`'s `CdpReachableCheckD
 - The CI matrix from Task 1 is green on all three OSes (`check (macos-latest)`, `check (ubuntu-latest)`, `check (windows-latest)`, plus the wrapper `test` job) on the first push carrying this plan's commits.
 - `grep -rn "lsof\|-o etime" src/` returns nothing.
 - `package.json`'s `dependencies` block is unchanged — still exactly `@notionhq/client`, `dotenv`, `playwright`, `zod`.
+- Spec §12/D23 documentation updates ship with the scheduling-daemon plan's Task 13, not this plan.
