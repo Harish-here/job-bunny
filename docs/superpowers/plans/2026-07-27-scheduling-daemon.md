@@ -2463,22 +2463,37 @@ MANDATORY ORDERING RULES — each stated once, each covered by a test:
 
 ---
 
-### Task 8: child supervision (the real `SpawnRun`)
+### Task 8: stage timeout budgets + child supervision (the real `SpawnRun`)
 
 **Files:**
+- Create: `/Users/harishamutha/Job-bunny/src/pipeline/stages/budgets.ts`
+- Create: `/Users/harishamutha/Job-bunny/src/pipeline/stages/budgets.test.ts`
+- Create: `/Users/harishamutha/Job-bunny/test/invariants/stage_budgets.test.ts`
+- Modify: `/Users/harishamutha/Job-bunny/src/pipeline/stages/index.ts`
+- Modify: `/Users/harishamutha/Job-bunny/src/cli/commands/run.ts`
 - Create: `/Users/harishamutha/Job-bunny/src/ops/daemon/supervise/supervise.ts`
 - Create: `/Users/harishamutha/Job-bunny/src/ops/daemon/supervise/supervise.test.ts`
 - Create: `/Users/harishamutha/Job-bunny/src/ops/daemon/supervise/index.ts`
 - Modify: `/Users/harishamutha/Job-bunny/src/ops/daemon/index.ts`
 
-**Placement note:** `src/ops/daemon/` already sits at the two-implementation-file cap — `daemon.ts` (Task 7) and `pidfile.ts` (Task 5) — with filesystem scanning and log-file management already split into their own `scan/` and `logs/` subfolders (Tasks 4 and 6) for exactly this reason. A third top-level file would exceed the cap, so child supervision gets its own subfolder, `src/ops/daemon/supervise/`, holding one implementation file (`supervise.ts`) plus its colocated test and public surface — under the cap.
+**Placement note:** `src/pipeline/stages/` already holds ten implementation files (`reconcile.ts` through `sync.ts`) plus their colocated tests and one `index.ts` — well past the two-implementation-file cap, but the folder's own established convention (flat, no subfolders, `index.ts` re-exporting every file) predates this task and isn't disturbed by it, so `budgets.ts` lands as an eleventh flat file rather than inventing a `budgets/` subfolder. Separately, `src/ops/daemon/` already sits at the two-implementation-file cap — `daemon.ts` (Task 7) and `pidfile.ts` (Task 5) — with filesystem scanning and log-file management already split into their own `scan/` and `logs/` subfolders (Tasks 4 and 6) for exactly this reason. A third top-level file would exceed the cap, so child supervision gets its own subfolder, `src/ops/daemon/supervise/`, holding one implementation file (`supervise.ts`) plus its colocated test and public surface — under the cap.
 
 **Interfaces:**
 
-Consumes: `updateDaemonPidfile`, `DaemonPidfileDeps` from `../pidfile.ts`; `rotateIfLarge`, `openAppendFd`, `runsLogPath`, `LogDeps` from `../logs/index.ts`; `SpawnRun` from `../daemon.ts`; `OwedRun` from `../../../core/schedule/index.ts`.
+Consumes: `updateDaemonPidfile`, `DaemonPidfileDeps` from `../pidfile.ts`; `rotateIfLarge`, `openAppendFd`, `runsLogPath`, `LogDeps` from `../logs/index.ts`; `SpawnRun` from `../daemon.ts`; `OwedRun` from `../../../core/schedule/index.ts`. Additionally, for the stage-budget drift guard ONLY (never for `budgets.ts` itself, which reads a plain table with no stage-factory imports): `StageDef`/`StagePayload` from `../../src/pipeline/runner/stage.ts`, `Connector` from `../../src/ports/connector.ts`, `LlmProvider` from `../../src/ports/llm.ts`, `RegistryPolicy` from `../../src/core/company/schema.ts`, `FilterConfigSchema` from `../../src/core/filter/config.ts`, `RankConfigSchema` from `../../src/core/rank/index.ts`, and the ten stage factories from `../../src/pipeline/stages/index.ts`.
 
 Produces:
 ```ts
+export interface StageBudget {
+  name: string;
+  timeoutMs: number;
+  retries: number;
+}
+
+export const RUN_CAP_MARGIN: number;               // 1.25
+export const STAGE_BUDGETS: readonly StageBudget[]; // the ten verified stage budgets, in pipeline order
+export function computeRunCapMs(budgets?: readonly StageBudget[]): number; // defaults to STAGE_BUDGETS
+
 export const BACKSTOP_MARGIN_MS: number;   // 300_000 — the same +300s the retired plist watchdog used
 export const SIGKILL_GRACE_MS: number;     // 20_000
 
@@ -2499,7 +2514,9 @@ export interface SuperviseDeps {
 export function createSpawnRun(deps: SuperviseDeps): SpawnRun;
 ```
 
-Behavior rules, each stated once and tested:
+`computeRunCapMs` behavior (tested in `budgets.test.ts`): sums `timeoutMs * (retries + 1)` across the given budgets (or `STAGE_BUDGETS` if omitted), then applies `Math.ceil(worstCaseMs * RUN_CAP_MARGIN)` — this is the SAME formula `cli/commands/run.ts` previously defined as a private local copy; it now has one home. **Why `test/invariants/stage_budgets.test.ts` exists:** `STAGE_BUDGETS` is a plain-data MIRROR of the real `timeoutMs`/`retries` baked into each `pipeline/stages/*.ts` factory — nothing in the type system enforces that the mirror stays accurate. An edit to a stage's `timeoutMs` that isn't mirrored here would silently shorten the daemon's run-cap backstop (`createSpawnRun`'s `runCapMs + BACKSTOP_MARGIN_MS`) below the real worst case a run could legitimately take, so the backstop would SIGKILL a legitimate in-flight run instead of letting the run's own `runCapMs` watchdog abort it gracefully. The guard test constructs the REAL stage factories — the same ones `cli/wire.ts` calls — with minimal placeholder ports that are NEVER invoked (`.run()` is never called on any resulting `StageDef`; only `.name`/`.timeoutMs`/`.retries` are read). That construction is fragile — it holds only as long as no stage factory does real work at construction time — which is exactly why it is deliberately confined to this ONE test rather than production code: an unmirrored change fails loudly here, in CI, rather than silently in a running daemon.
+
+Behavior rules for `createSpawnRun`, each stated once and tested:
 
 - Rotates `runs.log` via `rotateIfLarge` BEFORE spawning — the safe quiet point, because execution is sequential (D6) and no child is writing at that instant. Then opens the append fd and passes `stdio: ['ignore', fd, fd]` so the child's stdout and stderr are captured. This matters because the three early-abort paths in `cli/commands/run.ts` (a `wire()` config throw, a held run lock, a red doctor preflight) write only to `console.error` and create NO run folder, so without this capture they would leave no diagnostics at all.
 - This process's OWN copy of the fd is closed (`deps.logs.closeSync(fd)`) immediately after `spawn()` hands it to the child as stdio — otherwise a daemon that lives for months (D20 autostart) leaks one fd per spawned run for the rest of its life.
@@ -2511,7 +2528,390 @@ Behavior rules, each stated once and tested:
 - Clears `inFlight` from the pidfile on exit, whatever the exit code.
 - `runCapMs` is passed IN, derived by the caller from `computeRunCapMs()` (Task 9). It must never be hardcoded here — stage timeouts change, and a hardcoded figure goes stale silently (A12).
 
-- [ ] **Step 1: Write the first two failing tests plus their shared fakes.**
+- [ ] **Step 1: Write the failing tests for `budgets.ts`.**
+
+  Create `/Users/harishamutha/Job-bunny/src/pipeline/stages/budgets.test.ts`:
+
+  ```ts
+  import assert from 'node:assert/strict';
+  import { test } from 'node:test';
+  import { computeRunCapMs, RUN_CAP_MARGIN, STAGE_BUDGETS } from './budgets.ts';
+  import type { StageBudget } from './budgets.ts';
+
+  // Verified against every pipeline/stages/*.ts factory's real timeoutMs/
+  // retries (reconcile 60_000/0, farm 5_400_000/0, source 300_000/0,
+  // compress 30_000/0, structure 1_800_000/1, assemble 30_000/0, filter
+  // 30_000/0, dedup 30_000/0, rank 30_000/0, sync 900_000/0):
+  //   worst case = 60_000 + 5_400_000 + 300_000 + 30_000 + 1_800_000*2 +
+  //                30_000 + 30_000 + 30_000 + 30_000 + 900_000
+  //              = 10_410_000
+  //   run cap    = ceil(10_410_000 * 1.25) = 13_012_500
+
+  test('computeRunCapMs() with no argument sums STAGE_BUDGETS and applies RUN_CAP_MARGIN', () => {
+    assert.equal(RUN_CAP_MARGIN, 1.25);
+    assert.equal(computeRunCapMs(), 13_012_500);
+  });
+
+  test('the default STAGE_BUDGETS table sums to the verified worst-case figure', () => {
+    const worstCaseMs = STAGE_BUDGETS.reduce(
+      (sum, b) => sum + b.timeoutMs * (b.retries + 1),
+      0,
+    );
+    assert.equal(worstCaseMs, 10_410_000);
+  });
+
+  test('computeRunCapMs() sums a custom budget array, not just the default table', () => {
+    const budgets: StageBudget[] = [
+      { name: 'a', timeoutMs: 10_000, retries: 0 },
+      { name: 'b', timeoutMs: 20_000, retries: 0 },
+    ];
+    assert.equal(computeRunCapMs(budgets), 37_500); // (10_000 + 20_000) * 1.25
+  });
+
+  test('a stage with retries: 1 counts its timeoutMs twice toward the worst case', () => {
+    const budgets: StageBudget[] = [{ name: 'x', timeoutMs: 10_000, retries: 1 }];
+    assert.equal(computeRunCapMs(budgets), 25_000); // 10_000 * 2 * 1.25
+  });
+  ```
+
+- [ ] **Step 2: Run it and see it fail because `budgets.ts` does not exist yet.**
+
+  ```bash
+  node --test src/pipeline/stages/budgets.test.ts
+  ```
+
+  Expected failure: `Cannot find module '.../pipeline/stages/budgets.ts'`.
+
+- [ ] **Step 3: Implement `budgets.ts` in full.**
+
+  Create `/Users/harishamutha/Job-bunny/src/pipeline/stages/budgets.ts`:
+
+  ```ts
+  /**
+   * pipeline/stages/budgets.ts — a plain data mirror of every stage
+   * factory's own `timeoutMs`/`retries` (see each `pipeline/stages/*.ts`
+   * file for the source of truth), plus the arithmetic that turns that
+   * table into a run-level cap.
+   *
+   * Why a static table rather than calling the real stage factories at
+   * runtime: this module is consumed by `serve` (Task 9), which is
+   * cross-profile (D6) and therefore cannot `wire()` a real profile to
+   * obtain a live `stages` array the way `cli/commands/run.ts` does for
+   * itself. Reading a static table from PRODUCTION code — rather than
+   * constructing stage factories with never-invoked stub ports at
+   * runtime — keeps this module honest: it holds no fragile assumption
+   * about what a stage factory does at construction time.
+   *
+   * The cost of that simplicity is that this table can silently drift
+   * from the real per-stage `timeoutMs`/`retries` if a stage factory
+   * changes without a matching edit here. `test/invariants/
+   * stage_budgets.test.ts` closes that gap — it is the one place the
+   * fragile stub-port construction trick is still used, deliberately
+   * confined to a test so an unmirrored change fails loudly in CI, not
+   * silently in a running daemon (see that file's own header for the
+   * full rationale).
+   */
+  export interface StageBudget {
+    name: string;
+    timeoutMs: number;
+    retries: number;
+  }
+
+  /** Margin over the raw worst-case stage-timeout sum, to absorb
+   * orchestration overhead (checkpoint writes between batches,
+   * stall-watchdog polling, process scheduling jitter) that isn't itself
+   * charged against any one stage's `timeoutMs`. Same figure and same
+   * rationale `cli/commands/run.ts` previously defined as a private
+   * local constant — this is now its one home. */
+  export const RUN_CAP_MARGIN = 1.25;
+
+  /** Verified against every `pipeline/stages/*.ts` factory's real
+   * `name`/`timeoutMs`/`retries`, in pipeline order. Kept honest by
+   * `test/invariants/stage_budgets.test.ts`. */
+  export const STAGE_BUDGETS: readonly StageBudget[] = [
+    { name: 'reconcile', timeoutMs: 60_000, retries: 0 },
+    { name: 'farm', timeoutMs: 5_400_000, retries: 0 },
+    { name: 'source', timeoutMs: 300_000, retries: 0 },
+    { name: 'compress', timeoutMs: 30_000, retries: 0 },
+    { name: 'structure', timeoutMs: 1_800_000, retries: 1 },
+    { name: 'assemble', timeoutMs: 30_000, retries: 0 },
+    { name: 'filter', timeoutMs: 30_000, retries: 0 },
+    { name: 'dedup', timeoutMs: 30_000, retries: 0 },
+    { name: 'rank', timeoutMs: 30_000, retries: 0 },
+    { name: 'sync', timeoutMs: 900_000, retries: 0 },
+  ];
+
+  /**
+   * The run-level cap (third watchdog layer, `runPipeline`'s `runCapMs`)
+   * MUST exceed the worst case total every stage could legitimately
+   * take, including whole-stage retries — each retry attempt gets its
+   * OWN fresh `timeoutMs` budget (`guardStage`/`runOneAttempt`), so a
+   * stage with `retries: 1` can legitimately consume `timeoutMs * 2`
+   * before the run itself should even consider that a problem.
+   */
+  export function computeRunCapMs(
+    budgets: readonly StageBudget[] = STAGE_BUDGETS,
+  ): number {
+    const worstCaseMs = budgets.reduce(
+      (sum, b) => sum + b.timeoutMs * (b.retries + 1),
+      0,
+    );
+    return Math.ceil(worstCaseMs * RUN_CAP_MARGIN);
+  }
+  ```
+
+- [ ] **Step 4: Run it and see all four tests pass.**
+
+  ```bash
+  node --test src/pipeline/stages/budgets.test.ts
+  ```
+
+  Expected: `# pass 4`, `# fail 0`.
+
+- [ ] **Step 5: Update `pipeline/stages/index.ts` to export the new module.**
+
+  In `/Users/harishamutha/Job-bunny/src/pipeline/stages/index.ts`, replace:
+
+  ```ts
+  export * from './assemble.ts';
+  export * from './compress.ts';
+  export * from './dedup.ts';
+  export * from './farm.ts';
+  export * from './filter.ts';
+  export * from './rank.ts';
+  export * from './reconcile.ts';
+  export * from './source.ts';
+  export * from './structure.ts';
+  export * from './sync.ts';
+  ```
+
+  with:
+
+  ```ts
+  export * from './assemble.ts';
+  export * from './budgets.ts';
+  export * from './compress.ts';
+  export * from './dedup.ts';
+  export * from './farm.ts';
+  export * from './filter.ts';
+  export * from './rank.ts';
+  export * from './reconcile.ts';
+  export * from './source.ts';
+  export * from './structure.ts';
+  export * from './sync.ts';
+  ```
+
+- [ ] **Step 6: Write the drift-guard test.**
+
+  Create `/Users/harishamutha/Job-bunny/test/invariants/stage_budgets.test.ts`:
+
+  ```ts
+  /**
+   * stage_budgets.test.ts — the drift guard for `pipeline/stages/
+   * budgets.ts`'s `STAGE_BUDGETS` table (Task 8 of the scheduling-daemon
+   * plan).
+   *
+   * `STAGE_BUDGETS` is a plain data mirror of every stage factory's own
+   * `name`/`timeoutMs`/`retries`, read by `computeRunCapMs()` — consumed
+   * by both `cli/commands/run.ts` (a real profile's own run) and, more
+   * importantly, by `serve` (Task 9), which is cross-profile (D6) and
+   * therefore cannot `wire()` a real profile to obtain a live `stages`
+   * array the way `run.ts` does for itself. Nothing in the type system
+   * enforces that the mirror stays accurate: if a stage's `timeoutMs`/
+   * `retries` changes in its own `pipeline/stages/*.ts` factory without a
+   * matching edit to `STAGE_BUDGETS`, the daemon's run-cap backstop
+   * (`createSpawnRun`'s `runCapMs + BACKSTOP_MARGIN_MS`, Task 8) silently
+   * shortens below the real worst case a run could legitimately take —
+   * and then SIGKILLs a legitimate in-flight run instead of letting the
+   * run's own `runCapMs` watchdog abort it gracefully.
+   *
+   * This test constructs the REAL stage factories (the same ones
+   * `cli/wire.ts` calls) with minimal placeholder ports that are NEVER
+   * invoked — `.run()` is never called on any resulting `StageDef`, only
+   * `.name`/`.timeoutMs`/`.retries` are read. That construction is
+   * fragile: it holds only as long as no stage factory does real work at
+   * construction time, which is exactly why it is deliberately confined
+   * to this test rather than production code (`budgets.ts` reads a plain
+   * table, no stage-factory imports) — an unmirrored change fails loudly
+   * here, in CI, rather than silently in a running daemon.
+   *
+   * Spiritually the successor to `test/invariants/run_cap_backstop.
+   * test.ts` (deleted by Task 12, which imports `DEFAULT_RUN_CAP_MS`
+   * from the doomed `adapters/scheduler/launchd/plist.ts`) — same intent
+   * (catch a stage-budget drift before it reaches production), same
+   * `test/invariants/` home, different mechanism (a static table plus
+   * this construction-based guard, rather than a hand-copied launchd
+   * literal).
+   */
+  import assert from 'node:assert/strict';
+  import { test } from 'node:test';
+  import type { RegistryPolicy } from '../../src/core/company/schema.ts';
+  import { FilterConfigSchema } from '../../src/core/filter/config.ts';
+  import { RankConfigSchema } from '../../src/core/rank/index.ts';
+  import { STAGE_BUDGETS } from '../../src/pipeline/stages/budgets.ts';
+  import {
+    assembleStage,
+    compressStage,
+    dedupStage,
+    makeFarmStage,
+    makeFilterStage,
+    makeRankStage,
+    makeReconcileStage,
+    makeSourceStage,
+    makeStructureStage,
+    makeSyncStage,
+  } from '../../src/pipeline/stages/index.ts';
+  import type { Connector } from '../../src/ports/connector.ts';
+  import type { LlmProvider } from '../../src/ports/llm.ts';
+
+  function buildWiredStages() {
+    const stubConnector: Connector = {
+      name: 'stub',
+      rebuildCache: async () => [],
+      syncJobs: async () => [],
+      archiveStale: async () => ({ archived: 0, dropped: [] }),
+    };
+    const stubLlm: LlmProvider = { name: 'stub', complete: async () => '' };
+    const registryPolicy: RegistryPolicy = {
+      reprobeNotFoundAfterDays: 30,
+      maxProbeFailures: 3,
+      staleAfterFetchFailures: 3,
+    };
+    return [
+      makeReconcileStage(stubConnector),
+      makeFarmStage([]),
+      makeSourceStage([], registryPolicy, { maxProbesPerRun: 1 }),
+      compressStage,
+      makeStructureStage(stubLlm),
+      assembleStage,
+      makeFilterStage(FilterConfigSchema.parse({})),
+      dedupStage,
+      makeRankStage(RankConfigSchema.parse({})),
+      makeSyncStage(stubConnector, {}),
+    ];
+  }
+
+  test("STAGE_BUDGETS mirrors every wired stage's name/timeoutMs/retries exactly, in order", () => {
+    const wired = buildWiredStages();
+    assert.equal(
+      wired.length,
+      STAGE_BUDGETS.length,
+      'a stage was added to or removed from the pipeline without a matching STAGE_BUDGETS edit',
+    );
+    wired.forEach((stage, i) => {
+      const budget = STAGE_BUDGETS[i];
+      assert.ok(budget, `no STAGE_BUDGETS entry at index ${i} for wired stage "${stage.name}"`);
+      assert.equal(budget.name, stage.name);
+      assert.equal(budget.timeoutMs, stage.timeoutMs);
+      assert.equal(budget.retries, stage.retries);
+    });
+  });
+  ```
+
+- [ ] **Step 7: Run it and see it pass.**
+
+  ```bash
+  node --test test/invariants/stage_budgets.test.ts
+  ```
+
+  Expected: `# pass 1`, `# fail 0` — `STAGE_BUDGETS` was hand-verified against the real factories while writing Step 3, so this passes on the first run; its job is to catch the NEXT drift, not this one.
+
+- [ ] **Step 8: Modify `cli/commands/run.ts` to derive `computeRunCapMs` from `budgets.ts` instead of a local duplicate.**
+
+  **Chosen form and why:** an `import` of `computeRunCapMs` from `pipeline/stages/budgets.ts` PLUS an explicit `export { computeRunCapMs };` — not a bare `export { computeRunCapMs } from '...'` re-export. A bare re-export creates no local binding, so `computeRunCapMs` would not be callable at this file's own call site (`computeRunCapMs(stages)` a few dozen lines below); import-then-export keeps both that local call site AND every external importer of `computeRunCapMs` from `cli/commands/run.ts` (this file's own `run.test.ts`, and `test/invariants/run_cap_backstop.test.ts` until Task 12 deletes it) working with zero changes to either test file. `stages` (a live `Array<StageDef<StagePayload, StagePayload>>` from `wire()`) satisfies `budgets.ts`'s `readonly StageBudget[]` parameter structurally — `StageDef` is a superset of `StageBudget`'s three fields — so no adapter or cast is needed at the call site.
+
+  In `/Users/harishamutha/Job-bunny/src/cli/commands/run.ts`, first add the import, replacing:
+
+  ```ts
+  import type { PipelineCtx } from '../../pipeline/runner/context.ts';
+  import type { RunnerOptions } from '../../pipeline/runner/run.ts';
+  import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts';
+  import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
+  import type { Routine } from '../../routines/types.ts';
+  import { wire as defaultWire, type WireResult } from '../wire.ts';
+  ```
+
+  with:
+
+  ```ts
+  import type { PipelineCtx } from '../../pipeline/runner/context.ts';
+  import type { RunnerOptions } from '../../pipeline/runner/run.ts';
+  import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts';
+  import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
+  import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
+  import type { Routine } from '../../routines/types.ts';
+  import { wire as defaultWire, type WireResult } from '../wire.ts';
+  ```
+
+  Then replace the local margin constant and function it replaces:
+
+  ```ts
+  /** Margin over the raw worst-case stage-timeout sum, to absorb
+   * orchestration overhead (checkpoint writes between batches, stall-watchdog
+   * polling, process scheduling jitter) that isn't itself charged against
+   * any one stage's `timeoutMs`. */
+  const RUN_CAP_MARGIN = 1.25;
+
+  /**
+   * The run-level cap (third watchdog layer, `runPipeline`'s `runCapMs`) MUST
+   * exceed the worst case total every stage could legitimately take,
+   * including whole-stage retries — each retry attempt gets its OWN fresh
+   * `timeoutMs` budget (`guardStage`/`runOneAttempt`), so a stage with
+   * `retries: 1` can legitimately consume `timeoutMs * 2` before the run
+   * itself should even consider that a problem. Deriving the cap from the
+   * live `stages` array (rather than a hardcoded constant) means this never
+   * silently drifts out of sync again as stage budgets change — see P9
+   * closure register item 2, whose broken run was caused by exactly that
+   * drift (cap 30 min < sum of stage timeouts ~68 min).
+   */
+  export function computeRunCapMs(
+    stages: Array<StageDef<StagePayload, StagePayload>>,
+  ): number {
+    const worstCaseMs = stages.reduce(
+      (sum, stage) => sum + stage.timeoutMs * (stage.retries + 1),
+      0,
+    );
+    return Math.ceil(worstCaseMs * RUN_CAP_MARGIN);
+  }
+  ```
+
+  with:
+
+  ```ts
+  /**
+   * The run-level cap (third watchdog layer, `runPipeline`'s `runCapMs`) MUST
+   * exceed the worst case total every stage could legitimately take,
+   * including whole-stage retries — each retry attempt gets its OWN fresh
+   * `timeoutMs` budget (`guardStage`/`runOneAttempt`), so a stage with
+   * `retries: 1` can legitimately consume `timeoutMs * 2` before the run
+   * itself should even consider that a problem. Deriving the cap from the
+   * live `stages` array (rather than a hardcoded constant) means this never
+   * silently drifts out of sync again as stage budgets change — see P9
+   * closure register item 2, whose broken run was caused by exactly that
+   * drift (cap 30 min < sum of stage timeouts ~68 min).
+   *
+   * The arithmetic itself now lives in `pipeline/stages/budgets.ts` (Task
+   * 8), re-exported here so every existing call site — this file's own
+   * `computeRunCapMs(stages)` below, plus every test that imports
+   * `computeRunCapMs` from `cli/commands/run.ts` — keeps working
+   * unchanged. The live `stages` array satisfies `budgets.ts`'s `readonly
+   * StageBudget[]` parameter structurally, so no adapter or cast is
+   * needed at the call site.
+   */
+  export { computeRunCapMs };
+  ```
+
+  The call site itself, `runCapMs: opts.runCapMs ?? computeRunCapMs(stages),`, is untouched — same function name, same argument, now resolving to the imported implementation.
+
+- [ ] **Step 9: Run the existing `run.ts` tests and confirm nothing broke.**
+
+  ```bash
+  node --test src/cli/commands/run.test.ts test/invariants/run_cap_backstop.test.ts
+  ```
+
+  Expected: both files pass unchanged — `run.test.ts`'s `computeRunCapMs` tests and `run_cap_backstop.test.ts`'s `DEFAULT_RUN_CAP_MS` comparison both call `computeRunCapMs(stages)` exactly as before; only the implementation's location moved, not its behavior.
+
+- [ ] **Step 10: Write the first two failing tests plus their shared fakes.**
 
   Create `/Users/harishamutha/Job-bunny/src/ops/daemon/supervise/supervise.test.ts`:
 
@@ -2676,7 +3076,7 @@ Behavior rules, each stated once and tested:
   });
   ```
 
-- [ ] **Step 2: Run it and see it fail because `supervise.ts` does not exist yet.**
+- [ ] **Step 11: Run it and see it fail because `supervise.ts` does not exist yet.**
 
   ```bash
   node --test src/ops/daemon/supervise/supervise.test.ts
@@ -2684,7 +3084,7 @@ Behavior rules, each stated once and tested:
 
   Expected failure: `Cannot find module '.../ops/daemon/supervise/supervise.ts'`.
 
-- [ ] **Step 3: Implement `supervise.ts` in full.**
+- [ ] **Step 12: Implement `supervise.ts` in full.**
 
   Create `/Users/harishamutha/Job-bunny/src/ops/daemon/supervise/supervise.ts`:
 
@@ -2835,7 +3235,7 @@ Behavior rules, each stated once and tested:
   }
   ```
 
-- [ ] **Step 4: Run it and see both tests pass.**
+- [ ] **Step 13: Run it and see both tests pass.**
 
   ```bash
   node --test src/ops/daemon/supervise/supervise.test.ts
@@ -2843,7 +3243,7 @@ Behavior rules, each stated once and tested:
 
   Expected: `# pass 2`, `# fail 0`.
 
-- [ ] **Step 5: Write the remaining four tests.**
+- [ ] **Step 14: Write the remaining four tests.**
 
   Append to `supervise.test.ts`:
 
@@ -2929,7 +3329,7 @@ Behavior rules, each stated once and tested:
   });
   ```
 
-- [ ] **Step 6: Run it and see all six tests pass.**
+- [ ] **Step 15: Run it and see all six tests pass.**
 
   ```bash
   node --test src/ops/daemon/supervise/supervise.test.ts
@@ -2937,7 +3337,7 @@ Behavior rules, each stated once and tested:
 
   Expected: `# pass 6`, `# fail 0` — no implementation change needed.
 
-- [ ] **Step 7: Create the `supervise/` module's public surface.**
+- [ ] **Step 16: Create the `supervise/` module's public surface.**
 
   Create `/Users/harishamutha/Job-bunny/src/ops/daemon/supervise/index.ts`:
 
@@ -2945,7 +3345,7 @@ Behavior rules, each stated once and tested:
   export * from './supervise.ts';
   ```
 
-- [ ] **Step 8: Update the `ops/daemon/` module's public surface.**
+- [ ] **Step 17: Update the `ops/daemon/` module's public surface.**
 
   Modify `/Users/harishamutha/Job-bunny/src/ops/daemon/index.ts` from:
 
@@ -2962,7 +3362,7 @@ Behavior rules, each stated once and tested:
   export * from './supervise/index.ts';
   ```
 
-- [ ] **Step 9: Run the full gate.**
+- [ ] **Step 18: Run the full gate.**
 
   ```bash
   npm run check
@@ -2970,12 +3370,23 @@ Behavior rules, each stated once and tested:
 
   Expected: green.
 
-- [ ] **Step 10: Commit.**
+- [ ] **Step 19: Commit.**
 
   ```bash
-  git add src/ops/daemon/supervise/supervise.ts src/ops/daemon/supervise/supervise.test.ts src/ops/daemon/supervise/index.ts src/ops/daemon/index.ts
+  git add src/pipeline/stages/budgets.ts src/pipeline/stages/budgets.test.ts src/pipeline/stages/index.ts test/invariants/stage_budgets.test.ts src/cli/commands/run.ts src/ops/daemon/supervise/supervise.ts src/ops/daemon/supervise/supervise.test.ts src/ops/daemon/supervise/index.ts src/ops/daemon/index.ts
   git commit -m "$(cat <<'EOF'
-  feat(daemon): add child supervision — the real SpawnRun
+  feat(daemon): add stage timeout budgets + child supervision (real SpawnRun)
+
+  pipeline/stages/budgets.ts collects every stage's timeoutMs/retries
+  into one STAGE_BUDGETS table and computeRunCapMs(), replacing
+  cli/commands/run.ts's private local copy of the same formula (that
+  file now imports and re-exports it, so every existing call site and
+  test keeps working unchanged). test/invariants/stage_budgets.test.ts
+  is the drift guard: it constructs the real stage factories with
+  never-invoked stub ports — fragile, deliberately confined to a test —
+  and asserts they match STAGE_BUDGETS exactly, so an unmirrored
+  stage-timeout change fails in CI rather than silently shortening the
+  daemon's run-cap backstop.
 
   createSpawnRun builds `<nodeBin> <cliEntry> run --profile <p>
   --headless`, rotating runs.log immediately before each spawn (D21,
@@ -2987,7 +3398,8 @@ Behavior rules, each stated once and tested:
   and arms a SIGTERM-then-SIGKILL backstop timer that faithfully ports
   the retired launchd plist's embedded bash watchdog — same +300s
   margin, same 20s grace, not a new policy (§6.5). runCapMs is always
-  supplied by the caller, never hardcoded here (A12).
+  supplied by the caller, derived from computeRunCapMs(), never
+  hardcoded here (A12).
 
   Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
   EOF
@@ -3005,9 +3417,9 @@ Behavior rules, each stated once and tested:
 
 **Interfaces:**
 
-Consumes: `acquireDaemonPidfile`, `readDaemonPidfile`, `updateDaemonPidfile`, `releaseDaemonPidfile`, `isDaemonPidfileStale`, `HEARTBEAT_STALE_MS`, `DaemonPidfileDeps`, `defaultDaemonPidfileDeps`, `createDaemon`, `DaemonDeps`, `createSpawnRun`, `SuperviseDeps`, `SIGKILL_GRACE_MS` from `../../ops/daemon/index.ts`; `scanProfileSchedules`, `scanRunHistory`, `ScanDeps`, `defaultScanDeps` from `../../ops/daemon/scan/index.ts`; `daemonLogPath`, `rotateIfLarge`, `openAppendFd`, `LogDeps`, `defaultLogDeps` from `../../ops/daemon/logs/index.ts`; `isRunOwed`, `nextFireAt`, `formatLocalDate` from `../../core/schedule/index.ts`; `computeRunCapMs` from `./run.ts`; the frozen stage factories from `../../pipeline/stages/index.ts` and `StageDef`/`StagePayload` from `../../pipeline/runner/stage.ts` (only to derive `runCapMs` — see Step 3's `buildTimeoutOnlyStages` note); `Connector` from `../../ports/connector.ts`, `LlmProvider` from `../../ports/llm.ts`; `RegistryPolicy` from `../../core/company/schema.ts`; `FilterConfigSchema` from `../../core/filter/config.ts`; `RankConfigSchema` from `../../core/rank/index.ts`.
+Consumes: `acquireDaemonPidfile`, `readDaemonPidfile`, `updateDaemonPidfile`, `releaseDaemonPidfile`, `isDaemonPidfileStale`, `HEARTBEAT_STALE_MS`, `DaemonPidfileDeps`, `defaultDaemonPidfileDeps`, `createDaemon`, `DaemonDeps`, `createSpawnRun`, `SuperviseDeps`, `SIGKILL_GRACE_MS` from `../../ops/daemon/index.ts`; `scanProfileSchedules`, `scanRunHistory`, `ScanDeps`, `defaultScanDeps` from `../../ops/daemon/scan/index.ts`; `daemonLogPath`, `rotateIfLarge`, `openAppendFd`, `LogDeps`, `defaultLogDeps` from `../../ops/daemon/logs/index.ts`; `isRunOwed`, `nextFireAt`, `formatLocalDate` from `../../core/schedule/index.ts`; `computeRunCapMs` from `../../pipeline/stages/budgets.ts` (Task 8).
 
-**Design note (runCapMs derivation) — a judgment call this task must make, not left implicit:** `SuperviseDeps.runCapMs` (Task 8) must come from `computeRunCapMs()` (A12), but the daemon is cross-profile (D6) and, per D3, `ops/daemon/**` may not import `cli/wire.ts` (only `cli/wire.ts` may import `src/adapters/**`, and nothing may import `cli` at all) — so it cannot `wire()` a real profile to get a live `stages` array the way `cli/commands/run.ts` does for itself. Every stage's `timeoutMs`/`retries` is a static literal baked into its factory (verified against every file under `src/pipeline/stages/`: none of them read their ports argument to decide their own budget), so calling the SAME exported factories `cli/wire.ts` calls, with minimal placeholder ports that are NEVER invoked (`.run()` is never called on any of the resulting `StageDef`s — only `.timeoutMs`/`.retries` are read), yields the IDENTICAL `computeRunCapMs()` result real `wire()` would for any profile, without needing one to exist and without violating any boundary rule (`pipeline/stages/index.ts` is not an adapter). This keeps the backstop margin genuinely DERIVED and LIVE per A12, never a hardcoded figure.
+**Design note (runCapMs derivation) — a judgment call this task must make, not left implicit:** `SuperviseDeps.runCapMs` (Task 8) must come from `computeRunCapMs()` (A12), but the daemon is cross-profile (D6) and, per D3, `ops/daemon/**` may not import `cli/wire.ts` (only `cli/wire.ts` may import `src/adapters/**`, and nothing may import `cli` at all) — so it cannot `wire()` a real profile to get a live `stages` array the way `cli/commands/run.ts` does for itself. `serve` is cross-profile and therefore cannot call `wire(profile)`, which is why the run cap comes from the static budget table (`STAGE_BUDGETS`, `pipeline/stages/budgets.ts`, Task 8) rather than from wired stages — this file calls `computeRunCapMs()` with no arguments, defaulting to that table. The figure is derived, never hardcoded: `STAGE_BUDGETS` is drift-guarded by `test/invariants/stage_budgets.test.ts` from Task 8, which fails CI the moment a stage factory's real `timeoutMs`/`retries` moves without a matching edit to `STAGE_BUDGETS`, so the daemon's backstop can never silently fall below the real worst case.
 
 Produces:
 ```ts
@@ -3063,7 +3475,7 @@ export function serveCommand(
 Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
 
 1. **`serve start` (no `--daemon-child`, the parent).** On darwin, scans `~/Library/LaunchAgents/` for `^com\.jobbunny\.\d{4}\.plist$` (four digits — deliberately excludes `com.jobbunny.autostart.plist`, Task 10's file). Any match ⇒ refuse (exit 1), printing a ready-to-paste `launchctl bootout gui/<uid>/<label>` + `rm <path>` block, one pair per plist, sorted by filename. No `launchd` code is retained for this — a directory read plus printed strings. Then acquires the daemon pidfile with `acquireDaemonPidfile(root, pid, pidfileDeps)`, writing the PARENT's own pid as the placeholder. On acquisition failure: read the existing pidfile; if it is NOT stale, print the holder's pid/`startedAt` and exit 1 without touching it. If it IS stale (`isDaemonPidfileStale`) and the recorded pid is alive, wait `STEAL_RECHECK_WAIT_MS` (35s — one 30s tick plus a 5s margin) and re-read: if `lastTickAt` advanced, it was just woken from sleep, not dead — refuse, exit 1. Only when the pid is confirmed dead (immediately, no wait) or the re-check still shows no advance does it release and re-acquire. Then rotates `daemon.log` (start-only rotation, per Task 6/D21), opens its append fd, spawns `spawn(nodeBin, [cliEntry, 'serve', 'start', '--daemon-child'], { stdio: ['ignore', fd, fd], detached: true })`, closes its own fd copy, records the child's pid into the pidfile (overwriting the placeholder — necessarily after `spawn()` returns), attaches an `error` handler (same already-dead path below), waits 2s, and confirms liveness via `pidIsAlive`. Alive ⇒ print success, exit 0. Dead (or errored) ⇒ remove the pidfile it created, print the tail of `daemon.log`, exit 1.
-2. **`serve start --daemon-child`.** Does NOT touch the pidfile's create step — the parent already owns and populated it. Derives `runCapMs` via `buildTimeoutOnlyStages()` + `computeRunCapMs()` (see the design note above), builds `SuperviseDeps` and `DaemonDeps`, calls `createDaemon(daemonDeps).start()`, and resolves its own returned promise only once a `SIGINT`/`SIGTERM` handler fires `daemon.stop()` + `releaseDaemonPidfile()` — this is what makes the process a genuine foreground daemon rather than a one-shot command.
+2. **`serve start --daemon-child`.** Does NOT touch the pidfile's create step — the parent already owns and populated it. Derives `runCapMs` via `computeRunCapMs()` (see the design note above), builds `SuperviseDeps` and `DaemonDeps`, calls `createDaemon(daemonDeps).start()`, and resolves its own returned promise only once a `SIGINT`/`SIGTERM` handler fires `daemon.stop()` + `releaseDaemonPidfile()` — this is what makes the process a genuine foreground daemon rather than a one-shot command.
 3. **`serve stop`.** Reads the pidfile for the daemon pid. `SIGTERM`, poll (not a fixed sleep) until dead or `SIGKILL_GRACE_MS` (20s, reused from Task 8 — same constant, not a second one), then `SIGKILL`, poll again. If still alive: exit 1, leave the pidfile, print the pid. Only then RE-READS the pidfile for `inFlight` (safe: a dead daemon cannot write again) and applies the identical escalation to it if a pid is recorded and alive. Only once both are confirmed dead: remove the pidfile, exit 0. `ESRCH` anywhere is already-dead, not an error (`pidIsAlive`/`killPid` absorb it).
 4. **`serve status`.** Read-only — never mutates the pidfile. Reports running/not-running, pid + uptime, `lastTickAt` + a "wedged" flag when older than `HEARTBEAT_STALE_MS`, the `inFlight` pid (if any), the next scheduled slot(s) via `nextFireAt`, and any currently-owed runs via `isRunOwed` fed the SAME disk-history-plus-ledger merge `daemon.ts`'s own tick uses (D19) — not disk history alone, which would over-report a slot that a synthetic ledger entry already served.
 
@@ -3264,17 +3676,16 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
    * No `src/adapters/**` import here — the daemon spawns `jobbunny run` as
    * a plain child process (D3); this file never touches an adapter, and
    * derives its one adapter-adjacent number (`runCapMs`) from the pipeline's
-   * OWN stage table via `pipeline/stages/index.ts` (not an adapter) rather
-   * than `cli/wire.ts` (see the plan's Task 9 design note).
+   * own static `STAGE_BUDGETS` table (`pipeline/stages/budgets.ts`, Task 8,
+   * not an adapter) rather than `cli/wire.ts` — see the plan's Task 9
+   * design note, and Task 8's `test/invariants/stage_budgets.test.ts` for
+   * the drift guard that keeps that table honest.
    */
   import { spawn as nodeSpawn } from 'node:child_process';
   import { readdirSync as fsReaddirSync, readFileSync as fsReadFileSync } from 'node:fs';
   import { homedir } from 'node:os';
   import path from 'node:path';
   import { fileURLToPath } from 'node:url';
-  import type { RegistryPolicy } from '../../core/company/schema.ts';
-  import { FilterConfigSchema } from '../../core/filter/config.ts';
-  import { RankConfigSchema } from '../../core/rank/index.ts';
   import { formatLocalDate, isRunOwed, nextFireAt } from '../../core/schedule/index.ts';
   import {
     acquireDaemonPidfile,
@@ -3304,22 +3715,7 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
     scanProfileSchedules,
     scanRunHistory,
   } from '../../ops/daemon/scan/index.ts';
-  import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
-  import {
-    assembleStage,
-    compressStage,
-    dedupStage,
-    makeFarmStage,
-    makeFilterStage,
-    makeRankStage,
-    makeReconcileStage,
-    makeSourceStage,
-    makeStructureStage,
-    makeSyncStage,
-  } from '../../pipeline/stages/index.ts';
-  import type { Connector } from '../../ports/connector.ts';
-  import type { LlmProvider } from '../../ports/llm.ts';
-  import { computeRunCapMs } from './run.ts';
+  import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
 
   const LEGACY_PLIST_REGEX = /^com\.jobbunny\.\d{4}\.plist$/;
   /** One 30s tick plus a 5s margin (D22/A15.4) — see `isDaemonPidfileStale`'s
@@ -3461,40 +3857,6 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
     return `${h}h${m}m${s}s`;
   }
 
-  /** See the plan's Task 9 design note: the SAME exported stage factories
-   * `cli/wire.ts` calls, fed minimal placeholder ports that are NEVER
-   * invoked — only `.timeoutMs`/`.retries` are read off the result, via
-   * `computeRunCapMs`. This is what lets a cross-profile daemon (D6) derive
-   * a live, never-hardcoded backstop margin (A12) without wiring a real
-   * profile and without `ops/daemon/**` importing `cli/wire.ts` or any
-   * adapter. */
-  function buildTimeoutOnlyStages(): Array<StageDef<StagePayload, StagePayload>> {
-    const stubConnector: Connector = {
-      name: 'stub',
-      rebuildCache: async () => [],
-      syncJobs: async () => [],
-      archiveStale: async () => ({ archived: 0, dropped: [] }),
-    };
-    const stubLlm: LlmProvider = { name: 'stub', complete: async () => '' };
-    const registryPolicy: RegistryPolicy = {
-      reprobeNotFoundAfterDays: 30,
-      maxProbeFailures: 3,
-      staleAfterFetchFailures: 3,
-    };
-    return [
-      makeReconcileStage(stubConnector),
-      makeFarmStage([]),
-      makeSourceStage([], registryPolicy, { maxProbesPerRun: 1 }),
-      compressStage,
-      makeStructureStage(stubLlm),
-      assembleStage,
-      makeFilterStage(FilterConfigSchema.parse({})),
-      dedupStage,
-      makeRankStage(RankConfigSchema.parse({})),
-      makeSyncStage(stubConnector, {}),
-    ];
-  }
-
   async function runServeStartParent(deps: ServeDeps): Promise<number> {
     if (deps.platform === 'darwin') {
       const legacy = deps
@@ -3579,7 +3941,7 @@ Behavior, matching §6.1/§6.2/§6.7/§8/D10/D15/D22/A15.4 exactly:
   }
 
   async function runServeStartChild(deps: ServeDeps): Promise<number> {
-    const runCapMs = computeRunCapMs(buildTimeoutOnlyStages());
+    const runCapMs = computeRunCapMs();
     const log = (event: string, data?: Record<string, unknown>): void => {
       // Lands in daemon.log via the parent's stdio redirection (§6.1) —
       // this process's own stdout was already pointed at the fd before
@@ -6036,7 +6398,7 @@ Cross-checked every interface Tasks 8–13 CONSUME against what Tasks 1–7 (and
 - `LogDeps`/`rotateIfLarge`/`openAppendFd`/`runsLogPath`/`daemonLogPath` (Task 6) — consumed identically by Task 8 (`supervise.ts`'s per-child rotation) and Task 9 (`serve.ts`'s parent-side `daemon.log` rotation) — one asymmetry (per-spawn vs. start-only) preserved exactly as Task 6 specified it, not reinvented.
 - `ScanDeps`/`scanProfileSchedules`/`scanRunHistory` (Task 4) — consumed identically by Task 9's `runServeStartChild` (via `DaemonDeps.scan`) and `runServeStatus` (folding `scanRunHistory` + the pidfile ledger, matching `daemon.ts`'s own D19 fold byte-for-byte in shape).
 - `SIGKILL_GRACE_MS` (Task 8) — reused verbatim (not a second constant) by Task 9's `killAndConfirmDead`, per D10's own text ("the same `SIGKILL_GRACE_SECONDS = 20` constant").
-- `computeRunCapMs(stages: Array<StageDef<StagePayload, StagePayload>>): number` (pre-existing `cli/commands/run.ts`) — Task 9's `buildTimeoutOnlyStages()` return type (`Array<StageDef<StagePayload, StagePayload>>`) matches exactly; verified against every `pipeline/stages/*.ts` factory's real signature (`makeReconcileStage(connector: Connector)`, `makeFarmStage(lanes: FarmingLane[])`, `makeSourceStage(lanes, policy, opts)`, `makeStructureStage(llm: LlmProvider)`, `makeFilterStage(cfg: FilterConfig)`, `makeRankStage(cfg: RankConfig)`, `makeSyncStage(connector, opts)`) while writing Task 9, not assumed.
+- `computeRunCapMs(budgets?: readonly StageBudget[]): number` (`pipeline/stages/budgets.ts`, Task 8) — Task 9's `serve.ts` imports it directly and calls it with no arguments (`computeRunCapMs()`), defaulting to `STAGE_BUDGETS`; `cli/commands/run.ts` imports-and-re-exports the same function for its own call site (`computeRunCapMs(stages)`, a live wired `Array<StageDef<StagePayload, StagePayload>>`), which satisfies `readonly StageBudget[]` structurally since `StageDef` is a superset of `StageBudget`'s three fields. `STAGE_BUDGETS` itself was verified against every `pipeline/stages/*.ts` factory's real signature (`makeReconcileStage(connector: Connector)`, `makeFarmStage(lanes: FarmingLane[])`, `makeSourceStage(lanes, policy, opts)`, `makeStructureStage(llm: LlmProvider)`, `makeFilterStage(cfg: FilterConfig)`, `makeRankStage(cfg: RankConfig)`, `makeSyncStage(connector, opts)`) while writing Task 8, not assumed, and is kept honest going forward by `test/invariants/stage_budgets.test.ts`'s drift guard rather than by a one-time verification.
 - `LEGACY_PLIST_REGEX`/`migrationCleanupBlock` — defined `const`/private `function` in Task 9, exported (visibility change only, same signatures) in Task 10 Step 1, consumed identically by `autostart.ts`.
 - `DoctorCheck`/`DoctorFinding` (`ports/doctor.ts`, pre-existing) — Task 11's two new checks return the exact `{ check, status, detail }` shape every existing check already uses; no drift.
 - `MainDeps`/`CommandOptions`/`CommandName`/`CommandFn` (pre-existing `cli/main.ts`) — Tasks 9, 10, and 11 each extend these additively (new union members, new optional fields) and Task 12 mechanically un-adds exactly Task 9's `'schedule'`-touching additions, verified line-for-line against the composed state left by the prior task rather than against the ORIGINAL pre-Task-9 file (a mistake that would have produced a diff that doesn't apply) — this is why Task 12's `main.ts` before/after blocks are reproduced against the Tasks-9-through-11-composed text, not the file's original content.
