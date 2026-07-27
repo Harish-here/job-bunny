@@ -1,6 +1,6 @@
 {
   "name": "job-bunny",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Personal job-search companion — aggregates LinkedIn jobs daily, filters/ranks against your profile, syncs to Notion.",
   "type": "module",
   "private": true,

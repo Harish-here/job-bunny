@@ -3,6 +3,31 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [2.0.1] — 2026-07-27
+
+### Fixed
+- LinkedIn `jdRoot` now matches direct-nav `/jobs/view/` pages (#55) — those
+  pages render under hashed class names, so `#job-details` never existed there
+  and JD text limped along via the anchor-text fallback with a warning every
+  run. Both inventories now use the stable
+  `[componentkey^="JobDetails_AboutTheJob"]` hook (verified live), and
+  jd_open's 5s details-page wait cap — whose rationale was "the selector never
+  matches" — is retired for the shared 15s readiness wait. Closes the last
+  documented LinkedIn-lane known limitation.
+- Search-results card selectors repaired (#54) — `cardCompany`/`cardLocation`
+  carried invalid `p:nth()` CSS that threw a SyntaxError on every harvest,
+  failing the farm stage whenever this page-type was the run's only remaining
+  URL. Replaced with `:has()`-based sibling selectors, verified live at a 100%
+  match rate on 50 cards.
+- Structure stage no longer hangs unattended runs (#53) — `claude -p`'s
+  IDE-connection auto-discovery needs the macOS Local Network prompt; on a
+  locked screen it queues and the subprocess hangs to timeout twice. Headless
+  runs now skip auto-discovery.
+
+### Notes
+- All three fixes are selector/runtime hardening on the shipped v2.0.0
+  pipeline; no schema, config, or CLI surface changes.
+
 ## [2.0.0] — 2026-07-26
 
 ### Added
