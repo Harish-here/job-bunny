@@ -18,12 +18,11 @@ import type { Inventory } from './inventory.ts';
  * navigates straight to the card's own url instead of list-clicking.
  *
  * jdRoot's waitFor is best-effort (v0 parity, scripts/pipeline/extract/jd.js
- * waitSettled's `.catch(() => {})`) — a direct-nav job page can render its
- * content under hashed class names the inventory's jdRoot selector never
- * matches, so a timeout there must not by itself fail the card; on
- * details-page (where that mismatch is the committed inventories' live
- * reality) the wait is capped short so 40 cards don't burn 15s each on a
- * selector known not to match. Text extraction then tries the configured
+ * waitSettled's `.catch(() => {})`) — it is a real readiness signal for the
+ * hydrating JD (the componentkey-based jdRoot can take several seconds to
+ * hydrate after goto resolves), but it stays best-effort/fail-soft so
+ * future DOM drift degrades to the anchor fallback below instead of hard
+ * failing the card. Text extraction then tries the configured
  * jdRoot selector first and, if that comes back empty, falls back to
  * scanning the page for the smallest section/div/article/main whose text
  * starts with the inventory's `behaviors.jdAnchorText` (default "About the
@@ -52,14 +51,13 @@ export interface OpenJdOpts {
 
 const DEFAULT_GOTO_TIMEOUT_MS = 30_000;
 const DEFAULT_CLICK_TIMEOUT_MS = 15_000;
+/** Shared by both pageTypes: on details-page, goto has already resolved a
+ * full page load, so this wait is settle time for the jdRoot's async
+ * hydration (observed up to ~15s), not a load signal; on popup, the
+ * click-driven pane's jdRoot appearing IS the "JD opened" signal. Either
+ * way the wait resolves as soon as the selector matches, so the full cap
+ * only costs time on a genuinely broken/drifted page. */
 const DEFAULT_WAIT_FOR_TIMEOUT_MS = 15_000;
-/** details-page only: goto has already resolved a full page load, so this
- * wait is settle time for async hydration, not a load signal — and the
- * committed inventories' jdRoot (#job-details) never matches direct-nav
- * pages at all, making the full 15s a guaranteed per-card dead wait
- * (~10 min per url at the 40-card cap). Popup keeps the long wait: there
- * the click-driven pane's jdRoot appearing IS the "JD opened" signal. */
-const DEFAULT_DETAILS_WAIT_FOR_TIMEOUT_MS = 5_000;
 const DEFAULT_EVALUATE_TIMEOUT_MS = 10_000;
 
 /** Anchor-text fallback DEFAULTS (v0 scripts/pipeline/extract/jd.js
@@ -134,11 +132,7 @@ export async function openJd(
 ): Promise<JdOpenResult> {
   const gotoTimeoutMs = opts.gotoTimeoutMs ?? DEFAULT_GOTO_TIMEOUT_MS;
   const clickTimeoutMs = opts.clickTimeoutMs ?? DEFAULT_CLICK_TIMEOUT_MS;
-  const waitForTimeoutMs =
-    opts.waitForTimeoutMs ??
-    (inv.pageType === 'details-page'
-      ? DEFAULT_DETAILS_WAIT_FOR_TIMEOUT_MS
-      : DEFAULT_WAIT_FOR_TIMEOUT_MS);
+  const waitForTimeoutMs = opts.waitForTimeoutMs ?? DEFAULT_WAIT_FOR_TIMEOUT_MS;
   const evaluateTimeoutMs = opts.evaluateTimeoutMs ?? DEFAULT_EVALUATE_TIMEOUT_MS;
   const anchorText = inv.behaviors.jdAnchorText ?? JD_ANCHOR_TEXT;
   const anchorMinCharsRaw = Number(inv.behaviors.jdAnchorMinChars);
@@ -173,10 +167,10 @@ export async function openJd(
     }
     ctx.beat();
 
-    // Best-effort (v0 parity): a timeout here does not fail the card —
-    // the direct-nav job page's jdRoot can be hidden behind hashed class
-    // names that never satisfy this selector even though the JD content
-    // is present and readable via the anchor-text fallback below.
+    // Best-effort (v0 parity): a timeout here does not fail the card — it
+    // is a real readiness signal for the hydrating JD (resolves as soon as
+    // jdRoot appears), but any future DOM drift that breaks the selector
+    // must degrade to the anchor-text fallback below, not hard-fail.
     await page
       .waitFor(inv.selectors.jdRoot, { timeoutMs: waitForTimeoutMs })
       .catch((err) => {

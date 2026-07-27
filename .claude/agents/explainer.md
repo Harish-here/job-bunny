@@ -185,7 +185,7 @@ Three watchdog layers:
 
 **Secrets.** `NOTION_TOKEN`, `TELEGRAM_BOT_TOKEN` in `.env`, loaded once at `src/cli/main.ts`. (Drift note: shipped code uses `dotenv` — a de-facto 4th runtime dep.)
 
-**`src/adapters/lanes/linkedin/page_inventory/<page>.json`** — machine-shared, colocated inside the owning adapter (`page_inventory/` is LinkedIn-lane config, not repo-root-shared machinery) and read at runtime by `adapters/lanes/linkedin/inventory.ts`. Each `<page>.json` has a `<page>.md` companion in the same directory — human notes for `/page-analyse`, not read by runtime code. Shape: `{ page, pageType: 'details-page'|'popup', generatedAt, selectors { cardList, card, cardTitle, cardCompany, cardLocation, cardLink, jdRoot, pagination? }, behaviors }`. Every selector except `pagination` required non-empty — the zod schema is the completeness gate. `behaviors` carries `paginationType/Param/PageSize`, `maxPages`, `jdSettledSignal`, `jdAnchorText`, `maxRawTextChars`, `jobCardIdAttr`, `scrollContainer`, `mustExist`, `minJobCards`. Two pages: `linkedin__jobs-search` (verified live 2026-06-18) and `linkedin__jobs-search-results` (incomplete v0-carried selectors — needs regen).
+**`src/adapters/lanes/linkedin/page_inventory/<page>.json`** — machine-shared, colocated inside the owning adapter (`page_inventory/` is LinkedIn-lane config, not repo-root-shared machinery) and read at runtime by `adapters/lanes/linkedin/inventory.ts`. Each `<page>.json` has a `<page>.md` companion in the same directory — human notes for `/page-analyse`, not read by runtime code. Shape: `{ page, pageType: 'details-page'|'popup', generatedAt, selectors { cardList, card, cardTitle, cardCompany, cardLocation, cardLink, jdRoot, pagination? }, behaviors }`. Every selector except `pagination` required non-empty — the zod schema is the completeness gate. `behaviors` carries `paginationType/Param/PageSize`, `maxPages`, `jdSettledSignal`, `jdAnchorText`, `maxRawTextChars`, `jobCardIdAttr`, `scrollContainer`, `mustExist`, `minJobCards`. Two pages, both verified live 2026-07-27: `linkedin__jobs-search` and `linkedin__jobs-search-results` (its card selectors were repaired in c79d493 — invalid `p:nth()` replaced with `:has()`-based sibling selectors). `jdRoot` on both is now `[componentkey^="JobDetails_AboutTheJob"]`: direct-nav `/jobs/view/` pages render under hashed CSS class names, and `componentkey` is the stable hook there, same scheme as the search-results card selectors.
 
 **`profiles/rajni/`** — committed synthetic fixture: Staff/Lead frontend persona, 9 YoE, home cities `["Chennai","Bengaluru"]`, 14 records with documented outcomes (14 → 11 filter → 9 dedup → 9 rank). `settings.notion.dryRun: true`, tiny caps. Its `README.md` is the data dictionary.
 
@@ -231,12 +231,11 @@ Three watchdog layers:
 **Slash commands — only four**: `/setup` (Notion adopt-or-create, secrets, resume parse), `/page-analyse <page-slug>` (browser DOM analysis → `src/adapters/lanes/linkedin/page_inventory/<page>.json`; refresh values in place, bump `generatedAt`), `/structure` (LLM stage inline, byte-identical file contracts), `/wrap` (close-out; `jobbunny release` for ship). Plus the **`verify` skill**: drive stages via CLI against `profiles/rajni/` only; never test against `profiles/harish/`.
 
 **Known limitations / open P9 items:**
-1. LinkedIn `jdRoot` doesn't match direct-nav `/jobs/view/` pages — JD text via `behaviors.jdAnchorText` fallback; lane warns every run.
-2. `farm` funnel reports `jobsIn: 0` — cosmetic.
-3. `profiles/harish/` is fully migrated — v0 migration confirmed complete and legacy v0 config files (incl. `avoid.md`, its aliases folded into `filter.json` `companies.avoid`) deleted 2026-07-26. Still real user data: never run the pipeline against it.
-4. P9 open: Notion WRITE path never exercised live; undiagnosed farm 0-job harvest 2026-07-25; cutover not started; v0 deletion gated on ≥7-day green soak.
-5. Gate ordering (title/avoid → seen/cache → cap) deliberately diverges from v0 — cheapest-first.
-6. No stale-seen pruning — `api_seen.json` only grows (deliberate).
+1. `farm` funnel reports `jobsIn: 0` — cosmetic.
+2. `profiles/harish/` is fully migrated — v0 migration confirmed complete and legacy v0 config files (incl. `avoid.md`, its aliases folded into `filter.json` `companies.avoid`) deleted 2026-07-26. Still real user data: never run the pipeline against it.
+3. P9 open: Notion WRITE path never exercised live; undiagnosed farm 0-job harvest 2026-07-25; cutover not started; v0 deletion gated on ≥7-day green soak.
+4. Gate ordering (title/avoid → seen/cache → cap) deliberately diverges from v0 — cheapest-first.
+5. No stale-seen pruning — `api_seen.json` only grows (deliberate).
 7. LinkedIn cap is per-URL (`maxCardsPerUrl`, JD opens actually attempted), not per-page — pagination (`lane.ts`, `behaviors.maxPages`, now 6) multiplies the raw cards a url's card-gate sees before that cap applies, so ~21 URLs × up to 6 pages permit a larger harvested-card funnel than pre-pagination, though the per-url JD-open ceiling itself is unchanged; real numbers unmeasured.
 8. dedup cache index keyed on title+company — same-title+company different-city entries overwrite.
 9. `test/invariants/run_cap_backstop.test.ts` enforces launchd `DEFAULT_RUN_CAP_MS` > derived run cap via the real `wire()`.

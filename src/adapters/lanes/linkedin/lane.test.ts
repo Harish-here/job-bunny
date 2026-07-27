@@ -124,8 +124,9 @@ interface Script {
   harvestByUrl: Map<string, RawCardFixture[]>;
   jdTextByUrl: Map<string, string>;
   /** JD urls whose configured-selector (jdRoot) read comes back empty so
-   * only the anchor-fallback script yields the scripted text — models the
-   * live details-page reality where #job-details never matches. */
+   * only the anchor-fallback script yields the scripted text — models a
+   * page where the configured jdRoot selector has drifted/mismatched and
+   * the anchor-text fallback is carrying the run. */
   anchorOnlyUrls: Set<string>;
 }
 

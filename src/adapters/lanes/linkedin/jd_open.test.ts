@@ -367,7 +367,7 @@ test('the anchor script uses behaviors.jdAnchorText from the inventory, not a co
   assert.equal(source, 'anchor');
 });
 
-test('details-page uses a short best-effort jdRoot wait; popup keeps the long one', async () => {
+test('details-page and popup share the same default jdRoot wait timeout (15s) — a matching selector resolves the wait as soon as the JD hydrates, so the long cap only costs time on a broken page', async () => {
   const seen: Array<number | undefined> = [];
   const waitFor: PageHandle['waitFor'] = async (_selector, opts) => {
     seen.push(opts?.timeoutMs);
@@ -389,10 +389,7 @@ test('details-page uses a short best-effort jdRoot wait; popup keeps the long on
   );
 
   const [detailsTimeout, popupTimeout] = seen;
-  assert.ok(
-    (detailsTimeout ?? 0) <= 5_000,
-    `details-page wait should be short, got ${detailsTimeout}`,
-  );
+  assert.equal(detailsTimeout, 15_000);
   assert.equal(popupTimeout, 15_000);
 });
 
