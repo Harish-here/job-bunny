@@ -37,7 +37,8 @@ import {
  *    .jobbunny-chrome.json) => this Chrome was not spawned by this
  *    codebase — attach (reuse), never recycle, never kill; this check
  *    happens BEFORE decideChromeAction is consulted at all. Reachable +
- *    live pid file => age is Date.now() - pidfile.startedAt, fed into
+ *    live pid file => age is pidfileDeps.now() - pidfile.startedAt (the
+ *    same injected clock launchChrome stamped startedAt with), fed into
  *    decideChromeAction exactly as before: 'reuse' if <= maxAgeMs,
  *    'recycle' (kill via the pid file's pid, then respawn) if older.
  *  - The pid file is written by launchChrome itself, from the pid
@@ -250,7 +251,12 @@ export class CdpChromeProvider implements BrowserProvider {
       );
     }
 
-    const ageMs = Date.now() - Date.parse(pidfile.startedAt);
+    // pidfileDeps.now() is the single clock for BOTH sides of the pid file:
+    // launchChrome stamps startedAt with it, launch() ages that stamp with
+    // it. Default is `() => new Date()`, so production behavior is
+    // identical to Date.now() — but the seam keeps the read side injectable
+    // alongside the write side, so tests are wall-clock-independent.
+    const ageMs = this.pidfileDeps.now().getTime() - Date.parse(pidfile.startedAt);
     const action = decideChromeAction({
       reachable: true,
       ageMs,

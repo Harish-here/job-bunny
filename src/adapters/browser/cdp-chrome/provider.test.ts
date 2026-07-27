@@ -77,22 +77,19 @@ function fakeLauncher(pid = 4242): {
 
 /** Builds a ChromePidfileDeps fake. `exists: false` (or omitting `pid`)
  * models "no live pid file" (the reachable-but-unowned case); otherwise
- * `pid`/`ageMs` model a live pid file recorded `ageMs` ago.
+ * `pid`/`ageMs` model a live pid file recorded `ageMs` ago relative to a
+ * fixed `now`.
  *
- * `now` is captured once per fake (so a single test sees a stable clock)
- * but anchored to the REAL current time, not a hardcoded date: launch()
- * derives age as `Date.now() - Date.parse(pidfile.startedAt)` against the
- * real clock, so a hardcoded anchor would make the effective age drift by
- * the wall-clock distance from that date — a fixture claiming "1 minute
- * old" would silently cross maxAgeMs a day later and flip reuse into
- * recycle. Anchoring here keeps `ageMs` meaning exactly what it says. */
+ * The anchor can be a hardcoded date because launch() ages startedAt with
+ * `pidfileDeps.now()` — this same injected clock — never the real one, so
+ * `ageMs` means exactly what it says regardless of when the suite runs. */
 function fakePidfileDeps(
   overrides: { pid?: number; ageMs?: number; exists?: boolean } = {},
 ): ChromePidfileDeps {
   const exists = overrides.exists ?? overrides.pid !== undefined;
   const pid = overrides.pid ?? 0;
   const ageMs = overrides.ageMs ?? 0;
-  const now = new Date();
+  const now = new Date('2026-07-27T12:00:00.000Z');
   const startedAt = new Date(now.getTime() - ageMs).toISOString();
   return {
     existsSync: () => exists,
@@ -172,6 +169,11 @@ test('close() kills the spawned Chrome pid by default (JOBBUNNY_KEEP_BROWSER uns
   assert.equal(killCalls.length, 1);
   assert.equal(killCalls[0]?.pid, 4242);
   assert.deepEqual(killCalls[0]?.deps?.env, {});
+  // The pid file this kill must clear is identified by userDataDir, and the
+  // deps used to clear it must be the provider's injected ones — otherwise
+  // killChrome silently falls back to the real .chrome-debug/ + real fs.
+  assert.equal(killCalls[0]?.deps?.userDataDir, DEFAULT_USER_DATA_DIR);
+  assert.ok(killCalls[0]?.deps?.pidfileDeps);
 });
 
 test('close() respects JOBBUNNY_KEEP_BROWSER=1 by delegating the decision to killChrome', async () => {
@@ -388,10 +390,12 @@ test('launch() rejects after connectMaxWaitMs when connect always fails, naming 
     port: 9222,
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    // The give-up path calls the REAL killChrome (none injected here),
-    // which clears the pid file at userDataDir — keep that off the real
-    // .chrome-debug/.
+    // The give-up path kills the spawned pid. Both deps are faked so this
+    // test never signals a real process (pid 4242 may belong to something
+    // live, which would stall the timing assertion below) and never
+    // touches the real .chrome-debug/ pid file.
     pidfileDeps: fakePidfileDeps(),
+    killChrome: () => true,
     connectRetryMs: 1,
     connectMaxWaitMs: 20,
     connect: async () => {
@@ -424,7 +428,10 @@ test('launch() logs the underlying connect error (message + cause) before giving
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    pidfileDeps: fakePidfileDeps(), // keep the real killChrome off .chrome-debug/
+    // Faked so the give-up kill neither signals a real pid 4242 nor
+    // touches the real .chrome-debug/ pid file.
+    pidfileDeps: fakePidfileDeps(),
+    killChrome: () => true,
     connectRetryMs: 1,
     connectMaxWaitMs: 20,
     connect: async () => {
@@ -462,7 +469,10 @@ test('launch() enforces connectMaxWaitMs even when a single connect() attempt ha
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    pidfileDeps: fakePidfileDeps(), // keep the real killChrome off .chrome-debug/
+    // Faked so the give-up kill neither signals a real pid 4242 nor
+    // touches the real .chrome-debug/ pid file.
+    pidfileDeps: fakePidfileDeps(),
+    killChrome: () => true,
     connectRetryMs: 1,
     connectMaxWaitMs: 50,
     // Simulates playwright's connectOverCDP internal timeout (~30s in the
@@ -505,6 +515,8 @@ test('launch() kills the spawned Chrome pid when connect gives up (no leak)', as
   assert.equal(killCalls.length, 1);
   assert.equal(killCalls[0]?.pid, 4242);
   assert.deepEqual(killCalls[0]?.deps?.env, {});
+  assert.equal(killCalls[0]?.deps?.userDataDir, DEFAULT_USER_DATA_DIR);
+  assert.ok(killCalls[0]?.deps?.pidfileDeps);
 });
 
 test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', async () => {
@@ -513,7 +525,10 @@ test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', asy
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    pidfileDeps: fakePidfileDeps(), // keep the real killChrome off .chrome-debug/
+    // Faked so the give-up kill neither signals a real pid 4242 nor
+    // touches the real .chrome-debug/ pid file.
+    pidfileDeps: fakePidfileDeps(),
+    killChrome: () => true,
     connectRetryMs: 5,
     connectMaxWaitMs: 60_000,
     connect: async () => {
