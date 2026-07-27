@@ -15,12 +15,9 @@ import {
   CHROME_MAX_AGE_MS,
   CHROME_PATH_CANDIDATES,
   clearSessionState,
-  getProcessAgeMs,
   killChrome,
   launchChrome,
-  parseEtimeToMs,
   resolveChromePath,
-  resolveListenerPid,
   SESSION_CLEAR_PROFILE_DIR,
   SESSION_CLEAR_SKIP_ENV,
 } from './launcher.ts';
@@ -325,64 +322,6 @@ test('killChrome does not throw if SIGKILL races an already-exited process', asy
   assert.equal(result, true);
 });
 
-test('resolveListenerPid returns the pid lsof reports listening on the port', () => {
-  const calls: Array<{ command: string; args: string[] }> = [];
-  const pid = resolveListenerPid(9222, {
-    execFileSync: (command, args) => {
-      calls.push({ command, args });
-      return '54321\n';
-    },
-  });
-  assert.equal(pid, 54321);
-  assert.deepEqual(calls, [{ command: 'lsof', args: ['-ti', ':9222', '-sTCP:LISTEN'] }]);
-});
-
-test('resolveListenerPid returns undefined when nothing is listening (lsof throws)', () => {
-  const pid = resolveListenerPid(9222, {
-    execFileSync: () => {
-      throw new Error('lsof: no matches');
-    },
-  });
-  assert.equal(pid, undefined);
-});
-
-test('resolveListenerPid returns undefined on blank lsof output', () => {
-  const pid = resolveListenerPid(9222, { execFileSync: () => '' });
-  assert.equal(pid, undefined);
-});
-
-test('parseEtimeToMs parses MM:SS', () => {
-  assert.equal(parseEtimeToMs('05:30'), (5 * 60 + 30) * 1000);
-});
-
-test('parseEtimeToMs parses HH:MM:SS', () => {
-  assert.equal(parseEtimeToMs('02:15:00'), (2 * 3600 + 15 * 60) * 1000);
-});
-
-test('parseEtimeToMs parses DD-HH:MM:SS', () => {
-  assert.equal(parseEtimeToMs('1-00:00:00'), 24 * 3600 * 1000);
-});
-
-test('parseEtimeToMs parses bare SS', () => {
-  assert.equal(parseEtimeToMs('45'), 45 * 1000);
-});
-
-test('getProcessAgeMs converts ps etime output to milliseconds', () => {
-  const ageMs = getProcessAgeMs(4242, {
-    execFileSync: () => ' 25:03:12 \n',
-  });
-  assert.equal(ageMs, (25 * 3600 + 3 * 60 + 12) * 1000);
-});
-
-test('getProcessAgeMs returns null when the pid cannot be inspected', () => {
-  const ageMs = getProcessAgeMs(4242, {
-    execFileSync: () => {
-      throw new Error('ps: no such process');
-    },
-  });
-  assert.equal(ageMs, null);
-});
-
 test('CHROME_MAX_AGE_MS is 24 hours', () => {
   assert.equal(CHROME_MAX_AGE_MS, 24 * 60 * 60 * 1000);
 });
@@ -593,9 +532,10 @@ test('the session clear only ever runs via launchChrome, which provider.ts never
   // module's doc comment). provider.ts's launch() only invokes
   // launchChromeFn on the 'launch' branch (or 'recycle' -> kill -> launch)
   // — never on 'reuse' or a recycle kept alive by recycleIfOld=false (see
-  // provider.test.ts's "launch() reuses an already-reachable, fresh Chrome
-  // instead of spawning", which asserts launchChromeFn.calls.length === 0
-  // on that path). So a reuse/attach launch never touches session state:
+  // provider.test.ts's "launch() reuses a reachable Chrome whose
+  // pid-file-recorded age is under maxAgeMs", which asserts
+  // launchChromeFn.calls.length === 0 on that path). So a reuse/attach
+  // launch never touches session state:
   // the fake launchChrome injected there is a no-op stand-in that would
   // itself prove a call by incrementing a counter, and it never fires.
   // This test just pins that launchChrome (the one function that clears

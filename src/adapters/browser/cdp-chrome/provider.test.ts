@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import { DEFAULT_USER_DATA_DIR } from './launcher.ts';
+import type { ChromePidfileDeps } from './ownership/index.ts';
 import type { CdpBrowser, CdpPage } from './provider.ts';
 import { CdpChromeProvider } from './provider.ts';
 
@@ -74,6 +75,35 @@ function fakeLauncher(pid = 4242): {
   };
 }
 
+/** Builds a ChromePidfileDeps fake. `exists: false` (or omitting `pid`)
+ * models "no live pid file" (the reachable-but-unowned case); otherwise
+ * `pid`/`ageMs` model a live pid file recorded `ageMs` ago.
+ *
+ * `now` is captured once per fake (so a single test sees a stable clock)
+ * but anchored to the REAL current time, not a hardcoded date: launch()
+ * derives age as `Date.now() - Date.parse(pidfile.startedAt)` against the
+ * real clock, so a hardcoded anchor would make the effective age drift by
+ * the wall-clock distance from that date — a fixture claiming "1 minute
+ * old" would silently cross maxAgeMs a day later and flip reuse into
+ * recycle. Anchoring here keeps `ageMs` meaning exactly what it says. */
+function fakePidfileDeps(
+  overrides: { pid?: number; ageMs?: number; exists?: boolean } = {},
+): ChromePidfileDeps {
+  const exists = overrides.exists ?? overrides.pid !== undefined;
+  const pid = overrides.pid ?? 0;
+  const ageMs = overrides.ageMs ?? 0;
+  const now = new Date();
+  const startedAt = new Date(now.getTime() - ageMs).toISOString();
+  return {
+    existsSync: () => exists,
+    readFileSync: () => JSON.stringify({ pid, port: 9222, startedAt }),
+    writeFileSync: () => {},
+    unlinkSync: () => {},
+    pidIsAlive: () => true,
+    now: () => now,
+  };
+}
+
 test('launch() spawns Chrome via the injected launcher and connects to http://127.0.0.1:<port>', async () => {
   const launcher = fakeLauncher(4242);
   const connectUrls: string[] = [];
@@ -128,9 +158,6 @@ test('close() kills the spawned Chrome pid by default (JOBBUNNY_KEEP_BROWSER uns
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher(4242).launchChrome,
     cdpReachable: async () => null,
-    // Nothing resolves on the port in this test — close() falls back to the
-    // spawned pid, which is what's asserted below.
-    resolveListenerPid: () => undefined,
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
     killChrome: (pid, deps) => {
       killCalls.push({ pid, deps });
@@ -144,32 +171,7 @@ test('close() kills the spawned Chrome pid by default (JOBBUNNY_KEEP_BROWSER uns
 
   assert.equal(killCalls.length, 1);
   assert.equal(killCalls[0]?.pid, 4242);
-  assert.deepEqual(killCalls[0]?.deps, { env: {} });
-});
-
-test('close() kills the ACTUAL pid listening on the port, not the spawned hand-off-stub pid', async () => {
-  // Regression test for the live-incident failure mode: a Chrome already
-  // listening on the port (same user-data-dir) makes a fresh spawn hand off
-  // and exit immediately, so the spawned pid (999, "stub") is already dead
-  // while the real Chrome (424242) keeps running. close() must resolve and
-  // kill the real listener pid, never trust the spawned pid.
-  const killCalls: Array<number | undefined> = [];
-  const provider = new CdpChromeProvider({
-    launchChrome: fakeLauncher(999).launchChrome,
-    cdpReachable: async () => null,
-    resolveListenerPid: () => 424242,
-    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
-    killChrome: (pid) => {
-      killCalls.push(pid);
-      return true;
-    },
-    killEnv: {},
-  });
-
-  const handle = await provider.launch(fakeCtx());
-  await handle.close();
-
-  assert.deepEqual(killCalls, [424242]);
+  assert.deepEqual(killCalls[0]?.deps?.env, {});
 });
 
 test('close() respects JOBBUNNY_KEEP_BROWSER=1 by delegating the decision to killChrome', async () => {
@@ -177,7 +179,6 @@ test('close() respects JOBBUNNY_KEEP_BROWSER=1 by delegating the decision to kil
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher(4242).launchChrome,
     cdpReachable: async () => null,
-    resolveListenerPid: () => undefined,
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
     killEnv: { JOBBUNNY_KEEP_BROWSER: '1' },
     // real killChrome honors JOBBUNNY_KEEP_BROWSER itself — assert it's the
@@ -209,7 +210,6 @@ test('close() never calls a browser.close()-style API — only the OS-level pid 
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    resolveListenerPid: () => undefined,
     connect: async () => browser,
     killChrome: () => true,
   });
@@ -388,6 +388,10 @@ test('launch() rejects after connectMaxWaitMs when connect always fails, naming 
     port: 9222,
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
+    // The give-up path calls the REAL killChrome (none injected here),
+    // which clears the pid file at userDataDir — keep that off the real
+    // .chrome-debug/.
+    pidfileDeps: fakePidfileDeps(),
     connectRetryMs: 1,
     connectMaxWaitMs: 20,
     connect: async () => {
@@ -420,6 +424,7 @@ test('launch() logs the underlying connect error (message + cause) before giving
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
+    pidfileDeps: fakePidfileDeps(), // keep the real killChrome off .chrome-debug/
     connectRetryMs: 1,
     connectMaxWaitMs: 20,
     connect: async () => {
@@ -457,6 +462,7 @@ test('launch() enforces connectMaxWaitMs even when a single connect() attempt ha
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
+    pidfileDeps: fakePidfileDeps(), // keep the real killChrome off .chrome-debug/
     connectRetryMs: 1,
     connectMaxWaitMs: 50,
     // Simulates playwright's connectOverCDP internal timeout (~30s in the
@@ -482,9 +488,6 @@ test('launch() kills the spawned Chrome pid when connect gives up (no leak)', as
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher(4242).launchChrome,
     cdpReachable: async () => null,
-    // Nothing resolves on the port (connect never succeeded, so nothing
-    // ever bound it) — falls back to the spawned pid.
-    resolveListenerPid: () => undefined,
     connectRetryMs: 1,
     connectMaxWaitMs: 10,
     connect: async () => {
@@ -501,7 +504,7 @@ test('launch() kills the spawned Chrome pid when connect gives up (no leak)', as
 
   assert.equal(killCalls.length, 1);
   assert.equal(killCalls[0]?.pid, 4242);
-  assert.deepEqual(killCalls[0]?.deps, { env: {} });
+  assert.deepEqual(killCalls[0]?.deps?.env, {});
 });
 
 test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', async () => {
@@ -510,6 +513,7 @@ test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', asy
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
+    pidfileDeps: fakePidfileDeps(), // keep the real killChrome off .chrome-debug/
     connectRetryMs: 5,
     connectMaxWaitMs: 60_000,
     connect: async () => {
@@ -529,14 +533,13 @@ test('launch() stops retrying and rejects when ctx.signal aborts mid-retry', asy
   );
 });
 
-test('launch() reuses an already-reachable, fresh Chrome instead of spawning', async () => {
+test('launch() reuses a reachable Chrome whose pid-file-recorded age is under maxAgeMs', async () => {
   const launcher = fakeLauncher(4242);
   const connectUrls: string[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555,
-    getProcessAgeMs: () => 60_000, // 1 minute old — well under maxAgeMs
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 60_000 }), // 1 minute old
     connect: async (url) => {
       connectUrls.push(url);
       return { newPage: async () => fakePage() } satisfies CdpBrowser;
@@ -548,19 +551,24 @@ test('launch() reuses an already-reachable, fresh Chrome instead of spawning', a
   assert.equal(
     launcher.calls.length,
     0,
-    'expected no spawn when Chrome is already reachable',
+    'expected no spawn when Chrome is already reachable and fresh',
   );
   assert.deepEqual(connectUrls, ['http://127.0.0.1:9222']);
   assert.equal(handle.cdpUrl, 'http://127.0.0.1:9222');
 });
 
-test('launch() spawns Chrome when the port is not reachable', async () => {
+test('launch() spawns Chrome when the port is not reachable, consulting no pid file', async () => {
   const launcher = fakeLauncher(4242);
+  let pidfileReadAttempted = false;
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => null,
-    resolveListenerPid: () => {
-      throw new Error('should not be called when unreachable');
+    pidfileDeps: {
+      ...fakePidfileDeps(),
+      existsSync: () => {
+        pidfileReadAttempted = true;
+        return false;
+      },
     },
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
   });
@@ -568,16 +576,20 @@ test('launch() spawns Chrome when the port is not reachable', async () => {
   await provider.launch(fakeCtx());
 
   assert.equal(launcher.calls.length, 1, 'expected a spawn when nothing is reachable');
+  assert.equal(
+    pidfileReadAttempted,
+    false,
+    'expected the pid file never to be consulted when unreachable',
+  );
 });
 
-test('launch() recycles (kills, then spawns) a reachable Chrome older than maxAgeMs', async () => {
+test('launch() recycles a reachable Chrome whose pid-file-recorded age is over maxAgeMs', async () => {
   const launcher = fakeLauncher(7777);
   const killCalls: Array<number | undefined> = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555,
-    getProcessAgeMs: () => 25 * 60 * 60 * 1000, // 25h — over the 24h default
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }), // 25h
     killChrome: (pid) => {
       killCalls.push(pid);
       return true;
@@ -592,14 +604,13 @@ test('launch() recycles (kills, then spawns) a reachable Chrome older than maxAg
   assert.equal(handle.cdpUrl, 'http://127.0.0.1:9222');
 });
 
-test('launch() reuses a stale Chrome without recycling when recycleIfOld is false', async () => {
+test('launch() reuses a stale-pid-file Chrome without recycling when recycleIfOld is false', async () => {
   const launcher = fakeLauncher(7777);
   const killCalls: Array<number | undefined> = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555,
-    getProcessAgeMs: () => 25 * 60 * 60 * 1000,
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }),
     recycleIfOld: false,
     killChrome: (pid) => {
       killCalls.push(pid);
@@ -614,29 +625,6 @@ test('launch() reuses a stale Chrome without recycling when recycleIfOld is fals
   assert.equal(launcher.calls.length, 0, 'expected no spawn when recycling is disabled');
 });
 
-test('launch() treats an unresolvable age (resolveListenerPid returns undefined) as fresh — reuse, not recycle', async () => {
-  const launcher = fakeLauncher(4242);
-  const killCalls: unknown[] = [];
-  const provider = new CdpChromeProvider({
-    launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => undefined,
-    getProcessAgeMs: () => {
-      throw new Error('should not be called when no pid resolved');
-    },
-    killChrome: (pid) => {
-      killCalls.push(pid);
-      return true;
-    },
-    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
-  });
-
-  await provider.launch(fakeCtx());
-
-  assert.deepEqual(killCalls, []);
-  assert.equal(launcher.calls.length, 0);
-});
-
 test('close() is a no-op for a reused Chrome — never kills a process this run did not spawn', async () => {
   // Regression test for the 2026-07-25 incident: reuse must not kill the
   // user's own persistent, already-logged-in Chrome on close().
@@ -645,8 +633,7 @@ test('close() is a no-op for a reused Chrome — never kills a process this run 
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555,
-    getProcessAgeMs: () => 60_000, // fresh — well under maxAgeMs
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 60_000 }), // fresh
     killChrome: (pid) => {
       killCalls.push(pid);
       return true;
@@ -672,8 +659,7 @@ test('close() is a no-op for a stale-but-kept Chrome when recycleIfOld is false'
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555,
-    getProcessAgeMs: () => 25 * 60 * 60 * 1000,
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }),
     recycleIfOld: false,
     killChrome: (pid) => {
       killCalls.push(pid);
@@ -699,7 +685,6 @@ test('close() kills a fresh spawn (action launch) — this run owns that process
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => null, // unreachable -> action 'launch'
-    resolveListenerPid: () => 4242,
     killChrome: (pid) => {
       killCalls.push(pid);
       return true;
@@ -718,41 +703,13 @@ test('close() kills a fresh spawn (action launch) — this run owns that process
   );
 });
 
-test('close() kills the freshly-respawned Chrome after a recycle — this run owns that process', async () => {
-  const launcher = fakeLauncher(8888);
-  const killCalls: unknown[] = [];
-  const provider = new CdpChromeProvider({
-    launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555, // the pre-recycle listener, then the post-spawn one
-    getProcessAgeMs: () => 25 * 60 * 60 * 1000, // stale -> action 'recycle'
-    killChrome: (pid) => {
-      killCalls.push(pid);
-      return true;
-    },
-    killEnv: {},
-    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
-  });
-
-  const handle = await provider.launch(fakeCtx());
-  killCalls.length = 0; // clear the recycle-time kill (pre-spawn); isolate close()'s own kill
-  await handle.close();
-
-  assert.deepEqual(
-    killCalls,
-    [5555],
-    'expected close() to kill the process this run respawned after recycling',
-  );
-});
-
 test('close() respects JOBBUNNY_KEEP_BROWSER=1 after a recycle-then-spawn (owned process, global override)', async () => {
   const launcher = fakeLauncher(8888);
   const killCalls: unknown[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    resolveListenerPid: () => 5555,
-    getProcessAgeMs: () => 25 * 60 * 60 * 1000,
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }),
     killEnv: { JOBBUNNY_KEEP_BROWSER: '1' },
     killChrome: (pid, deps) => {
       if (deps?.env?.JOBBUNNY_KEEP_BROWSER === '1') return false;
@@ -811,7 +768,6 @@ test('newPage() opens the page in the existing persistent context, not a fresh o
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    resolveListenerPid: () => undefined,
     connect: async () => browser,
     killChrome: () => true,
   });
@@ -836,7 +792,6 @@ test('newPage() falls back to newContext() when the browser reports no contexts'
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
-    resolveListenerPid: () => undefined,
     connect: async () => browser,
     killChrome: () => true,
   });
@@ -845,4 +800,54 @@ test('newPage() falls back to newContext() when the browser reports no contexts'
   await handle.newPage();
 
   assert.equal(createdContext, true);
+});
+
+test('launch() attaches (reuse) to a reachable Chrome with no live pid file, and close() never kills it (ownsProcess === false)', async () => {
+  const launcher = fakeLauncher(4242);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    pidfileDeps: fakePidfileDeps({ exists: false }),
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  await handle.close();
+
+  assert.equal(
+    launcher.calls.length,
+    0,
+    'expected no spawn — Chrome is already reachable',
+  );
+  assert.deepEqual(killCalls, [], 'expected close() never to kill an unowned Chrome');
+});
+
+test('close() kills the freshly-respawned Chrome pid after a recycle — this run owns the new process, not the old one', async () => {
+  const launcher = fakeLauncher(8888);
+  const killCalls: unknown[] = [];
+  const provider = new CdpChromeProvider({
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }), // stale -> recycle
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  const handle = await provider.launch(fakeCtx());
+  killCalls.length = 0; // clear the recycle-time kill (pre-spawn, pid 5555); isolate close()'s own kill
+  await handle.close();
+
+  assert.deepEqual(
+    killCalls,
+    [8888],
+    'expected close() to kill the freshly-spawned pid this run owns, not the old listener pid',
+  );
 });
