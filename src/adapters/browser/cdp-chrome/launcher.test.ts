@@ -24,6 +24,7 @@ import {
   SESSION_CLEAR_PROFILE_DIR,
   SESSION_CLEAR_SKIP_ENV,
 } from './launcher.ts';
+import type { ChromePidfile, ChromePidfileDeps } from './ownership/index.ts';
 
 /** Real fs, pointed only at a throwaway temp dir this file creates and
  * removes — clearSessionState's own tests deliberately exercise the real
@@ -140,6 +141,7 @@ test('launchChrome resolves the chrome path, builds argv, spawns detached+unref,
         spawnCalls.push({ command, args, options });
         return { pid: 4242, unref: () => {} };
       },
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
     },
   );
   assert.equal(proc.pid, 4242);
@@ -168,6 +170,7 @@ test('launchChrome unrefs the spawned child so it never keeps the event loop ali
           unrefCalled = true;
         },
       }),
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
     },
   );
   assert.equal(unrefCalled, true);
@@ -178,7 +181,11 @@ test('launchChrome propagates the resolveChromePath error when no candidate exis
     () =>
       launchChrome(
         { port: 9222, candidates: ['/nope'] },
-        { existsSync: () => false, spawn: () => ({ pid: 1, unref: () => {} }) },
+        {
+          existsSync: () => false,
+          spawn: () => ({ pid: 1, unref: () => {} }),
+          pidfileDeps: fakePidfileDepsForLauncher().deps,
+        },
       ),
     /no Chrome executable found/,
   );
@@ -195,6 +202,7 @@ test('launchChrome resolves via JOBBUNNY_CHROME_PATH when set, ignoring the cand
         return { pid: 4242, unref: () => {} };
       },
       env: { JOBBUNNY_CHROME_PATH: '/from/env/chrome' },
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
     },
   );
   assert.equal(proc.pid, 4242);
@@ -210,6 +218,7 @@ test('killChrome sends SIGTERM to the spawned pid by default', async () => {
     },
     isAlive: () => false,
     sleep: instantSleep,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, true);
   assert.deepEqual(calls, [{ pid: 4242, signal: 'SIGTERM' }]);
@@ -222,6 +231,7 @@ test('killChrome does nothing when JOBBUNNY_KEEP_BROWSER=1', async () => {
     kill: (pid) => {
       calls.push(pid);
     },
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, false);
   assert.deepEqual(calls, []);
@@ -234,6 +244,7 @@ test('killChrome is a no-op when there is no pid to kill', async () => {
     kill: (pid) => {
       calls.push(pid);
     },
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, false);
   assert.deepEqual(calls, []);
@@ -245,6 +256,7 @@ test('killChrome treats an already-gone process as a handled no-op, not a throw'
     kill: () => {
       throw new Error('ESRCH');
     },
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, false);
 });
@@ -265,6 +277,7 @@ test('killChrome resolves without escalating when the process exits after SIGTER
     sleep: instantSleep,
     pollIntervalMs: 250,
     graceMs: 5000,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
 
   assert.equal(result, true);
@@ -288,6 +301,7 @@ test('killChrome escalates to SIGKILL when the process is still alive after the 
     pollIntervalMs: 5,
     graceMs: 20,
     settleMs: 5,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   const elapsed = Date.now() - start;
 
@@ -306,6 +320,7 @@ test('killChrome does not throw if SIGKILL races an already-exited process', asy
     graceMs: 10,
     pollIntervalMs: 5,
     settleMs: 1,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, true);
 });
@@ -483,6 +498,7 @@ test('launchChrome runs the session clear before spawning (Sessions dir gone aft
         rmSync,
         readFileSync,
         writeFileSync,
+        pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
     assert.equal(existsSync(join(profileDir, 'Sessions')), false);
@@ -503,12 +519,73 @@ test('launchChrome skips the session clear when JOBBUNNY_SKIP_SESSION_CLEAR=1', 
         readFileSync,
         writeFileSync,
         env: { [SESSION_CLEAR_SKIP_ENV]: '1' },
+        pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
     assert.equal(existsSync(join(profileDir, 'Sessions')), true);
   } finally {
     rmSync(userDataDir, { recursive: true, force: true });
   }
+});
+
+function fakePidfileDepsForLauncher(): {
+  deps: ChromePidfileDeps;
+  written: ChromePidfile[];
+  unlinked: number;
+} {
+  const written: ChromePidfile[] = [];
+  let unlinked = 0;
+  const deps: ChromePidfileDeps = {
+    existsSync: () => written.length > 0,
+    readFileSync: () => JSON.stringify(written[written.length - 1]),
+    writeFileSync: (_path, data) => {
+      written.push(JSON.parse(data) as ChromePidfile);
+    },
+    unlinkSync: () => {
+      unlinked += 1;
+    },
+    pidIsAlive: () => true,
+    now: () => new Date('2026-07-27T12:00:00.000Z'),
+  };
+  return { deps, written, unlinked };
+}
+
+test('launchChrome writes the Chrome pid file immediately after spawn returns a pid', () => {
+  const { deps, written } = fakePidfileDepsForLauncher();
+  launchChrome(
+    { port: 9333, userDataDir: '/repo/.chrome-debug', candidates: ['/only/chrome'] },
+    {
+      existsSync: (path) => path === '/only/chrome',
+      spawn: () => ({ pid: 4242, unref: () => {} }),
+      pidfileDeps: deps,
+    },
+  );
+  assert.equal(written.length, 1);
+  assert.deepEqual(written[0], {
+    pid: 4242,
+    port: 9333,
+    startedAt: '2026-07-27T12:00:00.000Z',
+  });
+});
+
+test('killChrome clears the Chrome pid file once the process is confirmed dead', async () => {
+  const { deps, written } = fakePidfileDepsForLauncher();
+  written.push({ pid: 4242, port: 9222, startedAt: '2026-07-27T12:00:00.000Z' });
+  let unlinked = 0;
+  const clearingDeps: ChromePidfileDeps = {
+    ...deps,
+    unlinkSync: () => {
+      unlinked += 1;
+    },
+  };
+  await killChrome(4242, {
+    env: {},
+    kill: () => {},
+    isAlive: () => false,
+    sleep: instantSleep,
+    pidfileDeps: clearingDeps,
+  });
+  assert.equal(unlinked, 1);
 });
 
 test('the session clear only ever runs via launchChrome, which provider.ts never calls on the reuse path', () => {
@@ -539,6 +616,7 @@ test('the session clear only ever runs via launchChrome, which provider.ts never
         rmSync,
         readFileSync,
         writeFileSync,
+        pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
     // By the time spawn() runs, the clear has already happened.

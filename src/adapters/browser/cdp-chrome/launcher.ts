@@ -8,6 +8,12 @@ import {
 import { join as nodeJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveCandidates } from './discovery/index.ts';
+import {
+  type ChromePidfileDeps,
+  clearChromePidfile,
+  defaultChromePidfileDeps,
+  writeChromePidfile,
+} from './ownership/index.ts';
 
 /**
  * Chrome-over-CDP process lifecycle: find the local Chrome binary, build its
@@ -80,6 +86,10 @@ export interface LauncherDeps {
   rmSync?: SessionClearFsDeps['rmSync'];
   readFileSync?: SessionClearFsDeps['readFileSync'];
   writeFileSync?: SessionClearFsDeps['writeFileSync'];
+  /** Injectable Chrome pid-file deps — used by launchChrome to write, and
+   * by killChrome to clear, .chrome-debug/.jobbunny-chrome.json. Default:
+   * defaultChromePidfileDeps(). */
+  pidfileDeps?: ChromePidfileDeps;
 }
 
 /** Resolves the first candidate path that exists on disk. Throws a clear
@@ -316,6 +326,14 @@ export function launchChrome(
   const argv = buildLaunchArgv({ port, userDataDir });
   const child = spawn(chromePath, argv, { detached: true, stdio: 'ignore' });
   child.unref();
+  if (child.pid != null) {
+    const pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
+    writeChromePidfile(
+      userDataDir,
+      { pid: child.pid, port, startedAt: pidfileDeps.now().toISOString() },
+      pidfileDeps,
+    );
+  }
   return { pid: child.pid };
 }
 
@@ -342,6 +360,12 @@ export interface KillDeps {
    * pause (lets the OS finish tearing the process down before the caller
    * treats the port as free). */
   settleMs?: number;
+  /** userDataDir whose Chrome pid file should be cleared once this
+   * process is confirmed dead. Default: DEFAULT_USER_DATA_DIR. */
+  userDataDir?: string;
+  /** Injectable Chrome pid-file deps for the same clear. Default:
+   * defaultChromePidfileDeps(). */
+  pidfileDeps?: ChromePidfileDeps;
 }
 
 function defaultIsAlive(pid: number): boolean {
@@ -380,10 +404,13 @@ export async function killChrome(
   const graceMs = deps.graceMs ?? 5000;
   const pollIntervalMs = deps.pollIntervalMs ?? 250;
   const settleMs = deps.settleMs ?? 500;
+  const userDataDir = deps.userDataDir ?? DEFAULT_USER_DATA_DIR;
+  const pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
 
   try {
     kill(pid, 'SIGTERM');
   } catch {
+    clearChromePidfile(userDataDir, pidfileDeps);
     return false; // already gone
   }
 
@@ -406,6 +433,7 @@ export async function killChrome(
     await sleep(settleMs);
   }
 
+  clearChromePidfile(userDataDir, pidfileDeps);
   return true;
 }
 
