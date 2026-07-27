@@ -3,8 +3,14 @@
 Filled from live DOM analysis on 2026-06-30 (Chrome 149, logged-in session) against
 `https://www.linkedin.com/jobs/search-results/`. This route uses hashed/obfuscated CSS
 class names (unstable); card identity comes from the stable `componentkey` attribute.
-Selectors verified still valid. `must_exist` changed from job-card selector to
+`must_exist` changed from job-card selector to
 `[componentkey="JobsSearchFilters"]` so 0-result pages don't false-fail the assertion.
+
+Selectors re-verified live against LinkedIn on 2026-07-27: `job_card_company` and
+`job_card_location` were `p:nth(1)`/`p:nth(2)` — `:nth()` is not valid CSS and crashed
+`farm`'s `page.evaluate` with a `SyntaxError`. Replaced with `:has()`-based sibling
+selectors, tested against all 50 job cards on a live search-results page with 100%
+match rate against ground truth.
 
 ## 1. Behavior (manual)
 - interaction_model: new-page
@@ -18,12 +24,12 @@ Selectors verified still valid. `must_exist` changed from job-card selector to
 - jd_anchor_text: About the job
 - max_raw_text_chars: 2500
 
-## 2. Selectors (from live page analysis 2026-06-24)
+## 2. Selectors (from live page analysis 2026-07-27)
 ### Search page
 - job_card: div[componentkey^="job-card-component-ref-"]
 - job_card_title: p
-- job_card_company: p:nth(1)
-- job_card_location: p:nth(2)
+- job_card_company: div:has(> p) + div > p
+- job_card_location: div:has(> p) + div + p
 - job_card_href:
 - job_card_id_attr: componentkey
 - job_card_id_attr_prefix: job-card-component-ref-

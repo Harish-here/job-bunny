@@ -1,13 +1,13 @@
 {
   "page": "linkedin__jobs-search-results",
   "pageType": "details-page",
-  "generatedAt": "2026-06-30",
+  "generatedAt": "2026-07-27",
   "selectors": {
     "cardList": "body",
     "card": "div[componentkey^=\"job-card-component-ref-\"]",
     "cardTitle": "p",
-    "cardCompany": "p:nth(1)",
-    "cardLocation": "p:nth(2)",
+    "cardCompany": "div:has(> p) + div > p",
+    "cardLocation": "div:has(> p) + div + p",
     "cardLink": "div[componentkey^=\"job-card-component-ref-\"]",
     "jdRoot": "#job-details"
   },
@@ -33,7 +33,7 @@
     "hashedClassNamesWarning": "this route uses hashed/obfuscated CSS class names (unstable); card identity comes from the stable componentkey attribute",
     "cardListNote": "v0 inventory did not capture a distinct list-container selector for this page (job_list_container/scroll_container both blank in the .md); using document body as scope until /page-analyse regenerates this page for v2",
     "cardLinkNote": "no href on the card; job id is parsed from the componentkey attribute (see jobCardIdAttr/jobCardIdAttrPrefix) and the JD url is built via urlPatternOfJob rather than read from an anchor — cardLink duplicates the card selector as the element carrying the id",
-    "selectorsVerifiedAt": "2026-06-24 (per .md section 2 header; page-level generatedAt above uses the .md's top banner date of 2026-06-30)",
+    "selectorsVerifiedAt": "2026-07-27 (selectors re-verified live against LinkedIn; cardCompany/cardLocation replaced with :has()-based sibling selectors after p:nth() was found to be invalid CSS, tested against all 50 cards on a live search-results page with 100% match rate)",
     "sourceInventory": "linkedin__jobs-search-results.md (v0, verified 2026-06-30 against https://www.linkedin.com/jobs/search-results/)"
   }
 }
