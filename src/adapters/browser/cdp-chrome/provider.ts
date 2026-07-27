@@ -299,7 +299,12 @@ export class CdpChromeProvider implements BrowserProvider {
   private async spawnAndConnect(cdpUrl: string, ctx: RunContext): Promise<BrowserHandle> {
     const proc = this.launchChromeFn(
       { port: this.port, userDataDir: this.userDataDir, candidates: this.candidates },
-      this.launcherFsDeps,
+      // pidfileDeps is threaded in explicitly so the ONE seam governs both
+      // sides of the pid file: without it, launchChrome's write path fell
+      // back to defaultChromePidfileDeps() (real fs) even when this provider
+      // was constructed with injected deps, so the write and the subsequent
+      // read used different worlds.
+      { ...this.launcherFsDeps, pidfileDeps: this.pidfileDeps },
     );
     let browser: CdpBrowser;
     try {

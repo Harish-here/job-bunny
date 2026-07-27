@@ -579,11 +579,19 @@ test('launch() spawns Chrome when the port is not reachable, consulting no pid f
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
     cdpReachable: async () => null,
+    // Base deps that DO describe a live pid file (existsSync true), so the
+    // only reason readFileSync can stay untouched is that launch() never
+    // consulted the pid file at all on the unreachable path — instrumenting
+    // existsSync instead would pass vacuously against a "no file" fake.
     pidfileDeps: {
-      ...fakePidfileDeps(),
-      existsSync: () => {
+      ...fakePidfileDeps({ pid: 5555 }),
+      readFileSync: () => {
         pidfileReadAttempted = true;
-        return false;
+        return JSON.stringify({
+          pid: 5555,
+          port: 9222,
+          startedAt: '2026-07-27T12:00:00.000Z',
+        });
       },
     },
     connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
