@@ -138,6 +138,11 @@ test('launchChrome resolves the chrome path, builds argv, spawns detached+unref,
         spawnCalls.push({ command, args, options });
         return { pid: 4242, unref: () => {} };
       },
+      // Empty env, not process.env: an ambient JOBBUNNY_CHROME_PATH would
+      // otherwise take precedence over the explicit `candidates` below (see
+      // resolveCandidates' override tier) and this assertion would break
+      // purely because of the shell that ran the suite.
+      env: {},
       pidfileDeps: fakePidfileDepsForLauncher().deps,
     },
   );
@@ -437,6 +442,7 @@ test('launchChrome runs the session clear before spawning (Sessions dir gone aft
         rmSync,
         readFileSync,
         writeFileSync,
+        env: {},
         pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
@@ -497,6 +503,7 @@ test('launchChrome writes the Chrome pid file immediately after spawn returns a 
     {
       existsSync: (path) => path === '/only/chrome',
       spawn: () => ({ pid: 4242, unref: () => {} }),
+      env: {},
       pidfileDeps: deps,
     },
   );
@@ -557,6 +564,7 @@ test('the session clear only ever runs via launchChrome, which provider.ts never
         rmSync,
         readFileSync,
         writeFileSync,
+        env: {},
         pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
