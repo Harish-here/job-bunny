@@ -68,8 +68,11 @@ function runClaudeCli(
       return;
     }
 
-    const child = spawn(command, ['-p', '--output-format', 'text'], {
+    const child = spawn(command, ['-p', '--output-format', 'text', '--bare'], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Headless launchd runs hang on a queued macOS "Local Network" prompt
+      // (IDE-connection auto-detection) unless this is disabled.
+      env: { ...process.env, CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' },
     });
 
     let stdout = '';
