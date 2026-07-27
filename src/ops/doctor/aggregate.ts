@@ -393,7 +393,7 @@ export function daemonLivenessCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
-/** coreChecks — the five profile/config/env/daemon/claude checks above,
+/** coreChecks — the six profile/config/env/daemon/claude checks above,
  * in a fixed order. Callers append adapter-contributed checks (e.g.
  * Notion/Telegram reachability) themselves before calling `runChecks`. */
 export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {

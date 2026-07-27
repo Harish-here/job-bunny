@@ -119,7 +119,13 @@ function defaultCheckDaemonLiveness(): string | undefined {
   }
   const heartbeatAgeMs = pidfileDeps.now().getTime() - Date.parse(file.lastTickAt);
   if (heartbeatAgeMs > HEARTBEAT_STALE_MS) {
-    return 'warning: jobbunny daemon appears wedged (no tick in over 5 minutes) — scheduled runs may not fire';
+    // Derived, never hardcoded: HEARTBEAT_STALE_MS is the only definition
+    // of "wedged", and this line is what the operator reads.
+    const minutes = Math.round(HEARTBEAT_STALE_MS / 60_000);
+    return (
+      `warning: jobbunny daemon appears wedged (no tick in over ${minutes} minutes) — ` +
+      'scheduled runs may not fire'
+    );
   }
   return undefined;
 }
