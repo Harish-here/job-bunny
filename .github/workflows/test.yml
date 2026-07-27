@@ -6,8 +6,12 @@ on:
     branches: [main, main-v2]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,3 +25,9 @@ jobs:
       - run: npm run lint
       - run: npm run boundaries
       - run: npm test
+
+  test:
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
