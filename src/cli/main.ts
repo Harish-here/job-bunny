@@ -10,8 +10,9 @@
  * Dispatch is `<command> [sub-action] [positionals] [--flags]`. All argv →
  * options translation lives in `buildOptions`, which hands each command ONLY
  * the keys it reads (never an irrelevant key set to `undefined`) and returns
- * a usage error when a required piece is missing. `schedule install` is the
- * one command that takes no `--profile`: it is cross-profile by design.
+ * a usage error when a required piece is missing. `schedule install`,
+ * `serve` (all three sub-actions), and `release` are cross-profile by
+ * design and take no `--profile`.
  *
  * Functions RETURN their exit code; only the bin-entry guard at the bottom
  * ever touches `process.exitCode`, so `main` itself is safe to call from a
@@ -37,6 +38,7 @@ import { npmSwallowedFlags, releaseCommand } from './commands/release.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
 import { scheduleCommand } from './commands/schedule.ts';
+import { serveCommand } from './commands/serve.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 
@@ -58,6 +60,7 @@ export interface CommandOptions {
   version?: string;
   noMerge?: boolean;
   yes?: boolean;
+  daemonChild?: boolean;
 }
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
@@ -69,6 +72,7 @@ export type CommandName =
   | 'stage'
   | 'routine'
   | 'schedule'
+  | 'serve'
   | 'lane'
   | 'profile'
   | 'setup'
@@ -96,6 +100,7 @@ const USAGE = [
   '  routine <routine-name> --profile <name>',
   '  schedule install                     (cross-profile — no --profile)',
   '  schedule remove --profile <name>',
+  '  serve start|stop|status              (cross-profile — no --profile)',
   '  lane add-url <url> [label] --profile <name>',
   '  profile build --profile <name>',
   '  profile remove --profile <name> [--force]',
@@ -111,6 +116,11 @@ function defaultCommands(): CommandRegistry {
     stage: stageCommand as unknown as CommandFn,
     routine: routineCommand as unknown as CommandFn,
     schedule: scheduleCommand as unknown as CommandFn,
+    serve: (async (opts: CommandOptions) =>
+      serveCommand({
+        action: (opts.action ?? 'status') as 'start' | 'stop' | 'status',
+        daemonChild: opts.daemonChild ?? false,
+      })) as CommandFn,
     lane: laneAddUrlCommand as unknown as CommandFn,
     // `profile` fans out to two commands; the sub-action picks which.
     profile: (async (opts: CommandOptions) =>
@@ -138,6 +148,7 @@ const COMMAND_NAMES = new Set<string>([
   'stage',
   'routine',
   'schedule',
+  'serve',
   'lane',
   'profile',
   'setup',
@@ -159,6 +170,7 @@ function buildOptions(
     'run-cap-ms'?: string;
     'no-merge'?: boolean;
     yes?: boolean;
+    'daemon-child'?: boolean;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -210,6 +222,13 @@ function buildOptions(
       if (action === 'install') return { action };
       return needsProfile() ?? { action, profile };
     }
+    case 'serve': {
+      const action = rest[0];
+      if (action !== 'start' && action !== 'stop' && action !== 'status') {
+        return { error: 'serve takes "start", "stop", or "status"' };
+      }
+      return { action, ...(values['daemon-child'] ? { daemonChild: true } : {}) };
+    }
     case 'lane': {
       if (rest[0] !== 'add-url') return { error: 'lane takes "add-url"' };
       const url = rest[1];
@@ -256,6 +275,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       'run-cap-ms': { type: 'string' },
       'no-merge': { type: 'boolean', default: false },
       yes: { type: 'boolean', default: false },
+      'daemon-child': { type: 'boolean', default: false },
     },
   });
 
