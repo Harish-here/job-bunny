@@ -3,7 +3,7 @@
  * main.ts (P8) — the `jobbunny` CLI entry point: parses argv into a
  * command name + options and dispatches to the registered command. Holds
  * NO adapter imports itself (`nothing-imports-cli`/`only-wire-imports-adapters`
- * in `.dependency-cruiser.cjs` — only `cli/wire.ts` may import
+ * in `.dependency-cruiser.cjs` — only `cli/wire/compose.ts` may import
  * `src/adapters/**`); the real `run`/`doctor` commands reach adapters only
  * through `wire()`, which they call internally.
  *

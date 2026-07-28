@@ -7,7 +7,7 @@
  * original speed instead of silently gaining a real multi-second sleep
  * per card/url. The real v0-parity default (2000, 5000) is applied
  * exactly once, at production wiring time, by `resolveJitterRange` in
- * `cli/wire.ts` (its own same-named constants) — the only caller that
+ * `cli/wire/settings.ts` (its own same-named constants) — the only caller that
  * needs it live. */
 export const DEFAULT_JITTER_MIN_MS = 0;
 export const DEFAULT_JITTER_MAX_MS = 0;
@@ -17,7 +17,7 @@ export const DEFAULT_JITTER_MAX_MS = 0;
  * directly above: `(0, 0)` here so every pre-existing `new LinkedInLane(...)`
  * call site keeps its original speed, with the real production range
  * (20_000, 45_000) applied once at wiring time by
- * `resolveInterUrlDelayRange` in `cli/wire.ts`. */
+ * `resolveInterUrlDelayRange` in `cli/wire/settings.ts`. */
 export const DEFAULT_INTER_URL_DELAY_MIN_MS = 0;
 export const DEFAULT_INTER_URL_DELAY_MAX_MS = 0;
 

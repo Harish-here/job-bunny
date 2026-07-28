@@ -5,10 +5,10 @@
  * `warn` never fails the command — see `ports/doctor.ts`).
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
- * `cli/wire.ts`'s `wire`, the sole adapter-import chokepoint).
+ * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
 import type { DoctorFinding } from '../../ports/doctor.ts';
-import { wire as defaultWire, type WireResult } from '../wire.ts';
+import { wire as defaultWire, type WireResult } from '../wire/index.ts';
 
 export interface DoctorCommandOptions {
   profile: string;

@@ -31,7 +31,7 @@ export type ProbeState = z.infer<typeof ProbeStateSchema>;
 export type CompanyRecord = z.infer<typeof CompanyRecordSchema>;
 
 /**
- * Plain interface, not a schema — callers (pipeline stage / wire.ts) pass
+ * Plain interface, not a schema — callers (pipeline stage / cli/wire/compose.ts) pass
  * concrete values; defaults documented here are not enforced by this module.
  * Defaults: reprobeNotFoundAfterDays = 30, maxProbeFailures = 3,
  * staleAfterFetchFailures = 3.

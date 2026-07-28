@@ -16,7 +16,7 @@
  * names and returns exit code 1 rather than throwing into `main`'s catch.
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
- * `cli/wire.ts`'s `wire`, the sole adapter-import chokepoint).
+ * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
 import { join } from 'node:path';
 import { buildFunnel } from '../../ops/observability/index.ts';
@@ -28,7 +28,7 @@ import {
 } from '../../ops/observability/run_folder.ts';
 import { guardStage } from '../../pipeline/runner/guard.ts';
 import type { StagePayload } from '../../pipeline/runner/stage.ts';
-import { wire as defaultWire, type WireResult } from '../wire.ts';
+import { wire as defaultWire, type WireResult } from '../wire/index.ts';
 
 const STALL_MS = 360_000; // matches run.ts's DEFAULT_STALL_MS — see its header
 const SEED_PAYLOAD: StagePayload = { jobs: [], dropped: [] };

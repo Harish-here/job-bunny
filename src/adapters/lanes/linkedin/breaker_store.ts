@@ -49,14 +49,14 @@ export interface LinkedinBreakerDeps {
  * `userDataDir` is a plain string, NOT an import of
  * `adapters/browser/cdp-chrome`'s `DEFAULT_USER_DATA_DIR`: those are two
  * different adapter families and `.dependency-cruiser.cjs`'s
- * `adapters-no-cross-family` rule forbids the cross-import. `cli/wire.ts`
- * — the one file allowed to import any adapter — reads the constant and
- * passes it in here.
+ * `adapters-no-cross-family` rule forbids the cross-import. `cli/wire/
+ * builders.ts` — one of the files allowed to import any adapter — reads
+ * the constant and passes it in here.
  *
  * The whole config is OPTIONAL on the constructor: omitted, the lane has
  * no breaker at all (no read, no write, no jdRoot presence probe), which
  * is what every pre-existing direct `new LinkedInLane(...)` call site
- * relies on. Production supplies it in `cli/wire.ts`.
+ * relies on. Production supplies it in `cli/wire/builders.ts`.
  *
  * Defined here (not in `lane.ts`) so `fire/url_runner.ts` can reach the
  * type without a circular import back through `lane.ts` -> `fire/index.ts`

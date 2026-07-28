@@ -13,7 +13,7 @@
  * into an exit code and message rather than propagating a throw.
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
- * `cli/wire.ts`'s `wire`, the sole adapter-import chokepoint).
+ * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -30,7 +30,7 @@ import type { RunnerOptions } from '../../pipeline/runner/run.ts';
 import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import { CACHE_PATH } from '../../pipeline/stages/reconcile.ts';
-import { wire as defaultWire, type WireResult } from '../wire.ts';
+import { wire as defaultWire, type WireResult } from '../wire/index.ts';
 
 const RUN_CAP_MS = 1_800_000;
 const STALL_MS = 360_000;
