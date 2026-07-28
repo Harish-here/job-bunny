@@ -1,0 +1,3 @@
+# Force LF in every working tree — the Windows CI runner's default
+# core.autocrlf would otherwise check out CRLF and fail Biome's formatter.
+* text=auto eol=lf
