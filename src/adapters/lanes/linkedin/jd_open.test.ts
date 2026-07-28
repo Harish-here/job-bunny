@@ -8,7 +8,7 @@ import type { PageHandle } from '../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { buildJdAnchorScript, openJd } from './jd_open.ts';
+import { buildJdAnchorScript, buildJdRootPresenceScript, openJd } from './jd_open.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -435,4 +435,73 @@ test('buildJdAnchorScript honors a custom anchor phrase and minimum length', asy
   });
 
   assert.equal(result, match);
+});
+
+// --- buildJdRootPresenceScript, evaluated over a fake `document` via node:vm ---
+
+/** Fake `document` whose querySelector matches `selector` (with the given
+ * text on the matched element) and nothing else. The three states this can
+ * model are the three the script must distinguish: matched-and-empty (the
+ * server-withheld shell, spec §1), matched-with-text (a failed open that
+ * left a populated pane behind — NOT a throttle, D4), and no match at all
+ * (selector drift). */
+function fakePresenceDocument(selector: string | null, text = ''): unknown {
+  return {
+    querySelector(s: string) {
+      return selector !== null && s === selector ? { textContent: text } : null;
+    },
+  };
+}
+
+test("buildJdRootPresenceScript returns 'empty' for a matched element that holds no text (the shell signature)", async () => {
+  const selector = '[componentkey^="JobDetails_AboutTheJob"]';
+  const document = fakePresenceDocument(selector);
+
+  const result = await vm.runInNewContext(buildJdRootPresenceScript(selector), {
+    document,
+  });
+
+  assert.equal(result, 'empty');
+});
+
+test("buildJdRootPresenceScript returns 'text' for a matched element that still holds text (a stale JD pane, never a throttle)", async () => {
+  const selector = '[componentkey^="JobDetails_AboutTheJob"]';
+  // Whitespace-only would still be 'empty' — the shell verdict is about
+  // trimmed emptiness, so this carries real characters.
+  const document = fakePresenceDocument(
+    selector,
+    '  About the job — the PREVIOUS card  ',
+  );
+
+  const result = await vm.runInNewContext(buildJdRootPresenceScript(selector), {
+    document,
+  });
+
+  assert.equal(result, 'text');
+});
+
+test("buildJdRootPresenceScript returns 'empty' for a matched element holding only whitespace (a shell, not text)", async () => {
+  const selector = '[componentkey^="JobDetails_AboutTheJob"]';
+  const document = fakePresenceDocument(selector, '   \n\t  ');
+
+  const result = await vm.runInNewContext(buildJdRootPresenceScript(selector), {
+    document,
+  });
+
+  assert.equal(result, 'empty');
+});
+
+test("buildJdRootPresenceScript returns '' when the selector matches nothing (selector drift, not a throttle)", async () => {
+  const document = fakePresenceDocument(null);
+
+  const result = await vm.runInNewContext(
+    buildJdRootPresenceScript('[componentkey^="JobDetails_AboutTheJob"]'),
+    { document },
+  );
+
+  assert.equal(result, '');
+});
+
+test('buildJdRootPresenceScript carries the jd-root-presence marker token so a fake page can route it', () => {
+  assert.match(buildJdRootPresenceScript('#x'), /jd-root-presence/);
 });

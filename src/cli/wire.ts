@@ -52,6 +52,7 @@ import {
   CdpChromeProvider,
   cdpReachableCheck,
   DEFAULT_CDP_PORT,
+  DEFAULT_USER_DATA_DIR,
   defaultCdpReachable,
 } from '../adapters/browser/cdp-chrome/index.ts';
 import type { NotionApiLike, NotionSdkClientLike } from '../adapters/db/notion/index.ts';
@@ -64,6 +65,7 @@ import {
 import { GreenhouseLane } from '../adapters/lanes/greenhouse/index.ts';
 import { KekaLane } from '../adapters/lanes/keka/index.ts';
 import {
+  defaultLinkedinBreakerDeps,
   inventoryFreshnessCheck,
   LinkedInLane,
   loadInventory,
@@ -368,6 +370,7 @@ async function buildLanes(config: PipelineConfig, deps: LiveLaneDeps): Promise<L
             deps,
             resolveMaxCardsPerUrl(config.settings.linkedin),
             resolveJitterRange(config.settings.linkedin),
+            resolveInterUrlDelayRange(config.settings.linkedin),
           ),
         );
         break;
@@ -388,6 +391,7 @@ async function buildLinkedInLane(
   deps: LiveLaneDeps,
   maxCardsPerUrl: number,
   jitterRange: { minMs: number; maxMs: number },
+  interUrlDelayRange: { minMs: number; maxMs: number },
 ): Promise<LinkedInLane> {
   if (!deps.filterCfg) {
     throw new Error(
@@ -427,6 +431,16 @@ async function buildLinkedInLane(
     maxCardsPerUrl,
     jitterRange.minMs,
     jitterRange.maxMs,
+    undefined, // randomFn: real Math.random
+    undefined, // sleepFn: real abort-aware core/async sleep
+    interUrlDelayRange.minMs,
+    interUrlDelayRange.maxMs,
+    // Session-scoped, shared by every profile (D11): the throttle belongs
+    // to the `.chrome-debug` Chrome profile whose cookies every profile
+    // farms through, not to any one profile's data dir. Passed as a plain
+    // string because `adapters-no-cross-family` forbids the lane importing
+    // `adapters/browser/**` itself.
+    { userDataDir: DEFAULT_USER_DATA_DIR, deps: defaultLinkedinBreakerDeps() },
   );
 }
 
@@ -468,37 +482,72 @@ export function resolveMaxCardsPerUrl(settings: unknown): number {
     : DEFAULT_MAX_CARDS_PER_URL;
 }
 
-/** v0-parity defaults for the linkedin lane's inter-request jitter (P9
- * tail: confirmed parity regression fix — see adapters/lanes/linkedin/
- * lane.ts's DEFAULT_JITTER_MIN_MS/MAX_MS doc comment). Kept here (not just
- * in the lane) so a profile with no `settings.linkedin.jitter*Ms` at all
- * still gets a fully-populated, schema-validated range object out of
- * `resolveJitterRange`. */
-const DEFAULT_JITTER_MIN_MS = 2_000;
-const DEFAULT_JITTER_MAX_MS = 5_000;
+/** Live pacing defaults for the linkedin lane (throttle guard D2/D3,
+ * 2026-07-28). Raised from the old v0-parity (2000, 5000) after LinkedIn
+ * soft-throttled the shared `.chrome-debug` session under that cadence: 21
+ * saved-search urls x 5 fires/day at ~1 navigation per 12s read as a burst.
+ * Kept here (not just in the lane) so a profile with no `settings.linkedin`
+ * pacing keys at all still gets a fully-populated, schema-validated range —
+ * the lane's own defaults stay a no-op `(0, 0)` for tests. */
+const DEFAULT_JITTER_MIN_MS = 5_000;
+const DEFAULT_JITTER_MAX_MS = 12_000;
+
+/** Pause between saved-search urls (D2). Together with the jitter above
+ * this puts a 21-url fire at roughly 25 minutes against farm's unchanged
+ * 90-minute ceiling — deliberately the moderate tier, since the
+ * conservative one (~50 min) would eventually force raising that ceiling. */
+const DEFAULT_INTER_URL_DELAY_MIN_MS = 20_000;
+const DEFAULT_INTER_URL_DELAY_MAX_MS = 45_000;
 
 /** Unlike `resolveMaxCardsPerUrl`/`resolveInventoryMaxAgeDays` (silently
- * fall back to a default on any bad value), an operator-set jitter range
+ * fall back to a default on any bad value), an operator-set pacing range
  * that doesn't make sense (min > max, or either negative) is a
  * config-authoring mistake, not "value absent" — fail LOUD (zod throws),
  * same posture as `NotionConnectorSettingsSchema.parse`/
  * `TelegramNotifierSettingsSchema.parse` above. Missing keys still default
- * quietly (v0 parity values), only a present-but-invalid value throws. */
-const JitterSettingsSchema = z
+ * quietly, only a present-but-invalid value throws.
+ *
+ * Both pacing pairs share one schema (D3): they are read from the same
+ * `settings.linkedin` blob and validated together, so a profile cannot end
+ * up with a valid inter-url range sitting next to an inverted jitter one.
+ *
+ * One-sided overrides interact with the defaults, and the 2026-07-28 raise
+ * (jitter 2000/5000 -> 5000/12000) made that sharper: a profile that sets
+ * ONLY `jitterMaxMs` below 5000 now inverts the range against the default
+ * `jitterMinMs` and throws here — failing `run` AND `doctor` — so such a
+ * profile must set `jitterMinMs` too. Same shape for an
+ * `interUrlDelayMaxMs` set alone below the 20000 default. */
+const LinkedinPacingSettingsSchema = z
   .object({
     jitterMinMs: z.number().min(0).default(DEFAULT_JITTER_MIN_MS),
     jitterMaxMs: z.number().min(0).default(DEFAULT_JITTER_MAX_MS),
+    interUrlDelayMinMs: z.number().min(0).default(DEFAULT_INTER_URL_DELAY_MIN_MS),
+    interUrlDelayMaxMs: z.number().min(0).default(DEFAULT_INTER_URL_DELAY_MAX_MS),
   })
   .refine((v) => v.jitterMinMs <= v.jitterMaxMs, {
     message: 'settings.linkedin.jitterMinMs must be <= settings.linkedin.jitterMaxMs',
+  })
+  .refine((v) => v.interUrlDelayMinMs <= v.interUrlDelayMaxMs, {
+    message:
+      'settings.linkedin.interUrlDelayMinMs must be <= settings.linkedin.interUrlDelayMaxMs',
   });
 
 /** Parses `settings.linkedin`'s `jitterMinMs`/`jitterMaxMs` pair — throws
  * (fail loud) on a negative value or `jitterMinMs > jitterMaxMs`; missing
- * settings (`undefined`/`{}`) fall back to v0-parity defaults. */
+ * settings (`undefined`/`{}`) fall back to the throttle-guard defaults. */
 export function resolveJitterRange(settings: unknown): { minMs: number; maxMs: number } {
-  const parsed = JitterSettingsSchema.parse(settings ?? {});
+  const parsed = LinkedinPacingSettingsSchema.parse(settings ?? {});
   return { minMs: parsed.jitterMinMs, maxMs: parsed.jitterMaxMs };
+}
+
+/** Parses `settings.linkedin`'s `interUrlDelayMinMs`/`interUrlDelayMaxMs`
+ * pair — same fail-loud posture and same schema as `resolveJitterRange`. */
+export function resolveInterUrlDelayRange(settings: unknown): {
+  minMs: number;
+  maxMs: number;
+} {
+  const parsed = LinkedinPacingSettingsSchema.parse(settings ?? {});
+  return { minMs: parsed.interUrlDelayMinMs, maxMs: parsed.interUrlDelayMaxMs };
 }
 
 /** Loosely reads an optional `maxNewPerLane` off the generic api-lane

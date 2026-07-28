@@ -12,6 +12,7 @@ import {
   loadFilterConfig,
   loadPipelineConfig,
   type RuntimeDeps,
+  resolveInterUrlDelayRange,
   resolveInventoryMaxAgeDays,
   resolveJitterRange,
   wire,
@@ -104,12 +105,12 @@ test('resolveInventoryMaxAgeDays: falls back to 30 on an invalid configured valu
   assert.equal(resolveInventoryMaxAgeDays({ maxAgeDays: 'thirty' }), 30);
 });
 
-// --- resolveJitterRange (P9 tail: v0->v2 LinkedIn jitter parity fix) ---
+// --- linkedin pacing settings (throttle guard D2/D3, 2026-07-28) ---
 
-test('resolveJitterRange: defaults to v0-parity (2000, 5000) when settings has no jitter keys', () => {
-  assert.deepEqual(resolveJitterRange(undefined), { minMs: 2_000, maxMs: 5_000 });
-  assert.deepEqual(resolveJitterRange({}), { minMs: 2_000, maxMs: 5_000 });
-  assert.deepEqual(resolveJitterRange(null), { minMs: 2_000, maxMs: 5_000 });
+test('resolveJitterRange: defaults to the throttle-guard range (5000, 12000) when settings has no jitter keys', () => {
+  assert.deepEqual(resolveJitterRange(undefined), { minMs: 5_000, maxMs: 12_000 });
+  assert.deepEqual(resolveJitterRange({}), { minMs: 5_000, maxMs: 12_000 });
+  assert.deepEqual(resolveJitterRange(null), { minMs: 5_000, maxMs: 12_000 });
 });
 
 test('resolveJitterRange: honors a configured valid range, including one-sided overrides', () => {
@@ -117,11 +118,11 @@ test('resolveJitterRange: honors a configured valid range, including one-sided o
     minMs: 500,
     maxMs: 1_500,
   });
-  // Only jitterMinMs overridden — jitterMaxMs still defaults to 5000, and
-  // 1000 <= 5000 so this is still a valid range.
+  // Only jitterMinMs overridden — jitterMaxMs still defaults to 12000, and
+  // 1000 <= 12000 so this is still a valid range.
   assert.deepEqual(resolveJitterRange({ jitterMinMs: 1_000 }), {
     minMs: 1_000,
-    maxMs: 5_000,
+    maxMs: 12_000,
   });
   // A zero-length range (both 0) is valid — the "no jitter" case.
   assert.deepEqual(resolveJitterRange({ jitterMinMs: 0, jitterMaxMs: 0 }), {
@@ -132,7 +133,7 @@ test('resolveJitterRange: honors a configured valid range, including one-sided o
 
 test('resolveJitterRange: fails LOUD (throws) when jitterMinMs > jitterMaxMs', () => {
   assert.throws(() => resolveJitterRange({ jitterMinMs: 5_000, jitterMaxMs: 2_000 }));
-  // Same failure via the one-sided override: default jitterMinMs (2000)
+  // Same failure via the one-sided override: default jitterMinMs (5000)
   // now exceeds the configured jitterMaxMs.
   assert.throws(() => resolveJitterRange({ jitterMaxMs: 1_000 }));
 });
@@ -140,6 +141,42 @@ test('resolveJitterRange: fails LOUD (throws) when jitterMinMs > jitterMaxMs', (
 test('resolveJitterRange: fails LOUD (throws) on a negative jitterMinMs or jitterMaxMs', () => {
   assert.throws(() => resolveJitterRange({ jitterMinMs: -1, jitterMaxMs: 5_000 }));
   assert.throws(() => resolveJitterRange({ jitterMinMs: 2_000, jitterMaxMs: -1 }));
+});
+
+test('resolveInterUrlDelayRange: defaults to (20000, 45000) when settings has no inter-url keys', () => {
+  assert.deepEqual(resolveInterUrlDelayRange(undefined), {
+    minMs: 20_000,
+    maxMs: 45_000,
+  });
+  assert.deepEqual(resolveInterUrlDelayRange({}), { minMs: 20_000, maxMs: 45_000 });
+  assert.deepEqual(resolveInterUrlDelayRange(null), { minMs: 20_000, maxMs: 45_000 });
+});
+
+test('resolveInterUrlDelayRange: honors a configured valid range and a zero-length one', () => {
+  assert.deepEqual(
+    resolveInterUrlDelayRange({ interUrlDelayMinMs: 1_000, interUrlDelayMaxMs: 2_000 }),
+    { minMs: 1_000, maxMs: 2_000 },
+  );
+  assert.deepEqual(
+    resolveInterUrlDelayRange({ interUrlDelayMinMs: 0, interUrlDelayMaxMs: 0 }),
+    { minMs: 0, maxMs: 0 },
+  );
+});
+
+test('resolveInterUrlDelayRange: fails LOUD on an inverted or negative range', () => {
+  assert.throws(() =>
+    resolveInterUrlDelayRange({ interUrlDelayMinMs: 45_000, interUrlDelayMaxMs: 20_000 }),
+  );
+  assert.throws(() => resolveInterUrlDelayRange({ interUrlDelayMinMs: -1 }));
+});
+
+test('both resolvers parse the SAME settings blob, so an invalid jitter range throws out of either entry point', () => {
+  // Deliberate (D3): one schema validates both pairs, so a profile cannot
+  // end up with a valid inter-url range quietly sitting next to an
+  // inverted jitter one just because the caller only read the other pair.
+  assert.throws(() =>
+    resolveInterUrlDelayRange({ jitterMinMs: 9_000, jitterMaxMs: 1_000 }),
+  );
 });
 
 // --- assembleAdapterChecks ---
@@ -757,6 +794,88 @@ test('wire: linkedin lane builds successfully end to end (search_urls.md -> pars
 
     const farmStage = result.stages.find((s) => s.name === 'farm');
     assert.ok(farmStage);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('wire: the linkedin lane is constructed with each resolved pacing value in its own slot (no transposed positional argument)', async () => {
+  // `new LinkedInLane(...)` takes 13 positional arguments, four of them
+  // adjacent plain `number`s — so swapping a min with a max, or the jitter
+  // pair with the inter-url pair, typechecks and passes every behavioral
+  // test in the suite while quietly changing the live cadence the whole
+  // throttle guard rests on. This pins the composition itself, through the
+  // real `wire()` path, using four deliberately distinct configured values
+  // (a transposition of any pair changes at least one assertion below).
+  // Read via a structural cast on the four private fields (same precedent
+  // as `ctx.storage as unknown as { rootDir }` above) — no adapter type is
+  // imported here (`only-wire-imports-adapters`).
+  const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-pacing-'));
+  try {
+    const inventoryDir = join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+    );
+    await mkdir(inventoryDir, { recursive: true });
+    await writeFile(
+      join(inventoryDir, 'staff-eng.json'),
+      validInventoryJson('staff-eng'),
+      'utf8',
+    );
+
+    const profileJson = JSON.stringify({
+      lanes: ['linkedin'],
+      connector: 'notion',
+      notifiers: [],
+      routines: [],
+      settings: {
+        notion: { dbId: 'db-1' },
+        linkedin: {
+          jitterMinMs: 1_001,
+          jitterMaxMs: 2_002,
+          interUrlDelayMinMs: 3_003,
+          interUrlDelayMaxMs: 4_004,
+        },
+      },
+    });
+    const searchUrlsMd = [
+      '### staff-eng',
+      '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
+    ].join('\n');
+    const readFile = fakeReadFile({
+      [join(root, 'profiles', 'rajni', 'profile.json')]: profileJson,
+      [join(root, 'profiles', 'rajni', 'filter.json')]: JSON.stringify({}),
+      [join(root, 'profiles', 'rajni', 'search_urls.md')]: searchUrlsMd,
+    });
+
+    const result = await wire('rajni', { root, readFile });
+
+    const lane = result.ctx.ports.lanes.find((l) => l.name === 'linkedin');
+    assert.ok(lane);
+    const pacing = lane as unknown as {
+      jitterMinMs: number;
+      jitterMaxMs: number;
+      interUrlDelayMinMs: number;
+      interUrlDelayMaxMs: number;
+    };
+    assert.deepEqual(
+      {
+        jitterMinMs: pacing.jitterMinMs,
+        jitterMaxMs: pacing.jitterMaxMs,
+        interUrlDelayMinMs: pacing.interUrlDelayMinMs,
+        interUrlDelayMaxMs: pacing.interUrlDelayMaxMs,
+      },
+      {
+        jitterMinMs: 1_001,
+        jitterMaxMs: 2_002,
+        interUrlDelayMinMs: 3_003,
+        interUrlDelayMaxMs: 4_004,
+      },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

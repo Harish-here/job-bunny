@@ -116,6 +116,43 @@ export function buildJdAnchorScript(
 })()`;
 }
 
+/** In-page TRI-STATE read of jdRoot for the throttle guard (spec D4):
+ * `'empty'` when the selector matches an element whose trimmed text is
+ * empty, `'text'` when it matches an element that still holds text, and
+ * `''` when it matches nothing at all.
+ *
+ * This exists because `buildJdTextScript` above cannot answer the question
+ * the throttle guard needs: it returns `''` both for "jdRoot matched
+ * nothing" (selector drift) and for "jdRoot matched an element whose text
+ * is empty" (the server-withheld skeleton shell LinkedIn serves to a
+ * soft-blocked session — spec §1/§4.3). Those two are different failures
+ * with opposite fixes (regenerate the inventory vs. back off), so the lane
+ * runs this script after a failed JD open to tell them apart.
+ *
+ * The third state is what keeps the guard honest, and is why presence
+ * alone is not enough: a failed JD open can leave a POPULATED pane in the
+ * DOM (a goto timeout that never navigated away from the previous card's
+ * JD is the common one). Read as mere presence that is the shell
+ * signature, and three such failures would open a 4-hour breaker for
+ * something that is not a throttle at all. So `'shell'` requires
+ * matched-AND-empty — exactly what D4 specifies — and a matched pane with
+ * text reads as neutral.
+ *
+ * The `jd-root-presence` comment token is load-bearing: lane.test.ts's
+ * single fake `evaluate` routes scripts by inspecting their source (the
+ * same trick that routes the harvest script by its `cardListSel`
+ * declaration), so this script must stay identifiable. Exported for direct
+ * vm-based testing, same pattern as buildJdAnchorScript. */
+export function buildJdRootPresenceScript(jdRootSelector: string): string {
+  return `(() => {
+  // jd-root-presence
+  const el = document.querySelector(${JSON.stringify(jdRootSelector)});
+  if (!el) return '';
+  const text = el.innerText || el.textContent || '';
+  return text.trim() ? 'text' : 'empty';
+})()`;
+}
+
 export interface JdOpenResult {
   text: string;
   /** Which extraction path produced the text — the configured jdRoot
