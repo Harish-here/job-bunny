@@ -15,7 +15,7 @@ Rationale: a file you cannot skim is a file that is doing too much. The cap is a
 
 ## The gate
 
-The gate is an invariant test, `test/invariants/filesize.test.ts` — the repo's established home for cross-cutting invariants (`scripts/` is a dead v0 path and is never used). It walks `src/**/*.ts`, counts lines with `wc -l` semantics, and fails listing every over-cap file. It runs inside `npm test` — and therefore `npm run check` — automatically; `npm run filesize` runs it alone. End state: **empty pin list** — the check passes because nothing is over cap.
+The gate is an invariant test, `test/invariants/filesize.test.ts` — the repo's established home for cross-cutting invariants (`scripts/` is a dead v0 path and is never used). It walks `src/**/*.ts`, counts lines (a trailing newline terminates the last line rather than starting a new one), and fails listing every over-cap file. It runs inside `npm test` — and therefore `npm run check` — automatically; `npm run filesize` runs it alone. End state: **empty pin list** — the check passes because nothing is over cap.
 
 During the refactor sequence only, the test carries a *temporary pin list*: each current offender pinned at its exact current line count, so growth fails immediately while splits proceed. The pin list is deleted entirely in the final PR — it is scaffolding, not a permanent exemption mechanism.
 

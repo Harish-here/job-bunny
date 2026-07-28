@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-28-file-size-caps-design.md` (Task 2 amends its gate location — see Task 2 rationale).
 
+> Historical note (2026-07-28): implementation found a 12th offender missed by the census below — `src/cli/commands/serve.ts` (513 lines). The committed gate pins 12 files; the committed test, not this plan's code block, is canonical.
+
 ## Global Constraints
 
 - Node ≥ 24 required; verify `node -v` before running anything (`source ~/.nvm/nvm.sh && nvm use 24` if lower).

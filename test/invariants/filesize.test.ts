@@ -1,3 +1,7 @@
+// Invariant: no file grows past the point where it can be skimmed. Caps and the
+// shrink-only pin ratchet are specified in docs/superpowers/specs/2026-07-28-file-size-caps-design.md;
+// the rule's rationale lives in .claude/agents/executor.md ("File-size caps").
+
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, sep } from 'node:path';
@@ -49,6 +53,8 @@ test('every src .ts file fits its cap (impl <= 400, test <= 800); pins shrink-on
   const files = sourceFiles();
   // Guard against a vacuous pass (the depcruise cruising-0-modules trap).
   assert.ok(files.length > 50, `expected to walk src/, found only ${files.length} files`);
+  // The pin list may only shrink. Never pin a NEW file — split it instead.
+  assert.ok(PINS.size <= 12, `pin list grew to ${PINS.size} — 12 were grandfathered on 2026-07-28`);
 
   const problems: string[] = [];
   for (const file of files) {

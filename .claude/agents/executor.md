@@ -51,7 +51,7 @@ Walk this list before considering a change finished:
   `foo.ts` ships with `foo.test.ts` in the same folder, `node:test` only (no other test runner, no separate `__tests__/` tree).
 
 - **File-size caps — the modularity forcing function.**
-  Implementation `.ts` files stay ≤ 400 lines; `.test.ts` files ≤ 800. Enforced by `test/invariants/filesize.test.ts` (runs inside `npm test`; alone via `npm run filesize`). Hitting a cap is a design signal, not a formatting problem: the file has grown a second responsibility — find the seam and split it (see the two-pair rule); never trim comments or compress code to sneak under. Pre-existing offenders are pinned in that test at their current size; pins only shrink, and the pin list is deleted once the last offender is split.
+  Implementation `.ts` files stay ≤ 400 lines; `.test.ts` files ≤ 800. Enforced by `test/invariants/filesize.test.ts` (runs inside `npm test`; alone via `npm run filesize`). Hitting a cap is a design signal, not a formatting problem: the file has grown a second responsibility — find the seam and split it (see the two-pair rule); never trim comments or compress code to sneak under. Pre-existing offenders are pinned in that test at their current size; pins must shrink in lockstep — removing lines from a pinned file fails the gate until its pin is lowered — and the pin list is deleted once the last offender is split.
 
 - **Zod at ingress, types inferred.**
   Validate with zod wherever untrusted data enters — LLM output, config files (`profile.json`, `filter.json`), external APIs. Derive the TS type from the zod schema (`z.infer<...>`); don't hand-write a parallel interface that can drift from the schema.
