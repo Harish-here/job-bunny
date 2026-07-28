@@ -22,7 +22,7 @@
  * There is deliberately no `wireScheduler()`/`Scheduler` port here anymore
  * (D14): `src/ports/scheduler.ts` and `src/adapters/scheduler/launchd/`
  * were deleted wholesale once the in-process daemon (`jobbunny serve
- * start|stop|status`, `src/ops/daemon/`, `src/cli/commands/serve.ts`)
+ * start|stop|status`, `src/ops/daemon/`, `src/cli/commands/serve/`)
  * replaced launchd triggering. The `Scheduler` interface's `install`/
  * `remove`/`list` semantics described registering jobs with an external OS
  * registry — a concept a live daemon doesn't have. No successor port

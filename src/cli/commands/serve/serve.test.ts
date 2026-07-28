@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import type { DaemonPidfileDeps } from '../../ops/daemon/index.ts';
+import type { DaemonPidfileDeps } from '../../../ops/daemon/index.ts';
 import {
   acquireDaemonPidfile,
   HEARTBEAT_STALE_MS,
   readDaemonPidfile,
   updateDaemonPidfile,
-} from '../../ops/daemon/index.ts';
-import type { LogDeps } from '../../ops/daemon/logs/index.ts';
-import type { ScanDeps } from '../../ops/daemon/scan/index.ts';
-import type { ServeDeps, SpawnFn, SpawnHandle } from './serve.ts';
-import { serveCommand } from './serve.ts';
+} from '../../../ops/daemon/index.ts';
+import type { LogDeps } from '../../../ops/daemon/logs/index.ts';
+import type { ScanDeps } from '../../../ops/daemon/scan/index.ts';
+import type { ServeDeps, SpawnFn, SpawnHandle } from './index.ts';
+import { serveCommand } from './index.ts';
 
 const ROOT = '/fake/root';
 const HOME = '/fake/home';

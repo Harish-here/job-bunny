@@ -44,7 +44,7 @@ import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
-import { serveCommand } from './commands/serve.ts';
+import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 
