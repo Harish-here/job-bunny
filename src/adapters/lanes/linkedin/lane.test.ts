@@ -2913,3 +2913,30 @@ test('half-open: a probe re-opening a card an earlier same-day fire already capt
   assert.equal(persisted.length, 1);
 });
 
+test('pacing: the constructor puts each pacing argument in its own slot (no transposition), readable via lane.pacing', async () => {
+  const inv = await singlePageInventory();
+  const provider = new FakeBrowserProvider(newScript());
+
+  // Four deliberately distinct values: any swapped pair shows up here.
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [],
+    fixtureFilterConfig(),
+    new FakeStorage(),
+    undefined,
+    1_001,
+    2_002,
+    () => 0.5,
+    spySleepFn([]),
+    3_003,
+    4_004,
+  );
+
+  assert.deepEqual(lane.pacing, {
+    jitterMinMs: 1_001,
+    jitterMaxMs: 2_002,
+    interUrlDelayMinMs: 3_003,
+    interUrlDelayMaxMs: 4_004,
+  });
+});

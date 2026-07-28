@@ -340,6 +340,30 @@ export class LinkedInLane implements FarmingLane {
     this.breaker = breaker;
   }
 
+  /** The pacing values this lane was constructed with, read-only.
+   *
+   * Exists for one reason: the four pacing numbers arrive as adjacent
+   * positional arguments in a 13-argument constructor, so a transposed
+   * pair at the single composition point (`cli/wire.ts`) — min for max, or
+   * jitter for inter-url — typechecks and passes every behavioral test
+   * while quietly changing the live cadence this whole throttle guard
+   * depends on. Exposing them lets that wiring be pinned by test without
+   * reaching into private state (see `cli/wire.test.ts`). Derived and
+   * unread by the lane itself. */
+  get pacing(): {
+    jitterMinMs: number;
+    jitterMaxMs: number;
+    interUrlDelayMinMs: number;
+    interUrlDelayMaxMs: number;
+  } {
+    return {
+      jitterMinMs: this.jitterMinMs,
+      jitterMaxMs: this.jitterMaxMs,
+      interUrlDelayMinMs: this.interUrlDelayMinMs,
+      interUrlDelayMaxMs: this.interUrlDelayMaxMs,
+    };
+  }
+
   /** Randomized inter-request pacing (v0 parity — see DEFAULT_JITTER_MIN_MS
    * doc comment). Abort-aware (`ctx.signal`) so a cancelled run never sits
    * in this sleep; a zero-length range (jitterMinMs === jitterMaxMs === 0,

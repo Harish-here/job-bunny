@@ -798,3 +798,78 @@ test('wire: linkedin lane builds successfully end to end (search_urls.md -> pars
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('wire: the linkedin lane is constructed with each resolved pacing value in its own slot (no transposed positional argument)', async () => {
+  // `new LinkedInLane(...)` takes 13 positional arguments, four of them
+  // adjacent plain `number`s — so swapping a min with a max, or the jitter
+  // pair with the inter-url pair, typechecks and passes every behavioral
+  // test in the suite while quietly changing the live cadence the whole
+  // throttle guard rests on. This pins the composition itself, through the
+  // real `wire()` path, using four deliberately distinct configured values
+  // (a transposition of any pair changes at least one assertion below).
+  // `lane.pacing` is the lane's own read-only surface for exactly this —
+  // no adapter is imported here (`only-wire-imports-adapters`).
+  const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-pacing-'));
+  try {
+    const inventoryDir = join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+    );
+    await mkdir(inventoryDir, { recursive: true });
+    await writeFile(
+      join(inventoryDir, 'staff-eng.json'),
+      validInventoryJson('staff-eng'),
+      'utf8',
+    );
+
+    const profileJson = JSON.stringify({
+      lanes: ['linkedin'],
+      connector: 'notion',
+      notifiers: [],
+      routines: [],
+      settings: {
+        notion: { dbId: 'db-1' },
+        linkedin: {
+          jitterMinMs: 1_001,
+          jitterMaxMs: 2_002,
+          interUrlDelayMinMs: 3_003,
+          interUrlDelayMaxMs: 4_004,
+        },
+      },
+    });
+    const searchUrlsMd = [
+      '### staff-eng',
+      '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
+    ].join('\n');
+    const readFile = fakeReadFile({
+      [join(root, 'profiles', 'rajni', 'profile.json')]: profileJson,
+      [join(root, 'profiles', 'rajni', 'filter.json')]: JSON.stringify({}),
+      [join(root, 'profiles', 'rajni', 'search_urls.md')]: searchUrlsMd,
+    });
+
+    const result = await wire('rajni', { root, readFile });
+
+    const lane = result.ctx.ports.lanes.find((l) => l.name === 'linkedin');
+    assert.ok(lane);
+    const { pacing } = lane as unknown as {
+      pacing: {
+        jitterMinMs: number;
+        jitterMaxMs: number;
+        interUrlDelayMinMs: number;
+        interUrlDelayMaxMs: number;
+      };
+    };
+    assert.deepEqual(pacing, {
+      jitterMinMs: 1_001,
+      jitterMaxMs: 2_002,
+      interUrlDelayMinMs: 3_003,
+      interUrlDelayMaxMs: 4_004,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

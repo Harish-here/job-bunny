@@ -509,7 +509,14 @@ const DEFAULT_INTER_URL_DELAY_MAX_MS = 45_000;
  *
  * Both pacing pairs share one schema (D3): they are read from the same
  * `settings.linkedin` blob and validated together, so a profile cannot end
- * up with a valid inter-url range sitting next to an inverted jitter one. */
+ * up with a valid inter-url range sitting next to an inverted jitter one.
+ *
+ * One-sided overrides interact with the defaults, and the 2026-07-28 raise
+ * (jitter 2000/5000 -> 5000/12000) made that sharper: a profile that sets
+ * ONLY `jitterMaxMs` below 5000 now inverts the range against the default
+ * `jitterMinMs` and throws here — failing `run` AND `doctor` — so such a
+ * profile must set `jitterMinMs` too. Same shape for an
+ * `interUrlDelayMaxMs` set alone below the 20000 default. */
 const LinkedinPacingSettingsSchema = z
   .object({
     jitterMinMs: z.number().min(0).default(DEFAULT_JITTER_MIN_MS),
