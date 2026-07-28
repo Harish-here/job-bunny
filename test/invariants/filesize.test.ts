@@ -32,9 +32,13 @@ const PINS = new Map<string, number>([
   // index.ts, and release.test.ts's tests were split by target into
   // {version,resume}.test.ts plus index.test.ts (the orchestration suite)
   // — every result is under its cap.
+  // provider.ts's and provider.test.ts's pins are gone too (task 4 of the
+  // split brief, 2026-07-29): provider.ts shed a handles/ subfolder
+  // (page_handle.ts, browser_handle.ts, index.ts — mirroring the existing
+  // ownership/discovery pattern), and provider.test.ts's PageHandle deadline
+  // suite moved to handles/page_handle.test.ts with its own minimal fakes
+  // — every result is under its cap.
   ['src/cli/commands/serve.ts', 513],
-  ['src/adapters/browser/cdp-chrome/provider.ts', 582],
-  ['src/adapters/browser/cdp-chrome/provider.test.ts', 877],
   ['src/adapters/browser/cdp-chrome/launcher.ts', 447],
   ['src/ops/doctor/aggregate.ts', 439],
   ['src/pipeline/stages/source.ts', 427],
@@ -66,7 +70,7 @@ test('every src .ts file fits its cap (impl <= 400, test <= 800); pins shrink-on
   // Guard against a vacuous pass (the depcruise cruising-0-modules trap).
   assert.ok(files.length > 50, `expected to walk src/, found only ${files.length} files`);
   // The pin list may only shrink. Never pin a NEW file — split it instead.
-  assert.ok(PINS.size <= 7, `pin list grew to ${PINS.size} — 7 remain after release.ts's split (task 3, 2026-07-29)`);
+  assert.ok(PINS.size <= 5, `pin list grew to ${PINS.size} — 5 remain after provider.ts's split (task 4, 2026-07-29)`);
 
   const problems: string[] = [];
   for (const file of files) {
