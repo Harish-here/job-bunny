@@ -15,14 +15,14 @@ Rationale: a file you cannot skim is a file that is doing too much. The cap is a
 
 ## The gate
 
-A small script (`scripts/filesize.ts`, exposed as `npm run filesize`, folded into `npm run check`) counts lines of git-tracked `src/**/*.ts` files and fails listing every over-cap file. It has a colocated test (`scripts/filesize.test.ts`). End state: **empty allowlist** — the check passes because nothing is over cap.
+The gate is an invariant test, `test/invariants/filesize.test.ts` — the repo's established home for cross-cutting invariants (`scripts/` is a dead v0 path and is never used). It walks `src/**/*.ts`, counts lines with `wc -l` semantics, and fails listing every over-cap file. It runs inside `npm test` — and therefore `npm run check` — automatically; `npm run filesize` runs it alone. End state: **empty pin list** — the check passes because nothing is over cap.
 
-During the refactor sequence only, the script carries a *temporary pin list*: each current offender pinned at its exact current line count, so growth fails immediately while splits proceed. The pin list is deleted entirely in the final PR — it is scaffolding, not a permanent exemption mechanism.
+During the refactor sequence only, the test carries a *temporary pin list*: each current offender pinned at its exact current line count, so growth fails immediately while splits proceed. The pin list is deleted entirely in the final PR — it is scaffolding, not a permanent exemption mechanism.
 
 ## Sequencing (multi-PR; `main` is protected)
 
-1. **PR 1** — the check script + its test + `npm run filesize` wired into `npm run check` + the rule prose added to `.claude/agents/executor.md`. Pin list holds current offenders at current sizes. Lands green; stops the bleeding.
-2. **PRs 2–N** — split the offenders, biggest first, removing pins as they go. Pure code motion, no behavior change; existing tests are the safety net. Order: `lane.ts` + `lane.test.ts` together, then `wire.ts` (with `wire.test.ts`), `release.ts`, `provider.ts` (with `provider.test.ts`), then the four barely-over files (`launcher.ts` 447, `aggregate.ts` 439, `source.ts` 427, `rank.ts` 407).
+1. **PR 1** — the invariant gate test + `npm run filesize` + the rule prose added to `.claude/agents/executor.md`. Pin list holds current offenders at current sizes. Lands green; stops the bleeding.
+2. **PRs 2–N** — split the offenders, biggest first, removing pins as they go. Pure code motion, no behavior change; existing tests are the safety net. Order: `lane.ts` + `lane.test.ts` together, then `wire.ts` (with `wire.test.ts`), `release.ts`, `provider.ts` (with `provider.test.ts`), then the five remaining files (`serve.ts` 513, `launcher.ts` 447, `aggregate.ts` 439, `source.ts` 427, `rank.ts` 407).
 3. **Final PR** — delete the pin-list machinery; the check becomes cap-only with no exemptions.
 
 ## wire.ts split (decided)
