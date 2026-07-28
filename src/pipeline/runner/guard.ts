@@ -41,6 +41,12 @@ export async function guardStage<In, Out>(
         throw err;
       }
       lastError = err;
+      ctx.logger.warn('stage attempt failed', {
+        stage: stage.name,
+        attempt,
+        maxAttempts,
+        error: err instanceof Error ? err.message : String(err),
+      });
       // fall through to retry (if attempts remain)
     }
   }

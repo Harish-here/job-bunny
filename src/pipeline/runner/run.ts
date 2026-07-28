@@ -76,7 +76,7 @@ export async function runPipeline(
       input = output;
     } catch (err) {
       const elapsedMs = Date.now() - runStarted;
-      const error = err instanceof Error ? err.message : String(err);
+      const error = errorText(err);
       await folder.writeFailure({
         stage: stage.name,
         error,
@@ -108,4 +108,18 @@ export async function runPipeline(
   await folder.clearFailure();
   await folder.writeResult(result);
   return result;
+}
+
+/** Renders an error for failure.json. When `err` is an Error with a
+ * non-null `cause`, the cause's message is appended (`<message> — cause:
+ * <causeMessage>`) so a wrapping error (e.g. guardStage's "stage ... failed
+ * after N attempt(s)") doesn't hide the underlying attempt failure. */
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause;
+  if (cause !== null && cause !== undefined) {
+    const causeMessage = cause instanceof Error ? cause.message : String(cause);
+    return `${err.message} — cause: ${causeMessage}`;
+  }
+  return err.message;
 }

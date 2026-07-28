@@ -204,6 +204,40 @@ test('run-level ctx.signal already aborted before guardStage is called cancels w
   assert.equal(calls, 0);
 });
 
+test('a stage that fails every attempt logs a warn per failed attempt with the error text', async () => {
+  const warnCalls: Array<{ msg: string; data?: unknown }> = [];
+  const { ctx } = fakeCtx();
+  ctx.logger = {
+    debug() {},
+    info() {},
+    warn(msg, data) {
+      warnCalls.push({ msg, data });
+    },
+    error() {},
+  };
+
+  const stage = fakeStage<undefined, string>({
+    timeoutMs: 200,
+    retries: 2,
+    async run() {
+      throw new Error('always fails');
+    },
+  });
+
+  await assert.rejects(() => guardStage(stage, undefined, ctx, { stallMs: 1_000 }));
+
+  assert.equal(warnCalls.length, 3, 'one warn per attempt (1 initial + 2 retries)');
+  for (const [i, call] of warnCalls.entries()) {
+    assert.equal(call.msg, 'stage attempt failed');
+    assert.deepEqual(call.data, {
+      stage: 'fake-stage',
+      attempt: i + 1,
+      maxAttempts: 3,
+      error: 'always fails',
+    });
+  }
+});
+
 test('non-heartbeat stage with no beats runs to completion without a spurious stall kill', async () => {
   const stage = fakeStage<undefined, string>({
     timeoutMs: 200,
