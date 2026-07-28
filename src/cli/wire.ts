@@ -52,6 +52,7 @@ import {
   CdpChromeProvider,
   cdpReachableCheck,
   DEFAULT_CDP_PORT,
+  DEFAULT_USER_DATA_DIR,
   defaultCdpReachable,
 } from '../adapters/browser/cdp-chrome/index.ts';
 import type { NotionApiLike, NotionSdkClientLike } from '../adapters/db/notion/index.ts';
@@ -64,6 +65,7 @@ import {
 import { GreenhouseLane } from '../adapters/lanes/greenhouse/index.ts';
 import { KekaLane } from '../adapters/lanes/keka/index.ts';
 import {
+  defaultLinkedinBreakerDeps,
   inventoryFreshnessCheck,
   LinkedInLane,
   loadInventory,
@@ -433,6 +435,12 @@ async function buildLinkedInLane(
     undefined, // sleepFn: real abort-aware core/async sleep
     interUrlDelayRange.minMs,
     interUrlDelayRange.maxMs,
+    // Session-scoped, shared by every profile (D11): the throttle belongs
+    // to the `.chrome-debug` Chrome profile whose cookies every profile
+    // farms through, not to any one profile's data dir. Passed as a plain
+    // string because `adapters-no-cross-family` forbids the lane importing
+    // `adapters/browser/**` itself.
+    { userDataDir: DEFAULT_USER_DATA_DIR, deps: defaultLinkedinBreakerDeps() },
   );
 }
 

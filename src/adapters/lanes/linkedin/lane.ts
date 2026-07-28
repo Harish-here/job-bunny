@@ -8,15 +8,29 @@ import {
   type JD,
   JDSchema,
 } from '../../../core/jd/index.ts';
-import type { BrowserProvider, PageHandle } from '../../../ports/browser.ts';
+import type {
+  BrowserHandle,
+  BrowserProvider,
+  PageHandle,
+} from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { FarmingLane } from '../../../ports/lane.ts';
 import type { Storage } from '../../../ports/storage.ts';
+import type { LinkedinBreakerDeps } from './breaker_store.ts';
+import {
+  breakerPhase,
+  closeBreaker,
+  openBreaker,
+  readBreaker,
+  recordProbe,
+} from './breaker_store.ts';
 import { CaptureStore } from './capture_store.ts';
 import { gateCards, type HarvestedCard, harvestCards } from './harvest.ts';
 import type { Inventory } from './inventory.ts';
-import { openJd } from './jd_open.ts';
+import { buildJdRootPresenceScript, openJd } from './jd_open.ts';
 import { ResumeState } from './resume_state.ts';
+import type { JdOutcome } from './throttle.ts';
+import { THROTTLE_COOLDOWN_MS, ThrottleCounter } from './throttle.ts';
 
 /**
  * Path of the reconciled Notion cache, read here for the lane's own
@@ -62,6 +76,37 @@ const DEFAULT_JITTER_MAX_MS = 0;
  * `resolveInterUrlDelayRange` in `cli/wire.ts`. */
 const DEFAULT_INTER_URL_DELAY_MIN_MS = 0;
 const DEFAULT_INTER_URL_DELAY_MAX_MS = 0;
+
+/** Everything the lane needs to reach the session-scoped breaker file.
+ *
+ * `userDataDir` is a plain string, NOT an import of
+ * `adapters/browser/cdp-chrome`'s `DEFAULT_USER_DATA_DIR`: those are two
+ * different adapter families and `.dependency-cruiser.cjs`'s
+ * `adapters-no-cross-family` rule forbids the cross-import. `cli/wire.ts`
+ * — the one file allowed to import any adapter — reads the constant and
+ * passes it in here.
+ *
+ * The whole config is OPTIONAL on the constructor: omitted, the lane has
+ * no breaker at all (no read, no write, no jdRoot presence probe), which
+ * is what every pre-existing direct `new LinkedInLane(...)` call site
+ * relies on. Production supplies it in `cli/wire.ts`. */
+export interface LinkedinBreakerConfig {
+  userDataDir: string;
+  deps: LinkedinBreakerDeps;
+}
+
+/** Deadline for the tiny in-page jdRoot presence read run after a failed
+ * JD open. Short on purpose: it is a diagnostic, and a page too sick to
+ * answer it in 5s is classified `missing` (never a trip). */
+const JD_ROOT_PRESENCE_TIMEOUT_MS = 5_000;
+
+/** What one half-open probe concluded (spec §4.5 step 3). `inconclusive`
+ * deliberately carries its message so the skipped reason can name the real
+ * failure instead of implying the session is still blocked. */
+type ProbeOutcome =
+  | { result: 'ok'; jd: JD; cardId: string }
+  | { result: 'shell' }
+  | { result: 'inconclusive'; message: string };
 
 /** PURE — [minMs, maxMs) jitter amount, v0 parity
  * (scripts/lib/page_actions.js's jitterMs). `rand` is injectable for
@@ -255,6 +300,7 @@ export class LinkedInLane implements FarmingLane {
   private readonly sleepFn: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly interUrlDelayMinMs: number;
   private readonly interUrlDelayMaxMs: number;
+  private readonly breaker: LinkedinBreakerConfig | undefined;
 
   constructor(
     browser: BrowserProvider,
@@ -275,6 +321,7 @@ export class LinkedInLane implements FarmingLane {
     // compiles unchanged.
     interUrlDelayMinMs: number = DEFAULT_INTER_URL_DELAY_MIN_MS,
     interUrlDelayMaxMs: number = DEFAULT_INTER_URL_DELAY_MAX_MS,
+    breaker?: LinkedinBreakerConfig,
   ) {
     this.browser = browser;
     this.inventories = inventories;
@@ -288,6 +335,7 @@ export class LinkedInLane implements FarmingLane {
     this.sleepFn = sleepFn;
     this.interUrlDelayMinMs = interUrlDelayMinMs;
     this.interUrlDelayMaxMs = interUrlDelayMaxMs;
+    this.breaker = breaker;
   }
 
   /** Randomized inter-request pacing (v0 parity — see DEFAULT_JITTER_MIN_MS
@@ -312,9 +360,136 @@ export class LinkedInLane implements FarmingLane {
     await this.sleepFn(ms, ctx.signal);
   }
 
-  async source(
+  /** Classifies a JD open that already FAILED: was jdRoot present but
+   * empty (`shell` — the server withheld the content, D4) or absent
+   * (`missing` — selector drift, explicitly not a throttle signal)?
+   *
+   * Never returns `ok`: a successful open is recorded directly at the call
+   * site. Any failure of the probe itself (dead page, timeout) is
+   * classified `missing`, the conservative answer — an unknown must never
+   * push the counter toward opening the breaker. */
+  private async classifyJdOutcome(
+    page: PageHandle,
+    inv: Inventory,
     ctx: RunContext,
-  ): Promise<{ jobs: JD[]; dropped: DroppedRecord[]; companiesSeen: string[] }> {
+  ): Promise<JdOutcome> {
+    try {
+      const present = await page.evaluate<string>(
+        buildJdRootPresenceScript(inv.selectors.jdRoot),
+        { timeoutMs: JD_ROOT_PRESENCE_TIMEOUT_MS },
+      );
+      return present === '1' ? 'shell' : 'missing';
+    } catch (err) {
+      ctx.logger.debug(
+        'linkedin lane: jdRoot presence check failed — classifying as missing',
+        { message: err instanceof Error ? err.message : String(err) },
+      );
+      return 'missing';
+    }
+  }
+
+  /** Half-open probe (D8): first url of the first group, one harvest,
+   * exactly ONE JD open. Never throws — every failure becomes an
+   * `inconclusive` outcome, because a broken page must not be allowed to
+   * close a breaker (spec §5). Deliberately unpaced: two requests are not
+   * a burst, and a blocked fire should learn its fate quickly. */
+  private async runProbe(handle: BrowserHandle, ctx: RunContext): Promise<ProbeOutcome> {
+    const group = this.urls[0];
+    const url = group?.urls[0];
+    const inv = group
+      ? this.inventories.find((candidate) => candidate.page === group.page)
+      : undefined;
+    if (!group || !url || !inv) {
+      return { result: 'inconclusive', message: 'no url/inventory available to probe' };
+    }
+
+    let page: PageHandle | undefined;
+    try {
+      page = await handle.newPage();
+      ctx.beat();
+      await page.goto(url, { timeoutMs: DEFAULT_GOTO_TIMEOUT_MS });
+      const cards = await harvestCards(page, inv, ctx);
+      const { pass } = gateCards(cards, this.filterCfg);
+      const card = pass[0];
+      if (!card) {
+        return {
+          result: 'inconclusive',
+          message: `no gate-passing card to probe on ${url}`,
+        };
+      }
+
+      let text: string;
+      try {
+        text = (await openJd(page, card, inv, ctx)).text;
+      } catch (err) {
+        const outcome = await this.classifyJdOutcome(page, inv, ctx);
+        if (outcome === 'shell') return { result: 'shell' };
+        return {
+          result: 'inconclusive',
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+
+      // Built outside the inner try on purpose: a JDSchema rejection here
+      // is an empty-title/company problem, not a throttle verdict, so it
+      // must fall to the outer catch as `inconclusive` rather than be
+      // classified as a shell.
+      const jd = JDSchema.parse({
+        identity: {
+          id: card.id,
+          lane: 'linkedin',
+          url: card.url,
+          company: card.company,
+          title: card.title,
+          scrapedAt: new Date().toISOString(),
+          location: card.location,
+        },
+        content: { rawText: text },
+      });
+      return { result: 'ok', jd, cardId: card.id };
+    } catch (err) {
+      return {
+        result: 'inconclusive',
+        message: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      if (page) await page.close();
+    }
+  }
+
+  async source(ctx: RunContext): Promise<{
+    jobs: JD[];
+    dropped: DroppedRecord[];
+    companiesSeen: string[];
+    skipped?: { reason: string };
+  }> {
+    // Breaker read comes before ANY other work (spec §4.5 step 1): an open
+    // breaker must leave zero footprint on the blocked session, and
+    // LinkedIn is the only browser lane in farm, so this is also what stops
+    // Chrome from being launched at all.
+    const breakerState = this.breaker
+      ? readBreaker(this.breaker.userDataDir, this.breaker.deps)
+      : undefined;
+    const phase = this.breaker
+      ? breakerPhase(breakerState, this.breaker.deps.now(), THROTTLE_COOLDOWN_MS)
+      : 'closed';
+
+    if (phase === 'open' && breakerState) {
+      const reopenAt = new Date(
+        Date.parse(breakerState.openedAt) + THROTTLE_COOLDOWN_MS,
+      ).toISOString();
+      ctx.logger.warn(
+        'linkedin lane: throttle breaker is open — skipping this fire without launching a browser',
+        { reopenAt, tripCount: breakerState.tripCount },
+      );
+      return {
+        jobs: [],
+        dropped: [],
+        companiesSeen: [],
+        skipped: { reason: `throttle cooldown until ${reopenAt}` },
+      };
+    }
+
     const resumeState = await ResumeState.load(this.storage, todayIso());
     const captureStore = await CaptureStore.load(this.storage);
 
@@ -379,10 +554,67 @@ export class LinkedInLane implements FarmingLane {
     // parallel scalar counters.
     const stats: UrlStat[] = [];
 
+    // Only armed when a breaker is configured: with no breaker there is
+    // nothing to open, so the classification's extra page.evaluate per
+    // failed JD would be pure cost. This is also what keeps every
+    // pre-throttle-guard call site (and its tests) behaviorally identical.
+    const throttle = this.breaker ? new ThrottleCounter() : undefined;
+    let throttleTripped = false;
+    // Shells seen this run, for the all-urls-failed evidence (D13).
+    let shellJdFailures = 0;
+
     // Lane's own failure (Chrome won't launch) is loud — deliberately NOT
     // caught here.
     const handle = await this.browser.launch(ctx);
     try {
+      if (phase === 'half-open' && this.breaker && breakerState) {
+        const probe = await this.runProbe(handle, ctx);
+        const { userDataDir, deps } = this.breaker;
+        if (probe.result === 'shell') {
+          // Still blocked. Re-open for another full cooldown, keeping the
+          // record that a probe ran. ~2 requests spent instead of a fire.
+          openBreaker(userDataDir, deps, {
+            ...breakerState,
+            lastProbeAt: deps.now().toISOString(),
+          });
+          ctx.logger.warn(
+            'linkedin lane: half-open probe still got a server-withheld shell — breaker re-opened, ending this fire',
+            { tripCount: breakerState.tripCount + 1 },
+          );
+          return {
+            jobs: [],
+            dropped: [],
+            companiesSeen: [],
+            skipped: { reason: 'probe found the session still throttled' },
+          };
+        }
+        if (probe.result === 'inconclusive') {
+          // A broken page proves nothing (spec §5) — leave openedAt where
+          // it is so the next fire past the window probes again.
+          recordProbe(userDataDir, deps, breakerState);
+          ctx.logger.warn(
+            'linkedin lane: half-open probe was inconclusive — breaker left open, ending this fire',
+            { message: probe.message },
+          );
+          return {
+            jobs: [],
+            dropped: [],
+            companiesSeen: [],
+            skipped: { reason: `probe inconclusive: ${probe.message}` },
+          };
+        }
+        // Real text: the block cleared. Delete the file and carry on with
+        // this same fire (D8) — the probe's own capture counts, and its
+        // card id joins processedIds so the main loop does not re-open it.
+        closeBreaker(userDataDir, deps);
+        await captureStore.append(this.storage, probe.jd);
+        processedIds.add(probe.cardId);
+        ctx.logger.info(
+          'linkedin lane: half-open probe returned real JD text — breaker closed, continuing this fire',
+          { cardId: probe.cardId },
+        );
+      }
+
       // True once this run has actually attempted a url. Gates the inter-url
       // pause so it never fires before the first attempt, and — because it is
       // declared outside the group loop — still fires across a group boundary.
@@ -566,6 +798,7 @@ export class LinkedInLane implements FarmingLane {
                   });
                   await captureStore.append(this.storage, jd);
                   stat.captured += 1;
+                  throttle?.record('ok');
                 } catch (err) {
                   // Distinguish "JD pane genuinely failed to open" (openJd
                   // already wraps that as a SoftError) from "the card's own
@@ -612,8 +845,30 @@ export class LinkedInLane implements FarmingLane {
                       },
                     ],
                   });
+                  // Was this a server-withheld shell (throttle) or a
+                  // missing jdRoot (selector drift)? They demand opposite
+                  // responses, so ask the page rather than guess.
+                  if (throttle && page) {
+                    const outcome = await this.classifyJdOutcome(page, inv, ctx);
+                    if (outcome === 'shell') shellJdFailures += 1;
+                    throttle.record(outcome);
+                    if (throttle.tripped && this.breaker) {
+                      throttleTripped = true;
+                      const wrote = openBreaker(
+                        this.breaker.userDataDir,
+                        this.breaker.deps,
+                        breakerState,
+                      );
+                      ctx.logger.warn(
+                        'linkedin lane: 3 consecutive server-withheld JD shells — the session is throttled; opening the breaker and stopping this fire, keeping every capture so far',
+                        { url: card.url, breakerWritten: wrote },
+                      );
+                    }
+                  }
                 }
+                if (throttleTripped) break;
               }
+              if (throttleTripped) break;
 
               // Stop-condition check (spec §2): (a) this page harvested
               // zero cards, (b) this page's harvested card-id set is
@@ -695,14 +950,19 @@ export class LinkedInLane implements FarmingLane {
 
           // markDone only on success — a url whose goto/harvest/newPage
           // threw must be retried on the next fire, not skipped as done.
-          if (!stat.failed) {
+          // A url cut short by a throttle trip is likewise unfinished: its
+          // remaining cards were never attempted, so it must not be
+          // recorded as complete.
+          if (!stat.failed && !throttleTripped) {
             resumeState.markDone(url, stat.captured);
           }
           // Persisted after EVERY url (success or failure), not once at
           // the end — a mid-run SIGKILL must lose at most the in-flight
           // url's mark, never every mark made so far this run.
           await resumeState.persist(this.storage);
+          if (throttleTripped) break;
         }
+        if (throttleTripped) break;
       }
     } finally {
       await handle.close();

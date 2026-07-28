@@ -12,6 +12,7 @@ import type {
 } from '../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { Storage } from '../../../ports/storage.ts';
+import type { LinkedinBreakerDeps, LinkedinBreakerState } from './breaker_store.ts';
 import { CAPTURE_PATH } from './capture_store.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
@@ -128,6 +129,11 @@ interface Script {
    * page where the configured jdRoot selector has drifted/mismatched and
    * the anchor-text fallback is carrying the run. */
   anchorOnlyUrls: Set<string>;
+  /** JD urls where jdRoot IS present in the DOM but holds no text — the
+   * server-withheld shell LinkedIn serves a soft-blocked session. Pair
+   * with an absent `jdTextByUrl` entry so openJd fails AND the presence
+   * probe reports '1'. */
+  jdShellUrls: Set<string>;
 }
 
 function newScript(): Script {
@@ -137,6 +143,7 @@ function newScript(): Script {
     harvestByUrl: new Map(),
     jdTextByUrl: new Map(),
     anchorOnlyUrls: new Set(),
+    jdShellUrls: new Set(),
   };
 }
 
@@ -164,6 +171,13 @@ class FakePage implements PageHandle {
   }
 
   async evaluate<T>(fn: string): Promise<T> {
+    // buildJdRootPresenceScript's source carries a stable `jd-root-presence`
+    // marker, the same routing trick the harvest branch below uses with
+    // `cardListSel`. It answers "did jdRoot match anything", independent of
+    // whether jdTextByUrl has text for this url.
+    if (fn.includes('jd-root-presence')) {
+      return (this.script.jdShellUrls.has(this.lastUrl) ? '1' : '') as unknown as T;
+    }
     // buildHarvestScript's source always declares `cardListSel` — a JD-text
     // script (buildJdTextScript) never does. This lets one fake `evaluate`
     // serve both call sites without inspecting PageHandle call order.
@@ -259,6 +273,38 @@ class FakeBrowserProvider implements BrowserProvider {
     this.handle = new FakeBrowserHandle(this.script, this.failNewPageAt);
     return this.handle;
   }
+}
+
+const BREAKER_DIR = '/repo/.chrome-debug';
+
+/** In-memory stand-in for the breaker file plus a frozen clock. The lane
+ * only ever sees LinkedinBreakerDeps, so nothing here touches a real fs. */
+function fakeBreakerFs(initial: LinkedinBreakerState | undefined, now: Date) {
+  const disk: { raw: string | undefined } = {
+    raw: initial === undefined ? undefined : JSON.stringify(initial),
+  };
+  const writes: string[] = [];
+  const unlinks: string[] = [];
+  const deps: LinkedinBreakerDeps = {
+    existsSync: () => disk.raw !== undefined,
+    readFileSync: () => {
+      if (disk.raw === undefined) throw new Error('ENOENT: no breaker file');
+      return disk.raw;
+    },
+    writeFileSync: (_path, data) => {
+      disk.raw = data;
+      writes.push(data);
+    },
+    mkdirSync: () => {},
+    unlinkSync: (path) => {
+      disk.raw = undefined;
+      unlinks.push(path);
+    },
+    now: () => now,
+  };
+  const current = (): LinkedinBreakerState | undefined =>
+    disk.raw === undefined ? undefined : (JSON.parse(disk.raw) as LinkedinBreakerState);
+  return { deps, writes, unlinks, current };
 }
 
 const URL_1 =
@@ -2105,4 +2151,364 @@ test('parseSearchUrls drops a page heading with zero urls beneath it', () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0]?.page, 'linkedin__jobs-search');
   assert.deepEqual(groups[0]?.urls, ['https://www.linkedin.com/jobs/search/?keywords=X']);
+});
+
+// ---------- throttle breaker (spec §4.5, D8/D9, 2026-07-28) ----------
+
+const NOW = new Date('2026-07-28T12:00:00.000Z');
+/** Opened 1h before NOW: inside the 4h cooldown ⇒ phase `open`. */
+const OPENED_RECENTLY: LinkedinBreakerState = {
+  openedAt: '2026-07-28T11:00:00.000Z',
+  tripCount: 1,
+};
+/** Opened 6h before NOW: past the 4h cooldown ⇒ phase `half-open`. */
+const OPENED_LONG_AGO: LinkedinBreakerState = {
+  openedAt: '2026-07-28T06:00:00.000Z',
+  tripCount: 1,
+};
+
+test('open breaker: the lane returns skipped with a reopen time and NEVER launches the browser (D9)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_RECENTLY, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.deepEqual(result.jobs, []);
+  assert.deepEqual(result.dropped, []);
+  assert.deepEqual(result.companiesSeen, []);
+  assert.match(result.skipped?.reason ?? '', /throttle cooldown until/);
+  // openedAt 11:00 + 4h cooldown = 15:00.
+  assert.match(result.skipped?.reason ?? '', /2026-07-28T15:00:00\.000Z/);
+  // The defining assertion of D9: a blocked fire leaves zero footprint.
+  assert.equal(provider.handle, null);
+  // And it changed nothing on "disk".
+  assert.deepEqual(fs.writes, []);
+  assert.deepEqual(fs.unlinks, []);
+});
+
+test('half-open: a probe returning real text deletes the breaker file and the fire proceeds normally', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.equal(result.skipped, undefined);
+  assert.equal(fs.current(), undefined, 'breaker file must be deleted on recovery');
+  assert.equal(fs.unlinks.length, 1);
+  // The whole fire ran: the happy-path fixture's 4 JD-opens all landed.
+  assert.equal(result.jobs.length, 4);
+});
+
+test('half-open: a probe returning a shell re-opens the breaker and ends the fire after ONE JD-open', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // URL_1's single card harvests fine, but its JD is a shell: no text
+  // scripted, and jdRoot IS present.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/5001/',
+    },
+  ]);
+  script.jdShellUrls.add('https://www.linkedin.com/jobs/view/5001/');
+  seedTrivialUrl(script, URL_2, '5002');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.match(result.skipped?.reason ?? '', /still throttled/);
+  assert.deepEqual(result.jobs, []);
+  const state = fs.current();
+  assert.equal(state?.openedAt, NOW.toISOString(), 'openedAt must be rewritten');
+  assert.equal(state?.tripCount, 2);
+  // ~2 requests spent: exactly one page was opened, and URL_2 was never
+  // visited.
+  assert.equal(provider.handle?.pages.length, 1);
+  const gotos = provider.handle?.pages[0]?.gotoCalls ?? [];
+  assert.equal(gotos.includes(URL_2), false);
+});
+
+test('half-open: a probe that THROWS leaves the breaker open with openedAt unchanged (spec §5)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // The probe url's navigation fails outright — inconclusive, not proof
+  // that the block cleared.
+  script.gotoThrows.add(URL_1);
+  seedTrivialUrl(script, URL_2, '5102');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.match(result.skipped?.reason ?? '', /probe inconclusive/);
+  const state = fs.current();
+  assert.equal(state?.openedAt, OPENED_LONG_AGO.openedAt, 'openedAt must NOT move');
+  assert.equal(state?.tripCount, 1, 'an inconclusive probe is not a trip');
+  assert.equal(state?.lastProbeAt, NOW.toISOString());
+  assert.deepEqual(fs.unlinks, [], 'a broken page must never close the breaker');
+});
+
+test('trip: 3 consecutive shells mid-fire open the breaker, stop the remaining urls, and KEEP prior captures (D6)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // URL_1: card 1 captures real text, cards 2-4 are shells. The third
+  // shell trips the counter.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/6001/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/6002/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Initech',
+      location: 'Remote',
+      href: '/jobs/view/6003/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Umbrella',
+      location: 'Remote',
+      href: '/jobs/view/6004/',
+    },
+  ]);
+  script.jdTextByUrl.set(
+    'https://www.linkedin.com/jobs/view/6001/',
+    'JD text — real, captured before the block',
+  );
+  for (const id of ['6002', '6003', '6004']) {
+    script.jdShellUrls.add(`https://www.linkedin.com/jobs/view/${id}/`);
+  }
+  seedTrivialUrl(script, URL_2, '6100');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  // No file on disk ⇒ phase closed ⇒ the fire starts normally.
+  const fs = fakeBreakerFs(undefined, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  // Returns NORMALLY — it did attempt work (D6), so this is not `skipped`.
+  assert.equal(result.skipped, undefined);
+  assert.deepEqual(
+    result.jobs.map((j) => j.identity.id),
+    ['li-6001'],
+  );
+  const state = fs.current();
+  assert.equal(state?.openedAt, NOW.toISOString());
+  assert.equal(state?.tripCount, 1);
+  // URL_2 was never visited: only ONE page was ever opened.
+  assert.equal(provider.handle?.pages.length, 1);
+  // The interrupted url is NOT marked done — the next fire must retry it.
+  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  assert.equal(Object.hasOwn(persisted.done, URL_1), false);
+});
+
+test('trip: an ok between shells resets the streak — a mostly-healthy fire never trips', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/6201/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/6202/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Initech',
+      location: 'Remote',
+      href: '/jobs/view/6203/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Umbrella',
+      location: 'Remote',
+      href: '/jobs/view/6204/',
+    },
+  ]);
+  // shell, shell, ok, shell -> longest streak 2, never trips.
+  script.jdShellUrls.add('https://www.linkedin.com/jobs/view/6201/');
+  script.jdShellUrls.add('https://www.linkedin.com/jobs/view/6202/');
+  script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/6203/', 'JD text — healthy');
+  script.jdShellUrls.add('https://www.linkedin.com/jobs/view/6204/');
+  seedTrivialUrl(script, URL_2, '6300');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(undefined, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.equal(fs.current(), undefined, 'breaker must stay closed');
+  // Both urls were visited: 2 pages opened, and URL_2's job landed.
+  assert.equal(provider.handle?.pages.length, 2);
+  assert.ok(result.jobs.some((j) => j.identity.id === 'li-6300'));
+});
+
+test('no breaker configured: the lane never reads or writes breaker state (every legacy call site is unaffected)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/6401/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/6402/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Initech',
+      location: 'Remote',
+      href: '/jobs/view/6403/',
+    },
+  ]);
+  for (const id of ['6401', '6402', '6403']) {
+    script.jdShellUrls.add(`https://www.linkedin.com/jobs/view/${id}/`);
+  }
+  seedTrivialUrl(script, URL_2, '6500');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+
+  // 13th argument omitted entirely — the pre-throttle-guard call shape.
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  // Three shells in a row and yet URL_2 still got visited: with no breaker
+  // configured there is no counter and no early stop.
+  assert.equal(result.skipped, undefined);
+  assert.equal(provider.handle?.pages.length, 2);
 });
