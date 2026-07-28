@@ -75,10 +75,23 @@ export function makeFarmStage(
       const farmedDropped: DroppedRecord[] = [];
       const seen: Record<string, string[]> = {};
       let failedLanes = 0;
+      let skippedLanes = 0;
 
       for (const lane of farmingLanes) {
         try {
           const result = await lane.source(ctx);
+          if (result.skipped) {
+            // Deliberately attempted nothing (e.g. the LinkedIn lane
+            // sitting out a throttle cooldown). Not a failure, not an
+            // empty success: it contributes no companies_seen entry and
+            // is excluded from the outage denominator below.
+            skippedLanes += 1;
+            ctx.logger.info('farming lane skipped', {
+              lane: lane.name,
+              reason: result.skipped.reason,
+            });
+            continue;
+          }
           farmedJobs.push(...result.jobs);
           farmedDropped.push(...result.dropped);
           seen[lane.name] = result.companiesSeen;
@@ -94,9 +107,14 @@ export function makeFarmStage(
         }
       }
 
-      // Every farming lane failed: not one broken lane, a total outage —
-      // fail loud rather than a silently-green zero-job run (mirrors
-      // linkedin/lane.ts's all-urls-failed guard, v0 checkAggregateFailure).
+      // Every farming lane that ATTEMPTED work failed: not one broken lane,
+      // a total outage — fail loud rather than a silently-green zero-job run
+      // (mirrors linkedin/lane.ts's all-urls-failed guard, v0
+      // checkAggregateFailure). Skipped lanes are excluded from the
+      // denominator (D10): a lane that never touched the network cannot be
+      // evidence of an outage, and counting it would turn a deliberate
+      // throttle cooldown into a failed run — the exact opposite of the
+      // graceful degradation the skip exists to provide.
       //
       // Known, accepted cost (2026-07-26 review): LinkedIn is currently
       // the ONLY farming lane, so this throw aborts the whole 10-stage run
@@ -109,9 +127,10 @@ export function makeFarmStage(
       // Letting ATS lanes still run would need a real "degraded run"
       // status flowing through result.json into both digests — a feature,
       // not a tweak to this condition.
-      if (farmingLanes.length > 0 && failedLanes === farmingLanes.length) {
+      const attemptedLanes = farmingLanes.length - skippedLanes;
+      if (attemptedLanes > 0 && failedLanes === attemptedLanes) {
         throw new Error(
-          `farm stage: all ${farmingLanes.length} farming lane(s) failed this run — ` +
+          `farm stage: all ${attemptedLanes} farming lane(s) failed this run — ` +
             'total outage, not one broken lane',
         );
       }

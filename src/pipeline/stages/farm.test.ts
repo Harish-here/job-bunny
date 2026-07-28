@@ -27,14 +27,18 @@ function fakeStorage(): Storage & { store: Map<string, unknown>; writeCalls: str
 
 function fakeCtx(
   storage: ReturnType<typeof fakeStorage>,
-  overrides?: { signal?: AbortSignal; warn?: (msg: string, data?: unknown) => void },
+  overrides?: {
+    signal?: AbortSignal;
+    warn?: (msg: string, data?: unknown) => void;
+    info?: (msg: string, data?: unknown) => void;
+  },
 ): StageContext {
   return {
     profile: 'rajni',
     signal: overrides?.signal ?? AbortSignal.timeout(30_000),
     logger: {
       debug() {},
-      info() {},
+      info: overrides?.info ?? (() => {}),
       warn: overrides?.warn ?? (() => {}),
       error() {},
     },
@@ -73,6 +77,7 @@ function makeFakeLane(opts: {
   dropped?: ReturnType<typeof fakeDropped>[];
   companiesSeen?: string[];
   throwErr?: Error;
+  skipped?: { reason: string };
 }): FarmingLane {
   return {
     kind: 'farming',
@@ -83,6 +88,7 @@ function makeFakeLane(opts: {
         jobs: (opts.jobs ?? []) as never,
         dropped: (opts.dropped ?? []) as never,
         companiesSeen: opts.companiesSeen ?? [],
+        ...(opts.skipped ? { skipped: opts.skipped } : {}),
       };
     },
   };
@@ -258,4 +264,111 @@ test('stage definition has heartbeat armed and correct timeout', () => {
   const stage = makeFarmStage([]);
   assert.equal(stage.heartbeat, true, 'heartbeat must be true');
   assert.equal(stage.timeoutMs, 5_400_000, 'timeoutMs must be 5_400_000 (90 min)');
+});
+
+// --- skipped lanes (throttle guard D10, 2026-07-28) ---
+
+test('the only lane skipping does NOT trip the total-outage throw — the stage completes and companies_seen is still written', async () => {
+  const storage = fakeStorage();
+  const infos: Array<{ msg: string; data?: unknown }> = [];
+  const lane = makeFakeLane({
+    name: 'linkedin',
+    skipped: { reason: 'throttle cooldown until 2026-07-28T18:42:00.000Z' },
+  });
+
+  const stage = makeFarmStage([lane]);
+  const ctx = fakeCtx(storage, {
+    info: (msg, data) => {
+      infos.push({ msg, data });
+    },
+  });
+
+  const out = await stage.run(emptyPayload(), ctx);
+
+  assert.deepEqual(out.jobs, []);
+  assert.ok(infos.some((i) => i.msg === 'farming lane skipped'));
+  assert.deepEqual(infos.find((i) => i.msg === 'farming lane skipped')?.data, {
+    lane: 'linkedin',
+    reason: 'throttle cooldown until 2026-07-28T18:42:00.000Z',
+  });
+  // Written, and the skipped lane contributes no entry to it.
+  assert.deepEqual(storage.store.get('registry/companies_seen.json'), {});
+});
+
+test('one lane skipped + one lane failing IS a total outage — every lane that attempted work failed', async () => {
+  const storage = fakeStorage();
+  const skippedLane = makeFakeLane({
+    name: 'linkedin',
+    skipped: { reason: 'throttle cooldown until 18:42' },
+  });
+  const brokenLane = makeFakeLane({
+    name: 'linkedin-secondary',
+    throwErr: new Error('all attempted URLs failed — logout shape'),
+  });
+
+  const stage = makeFarmStage([skippedLane, brokenLane]);
+
+  await assert.rejects(
+    () => stage.run(emptyPayload(), fakeCtx(storage)),
+    /all 1 farming lane\(s\) failed/,
+  );
+  assert.equal(storage.store.has('registry/companies_seen.json'), false);
+});
+
+test('one lane skipped + one lane succeeding does not throw and keeps the healthy lane s results', async () => {
+  const storage = fakeStorage();
+  const skippedLane = makeFakeLane({
+    name: 'linkedin',
+    skipped: { reason: 'throttle cooldown until 18:42' },
+  });
+  const healthyLane = makeFakeLane({
+    name: 'linkedin-secondary',
+    jobs: [fakeJob('li-7', 'linkedin-secondary', 'Reliable Co')],
+    companiesSeen: ['Reliable Co'],
+  });
+
+  const stage = makeFarmStage([skippedLane, healthyLane]);
+  const out = await stage.run(emptyPayload(), fakeCtx(storage));
+
+  assert.deepEqual(
+    out.jobs.map((j) => j.identity.id),
+    ['li-7'],
+  );
+  assert.deepEqual(storage.store.get('registry/companies_seen.json'), {
+    'linkedin-secondary': ['Reliable Co'],
+  });
+});
+
+test('every lane skipping does not throw — nothing attempted means nothing failed', async () => {
+  const storage = fakeStorage();
+  const stage = makeFarmStage([
+    makeFakeLane({ name: 'linkedin', skipped: { reason: 'throttle cooldown' } }),
+    makeFakeLane({
+      name: 'linkedin-secondary',
+      skipped: { reason: 'throttle cooldown' },
+    }),
+  ]);
+
+  const out = await stage.run(emptyPayload(), fakeCtx(storage));
+
+  assert.deepEqual(out.jobs, []);
+  assert.deepEqual(storage.store.get('registry/companies_seen.json'), {});
+});
+
+test('a skipped lane s own jobs/dropped/companiesSeen are ignored — skipped means it contributed nothing', async () => {
+  const storage = fakeStorage();
+  const lane = makeFakeLane({
+    name: 'linkedin',
+    jobs: [fakeJob('li-ghost', 'linkedin', 'Ghost Co')],
+    dropped: [fakeDropped('li-ghost-dropped')],
+    companiesSeen: ['Ghost Co'],
+    skipped: { reason: 'throttle cooldown' },
+  });
+
+  const stage = makeFarmStage([lane]);
+  const out = await stage.run(emptyPayload(), fakeCtx(storage));
+
+  assert.deepEqual(out.jobs, []);
+  assert.deepEqual(out.dropped, []);
+  assert.deepEqual(storage.store.get('registry/companies_seen.json'), {});
 });

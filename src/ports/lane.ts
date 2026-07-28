@@ -10,7 +10,15 @@ export type ProbeResult =
  * inside the lane BEFORE a JD is opened — token/browser economy, spec §4.
  * `dropped` carries every card-gate drop (identity-only JD + verdicts) so
  * the funnel can always answer "why did this job disappear?" — a lane
- * must never silently swallow them. */
+ * must never silently swallow them.
+ *
+ * `skipped` is how a lane says "I deliberately attempted nothing, and
+ * here is why" (throttle guard D10, 2026-07-28). It is NOT a failure and
+ * NOT an empty success: the `farm` stage excludes a skipped lane from its
+ * every-attempted-lane-failed computation, so a deliberate skip cannot
+ * convert a healthy degradation into a loud run failure. A lane that
+ * skips must return empty `jobs`/`dropped`/`companiesSeen` alongside it —
+ * the stage ignores those fields when `skipped` is set. */
 export interface FarmingLane {
   readonly kind: 'farming';
   readonly name: string;
@@ -18,6 +26,7 @@ export interface FarmingLane {
     jobs: JD[];
     dropped: DroppedRecord[];
     companiesSeen: string[];
+    skipped?: { reason: string };
   }>;
 }
 
