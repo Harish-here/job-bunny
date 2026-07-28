@@ -1053,18 +1053,37 @@ export class LinkedInLane implements FarmingLane {
           `${fieldValidation} card(s) had empty/invalid title or company after ` +
             `extraction${sample ? ` (e.g. "${sample}")` : ''} ` +
             '— cards WERE found in the DOM, but field extraction failed schema validation; ' +
-            'this points at drifted title/company sub-selectors in ' +
-            'src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json, NOT a session problem.',
+            'one candidate is drifted title/company sub-selectors in ' +
+            'src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json ' +
+            '(regenerate via /page-analyse). This signal on its own does not rule out a ' +
+            'degraded/throttled session, so do not treat the inventory as proven guilty.',
         );
       }
       const jdOpen = countOf('jd-open');
       if (jdOpen > 0) {
         const sample = sampleOf('jd-open');
-        evidence.push(
-          `${jdOpen} card(s) were found and extracted, but JD-open failed for ` +
-            `them${sample ? ` (e.g. "${sample}")` : ''} — a different ` +
-            'failure mode from the above two; check the jdRoot selector or JD-pane load timing.',
-        );
+        if (shellJdFailures > 0) {
+          // The 2026-07-28 signature: jdRoot present, textContent empty,
+          // hydration request 503 while everything else on the page
+          // returned 200 — the same job rendered fine to a logged-out
+          // guest. Pointing at the inventory here is exactly the
+          // misdiagnosis D13 exists to end.
+          evidence.push(
+            `${shellJdFailures} of ${jdOpen} JD-open failure(s) found the jdRoot element ` +
+              'PRESENT but empty — the server withheld the JD content while serving the ' +
+              'rest of the page normally. That is a rate-limit/soft-block on the shared ' +
+              '.chrome-debug session, not DOM drift: the page inventory is not implicated ' +
+              'and regenerating it will not help. Wait out the throttle breaker cooldown ' +
+              '(.chrome-debug/.jobbunny-linkedin-breaker.json) — the next fire past it ' +
+              'probes automatically.',
+          );
+        } else {
+          evidence.push(
+            `${jdOpen} card(s) were found and extracted, but JD-open failed for ` +
+              `them${sample ? ` (e.g. "${sample}")` : ''} — a different ` +
+              'failure mode from the above two; check the jdRoot selector or JD-pane load timing.',
+          );
+        }
       }
       const other = countOf('other');
       if (other > 0) {

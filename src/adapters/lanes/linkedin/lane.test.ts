@@ -981,7 +981,11 @@ test('every attempted url failing with cards found but empty title/company repor
     message,
     /src\/adapters\/lanes\/linkedin\/page_inventory\/linkedin__jobs-search\.json/,
   );
-  assert.match(message, /NOT a session problem/);
+  // D13: the message may name drifted sub-selectors as A candidate, but it
+  // must no longer ASSERT that the session is fine — that claim sent the
+  // 2026-07-28 throttle investigation to /page-analyse for two days.
+  assert.doesNotMatch(message, /NOT a session problem/);
+  assert.match(message, /one candidate/i);
   // The defining assertion for this defect: an empty-fields failure must
   // never claim the session expired, and must not even land in the
   // zero-cards bucket (cards WERE found).
@@ -2670,4 +2674,64 @@ test('no breaker configured: the lane never reads or writes breaker state (every
   // configured there is no counter and no early stop.
   assert.equal(result.skipped, undefined);
   assert.equal(provider.handle?.pages.length, 2);
+});
+
+test('all-urls-failed evidence: shell JD failures are reported as server-withheld content, not as an inventory problem (D13)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // Two cards, both shells: jdRoot present, no text. Two is below the
+  // 3-shell trip threshold, so the fire runs to completion and the
+  // all-urls-failed guard produces the message under test.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/7001/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/7002/',
+    },
+  ]);
+  script.jdShellUrls.add('https://www.linkedin.com/jobs/view/7001/');
+  script.jdShellUrls.add('https://www.linkedin.com/jobs/view/7002/');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(undefined, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  let message = '';
+  await assert.rejects(
+    () => lane.source(fakeCtx()),
+    (err: Error) => {
+      message = err.message;
+      return true;
+    },
+  );
+
+  assert.match(message, /server withheld the JD content/);
+  assert.match(message, /rate-limit|soft-block/);
+  assert.match(message, /cooldown/);
+  // The defining assertion: a throttle must NOT send anyone to the page
+  // inventory or /page-analyse.
+  assert.doesNotMatch(message, /page_inventory/);
+  assert.doesNotMatch(message, /page-analyse/);
 });
