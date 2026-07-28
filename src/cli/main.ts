@@ -10,16 +10,18 @@
  * Dispatch is `<command> [sub-action] [positionals] [--flags]`. All argv →
  * options translation lives in `buildOptions`, which hands each command ONLY
  * the keys it reads (never an irrelevant key set to `undefined`) and returns
- * a usage error when a required piece is missing. `schedule install` is the
- * one command that takes no `--profile`: it is cross-profile by design.
+ * a usage error when a required piece is missing. `serve` (all three
+ * sub-actions), `autostart` (darwin only), and `release` are cross-profile
+ * by design and take no `--profile`.
  *
  * Functions RETURN their exit code; only the bin-entry guard at the bottom
  * ever touches `process.exitCode`, so `main` itself is safe to call from a
  * test without side effects on the real process.
  *
  * `dotenv/config` is imported FIRST, for its side effect only: `NOTION_TOKEN`
- * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and launchd hands a
- * scheduled run a minimal environment that does not include them. Without this
+ * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and a daemon-spawned
+ * scheduled run (`ops/daemon/supervise`) inherits a minimal environment that
+ * does not include them. Without this
  * a scheduled run would wire a throwing-stub connector, die at sync, and then
  * fail to send the digest that would have reported it — a silent daily
  * failure. v0 does the same thing per entry point (`scripts/notion/client.js`,
@@ -29,6 +31,12 @@ import 'dotenv/config';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import {
+  defaultDaemonPidfileDeps,
+  HEARTBEAT_STALE_MS,
+  readDaemonPidfile,
+} from '../ops/daemon/index.ts';
+import { autostartCommand } from './commands/autostart.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
@@ -36,7 +44,7 @@ import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
-import { scheduleCommand } from './commands/schedule.ts';
+import { serveCommand } from './commands/serve.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 
@@ -58,6 +66,7 @@ export interface CommandOptions {
   version?: string;
   noMerge?: boolean;
   yes?: boolean;
+  daemonChild?: boolean;
 }
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
@@ -68,7 +77,8 @@ export type CommandName =
   | 'reconcile'
   | 'stage'
   | 'routine'
-  | 'schedule'
+  | 'serve'
+  | 'autostart'
   | 'lane'
   | 'profile'
   | 'setup'
@@ -84,6 +94,40 @@ export interface MainDeps {
   stderr?: (line: string) => void;
   /** Environment for the npm swallowed-flag guard. Default: `process.env`. */
   env?: Record<string, string | undefined>;
+  /** §6.8 — the per-command daemon-liveness warning. Returns the warning
+   * line to print, or `undefined` for silence. Injected so no test here
+   * touches a real pidfile on disk. Default: `defaultCheckDaemonLiveness`
+   * below, which is silent when the pidfile is absent OR unparseable
+   * (`readDaemonPidfile` already collapses both to `undefined` — §6.2's
+   * reader rule) and warns only when it EXISTS and shows a dead pid or a
+   * stale heartbeat — deliberately narrower than `daemonLivenessCheck`
+   * (`ops/doctor/aggregate.ts`), which also warns on a missing pidfile as
+   * useful information on that opt-in surface; a blanket per-command nag
+   * for "you've never run `serve start`" would be unwelcome noise here. */
+  checkDaemonLiveness?: () => string | undefined;
+}
+
+function defaultCheckDaemonLiveness(): string | undefined {
+  const pidfileDeps = defaultDaemonPidfileDeps();
+  const file = readDaemonPidfile(process.cwd(), pidfileDeps);
+  if (!file) return undefined; // absent or unparseable — both silent.
+  if (!pidfileDeps.pidIsAlive(file.pid)) {
+    return (
+      'warning: jobbunny daemon is not running (stale pidfile) — scheduled runs will not ' +
+      "fire until 'jobbunny serve start'"
+    );
+  }
+  const heartbeatAgeMs = pidfileDeps.now().getTime() - Date.parse(file.lastTickAt);
+  if (heartbeatAgeMs > HEARTBEAT_STALE_MS) {
+    // Derived, never hardcoded: HEARTBEAT_STALE_MS is the only definition
+    // of "wedged", and this line is what the operator reads.
+    const minutes = Math.round(HEARTBEAT_STALE_MS / 60_000);
+    return (
+      `warning: jobbunny daemon appears wedged (no tick in over ${minutes} minutes) — ` +
+      'scheduled runs may not fire'
+    );
+  }
+  return undefined;
 }
 
 const USAGE = [
@@ -94,8 +138,8 @@ const USAGE = [
   '  reconcile --profile <name>',
   '  stage <stage-name> --profile <name>',
   '  routine <routine-name> --profile <name>',
-  '  schedule install                     (cross-profile — no --profile)',
-  '  schedule remove --profile <name>',
+  '  serve start|stop|status              (cross-profile — no --profile)',
+  '  autostart enable|disable             (cross-profile — darwin only)',
   '  lane add-url <url> [label] --profile <name>',
   '  profile build --profile <name>',
   '  profile remove --profile <name> [--force]',
@@ -110,7 +154,15 @@ function defaultCommands(): CommandRegistry {
     reconcile: reconcileCommand as unknown as CommandFn,
     stage: stageCommand as unknown as CommandFn,
     routine: routineCommand as unknown as CommandFn,
-    schedule: scheduleCommand as unknown as CommandFn,
+    serve: (async (opts: CommandOptions) =>
+      serveCommand({
+        action: (opts.action ?? 'status') as 'start' | 'stop' | 'status',
+        daemonChild: opts.daemonChild ?? false,
+      })) as CommandFn,
+    autostart: (async (opts: CommandOptions) =>
+      autostartCommand({
+        action: (opts.action ?? 'enable') as 'enable' | 'disable',
+      })) as CommandFn,
     lane: laneAddUrlCommand as unknown as CommandFn,
     // `profile` fans out to two commands; the sub-action picks which.
     profile: (async (opts: CommandOptions) =>
@@ -137,7 +189,8 @@ const COMMAND_NAMES = new Set<string>([
   'reconcile',
   'stage',
   'routine',
-  'schedule',
+  'serve',
+  'autostart',
   'lane',
   'profile',
   'setup',
@@ -159,6 +212,7 @@ function buildOptions(
     'run-cap-ms'?: string;
     'no-merge'?: boolean;
     yes?: boolean;
+    'daemon-child'?: boolean;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -200,15 +254,19 @@ function buildOptions(
       if (!routine) return { error: 'missing routine name' };
       return needsProfile() ?? { profile, routine };
     }
-    case 'schedule': {
+    case 'serve': {
       const action = rest[0];
-      if (action !== 'install' && action !== 'remove') {
-        return { error: 'schedule takes "install" or "remove"' };
+      if (action !== 'start' && action !== 'stop' && action !== 'status') {
+        return { error: 'serve takes "start", "stop", or "status"' };
       }
-      // `install` is deliberately cross-profile: it reads every profile's
-      // schedule and installs one launchd job per distinct time.
-      if (action === 'install') return { action };
-      return needsProfile() ?? { action, profile };
+      return { action, ...(values['daemon-child'] ? { daemonChild: true } : {}) };
+    }
+    case 'autostart': {
+      const action = rest[0];
+      if (action !== 'enable' && action !== 'disable') {
+        return { error: 'autostart takes "enable" or "disable"' };
+      }
+      return { action };
     }
     case 'lane': {
       if (rest[0] !== 'add-url') return { error: 'lane takes "add-url"' };
@@ -244,6 +302,12 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   const commands = { ...defaultCommands(), ...deps.commands };
   const stderr = deps.stderr ?? ((line: string) => console.error(line));
 
+  // §6.8: every command warns, first thing, when the daemon pidfile
+  // exists but shows no live daemon — before anything else runs.
+  const checkDaemonLiveness = deps.checkDaemonLiveness ?? defaultCheckDaemonLiveness;
+  const livenessWarning = checkDaemonLiveness();
+  if (livenessWarning) stderr(livenessWarning);
+
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -256,6 +320,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       'run-cap-ms': { type: 'string' },
       'no-merge': { type: 'boolean', default: false },
       yes: { type: 'boolean', default: false },
+      'daemon-child': { type: 'boolean', default: false },
     },
   });
 

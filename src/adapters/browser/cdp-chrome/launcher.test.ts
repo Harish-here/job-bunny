@@ -15,15 +15,13 @@ import {
   CHROME_MAX_AGE_MS,
   CHROME_PATH_CANDIDATES,
   clearSessionState,
-  getProcessAgeMs,
   killChrome,
   launchChrome,
-  parseEtimeToMs,
   resolveChromePath,
-  resolveListenerPid,
   SESSION_CLEAR_PROFILE_DIR,
   SESSION_CLEAR_SKIP_ENV,
 } from './launcher.ts';
+import type { ChromePidfile, ChromePidfileDeps } from './ownership/index.ts';
 
 /** Real fs, pointed only at a throwaway temp dir this file creates and
  * removes — clearSessionState's own tests deliberately exercise the real
@@ -92,7 +90,7 @@ test('resolveChromePath prefers earlier candidates over later ones', () => {
 test('resolveChromePath throws a clear error naming every path checked when none exist', () => {
   assert.throws(
     () => resolveChromePath(['/a', '/b'], { existsSync: () => false }),
-    /no Chrome executable found \(checked: \/a, \/b\)/,
+    /no Chrome executable found \(checked: \/a, \/b\) — install Google Chrome \(or Microsoft Edge on Windows\)/,
   );
 });
 
@@ -140,6 +138,12 @@ test('launchChrome resolves the chrome path, builds argv, spawns detached+unref,
         spawnCalls.push({ command, args, options });
         return { pid: 4242, unref: () => {} };
       },
+      // Empty env, not process.env: an ambient JOBBUNNY_CHROME_PATH would
+      // otherwise take precedence over the explicit `candidates` below (see
+      // resolveCandidates' override tier) and this assertion would break
+      // purely because of the shell that ran the suite.
+      env: {},
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
     },
   );
   assert.equal(proc.pid, 4242);
@@ -168,6 +172,7 @@ test('launchChrome unrefs the spawned child so it never keeps the event loop ali
           unrefCalled = true;
         },
       }),
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
     },
   );
   assert.equal(unrefCalled, true);
@@ -178,10 +183,32 @@ test('launchChrome propagates the resolveChromePath error when no candidate exis
     () =>
       launchChrome(
         { port: 9222, candidates: ['/nope'] },
-        { existsSync: () => false, spawn: () => ({ pid: 1, unref: () => {} }) },
+        {
+          existsSync: () => false,
+          spawn: () => ({ pid: 1, unref: () => {} }),
+          pidfileDeps: fakePidfileDepsForLauncher().deps,
+        },
       ),
     /no Chrome executable found/,
   );
+});
+
+test('launchChrome resolves via JOBBUNNY_CHROME_PATH when set, ignoring the candidates option entirely', () => {
+  const spawnCalls: Array<{ command: string }> = [];
+  const proc = launchChrome(
+    { port: 9222, candidates: ['/configured/chrome'] },
+    {
+      existsSync: (path) => path === '/from/env/chrome',
+      spawn: (command) => {
+        spawnCalls.push({ command });
+        return { pid: 4242, unref: () => {} };
+      },
+      env: { JOBBUNNY_CHROME_PATH: '/from/env/chrome' },
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
+    },
+  );
+  assert.equal(proc.pid, 4242);
+  assert.equal(spawnCalls[0]?.command, '/from/env/chrome');
 });
 
 test('killChrome sends SIGTERM to the spawned pid by default', async () => {
@@ -193,6 +220,7 @@ test('killChrome sends SIGTERM to the spawned pid by default', async () => {
     },
     isAlive: () => false,
     sleep: instantSleep,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, true);
   assert.deepEqual(calls, [{ pid: 4242, signal: 'SIGTERM' }]);
@@ -205,6 +233,7 @@ test('killChrome does nothing when JOBBUNNY_KEEP_BROWSER=1', async () => {
     kill: (pid) => {
       calls.push(pid);
     },
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, false);
   assert.deepEqual(calls, []);
@@ -217,6 +246,7 @@ test('killChrome is a no-op when there is no pid to kill', async () => {
     kill: (pid) => {
       calls.push(pid);
     },
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, false);
   assert.deepEqual(calls, []);
@@ -228,6 +258,7 @@ test('killChrome treats an already-gone process as a handled no-op, not a throw'
     kill: () => {
       throw new Error('ESRCH');
     },
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, false);
 });
@@ -248,6 +279,7 @@ test('killChrome resolves without escalating when the process exits after SIGTER
     sleep: instantSleep,
     pollIntervalMs: 250,
     graceMs: 5000,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
 
   assert.equal(result, true);
@@ -271,6 +303,7 @@ test('killChrome escalates to SIGKILL when the process is still alive after the 
     pollIntervalMs: 5,
     graceMs: 20,
     settleMs: 5,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   const elapsed = Date.now() - start;
 
@@ -289,66 +322,9 @@ test('killChrome does not throw if SIGKILL races an already-exited process', asy
     graceMs: 10,
     pollIntervalMs: 5,
     settleMs: 1,
+    pidfileDeps: fakePidfileDepsForLauncher().deps,
   });
   assert.equal(result, true);
-});
-
-test('resolveListenerPid returns the pid lsof reports listening on the port', () => {
-  const calls: Array<{ command: string; args: string[] }> = [];
-  const pid = resolveListenerPid(9222, {
-    execFileSync: (command, args) => {
-      calls.push({ command, args });
-      return '54321\n';
-    },
-  });
-  assert.equal(pid, 54321);
-  assert.deepEqual(calls, [{ command: 'lsof', args: ['-ti', ':9222', '-sTCP:LISTEN'] }]);
-});
-
-test('resolveListenerPid returns undefined when nothing is listening (lsof throws)', () => {
-  const pid = resolveListenerPid(9222, {
-    execFileSync: () => {
-      throw new Error('lsof: no matches');
-    },
-  });
-  assert.equal(pid, undefined);
-});
-
-test('resolveListenerPid returns undefined on blank lsof output', () => {
-  const pid = resolveListenerPid(9222, { execFileSync: () => '' });
-  assert.equal(pid, undefined);
-});
-
-test('parseEtimeToMs parses MM:SS', () => {
-  assert.equal(parseEtimeToMs('05:30'), (5 * 60 + 30) * 1000);
-});
-
-test('parseEtimeToMs parses HH:MM:SS', () => {
-  assert.equal(parseEtimeToMs('02:15:00'), (2 * 3600 + 15 * 60) * 1000);
-});
-
-test('parseEtimeToMs parses DD-HH:MM:SS', () => {
-  assert.equal(parseEtimeToMs('1-00:00:00'), 24 * 3600 * 1000);
-});
-
-test('parseEtimeToMs parses bare SS', () => {
-  assert.equal(parseEtimeToMs('45'), 45 * 1000);
-});
-
-test('getProcessAgeMs converts ps etime output to milliseconds', () => {
-  const ageMs = getProcessAgeMs(4242, {
-    execFileSync: () => ' 25:03:12 \n',
-  });
-  assert.equal(ageMs, (25 * 3600 + 3 * 60 + 12) * 1000);
-});
-
-test('getProcessAgeMs returns null when the pid cannot be inspected', () => {
-  const ageMs = getProcessAgeMs(4242, {
-    execFileSync: () => {
-      throw new Error('ps: no such process');
-    },
-  });
-  assert.equal(ageMs, null);
 });
 
 test('CHROME_MAX_AGE_MS is 24 hours', () => {
@@ -466,6 +442,8 @@ test('launchChrome runs the session clear before spawning (Sessions dir gone aft
         rmSync,
         readFileSync,
         writeFileSync,
+        env: {},
+        pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
     assert.equal(existsSync(join(profileDir, 'Sessions')), false);
@@ -486,6 +464,7 @@ test('launchChrome skips the session clear when JOBBUNNY_SKIP_SESSION_CLEAR=1', 
         readFileSync,
         writeFileSync,
         env: { [SESSION_CLEAR_SKIP_ENV]: '1' },
+        pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
     assert.equal(existsSync(join(profileDir, 'Sessions')), true);
@@ -494,14 +473,77 @@ test('launchChrome skips the session clear when JOBBUNNY_SKIP_SESSION_CLEAR=1', 
   }
 });
 
+function fakePidfileDepsForLauncher(): {
+  deps: ChromePidfileDeps;
+  written: ChromePidfile[];
+  unlinked: number;
+} {
+  const written: ChromePidfile[] = [];
+  let unlinked = 0;
+  const deps: ChromePidfileDeps = {
+    existsSync: () => written.length > 0,
+    readFileSync: () => JSON.stringify(written[written.length - 1]),
+    writeFileSync: (_path, data) => {
+      written.push(JSON.parse(data) as ChromePidfile);
+    },
+    mkdirSync: () => {},
+    unlinkSync: () => {
+      unlinked += 1;
+    },
+    pidIsAlive: () => true,
+    now: () => new Date('2026-07-27T12:00:00.000Z'),
+  };
+  return { deps, written, unlinked };
+}
+
+test('launchChrome writes the Chrome pid file immediately after spawn returns a pid', () => {
+  const { deps, written } = fakePidfileDepsForLauncher();
+  launchChrome(
+    { port: 9333, userDataDir: '/repo/.chrome-debug', candidates: ['/only/chrome'] },
+    {
+      existsSync: (path) => path === '/only/chrome',
+      spawn: () => ({ pid: 4242, unref: () => {} }),
+      env: {},
+      pidfileDeps: deps,
+    },
+  );
+  assert.equal(written.length, 1);
+  assert.deepEqual(written[0], {
+    pid: 4242,
+    port: 9333,
+    startedAt: '2026-07-27T12:00:00.000Z',
+  });
+});
+
+test('killChrome clears the Chrome pid file once the process is confirmed dead', async () => {
+  const { deps, written } = fakePidfileDepsForLauncher();
+  written.push({ pid: 4242, port: 9222, startedAt: '2026-07-27T12:00:00.000Z' });
+  let unlinked = 0;
+  const clearingDeps: ChromePidfileDeps = {
+    ...deps,
+    unlinkSync: () => {
+      unlinked += 1;
+    },
+  };
+  await killChrome(4242, {
+    env: {},
+    kill: () => {},
+    isAlive: () => false,
+    sleep: instantSleep,
+    pidfileDeps: clearingDeps,
+  });
+  assert.equal(unlinked, 1);
+});
+
 test('the session clear only ever runs via launchChrome, which provider.ts never calls on the reuse path', () => {
   // clearSessionState has exactly one caller: launchChrome (see this
   // module's doc comment). provider.ts's launch() only invokes
   // launchChromeFn on the 'launch' branch (or 'recycle' -> kill -> launch)
   // — never on 'reuse' or a recycle kept alive by recycleIfOld=false (see
-  // provider.test.ts's "launch() reuses an already-reachable, fresh Chrome
-  // instead of spawning", which asserts launchChromeFn.calls.length === 0
-  // on that path). So a reuse/attach launch never touches session state:
+  // provider.test.ts's "launch() reuses a reachable Chrome whose
+  // pid-file-recorded age is under maxAgeMs", which asserts
+  // launchChromeFn.calls.length === 0 on that path). So a reuse/attach
+  // launch never touches session state:
   // the fake launchChrome injected there is a no-op stand-in that would
   // itself prove a call by incrementing a counter, and it never fires.
   // This test just pins that launchChrome (the one function that clears
@@ -522,6 +564,8 @@ test('the session clear only ever runs via launchChrome, which provider.ts never
         rmSync,
         readFileSync,
         writeFileSync,
+        env: {},
+        pidfileDeps: fakePidfileDepsForLauncher().deps,
       },
     );
     // By the time spawn() runs, the clear has already happened.

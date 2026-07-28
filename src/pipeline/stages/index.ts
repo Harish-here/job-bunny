@@ -1,4 +1,5 @@
 export * from './assemble.ts';
+export * from './budgets.ts';
 export * from './compress.ts';
 export * from './dedup.ts';
 export * from './farm.ts';

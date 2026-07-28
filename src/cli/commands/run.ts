@@ -43,18 +43,13 @@ import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { RunnerOptions } from '../../pipeline/runner/run.ts';
 import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
+import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
 import type { Routine } from '../../routines/types.ts';
 import { wire as defaultWire, type WireResult } from '../wire.ts';
 
 // > structure provider timeout (300_000) so the stall watchdog never
 // false-kills a live batch.
 const DEFAULT_STALL_MS = 360_000;
-
-/** Margin over the raw worst-case stage-timeout sum, to absorb orchestration
- * overhead (checkpoint writes between batches, stall-watchdog polling,
- * process scheduling jitter) that isn't itself charged against any one
- * stage's `timeoutMs`. */
-const RUN_CAP_MARGIN = 1.25;
 
 /**
  * The run-level cap (third watchdog layer, `runPipeline`'s `runCapMs`) MUST
@@ -67,16 +62,16 @@ const RUN_CAP_MARGIN = 1.25;
  * silently drifts out of sync again as stage budgets change — see P9
  * closure register item 2, whose broken run was caused by exactly that
  * drift (cap 30 min < sum of stage timeouts ~68 min).
+ *
+ * The arithmetic itself now lives in `pipeline/stages/budgets.ts` (Task
+ * 8), re-exported here so every existing call site — this file's own
+ * `computeRunCapMs(stages)` below, plus every test that imports
+ * `computeRunCapMs` from `cli/commands/run.ts` — keeps working
+ * unchanged. The live `stages` array satisfies `budgets.ts`'s `readonly
+ * StageBudget[]` parameter structurally, so no adapter or cast is
+ * needed at the call site.
  */
-export function computeRunCapMs(
-  stages: Array<StageDef<StagePayload, StagePayload>>,
-): number {
-  const worstCaseMs = stages.reduce(
-    (sum, stage) => sum + stage.timeoutMs * (stage.retries + 1),
-    0,
-  );
-  return Math.ceil(worstCaseMs * RUN_CAP_MARGIN);
-}
+export { computeRunCapMs };
 
 export interface RunCommandOptions {
   profile: string;

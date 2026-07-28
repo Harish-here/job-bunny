@@ -11,11 +11,14 @@ import {
   CHROME_MAX_AGE_MS,
   DEFAULT_CDP_PORT,
   DEFAULT_USER_DATA_DIR,
-  getProcessAgeMs as defaultGetProcessAgeMs,
   killChrome as defaultKillChrome,
   launchChrome as defaultLaunchChrome,
-  resolveListenerPid as defaultResolveListenerPid,
 } from './launcher.ts';
+import {
+  type ChromePidfileDeps,
+  defaultChromePidfileDeps,
+  readChromePidfile,
+} from './ownership/index.ts';
 
 /**
  * CdpChromeProvider — BrowserProvider implementation over a real, locally
@@ -26,29 +29,28 @@ import {
  * pattern, replicated locally here since adapters must not import pipeline/).
  *
  * Chrome lifecycle mirrors scripts/lib/browser.js's proven, hard-won
- * ensureChrome pattern:
+ * ensureChrome pattern, now sourced from a pid file rather than lsof/ps
+ * (D12):
  *  - launch() ALWAYS probes CDP reachability (bounded fetch of
- *    `${cdpUrl}/json/version`) before spawning. Reachable + fresh (age
- *    <= maxAgeMs, via resolveListenerPid + getProcessAgeMs) => REUSE the
- *    live instance, no spawn. Reachable + older than maxAgeMs => RECYCLE
- *    (kill the live instance, then spawn fresh over the same user-data-dir)
- *    when recycleIfOld is true, else reuse anyway. Only truly unreachable
- *    falls through to spawning. This exists because launch() used to spawn
- *    unconditionally: a Chrome already listening on the port (same
- *    user-data-dir) makes a fresh spawn hand off and exit immediately
- *    (Chrome's profile singleton behavior) while connectWithRetry goes on
- *    to connect to the OLD Chrome — the handle would then hold the dead
- *    stub's pid and close() would signal a already-gone process, leaking
- *    the real Chrome forever.
- *  - Both the reuse/recycle decision and close() resolve the pid to act on
- *    via resolveListenerPid (v0: `lsof -ti :<port>`) — the pid actually
- *    LISTENING on the CDP port — never the pid launchChrome's spawn() call
- *    happened to return, for the same hand-off reason above.
+ *    `${cdpUrl}/json/version`) before spawning. Unreachable => spawn fresh
+ *    (action 'launch'). Reachable + no live pid file (.chrome-debug/
+ *    .jobbunny-chrome.json) => this Chrome was not spawned by this
+ *    codebase — attach (reuse), never recycle, never kill; this check
+ *    happens BEFORE decideChromeAction is consulted at all. Reachable +
+ *    live pid file => age is pidfileDeps.now() - pidfile.startedAt (the
+ *    same injected clock launchChrome stamped startedAt with), fed into
+ *    decideChromeAction exactly as before: 'reuse' if <= maxAgeMs,
+ *    'recycle' (kill via the pid file's pid, then respawn) if older.
+ *  - The pid file is written by launchChrome itself, from the pid
+ *    spawn() returned — never re-resolved via an OS tool. close() kills
+ *    exactly that pid (the one this run spawned, recorded at handle
+ *    construction time), not a freshly re-resolved "whoever is listening
+ *    on the port now".
  *  - NEVER call browser.close() on a CDP-attached connection (a
  *    live-incident lesson there: closing the Browser object over CDP can
  *    take the whole Chrome process down with it, an unreliable way to end a
  *    session) — release the playwright-side reference and separately kill
- *    the OS process by resolved pid (killChrome), unless
+ *    the OS process by its recorded pid (killChrome), unless
  *    JOBBUNNY_KEEP_BROWSER=1.
  *  - close() only ever kills a Chrome process THIS run spawned (action
  *    launch, or recycle's kill-then-respawn). A reused instance (action
@@ -165,14 +167,12 @@ export interface CdpChromeProviderDeps {
    * to spawn. Injectable so tests never make a real network call. Default:
    * bounded fetch of `${cdpUrl}/json/version`. */
   cdpReachable?: CdpReachableFn;
-  /** Resolves the pid actually listening on the CDP port (v0: `lsof -ti
-   * :<port>`) — used both to decide reuse/recycle and, at close() time, to
-   * find the real pid to kill. Injectable so tests never shell out.
-   * Default: launcher.ts's resolveListenerPid. */
-  resolveListenerPid?: (port: number) => number | undefined;
-  /** Age of a running pid (v0: `ps -o etime=`). Injectable so tests never
-   * shell out. Default: launcher.ts's getProcessAgeMs. */
-  getProcessAgeMs?: (pid: number) => number | null;
+  /** Injectable Chrome pid-file deps (D12) — used to read
+   * .chrome-debug/.jobbunny-chrome.json when deciding reuse/recycle/launch,
+   * and passed through to killChrome so close()/recycle clear it after a
+   * kill. Injectable so tests never touch the real filesystem or process
+   * table. Default: defaultChromePidfileDeps(). */
+  pidfileDeps?: ChromePidfileDeps;
   /** Recycle (kill + respawn, same user-data-dir) a reachable Chrome once
    * it's older than this, instead of reusing it indefinitely. Default:
    * CHROME_MAX_AGE_MS (24h), matching scripts/lib/browser.js. */
@@ -192,19 +192,14 @@ export class CdpChromeProvider implements BrowserProvider {
   private readonly launchChromeFn: NonNullable<CdpChromeProviderDeps['launchChrome']>;
   private readonly killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>;
   private readonly port: number;
-  private readonly userDataDir: string | undefined;
+  private readonly userDataDir: string;
   private readonly candidates: readonly string[] | undefined;
   private readonly launcherFsDeps: LauncherDeps | undefined;
   private readonly killEnv: NodeJS.ProcessEnv | undefined;
   private readonly connectRetryMs: number;
   private readonly connectMaxWaitMs: number;
   private readonly cdpReachableFn: CdpReachableFn;
-  private readonly resolveListenerPidFn: NonNullable<
-    CdpChromeProviderDeps['resolveListenerPid']
-  >;
-  private readonly getProcessAgeMsFn: NonNullable<
-    CdpChromeProviderDeps['getProcessAgeMs']
-  >;
+  private readonly pidfileDeps: ChromePidfileDeps;
   private readonly maxAgeMs: number;
   private readonly recycleIfOld: boolean;
   private readonly reachabilityTimeoutMs: number;
@@ -221,10 +216,7 @@ export class CdpChromeProvider implements BrowserProvider {
     this.connectRetryMs = deps.connectRetryMs ?? 250;
     this.connectMaxWaitMs = deps.connectMaxWaitMs ?? 10_000;
     this.cdpReachableFn = deps.cdpReachable ?? defaultCdpReachable;
-    this.resolveListenerPidFn =
-      deps.resolveListenerPid ?? ((port) => defaultResolveListenerPid(port));
-    this.getProcessAgeMsFn =
-      deps.getProcessAgeMs ?? ((pid) => defaultGetProcessAgeMs(pid));
+    this.pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
     this.maxAgeMs = deps.maxAgeMs ?? CHROME_MAX_AGE_MS;
     this.recycleIfOld = deps.recycleIfOld ?? true;
     this.reachabilityTimeoutMs = deps.reachabilityTimeoutMs ?? 2000;
@@ -235,59 +227,94 @@ export class CdpChromeProvider implements BrowserProvider {
     const version = await this.cdpReachableFn(cdpUrl, {
       timeoutMs: this.reachabilityTimeoutMs,
     });
-    const listenerPid = version ? this.resolveListenerPidFn(this.port) : undefined;
-    const ageMs = listenerPid != null ? this.getProcessAgeMsFn(listenerPid) : null;
-    const action = decideChromeAction({
-      reachable: !!version,
-      ageMs,
-      maxAgeMs: this.maxAgeMs,
-    });
 
-    if (action === 'reuse' || (action === 'recycle' && !this.recycleIfOld)) {
+    if (!version) {
+      return this.spawnAndConnect(cdpUrl, ctx);
+    }
+
+    const pidfile = readChromePidfile(this.userDataDir, this.pidfileDeps);
+    if (!pidfile) {
+      // Reachable, no live pid file: not ours — attach, never recycle,
+      // never kill (D12/§7.4's "strengthens ownsProcess" branch, applied
+      // BEFORE decideChromeAction is consulted at all).
       const browser = await this.connectWithRetry(cdpUrl, ctx);
       return new CdpChromeBrowserHandle(
         cdpUrl,
         browser,
         ctx,
-        listenerPid,
-        this.port,
-        this.resolveListenerPidFn,
+        undefined,
         this.killChromeFn,
         this.killEnv,
-        // Neither branch here spawned Chrome — a bare reuse, or a
-        // recycle-eligible instance kept alive because recycleIfOld is
-        // false. This process attached to something already running and
-        // must not kill it on close() (2026-07-25 incident: reuse killed
-        // the user's own logged-in Chrome mid-session).
+        this.userDataDir,
+        this.pidfileDeps,
         false,
       );
     }
 
-    if (action === 'recycle') {
-      ctx.logger.info('cdp-chrome: recycling a reachable-but-stale Chrome instance', {
-        ageMs,
-        maxAgeMs: this.maxAgeMs,
-        port: this.port,
-      });
-      await this.killChromeFn(listenerPid, { env: this.killEnv });
+    // pidfileDeps.now() is the single clock for BOTH sides of the pid file:
+    // launchChrome stamps startedAt with it, launch() ages that stamp with
+    // it. Default is `() => new Date()`, so production behavior is
+    // identical to Date.now() — but the seam keeps the read side injectable
+    // alongside the write side, so tests are wall-clock-independent.
+    const ageMs = this.pidfileDeps.now().getTime() - Date.parse(pidfile.startedAt);
+    const action = decideChromeAction({
+      reachable: true,
+      ageMs,
+      maxAgeMs: this.maxAgeMs,
+    });
+
+    if (action === 'reuse' || !this.recycleIfOld) {
+      const browser = await this.connectWithRetry(cdpUrl, ctx);
+      return new CdpChromeBrowserHandle(
+        cdpUrl,
+        browser,
+        ctx,
+        undefined,
+        this.killChromeFn,
+        this.killEnv,
+        this.userDataDir,
+        this.pidfileDeps,
+        false,
+      );
     }
 
-    // action === 'launch', or fell through from a recycle above.
+    // action === 'recycle' && recycleIfOld.
+    ctx.logger.info('cdp-chrome: recycling a reachable-but-stale Chrome instance', {
+      ageMs,
+      maxAgeMs: this.maxAgeMs,
+      port: this.port,
+    });
+    await this.killChromeFn(pidfile.pid, {
+      env: this.killEnv,
+      userDataDir: this.userDataDir,
+      pidfileDeps: this.pidfileDeps,
+    });
+    return this.spawnAndConnect(cdpUrl, ctx);
+  }
+
+  /** Spawns a fresh Chrome, connects, and — on connect failure — kills the
+   * freshly-spawned pid before rethrowing (never leaks the spawned
+   * process). Shared by the unreachable branch and the recycle branch of
+   * launch(). */
+  private async spawnAndConnect(cdpUrl: string, ctx: RunContext): Promise<BrowserHandle> {
     const proc = this.launchChromeFn(
       { port: this.port, userDataDir: this.userDataDir, candidates: this.candidates },
-      this.launcherFsDeps,
+      // pidfileDeps is threaded in explicitly so the ONE seam governs both
+      // sides of the pid file: without it, launchChrome's write path fell
+      // back to defaultChromePidfileDeps() (real fs) even when this provider
+      // was constructed with injected deps, so the write and the subsequent
+      // read used different worlds.
+      { ...this.launcherFsDeps, pidfileDeps: this.pidfileDeps },
     );
     let browser: CdpBrowser;
     try {
       browser = await this.connectWithRetry(cdpUrl, ctx);
     } catch (err) {
-      // Connect never succeeded within the cap — don't leak the spawned
-      // Chrome process. Resolve the real listener pid rather than trusting
-      // proc.pid (same hand-off risk as close(), see class doc comment);
-      // fall back to proc.pid only if nothing resolves (e.g. Chrome never
-      // got far enough to open the port at all).
-      const pidToKill = this.resolveListenerPidFn(this.port) ?? proc.pid;
-      await this.killChromeFn(pidToKill, { env: this.killEnv });
+      await this.killChromeFn(proc.pid, {
+        env: this.killEnv,
+        userDataDir: this.userDataDir,
+        pidfileDeps: this.pidfileDeps,
+      });
       throw err;
     }
     return new CdpChromeBrowserHandle(
@@ -295,10 +322,10 @@ export class CdpChromeProvider implements BrowserProvider {
       browser,
       ctx,
       proc.pid,
-      this.port,
-      this.resolveListenerPidFn,
       this.killChromeFn,
       this.killEnv,
+      this.userDataDir,
+      this.pidfileDeps,
       // This process just spawned (or recycled-then-spawned) the Chrome
       // instance behind proc.pid — it owns the process and close() must
       // kill it.
@@ -390,18 +417,14 @@ class CdpChromeBrowserHandle implements BrowserHandle {
   readonly cdpUrl: string;
   private readonly browser: CdpBrowser;
   private readonly ctx: RunContext;
-  /** Fallback pid only — the one launch() had on hand when this handle was
-   * built (spawn's own pid, or the listener pid resolved during the
-   * reuse/recycle check). close() re-resolves the live listener pid fresh
-   * and prefers that; this is used only if that resolution comes back
-   * empty (e.g. Chrome already gone). */
-  private readonly fallbackPid: number | undefined;
-  private readonly port: number;
-  private readonly resolveListenerPidFn: NonNullable<
-    CdpChromeProviderDeps['resolveListenerPid']
-  >;
+  /** The pid this run spawned (undefined when it merely attached to an
+   * already-running, unowned Chrome — ownsProcess is false in that case,
+   * so close() never reads this field). */
+  private readonly pid: number | undefined;
   private readonly killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>;
   private readonly killEnv: NodeJS.ProcessEnv | undefined;
+  private readonly userDataDir: string;
+  private readonly pidfileDeps: ChromePidfileDeps;
   /** True only when THIS process spawned the Chrome instance behind this
    * handle (launch, or recycle's kill-then-respawn) — false when it merely
    * attached to one already running (reuse, or a recycle-eligible instance
@@ -415,21 +438,21 @@ class CdpChromeBrowserHandle implements BrowserHandle {
     cdpUrl: string,
     browser: CdpBrowser,
     ctx: RunContext,
-    fallbackPid: number | undefined,
-    port: number,
-    resolveListenerPidFn: NonNullable<CdpChromeProviderDeps['resolveListenerPid']>,
+    pid: number | undefined,
     killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>,
     killEnv: NodeJS.ProcessEnv | undefined,
+    userDataDir: string,
+    pidfileDeps: ChromePidfileDeps,
     ownsProcess: boolean,
   ) {
     this.cdpUrl = cdpUrl;
     this.browser = browser;
     this.ctx = ctx;
-    this.fallbackPid = fallbackPid;
-    this.port = port;
-    this.resolveListenerPidFn = resolveListenerPidFn;
+    this.pid = pid;
     this.killChromeFn = killChromeFn;
     this.killEnv = killEnv;
+    this.userDataDir = userDataDir;
+    this.pidfileDeps = pidfileDeps;
     this.ownsProcess = ownsProcess;
   }
 
@@ -465,12 +488,11 @@ class CdpChromeBrowserHandle implements BrowserHandle {
     // the CDP connection reference and leaves the OS process alone.
     if (!this.ownsProcess) return;
 
-    // Re-resolve the pid actually LISTENING on the port right now rather
-    // than trusting whatever pid this handle was built with — that stored
-    // pid can be a dead hand-off stub (see class doc comment) that no
-    // longer corresponds to the real, running Chrome.
-    const pid = this.resolveListenerPidFn(this.port) ?? this.fallbackPid;
-    await this.killChromeFn(pid, { env: this.killEnv });
+    await this.killChromeFn(this.pid, {
+      env: this.killEnv,
+      userDataDir: this.userDataDir,
+      pidfileDeps: this.pidfileDeps,
+    });
   }
 }
 

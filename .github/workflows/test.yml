@@ -6,8 +6,12 @@ on:
     branches: [main, main-v2]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,3 +25,16 @@ jobs:
       - run: npm run lint
       - run: npm run boundaries
       - run: npm test
+
+  # Branch protection pins the check name `test`. `if: always()` is load-bearing:
+  # without it a failing matrix leaves this job SKIPPED, and a skipped required
+  # check can satisfy protection vacuously. Run always, then fail explicitly
+  # unless every `check` matrix leg succeeded.
+  test:
+    if: always()
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+      - if: needs.check.result != 'success'
+        run: exit 1

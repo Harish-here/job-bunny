@@ -32,18 +32,17 @@
  * below, alongside the live adapter construction — the only two places
  * adapters are constructed) and returns `{ ctx, stages, routines, checks }`.
  *
- * `wireScheduler()` is a second, independent composition point: the
- * `schedule` CLI command (`cli/commands/schedule.ts`) is the only caller
- * that needs a `Scheduler` (`ports/scheduler.ts`), and it's deliberately
- * NOT part of `PipelineCtx`/`wire()`'s normal per-profile run path (P8
- * Task 3 descoped it — a scheduler has no role in an actual pipeline
- * run). It returns the real `LaunchdScheduler` wired to a real `launchctl`
- * command runner; the command injects a fake in tests.
+ * There is deliberately no `wireScheduler()`/`Scheduler` port here anymore
+ * (D14): `src/ports/scheduler.ts` and `src/adapters/scheduler/launchd/`
+ * were deleted wholesale once the in-process daemon (`jobbunny serve
+ * start|stop|status`, `src/ops/daemon/`, `src/cli/commands/serve.ts`)
+ * replaced launchd triggering. The `Scheduler` interface's `install`/
+ * `remove`/`list` semantics described registering jobs with an external OS
+ * registry — a concept a live daemon doesn't have. No successor port
+ * replaces it; the daemon is not a `Scheduler` implementation.
  */
-import { execFile } from 'node:child_process';
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { z } from 'zod';
 import type {
   CdpChromeProviderDeps,
@@ -79,7 +78,6 @@ import {
   TelegramNotifier,
   TelegramNotifierSettingsSchema,
 } from '../adapters/notify/telegram/index.ts';
-import { LaunchdScheduler } from '../adapters/scheduler/launchd/index.ts';
 import type { RegistryPolicy } from '../core/company/schema.ts';
 import type { PipelineConfig } from '../core/config/schema.ts';
 import { PipelineConfigSchema } from '../core/config/schema.ts';
@@ -104,7 +102,6 @@ import {
 } from '../pipeline/stages/index.ts';
 import type { DoctorCheck } from '../ports/doctor.ts';
 import type { ApiLane, FarmingLane, Lane } from '../ports/lane.ts';
-import type { Scheduler } from '../ports/scheduler.ts';
 import type { Storage } from '../ports/storage.ts';
 import { cleanupRoutine } from '../routines/cleanup/index.ts';
 import type { Routine } from '../routines/types.ts';
@@ -723,38 +720,4 @@ export async function wire(
   ];
 
   return { ctx, stages, routines, checks };
-}
-
-// --- wireScheduler() ---
-
-/** Runs `launchctl`, adapting `child_process.execFile`'s reject-on-nonzero
- * behavior into `CommandRunner`'s resolve-with-exit-code contract
- * (`adapters/scheduler/launchd/launchd.ts`) — `LaunchdScheduler` itself
- * tolerates either shape for the one call it expects to fail harmlessly
- * (`bootout` on a not-yet-loaded job), but giving it a real exit code
- * keeps `bootstrap` failures reported with the process's own stdout
- * rather than a generic `Error` message. */
-const execFileAsync = promisify(execFile);
-
-async function runLaunchctl(
-  command: string,
-  args: string[],
-): Promise<{ stdout: string; exitCode: number }> {
-  try {
-    const { stdout } = await execFileAsync(command, args);
-    return { stdout, exitCode: 0 };
-  } catch (err) {
-    const failure = err as { stdout?: string; code?: number };
-    return {
-      stdout: failure.stdout ?? '',
-      exitCode: typeof failure.code === 'number' ? failure.code : 1,
-    };
-  }
-}
-
-/** Builds the real `Scheduler` — a `LaunchdScheduler` over real `launchctl`
- * calls. The only caller is `cli/commands/schedule.ts`'s `defaultDeps`;
- * every test injects a fake `Scheduler` instead. */
-export function wireScheduler(): Scheduler {
-  return new LaunchdScheduler({ run: runLaunchctl });
 }

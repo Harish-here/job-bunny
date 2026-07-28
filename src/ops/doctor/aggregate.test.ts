@@ -1,14 +1,76 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
+import type { DaemonPidfileDeps } from '../daemon/index.ts';
+import { acquireDaemonPidfile } from '../daemon/index.ts';
 import {
+  claudeOnPathCheck,
   coreChecks,
+  daemonLivenessCheck,
   emptyLanesCheck,
   envTokensCheck,
   filterParsesCheck,
   profileParsesCheck,
   runChecks,
 } from './aggregate.ts';
+
+function fakeDaemonPidfileDeps(nowMs: number): DaemonPidfileDeps {
+  const files = new Map<string, string>();
+  const notFound = (): never => {
+    const err = new Error('ENOENT') as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    throw err;
+  };
+  return {
+    existsSync: (p) => files.has(p),
+    readFileSync: (p) => files.get(p) ?? notFound(),
+    writeFileSync: (p, data) => {
+      files.set(p, data);
+    },
+    writeFileSyncExclusive: (p, data) => {
+      if (files.has(p)) return false;
+      files.set(p, data);
+      return true;
+    },
+    renameSync: (from, to) => {
+      const content = files.get(from) ?? notFound();
+      files.delete(from);
+      files.set(to, content);
+    },
+    unlinkSync: (p) => {
+      files.delete(p);
+    },
+    pidIsAlive: () => true,
+    now: () => new Date(nowMs),
+  };
+}
+
+test('daemonLivenessCheck: a fresh heartbeat on a live pid is ok', async () => {
+  const now = Date.parse('2026-07-27T14:04:00.000Z');
+  const daemonPidfile = fakeDaemonPidfileDeps(now);
+  acquireDaemonPidfile('/fake/root', 1000, daemonPidfile);
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('daemonLivenessCheck: a six-minute-old heartbeat on a live pid warns "wedged"', async () => {
+  const started = Date.parse('2026-07-27T14:04:00.000Z');
+  const daemonPidfile = fakeDaemonPidfileDeps(started);
+  acquireDaemonPidfile('/fake/root', 1000, daemonPidfile);
+  daemonPidfile.now = () => new Date(started + 6 * 60_000);
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /wedged/);
+});
 
 const VALID_PROFILE_JSON = JSON.stringify({
   lanes: ['linkedin'],
@@ -38,6 +100,17 @@ function fakeReadFile(files: Record<string, string>): (path: string) => Promise<
   };
 }
 
+// aggregate.ts composes each check's file path with `path.join(root, ...)`,
+// so a POSIX-literal fixture key misses on windows-latest (backslash-joined
+// paths) — same pattern as wire.test.ts/release.test.ts.
+const REPO_ROOT = '/repo';
+function profilePath(name: string): string {
+  return join(REPO_ROOT, 'profiles', name, 'profile.json');
+}
+function filterPath(name: string): string {
+  return join(REPO_ROOT, 'profiles', name, 'filter.json');
+}
+
 function fakeCheck(name: string, status: DoctorFinding['status']): DoctorCheck {
   return {
     name,
@@ -52,8 +125,8 @@ function fakeCheck(name: string, status: DoctorFinding['status']): DoctorCheck {
 test('profileParsesCheck: ok on valid profile.json matching the schema', async () => {
   const check = profileParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
-    readFile: fakeReadFile({ '/repo/profiles/rajni/profile.json': VALID_PROFILE_JSON }),
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [profilePath('rajni')]: VALID_PROFILE_JSON }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'ok');
@@ -62,7 +135,7 @@ test('profileParsesCheck: ok on valid profile.json matching the schema', async (
 test('profileParsesCheck: red on missing profile.json', async () => {
   const check = profileParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({}),
   });
   const finding = await check.run();
@@ -73,8 +146,8 @@ test('profileParsesCheck: red on missing profile.json', async () => {
 test('profileParsesCheck: red on malformed JSON', async () => {
   const check = profileParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
-    readFile: fakeReadFile({ '/repo/profiles/rajni/profile.json': '{ not json' }),
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [profilePath('rajni')]: '{ not json' }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'red');
@@ -83,9 +156,9 @@ test('profileParsesCheck: red on malformed JSON', async () => {
 test('profileParsesCheck: red on schema-mismatch', async () => {
   const check = profileParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/profile.json': JSON.stringify({ lanes: 'not-an-array' }),
+      [profilePath('rajni')]: JSON.stringify({ lanes: 'not-an-array' }),
     }),
   });
   const finding = await check.run();
@@ -95,7 +168,7 @@ test('profileParsesCheck: red on schema-mismatch', async () => {
 test('profileParsesCheck: never throws', async () => {
   const check = profileParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: async () => {
       throw new Error('disk on fire');
     },
@@ -108,9 +181,9 @@ test('profileParsesCheck: never throws', async () => {
 test('filterParsesCheck: ok on valid filter.json matching the schema', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/filter.json': VALID_FILTER_JSON,
+      [filterPath('rajni')]: VALID_FILTER_JSON,
     }),
   });
   const finding = await check.run();
@@ -120,7 +193,7 @@ test('filterParsesCheck: ok on valid filter.json matching the schema', async () 
 test('filterParsesCheck: warn on missing filter.json (optional)', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({}),
   });
   const finding = await check.run();
@@ -130,8 +203,8 @@ test('filterParsesCheck: warn on missing filter.json (optional)', async () => {
 test('filterParsesCheck: red on malformed JSON', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
-    readFile: fakeReadFile({ '/repo/profiles/rajni/filter.json': '{ nope' }),
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [filterPath('rajni')]: '{ nope' }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'red');
@@ -140,9 +213,9 @@ test('filterParsesCheck: red on malformed JSON', async () => {
 test('filterParsesCheck: red on schema-mismatch', async () => {
   const check = filterParsesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/filter.json': JSON.stringify({
+      [filterPath('rajni')]: JSON.stringify({
         locations: [{ city: 'X', workTypes: ['not-a-worktype'] }],
       }),
     }),
@@ -205,12 +278,11 @@ test('envTokensCheck: red when NOTION_TOKEN is an empty string', async () => {
 // --- emptyLanesCheck ---
 
 test('emptyLanesCheck: red when profile.json has no lanes configured', async () => {
-  const path = '/repo/profiles/rajni/profile.json';
   const check = emptyLanesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({
-      [path]: JSON.stringify({
+      [profilePath('rajni')]: JSON.stringify({
         lanes: [],
         connector: 'notion',
         notifiers: [],
@@ -225,11 +297,10 @@ test('emptyLanesCheck: red when profile.json has no lanes configured', async () 
 });
 
 test('emptyLanesCheck: ok when at least one lane is configured', async () => {
-  const path = '/repo/profiles/rajni/profile.json';
   const check = emptyLanesCheck({
     profileName: 'rajni',
-    root: '/repo',
-    readFile: fakeReadFile({ [path]: VALID_PROFILE_JSON }),
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [profilePath('rajni')]: VALID_PROFILE_JSON }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'ok');
@@ -238,7 +309,7 @@ test('emptyLanesCheck: ok when at least one lane is configured', async () => {
 test('emptyLanesCheck: stays ok (silent) when profile.json is missing — profileParsesCheck already reports that red', async () => {
   const check = emptyLanesCheck({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     readFile: fakeReadFile({}),
   });
   const finding = await check.run();
@@ -246,11 +317,10 @@ test('emptyLanesCheck: stays ok (silent) when profile.json is missing — profil
 });
 
 test('emptyLanesCheck: stays ok (silent) when profile.json fails schema validation — profileParsesCheck already reports that red', async () => {
-  const path = '/repo/profiles/rajni/profile.json';
   const check = emptyLanesCheck({
     profileName: 'rajni',
-    root: '/repo',
-    readFile: fakeReadFile({ [path]: JSON.stringify({ nope: true }) }),
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [profilePath('rajni')]: JSON.stringify({ nope: true }) }),
   });
   const finding = await check.run();
   assert.equal(finding.status, 'ok');
@@ -258,16 +328,42 @@ test('emptyLanesCheck: stays ok (silent) when profile.json fails schema validati
 
 // --- coreChecks ---
 
-test('coreChecks: returns the four core checks', () => {
+test('daemonLivenessCheck: a missing pidfile warns', async () => {
+  const daemonPidfile = fakeDaemonPidfileDeps(Date.now());
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /no daemon pidfile found/);
+});
+
+test('claudeOnPathCheck: present ⇒ ok, absent ⇒ red', async () => {
+  const present = await claudeOnPathCheck({
+    profileName: 'harish',
+    commandExists: async () => true,
+  }).run();
+  assert.equal(present.status, 'ok');
+
+  const absent = await claudeOnPathCheck({
+    profileName: 'harish',
+    commandExists: async () => false,
+  }).run();
+  assert.equal(absent.status, 'red');
+  assert.match(absent.detail, /not found on PATH/);
+});
+
+test('coreChecks: returns the six core checks', () => {
   const checks = coreChecks({
     profileName: 'rajni',
-    root: '/repo',
+    root: REPO_ROOT,
     env: { NOTION_TOKEN: 't', TELEGRAM_BOT_TOKEN: 't' },
     readFile: fakeReadFile({}),
   });
-  assert.equal(checks.length, 4);
+  assert.equal(checks.length, 6);
   const names = checks.map((c) => c.name);
-  assert.equal(new Set(names).size, 4);
+  assert.equal(new Set(names).size, 6);
 });
 
 // --- runChecks ---

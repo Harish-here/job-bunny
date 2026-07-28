@@ -9,6 +9,9 @@ import { z } from 'zod';
 
 export const ScheduleSchema = z.object({
   times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM')),
+  enabled: z.boolean().default(true),
+  weekdays: z.array(z.number().int().min(0).max(6)).default([1, 2, 3, 4, 5]),
+  graceMinutes: z.number().int().positive().default(90),
 });
 
 export const PipelineConfigSchema = z.object({

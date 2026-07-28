@@ -1,4 +1,4 @@
-import { execFileSync as nodeExecFileSync, spawn as nodeSpawn } from 'node:child_process';
+import { spawn as nodeSpawn } from 'node:child_process';
 import {
   existsSync as nodeExistsSync,
   readFileSync as nodeReadFileSync,
@@ -7,22 +7,30 @@ import {
 } from 'node:fs';
 import { join as nodeJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveCandidates } from './discovery/index.ts';
+import {
+  type ChromePidfileDeps,
+  clearChromePidfile,
+  defaultChromePidfileDeps,
+  writeChromePidfile,
+} from './ownership/index.ts';
 
 /**
  * Chrome-over-CDP process lifecycle: find the local Chrome binary, build its
  * launch argv, spawn/probe/age/kill it. Ported from scripts/lib/browser.js's
  * know-how (CHROME_BIN, CDP_PORT flag, .chrome-debug/ user-data-dir,
- * always-kill-unless-JOBBUNNY_KEEP_BROWSER, lsof-for-the-real-listener,
- * SIGTERM-then-poll-then-SIGKILL). fs/spawn/execFileSync/kill/sleep are all
- * injectable so tests never touch a real filesystem, process, or timer.
+ * always-kill-unless-JOBBUNNY_KEEP_BROWSER, SIGTERM-then-poll-then-SIGKILL).
+ * fs/spawn/kill/sleep are all injectable so tests never touch a real
+ * filesystem, process, or timer.
  *
- * resolveListenerPid is deliberately the pid actually LISTENING on the CDP
- * port (via lsof), not the pid launchChrome's spawn() call returns — a live
- * incident showed a fresh spawn can hand off to an already-running Chrome
- * (profile singleton on the same user-data-dir) and exit immediately, which
- * would leave the spawned pid dead while the real Chrome keeps running.
- * Callers (provider.ts) must resolve+kill this way, never trust the spawned
- * child's own pid.
+ * Ownership (D12): launchChrome writes `.jobbunny-chrome.json` (see
+ * ownership/pidfile.ts) into userDataDir immediately after spawn() returns
+ * a pid — { pid, port, startedAt }. killChrome clears that file once the
+ * process is confirmed dead. This is what pid liveness/age is now decided
+ * from, replacing the old lsof/ps-based resolveListenerPid/getProcessAgeMs
+ * (deleted): the pid file records exactly the pid THIS codebase spawned,
+ * so ownership is "is that exact pid alive and recorded", not "whoever the
+ * OS reports is listening on the port right now".
  *
  * launchChrome also runs clearSessionState immediately before spawning
  * (2026-07-25 follow-up): buildLaunchArgv's --restore-last-session=false
@@ -79,6 +87,10 @@ export interface LauncherDeps {
   rmSync?: SessionClearFsDeps['rmSync'];
   readFileSync?: SessionClearFsDeps['readFileSync'];
   writeFileSync?: SessionClearFsDeps['writeFileSync'];
+  /** Injectable Chrome pid-file deps — used by launchChrome to write, and
+   * by killChrome to clear, .chrome-debug/.jobbunny-chrome.json. Default:
+   * defaultChromePidfileDeps(). */
+  pidfileDeps?: ChromePidfileDeps;
 }
 
 /** Resolves the first candidate path that exists on disk. Throws a clear
@@ -90,7 +102,7 @@ export function resolveChromePath(
   const found = candidates.find((path) => deps.existsSync(path));
   if (!found) {
     throw new Error(
-      `no Chrome executable found (checked: ${candidates.join(', ')}) — install Google Chrome`,
+      `no Chrome executable found (checked: ${candidates.join(', ')}) — install Google Chrome (or Microsoft Edge on Windows)`,
     );
   }
   return found;
@@ -297,11 +309,7 @@ export function launchChrome(
   options: LaunchChromeOptions,
   deps: LauncherDeps = {},
 ): ChromeProcessHandle {
-  const {
-    port,
-    userDataDir = DEFAULT_USER_DATA_DIR,
-    candidates = CHROME_PATH_CANDIDATES,
-  } = options;
+  const { port, userDataDir = DEFAULT_USER_DATA_DIR, candidates } = options;
   const existsSync = deps.existsSync ?? nodeExistsSync;
   const spawn = deps.spawn ?? (nodeSpawn as unknown as SpawnFn);
   const env = deps.env ?? process.env;
@@ -314,10 +322,19 @@ export function launchChrome(
     };
     clearSessionState(userDataDir, sessionClearDeps);
   }
-  const chromePath = resolveChromePath(candidates, { existsSync });
+  const resolvedCandidates = resolveCandidates(process.platform, env, candidates);
+  const chromePath = resolveChromePath(resolvedCandidates, { existsSync });
   const argv = buildLaunchArgv({ port, userDataDir });
   const child = spawn(chromePath, argv, { detached: true, stdio: 'ignore' });
   child.unref();
+  if (child.pid != null) {
+    const pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
+    writeChromePidfile(
+      userDataDir,
+      { pid: child.pid, port, startedAt: pidfileDeps.now().toISOString() },
+      pidfileDeps,
+    );
+  }
   return { pid: child.pid };
 }
 
@@ -344,6 +361,12 @@ export interface KillDeps {
    * pause (lets the OS finish tearing the process down before the caller
    * treats the port as free). */
   settleMs?: number;
+  /** userDataDir whose Chrome pid file should be cleared once this
+   * process is confirmed dead. Default: DEFAULT_USER_DATA_DIR. */
+  userDataDir?: string;
+  /** Injectable Chrome pid-file deps for the same clear. Default:
+   * defaultChromePidfileDeps(). */
+  pidfileDeps?: ChromePidfileDeps;
 }
 
 function defaultIsAlive(pid: number): boolean {
@@ -382,10 +405,13 @@ export async function killChrome(
   const graceMs = deps.graceMs ?? 5000;
   const pollIntervalMs = deps.pollIntervalMs ?? 250;
   const settleMs = deps.settleMs ?? 500;
+  const userDataDir = deps.userDataDir ?? DEFAULT_USER_DATA_DIR;
+  const pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
 
   try {
     kill(pid, 'SIGTERM');
   } catch {
+    clearChromePidfile(userDataDir, pidfileDeps);
     return false; // already gone
   }
 
@@ -408,83 +434,8 @@ export async function killChrome(
     await sleep(settleMs);
   }
 
+  clearChromePidfile(userDataDir, pidfileDeps);
   return true;
-}
-
-export interface ProcessProbeDeps {
-  /** Minimal shape of node:child_process's execFileSync this module needs —
-   * injectable so tests never shell out to lsof/ps. */
-  execFileSync?: (
-    command: string,
-    args: string[],
-    options: { encoding: 'utf8' },
-  ) => string;
-}
-
-/** Resolves the pid of whatever process is actually LISTENING on `port` —
- * ported from scripts/lib/browser.js's getChromePid (`lsof -ti :<port>
- * -sTCP:LISTEN`). See the module doc comment for why this, not the spawned
- * child's pid, is the one that must be killed. */
-export function resolveListenerPid(
-  port: number,
-  deps: ProcessProbeDeps = {},
-): number | undefined {
-  const execFileSync =
-    deps.execFileSync ?? (nodeExecFileSync as ProcessProbeDeps['execFileSync']);
-  try {
-    const out = execFileSync?.('lsof', ['-ti', `:${port}`, '-sTCP:LISTEN'], {
-      encoding: 'utf8',
-    }).trim();
-    const pid = out?.split('\n')[0];
-    return pid ? Number(pid) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Parses `ps -o etime=` output, format `[[DD-]HH:]MM:SS` — ported 1:1 from
- * scripts/lib/browser.js's parseEtimeToMs. Pure, so it's tested directly
- * without shelling out. */
-export function parseEtimeToMs(etime: string): number {
-  let days = 0;
-  let rest = etime.trim();
-  if (rest.includes('-')) {
-    const [d, r] = rest.split('-');
-    days = Number(d);
-    rest = r ?? '';
-  }
-  const parts = rest.split(':').map(Number);
-  let h = 0;
-  let m = 0;
-  let s = 0;
-  if (parts.length === 3) {
-    h = parts[0] ?? 0;
-    m = parts[1] ?? 0;
-    s = parts[2] ?? 0;
-  } else if (parts.length === 2) {
-    m = parts[0] ?? 0;
-    s = parts[1] ?? 0;
-  } else if (parts.length === 1) {
-    s = parts[0] ?? 0;
-  }
-  return (((days * 24 + h) * 60 + m) * 60 + s) * 1000;
-}
-
-/** Age of a running process via `ps -o etime=` — ported from
- * scripts/lib/browser.js's getProcessAgeMs. Returns null if the pid can't be
- * inspected (already gone, ps unavailable, etc) rather than throwing —
- * callers treat null as "unknown age, don't recycle". */
-export function getProcessAgeMs(pid: number, deps: ProcessProbeDeps = {}): number | null {
-  const execFileSync =
-    deps.execFileSync ?? (nodeExecFileSync as ProcessProbeDeps['execFileSync']);
-  try {
-    const etime = execFileSync?.('ps', ['-o', 'etime=', '-p', String(pid)], {
-      encoding: 'utf8',
-    }).trim();
-    return etime ? parseEtimeToMs(etime) : null;
-  } catch {
-    return null;
-  }
 }
 
 /** A debug Chrome left alone across days just accumulates tabs/memory (live

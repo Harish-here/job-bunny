@@ -33,3 +33,57 @@ test('rejects missing connector and malformed schedule times', () => {
     PipelineConfigSchema.parse({ connector: 'notion', schedule: { times: ['25:00'] } }),
   );
 });
+
+test('schedule with only times gets enabled/weekdays/graceMinutes defaults', () => {
+  const cfg = PipelineConfigSchema.parse({
+    connector: 'notion',
+    schedule: { times: ['09:00'] },
+  });
+  assert.deepEqual(cfg.schedule, {
+    times: ['09:00'],
+    enabled: true,
+    weekdays: [1, 2, 3, 4, 5],
+    graceMinutes: 90,
+  });
+});
+
+test('schedule with explicit enabled/weekdays/graceMinutes preserves them', () => {
+  const cfg = PipelineConfigSchema.parse({
+    connector: 'notion',
+    schedule: {
+      times: ['09:00'],
+      enabled: false,
+      weekdays: [0, 6],
+      graceMinutes: 45,
+    },
+  });
+  assert.deepEqual(cfg.schedule, {
+    times: ['09:00'],
+    enabled: false,
+    weekdays: [0, 6],
+    graceMinutes: 45,
+  });
+});
+
+test('rejects an out-of-range weekday', () => {
+  assert.throws(() =>
+    PipelineConfigSchema.parse({
+      connector: 'notion',
+      schedule: { times: ['09:00'], weekdays: [7] },
+    }),
+  );
+});
+
+test('rejects a non-positive graceMinutes', () => {
+  assert.throws(() =>
+    PipelineConfigSchema.parse({
+      connector: 'notion',
+      schedule: { times: ['09:00'], graceMinutes: 0 },
+    }),
+  );
+});
+
+test('a config with no schedule key at all still parses fine', () => {
+  const cfg = PipelineConfigSchema.parse({ connector: 'notion' });
+  assert.equal(cfg.schedule, undefined);
+});
