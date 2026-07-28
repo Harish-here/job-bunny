@@ -1,11 +1,8 @@
 import { chromium } from 'playwright';
 import { sleep } from '../../../core/async/index.ts';
-import type {
-  BrowserHandle,
-  BrowserProvider,
-  PageHandle,
-} from '../../../ports/browser.ts';
+import type { BrowserHandle, BrowserProvider } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
+import { CdpChromeBrowserHandle } from './handles/index.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import {
   CHROME_MAX_AGE_MS,
@@ -22,11 +19,8 @@ import {
 
 /**
  * CdpChromeProvider — BrowserProvider implementation over a real, locally
- * spawned Chrome attached via CDP (playwright's connectOverCDP). Every
- * PageHandle method is deadline-bound: a hanging playwright call rejects at
- * opts.timeoutMs even if playwright itself never honors the abort signal
- * (2026-07-17 lesson — see src/pipeline/runner/guard.ts for the same race
- * pattern, replicated locally here since adapters must not import pipeline/).
+ * spawned Chrome attached via CDP (playwright's connectOverCDP). PageHandle's
+ * deadline-bound behavior lives in ./handles/page_handle.ts.
  *
  * Chrome lifecycle mirrors scripts/lib/browser.js's proven, hard-won
  * ensureChrome pattern, now sourced from a pid file rather than lsof/ps
@@ -45,19 +39,8 @@ import {
  *    spawn() returned — never re-resolved via an OS tool. close() kills
  *    exactly that pid (the one this run spawned, recorded at handle
  *    construction time), not a freshly re-resolved "whoever is listening
- *    on the port now".
- *  - NEVER call browser.close() on a CDP-attached connection (a
- *    live-incident lesson there: closing the Browser object over CDP can
- *    take the whole Chrome process down with it, an unreliable way to end a
- *    session) — release the playwright-side reference and separately kill
- *    the OS process by its recorded pid (killChrome), unless
- *    JOBBUNNY_KEEP_BROWSER=1.
- *  - close() only ever kills a Chrome process THIS run spawned (action
- *    launch, or recycle's kill-then-respawn). A reused instance (action
- *    reuse, or a stale-but-not-recycled one) is the user's own persistent
- *    session — close() drops the CDP connection reference and leaves it
- *    running (2026-07-25 incident: a reuse run's close() killed the user's
- *    logged-in Chrome mid-session).
+ *    on the port now" — see ./handles/browser_handle.ts's class doc for the
+ *    close()/ownsProcess rules this feeds.
  */
 
 /** Minimal playwright Page surface this adapter drives — narrow so fakes in
@@ -411,172 +394,4 @@ function raceWithTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
   return Promise.race([task, timeout]).finally(() => {
     clearTimeout(timer);
   });
-}
-
-class CdpChromeBrowserHandle implements BrowserHandle {
-  readonly cdpUrl: string;
-  private readonly browser: CdpBrowser;
-  private readonly ctx: RunContext;
-  /** The pid this run spawned (undefined when it merely attached to an
-   * already-running, unowned Chrome — ownsProcess is false in that case,
-   * so close() never reads this field). */
-  private readonly pid: number | undefined;
-  private readonly killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>;
-  private readonly killEnv: NodeJS.ProcessEnv | undefined;
-  private readonly userDataDir: string;
-  private readonly pidfileDeps: ChromePidfileDeps;
-  /** True only when THIS process spawned the Chrome instance behind this
-   * handle (launch, or recycle's kill-then-respawn) — false when it merely
-   * attached to one already running (reuse, or a recycle-eligible instance
-   * kept alive because recycleIfOld is false). close() must only ever kill
-   * a process this run is responsible for; killing a reused Chrome tore
-   * down the user's own logged-in session out from under them
-   * (2026-07-25 incident). */
-  private readonly ownsProcess: boolean;
-
-  constructor(
-    cdpUrl: string,
-    browser: CdpBrowser,
-    ctx: RunContext,
-    pid: number | undefined,
-    killChromeFn: NonNullable<CdpChromeProviderDeps['killChrome']>,
-    killEnv: NodeJS.ProcessEnv | undefined,
-    userDataDir: string,
-    pidfileDeps: ChromePidfileDeps,
-    ownsProcess: boolean,
-  ) {
-    this.cdpUrl = cdpUrl;
-    this.browser = browser;
-    this.ctx = ctx;
-    this.pid = pid;
-    this.killChromeFn = killChromeFn;
-    this.killEnv = killEnv;
-    this.userDataDir = userDataDir;
-    this.pidfileDeps = pidfileDeps;
-    this.ownsProcess = ownsProcess;
-  }
-
-  async newPage(): Promise<PageHandle> {
-    const page = await this.openPage();
-    return new CdpChromePageHandle(page, this.ctx);
-  }
-
-  /** Pages MUST open in the persistent context, mirroring v0
-   * (`scripts/lib/browser.js:180` — `browser.contexts()[0] || newContext()`).
-   * playwright's `browser.newPage()` is shorthand for `newContext()` +
-   * `newPage()`, i.e. a FRESH, cookie-less context. Using it over
-   * `connectOverCDP` opened every page logged OUT even though the attached
-   * Chrome profile held a valid session — LinkedIn answered every url with
-   * its logout wall (observed 2026-07-25). */
-  private async openPage(): Promise<CdpPage> {
-    const existing = this.browser.contexts?.()[0];
-    if (existing) return existing.newPage();
-    if (this.browser.newContext) {
-      const created = await this.browser.newContext();
-      return created.newPage();
-    }
-    return this.browser.newPage();
-  }
-
-  async close(): Promise<void> {
-    // Deliberately NOT calling browser.close() here — see the class-level
-    // doc comment / scripts/lib/browser.js's disconnect() for why. Only the
-    // OS-level process kill actually ends the session.
-    //
-    // This handle didn't spawn Chrome (reuse, or a stale-but-kept instance)
-    // — it's the user's own long-running session, so close() only drops
-    // the CDP connection reference and leaves the OS process alone.
-    if (!this.ownsProcess) return;
-
-    await this.killChromeFn(this.pid, {
-      env: this.killEnv,
-      userDataDir: this.userDataDir,
-      pidfileDeps: this.pidfileDeps,
-    });
-  }
-}
-
-class CdpChromePageHandle implements PageHandle {
-  private readonly page: CdpPage;
-  private readonly ctx: RunContext;
-
-  constructor(page: CdpPage, ctx: RunContext) {
-    this.page = page;
-    this.ctx = ctx;
-  }
-
-  async goto(url: string, opts: { timeoutMs: number }): Promise<void> {
-    await withDeadline(
-      this.page.goto(url, { timeout: opts.timeoutMs }),
-      this.ctx,
-      opts.timeoutMs,
-      `goto(${url})`,
-    );
-  }
-
-  async evaluate<T>(fn: string, opts: { timeoutMs: number }): Promise<T> {
-    return withDeadline(this.page.evaluate<T>(fn), this.ctx, opts.timeoutMs, 'evaluate');
-  }
-
-  async click(selector: string, opts: { timeoutMs: number }): Promise<void> {
-    await withDeadline(
-      this.page.click(selector, { timeout: opts.timeoutMs }),
-      this.ctx,
-      opts.timeoutMs,
-      `click(${selector})`,
-    );
-  }
-
-  async waitFor(selector: string, opts: { timeoutMs: number }): Promise<void> {
-    await withDeadline(
-      this.page.waitForSelector(selector, { timeout: opts.timeoutMs }),
-      this.ctx,
-      opts.timeoutMs,
-      `waitFor(${selector})`,
-    );
-  }
-
-  async content(opts: { timeoutMs: number }): Promise<string> {
-    return withDeadline(this.page.content(), this.ctx, opts.timeoutMs, 'content');
-  }
-
-  async close(): Promise<void> {
-    await this.page.close();
-  }
-}
-
-/**
- * Races an in-flight playwright call against a deadline derived from
- * AbortSignal.any([ctx.signal, AbortSignal.timeout(timeoutMs)]) — same
- * race-a-promise-against-an-abort-listener pattern as
- * src/pipeline/runner/guard.ts's runOneAttempt, replicated locally since
- * adapters must not import pipeline/. Guarantees a hanging playwright call
- * rejects at ~timeoutMs even though playwright itself doesn't accept an
- * AbortSignal.
- */
-function withDeadline<T>(
-  task: Promise<T>,
-  ctx: RunContext,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  const deadlineSignal = AbortSignal.any([ctx.signal, AbortSignal.timeout(timeoutMs)]);
-
-  let onAbort: () => void = () => {};
-  const abortPromise = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(toAbortError(deadlineSignal, label));
-    if (deadlineSignal.aborted) {
-      onAbort();
-      return;
-    }
-    deadlineSignal.addEventListener('abort', onAbort, { once: true });
-  });
-
-  return Promise.race([task, abortPromise]).finally(() => {
-    deadlineSignal.removeEventListener('abort', onAbort);
-  });
-}
-
-function toAbortError(signal: AbortSignal, label: string): Error {
-  return new Error(`${label} timed out`, { cause: signal.reason });
 }
