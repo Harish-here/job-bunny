@@ -2810,3 +2810,106 @@ test('no trip: 3 consecutive JD-open failures whose jdRoot is present AND still 
   assert.ok(result.jobs.some((j) => j.identity.id === 'li-7200'));
 });
 
+test('half-open: a successful probe records its own UrlStat, so a single-url fire whose remaining cards all fail still returns the probe capture instead of throwing', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // One url, three cards: the probe opens card 1 (the only one with
+  // scripted text); the main loop then attempts cards 2-3 and both fail
+  // with no jdRoot at all (neutral, so nothing trips).
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/7301/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/7302/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Initech',
+      location: 'Remote',
+      href: '/jobs/view/7303/',
+    },
+  ]);
+  script.jdTextByUrl.set(
+    'https://www.linkedin.com/jobs/view/7301/',
+    'JD text — recovered by the probe',
+  );
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  // Without the probe's UrlStat the only stat on record is URL_1's, which
+  // failed every card it attempted — so the all-urls-failed guard would
+  // throw away a fire that demonstrably captured a JD.
+  const result = await lane.source(fakeCtx());
+
+  assert.equal(result.skipped, undefined);
+  assert.deepEqual(
+    result.jobs.map((j) => j.identity.id),
+    ['li-7301'],
+  );
+  assert.equal(fs.current(), undefined, 'a recovered probe closes the breaker');
+});
+
+test('half-open: a probe re-opening a card an earlier same-day fire already captured does NOT append it twice', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedTrivialUrl(script, URL_1, '7401');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  // The earlier fire's flushed capture — CaptureStore seeds itself from
+  // this file, and the probe always re-opens the first card of the first
+  // url, i.e. exactly this job.
+  storage.set(CAPTURE_PATH, [fakeCapturedJD('li-7401')]);
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  // Exactly once: a duplicate here costs a compress `duplicate-id` drop
+  // and one wasted LLM row on every recovery.
+  assert.deepEqual(
+    result.jobs.map((j) => j.identity.id),
+    ['li-7401'],
+  );
+  const persisted = storage.get(CAPTURE_PATH) as JD[];
+  assert.equal(persisted.length, 1);
+});
+

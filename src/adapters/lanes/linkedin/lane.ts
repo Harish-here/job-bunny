@@ -102,9 +102,11 @@ const JD_ROOT_PRESENCE_TIMEOUT_MS = 5_000;
 
 /** What one half-open probe concluded (spec §4.5 step 3). `inconclusive`
  * deliberately carries its message so the skipped reason can name the real
- * failure instead of implying the session is still blocked. */
+ * failure instead of implying the session is still blocked. `ok` carries
+ * the probed `url` as well as the JD: a successful probe is a real attempt
+ * against a real url and gets its own `UrlStat` back in `source()`. */
 type ProbeOutcome =
-  | { result: 'ok'; jd: JD; cardId: string }
+  | { result: 'ok'; jd: JD; cardId: string; url: string }
   | { result: 'shell' }
   | { result: 'inconclusive'; message: string };
 
@@ -451,7 +453,7 @@ export class LinkedInLane implements FarmingLane {
         },
         content: { rawText: text },
       });
-      return { result: 'ok', jd, cardId: card.id };
+      return { result: 'ok', jd, cardId: card.id, url };
     } catch (err) {
       return {
         result: 'inconclusive',
@@ -628,14 +630,43 @@ export class LinkedInLane implements FarmingLane {
         // this same fire (D8) — the probe's own capture counts, and its
         // card id joins processedIds so the main loop does not re-open it.
         closeBreaker(userDataDir, deps);
-        await captureStore.append(this.storage, probe.jd);
+        // Dedupe before appending: the probe always re-opens the FIRST
+        // gate-passing card of the first url, which an earlier same-day
+        // fire may already have flushed to captures.json (CaptureStore
+        // seeds itself from it). Appending it again would cost a
+        // compress `duplicate-id` drop and one wasted LLM row on every
+        // single recovery.
+        if (!captureStore.all().some((j) => j.identity.id === probe.cardId)) {
+          await captureStore.append(this.storage, probe.jd);
+        }
+        // Unconditional, unlike the append above: captured now or captured
+        // earlier today, the main loop must not spend a second JD open on
+        // this card.
         processedIds.add(probe.cardId);
+        // A successful probe IS an attempted url, so it gets a UrlStat like
+        // any other attempt. Without one, the aggregates below undercount
+        // the probe's card and capture by one, and — on a single-url
+        // profile whose main-loop cards then all fail — the
+        // all-urls-failed guard throws away a fire that demonstrably DID
+        // capture a JD.
+        stats.push({
+          url: probe.url,
+          cardsAttempted: 1,
+          captured: 1,
+          // Not tracked for the probe: `runProbe` reads only openJd's text,
+          // and one probe is far too thin a sample to raise the
+          // "the anchor fallback is carrying this run" warning on.
+          anchorExtractions: 0,
+          failed: false,
+          failures: [],
+        });
         // The probe just navigated and JD-opened against the very url the
-        // main loop is about to request again (it deliberately populates no
-        // UrlStat, so that re-navigation is by design). Marking the fire as
-        // having attempted a url makes the loop pace that repeat like any
-        // other — otherwise recovery, the moment LinkedIn is most watchful,
-        // would open the same url twice back-to-back with no gap at all.
+        // main loop is about to request again (that re-navigation is by
+        // design — the probe reads one card, the loop reads the rest).
+        // Marking the fire as having attempted a url makes the loop pace
+        // that repeat like any other — otherwise recovery, the moment
+        // LinkedIn is most watchful, would open the same url twice
+        // back-to-back with no gap at all.
         attemptedAnyUrl = true;
         ctx.logger.info(
           'linkedin lane: half-open probe returned real JD text — breaker closed, continuing this fire',
