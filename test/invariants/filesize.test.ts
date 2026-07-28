@@ -21,7 +21,7 @@ const PINS = new Map<string, number>([
   // (lane_features.test.ts, pacing/pagination.test.ts, pacing/pacing.test.ts,
   // search_urls.test.ts, lane_breaker.test.ts) — this pin is removed
   // entirely once the file lands under the 800-line cap.
-  ['src/adapters/lanes/linkedin/lane.test.ts', 2246],
+  ['src/adapters/lanes/linkedin/lane.test.ts', 1742],
   ['src/cli/wire.ts', 772],
   ['src/cli/wire.test.ts', 882],
   ['src/cli/commands/release.ts', 705],
