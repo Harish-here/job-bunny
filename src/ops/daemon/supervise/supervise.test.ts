@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type { OwedRun } from '../../../core/schedule/index.ts';
 import type { LogDeps } from '../logs/index.ts';
@@ -9,6 +10,7 @@ import { BACKSTOP_MARGIN_MS, createSpawnRun, SIGKILL_GRACE_MS } from './supervis
 
 const ROOT = '/fake/root';
 const HOME = '/fake/home';
+const RUNS_LOG_PATH = join(HOME, '.jobbunny', 'logs', 'runs.log');
 const OWED: OwedRun = { profile: 'harish', date: '2026-07-27', slot: '14:00' };
 
 function fakePidfileDeps(): DaemonPidfileDeps {
@@ -153,8 +155,8 @@ test('rotates runs.log (size check) then spawns, then closes its own fd copy, in
   child.emit('exit', 0);
   await promise;
   assert.deepEqual(calls, [
-    'stat:/fake/home/.jobbunny/logs/runs.log',
-    'open:/fake/home/.jobbunny/logs/runs.log:a',
+    `stat:${RUNS_LOG_PATH}`,
+    `open:${RUNS_LOG_PATH}:a`,
     'spawn',
     'close:42',
   ]);
