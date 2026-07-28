@@ -807,8 +807,9 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
   // throttle guard rests on. This pins the composition itself, through the
   // real `wire()` path, using four deliberately distinct configured values
   // (a transposition of any pair changes at least one assertion below).
-  // `lane.pacing` is the lane's own read-only surface for exactly this —
-  // no adapter is imported here (`only-wire-imports-adapters`).
+  // Read via a structural cast on the four private fields (same precedent
+  // as `ctx.storage as unknown as { rootDir }` above) — no adapter type is
+  // imported here (`only-wire-imports-adapters`).
   const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-pacing-'));
   try {
     const inventoryDir = join(
@@ -855,20 +856,26 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
 
     const lane = result.ctx.ports.lanes.find((l) => l.name === 'linkedin');
     assert.ok(lane);
-    const { pacing } = lane as unknown as {
-      pacing: {
-        jitterMinMs: number;
-        jitterMaxMs: number;
-        interUrlDelayMinMs: number;
-        interUrlDelayMaxMs: number;
-      };
+    const pacing = lane as unknown as {
+      jitterMinMs: number;
+      jitterMaxMs: number;
+      interUrlDelayMinMs: number;
+      interUrlDelayMaxMs: number;
     };
-    assert.deepEqual(pacing, {
-      jitterMinMs: 1_001,
-      jitterMaxMs: 2_002,
-      interUrlDelayMinMs: 3_003,
-      interUrlDelayMaxMs: 4_004,
-    });
+    assert.deepEqual(
+      {
+        jitterMinMs: pacing.jitterMinMs,
+        jitterMaxMs: pacing.jitterMaxMs,
+        interUrlDelayMinMs: pacing.interUrlDelayMinMs,
+        interUrlDelayMaxMs: pacing.interUrlDelayMaxMs,
+      },
+      {
+        jitterMinMs: 1_001,
+        jitterMaxMs: 2_002,
+        interUrlDelayMinMs: 3_003,
+        interUrlDelayMaxMs: 4_004,
+      },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

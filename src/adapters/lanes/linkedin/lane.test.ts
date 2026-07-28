@@ -2913,7 +2913,7 @@ test('half-open: a probe re-opening a card an earlier same-day fire already capt
   assert.equal(persisted.length, 1);
 });
 
-test('pacing: the constructor puts each pacing argument in its own slot (no transposition), readable via lane.pacing', async () => {
+test('pacing: the constructor puts each pacing argument in its own slot (no transposition), read via a structural cast on the four private fields', async () => {
   const inv = await singlePageInventory();
   const provider = new FakeBrowserProvider(newScript());
 
@@ -2933,10 +2933,24 @@ test('pacing: the constructor puts each pacing argument in its own slot (no tran
     4_004,
   );
 
-  assert.deepEqual(lane.pacing, {
-    jitterMinMs: 1_001,
-    jitterMaxMs: 2_002,
-    interUrlDelayMinMs: 3_003,
-    interUrlDelayMaxMs: 4_004,
-  });
+  const pacing = lane as unknown as {
+    jitterMinMs: number;
+    jitterMaxMs: number;
+    interUrlDelayMinMs: number;
+    interUrlDelayMaxMs: number;
+  };
+  assert.deepEqual(
+    {
+      jitterMinMs: pacing.jitterMinMs,
+      jitterMaxMs: pacing.jitterMaxMs,
+      interUrlDelayMinMs: pacing.interUrlDelayMinMs,
+      interUrlDelayMaxMs: pacing.interUrlDelayMaxMs,
+    },
+    {
+      jitterMinMs: 1_001,
+      jitterMaxMs: 2_002,
+      interUrlDelayMinMs: 3_003,
+      interUrlDelayMaxMs: 4_004,
+    },
+  );
 });
