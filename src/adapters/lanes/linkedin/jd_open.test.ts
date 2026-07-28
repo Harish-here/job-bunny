@@ -8,7 +8,7 @@ import type { PageHandle } from '../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { buildJdAnchorScript, openJd } from './jd_open.ts';
+import { buildJdAnchorScript, buildJdRootPresenceScript, openJd } from './jd_open.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -435,4 +435,44 @@ test('buildJdAnchorScript honors a custom anchor phrase and minimum length', asy
   });
 
   assert.equal(result, match);
+});
+
+// --- buildJdRootPresenceScript, evaluated over a fake `document` via node:vm ---
+
+/** Fake `document` whose querySelector matches `selector` and nothing else.
+ * The returned element deliberately has NO text — the whole point of the
+ * presence script is that a matched-but-empty jdRoot (the server-withheld
+ * shell, spec §1) is distinguishable from no match at all. */
+function fakePresenceDocument(selector: string | null): unknown {
+  return {
+    querySelector(s: string) {
+      return selector !== null && s === selector ? { textContent: '' } : null;
+    },
+  };
+}
+
+test("buildJdRootPresenceScript returns '1' for a matched element even when it holds no text (the shell signature)", async () => {
+  const selector = '[componentkey^="JobDetails_AboutTheJob"]';
+  const document = fakePresenceDocument(selector);
+
+  const result = await vm.runInNewContext(buildJdRootPresenceScript(selector), {
+    document,
+  });
+
+  assert.equal(result, '1');
+});
+
+test("buildJdRootPresenceScript returns '' when the selector matches nothing (selector drift, not a throttle)", async () => {
+  const document = fakePresenceDocument(null);
+
+  const result = await vm.runInNewContext(
+    buildJdRootPresenceScript('[componentkey^="JobDetails_AboutTheJob"]'),
+    { document },
+  );
+
+  assert.equal(result, '');
+});
+
+test('buildJdRootPresenceScript carries the jd-root-presence marker token so a fake page can route it', () => {
+  assert.match(buildJdRootPresenceScript('#x'), /jd-root-presence/);
 });

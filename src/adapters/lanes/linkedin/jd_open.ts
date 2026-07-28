@@ -116,6 +116,31 @@ export function buildJdAnchorScript(
 })()`;
 }
 
+/** In-page presence check for jdRoot, returning `'1'` when the selector
+ * matches ANY element and `''` when it matches none — deliberately
+ * ignoring the element's text.
+ *
+ * This exists because `buildJdTextScript` above cannot answer the question
+ * the throttle guard needs: it returns `''` both for "jdRoot matched
+ * nothing" (selector drift) and for "jdRoot matched an element whose text
+ * is empty" (the server-withheld skeleton shell LinkedIn serves to a
+ * soft-blocked session — spec §1/§4.3). Those two are different failures
+ * with opposite fixes (regenerate the inventory vs. back off), so the lane
+ * runs this script after a failed JD open to tell them apart.
+ *
+ * The `jd-root-presence` comment token is load-bearing: lane.test.ts's
+ * single fake `evaluate` routes scripts by inspecting their source (the
+ * same trick that routes the harvest script by its `cardListSel`
+ * declaration), so this script must stay identifiable. Exported for direct
+ * vm-based testing, same pattern as buildJdAnchorScript. */
+export function buildJdRootPresenceScript(jdRootSelector: string): string {
+  return `(() => {
+  // jd-root-presence
+  const el = document.querySelector(${JSON.stringify(jdRootSelector)});
+  return el ? '1' : '';
+})()`;
+}
+
 export interface JdOpenResult {
   text: string;
   /** Which extraction path produced the text — the configured jdRoot
