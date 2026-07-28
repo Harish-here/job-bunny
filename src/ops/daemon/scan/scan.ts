@@ -57,7 +57,7 @@ export function scanProfileSchedules(
     if (!result.success) continue; // invalid config — fail-soft, skip this profile.
 
     const schedule = result.data.schedule;
-    if (!schedule || !schedule.enabled) continue;
+    if (!schedule?.enabled) continue;
 
     schedules.push({
       profile: name,
