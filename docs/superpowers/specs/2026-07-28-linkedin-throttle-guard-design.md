@@ -41,7 +41,7 @@ Contributing volume, for context: 21 saved-search URLs × 5 daily fires ≈ **10
 
 - **URL rotation.** Visiting a subset of saved searches per fire on rotation was considered and rejected for this spec — it needs rotation state and changes coverage semantics. Revisit only if pacing plus the breaker prove insufficient.
 - **Changing the fire schedule.** `schedule.times` stays a user decision in `profile.json`, untouched by this design.
-- **New profile-level configuration.** See D3 — the knobs are lane constants, not `profile.json` surface.
+- **A new profile-level configuration *surface*.** See D3 — pacing extends the `settings.linkedin` keys that already exist; the breaker's thresholds stay lane constants. No new settings block is invented.
 - **Page-inventory regeneration.** The selectors are correct (§1); this design must not touch `page_inventory/*.json`.
 - **Any change to the ATS lanes, `source`, or `sync`.** A skipped LinkedIn lane leaves the rest of the pipeline running normally.
 - **Raising `farm.timeoutMs`.** The new pacing must fit the existing 90-minute budget (D2).
@@ -52,7 +52,7 @@ Contributing volume, for context: 21 saved-search URLs × 5 daily fires ≈ **10
 |---|---|---|---|
 | D1 | Levers | Slow the cadence **and** add a circuit breaker. Not URL rotation, not schedule changes. | Pacing alone cannot help once a block is active; a breaker alone leaves the burst pattern that likely triggered it. The two are complementary — one lowers the trigger probability, the other bounds the damage. |
 | D2 | Cadence | Per-navigation jitter **5–12s** (from 2–5s); new **20–45s** pause between saved-search URLs. Target ≈25 min farm runtime. | Today's fire is ~10 min of a 90-min budget (11% utilized) at ~1 navigation/12s. The moderate tier lands ~25 min — still 3.5× inside the budget, so `farm.timeoutMs` and its `STAGE_BUDGETS` mirror are both untouched. The conservative tier (~50 min) was rejected: a heavy JD-open day could approach the timeout and force changing both. |
-| D3 | Config home | Lane-owned **constants** in the lane module, with the existing constructor-param seam kept for tests. **No `profile.json` surface, no `behaviors` key.** | A throttle is a property of the shared `.chrome-debug` session, not of a profile: per-profile config would let two profiles disagree about how fast one session may be touched. `behaviors` was rejected because there are two inventories (`jobs-search`, `jobs-search-results`) — pacing would be duplicated and could drift — and because `/page-analyse` rewrites that file. Jitter has lived as a lane constant for months with no one needing to tune it per profile; adding surface now is unearned. |
+| D3 | Config home | **Pacing** values extend the **existing** `settings.linkedin` zod schema in `cli/wire.ts`: raise the two `jitterMinMs`/`jitterMaxMs` defaults and add `interUrlDelayMinMs`/`interUrlDelayMaxMs` alongside them, keeping the lane's constructor-param seam. The **breaker's own thresholds** (consecutive-shells-to-trip, cooldown) stay lane-module constants. **No `behaviors` key.** | Corrects this row's first draft, which assumed no `profile.json` surface existed: `cli/wire.ts` already defines `DEFAULT_JITTER_MIN_MS`/`DEFAULT_JITTER_MAX_MS` and a zod-validated `settings.linkedin` surface exposing `jitterMinMs`/`jitterMaxMs` (`resolveJitterRange`). Deleting a live, validated surface to satisfy a "lane constants only" rule would be a gratuitous breaking change for any `profile.json` already carrying those keys, so pacing extends it instead. The breaker's thresholds do **not** get that treatment: they describe the shared `.chrome-debug` session, not a profile, and per-profile values would let two profiles disagree about how long one blocked session must rest. `behaviors` was rejected because there are two inventories (`jobs-search`, `jobs-search-results`) — pacing would be duplicated and could drift — and because `/page-analyse` rewrites that file. |
 | D4 | Detection signal | **`jdRoot` matched but `textContent.trim().length === 0`** — the server-withheld shell. Distinct from `jdRoot` not found, which stays the genuine selector-drift signal. | This is the exact observed signature (§1) and it is what separates a throttle from DOM drift. Conflating the two is precisely the misdiagnosis this spec exists to fix. |
 | D5 | Trip threshold | **3 consecutive** shell outcomes. A real-text outcome resets the counter. | One or two empty JDs happen for benign reasons (a pulled posting, a slow pane). Three in a row is the block. Consecutive rather than cumulative so a mostly-healthy fire is never tripped by scattered failures. |
 | D6 | Trip action | Stop farming immediately, **keep everything already captured**, write the breaker open. The fire returns normally (it did attempt work). | Discarding a partial harvest punishes the run for a condition it detected correctly. The existing outage-guard and prior-capture rules then apply unchanged to that partial harvest. |
@@ -79,7 +79,7 @@ Each unit is independently testable: the classifier with plain data, the store w
 
 ### 4.2 Pacing
 
-Existing constants change; one pair is added. All keep the constructor-param seam so tests inject `0` and `wire.ts` needs no new plumbing.
+Existing `cli/wire.ts` defaults change; one pair is added there and threaded into the lane. All keep the constructor-param seam, whose in-lane default stays a no-op `0` so existing tests inject nothing (D3).
 
 | Constant | Today | New |
 |---|---|---|
@@ -101,6 +101,8 @@ Pure function over the per-card JD outcomes the lane already produces. One outco
 - `ok` — real text
 
 The classifier tracks consecutive `shell` outcomes; `ok` resets the counter to zero, `missing` does **not** count toward a trip. At `THROTTLE_CONSECUTIVE_SHELLS_TO_TRIP = 3` (D5) it reports tripped.
+
+Note that the `shell`-vs-`missing` distinction **does not exist in today's code** and has to be built: `jd_open.ts`'s `buildJdTextScript` returns `''` both when `jdRoot` matched nothing and when it matched an empty element, so the lane currently cannot tell the two apart — a separate in-page presence check is required.
 
 ### 4.4 Breaker store
 
@@ -169,5 +171,5 @@ Hermetic throughout — no real browser, network, filesystem, or clock (repo har
 | Every fire now takes ~25 min instead of ~10, throttled or not. | Still 3.5× inside the farm budget, and slots are 150 min apart. Wall-clock is the cheapest thing this pipeline can spend. |
 | A 4-hour cooldown can skip 1–2 slots after a false trip. | Three consecutive shells is a strong signal, and the half-open probe recovers automatically at the next fire past the window — worst case ~4h of LinkedIn freshness on a rare false positive, while the ATS lanes keep running. |
 | The breaker cannot distinguish a session-wide block from LinkedIn being globally down. | Both call for the same action (stop, wait, probe), so the distinction has no behavioral consequence. |
-| Pacing constants are not runtime-tunable without a code change (D3). | Deliberate: they have been constants for months, and the alternative homes are each incoherent for a session-scoped property. If per-profile tuning ever becomes a real need, `settings.linkedin` remains available as an additive change. |
+| The breaker's thresholds are not runtime-tunable without a code change (D3), even though pacing is. | Deliberate: the alternative homes are each incoherent for a session-scoped property, and nobody has needed to tune a cooldown per profile. Pacing gets the surface only because it already had one. |
 | Session-scoped state means one profile's trip pauses LinkedIn for all profiles. | Correct by construction — they share the session that is blocked. Today only one profile is enabled. |
