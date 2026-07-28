@@ -2206,6 +2206,59 @@ test('open breaker: the lane returns skipped with a reopen time and NEVER launch
   assert.deepEqual(fs.unlinks, []);
 });
 
+test('corrupt breaker state: the lane warns that the guard is disabled this fire and farms normally (spec §5 row 1)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(undefined, NOW);
+  // A file that exists but holds garbage — the case that used to disable
+  // the whole guard with nothing in the log to show for it.
+  const deps: LinkedinBreakerDeps = {
+    ...fs.deps,
+    existsSync: () => true,
+    readFileSync: () => '{not json',
+  };
+  const warnings: unknown[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      warn(msg, data) {
+        warnings.push({ msg, data });
+      },
+    },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps },
+  );
+
+  const result = await lane.source(ctx);
+
+  const warned = warnings.find((w) =>
+    (w as { msg: string }).msg.includes('breaker state unreadable'),
+  ) as { data: { detail: string } } | undefined;
+  assert.ok(warned, 'a silently-disabled guard must announce itself');
+  assert.match(warned.data.detail, /jobbunny-linkedin-breaker\.json/);
+  // Unreadable reads as CLOSED, never as blocked (D12): the fire runs in
+  // full rather than being skipped by a file nobody can parse.
+  assert.equal(result.skipped, undefined);
+  assert.equal(result.jobs.length, 4);
+});
+
 test('half-open: a probe returning real text deletes the breaker file and the fire proceeds normally', async () => {
   const inv = await singlePageInventory();
   const script = newScript();
@@ -2237,6 +2290,45 @@ test('half-open: a probe returning real text deletes the breaker file and the fi
   assert.equal(fs.unlinks.length, 1);
   // The whole fire ran: the happy-path fixture's 4 JD-opens all landed.
   assert.equal(result.jobs.length, 4);
+});
+
+test('half-open: after a successful probe the first main-loop url is paced like any other (the probe already spent a request on it)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedHappyPathScript(script);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0, // jitter off, so sleepCalls records inter-url pauses only
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+    20_000,
+    45_000,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.equal(result.skipped, undefined);
+  // Three navigations happen this fire — probe(URL_1), URL_1, URL_2 — and
+  // the probe is deliberately unpaced, so a pause must precede BOTH
+  // main-loop urls. Without the probe marking the fire as started, URL_1
+  // would follow the probe's own request to the same url instantly, which
+  // is the one moment (recovery from a block) that burst looks worst.
+  assert.equal(sleepCalls.length, 2);
+  for (const ms of sleepCalls) {
+    assert.equal(ms, 20_000 + Math.floor(0.5 * (45_000 - 20_000)));
+  }
 });
 
 test('half-open: a probe returning a shell re-opens the breaker and ends the fire after ONE JD-open', async () => {
@@ -2401,6 +2493,73 @@ test('trip: 3 consecutive shells mid-fire open the breaker, stop the remaining u
   // The interrupted url is NOT marked done — the next fire must retry it.
   const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.equal(Object.hasOwn(persisted.done, URL_1), false);
+});
+
+test('trip: a fire that trips before capturing anything still writes the breaker, and the pre-existing all-urls-failed guard still throws (spec §4.5 step 6)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // Every card on URL_1 is a shell: the counter trips on card 3 with zero
+  // captures to keep.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/6701/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/6702/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Initech',
+      location: 'Remote',
+      href: '/jobs/view/6703/',
+    },
+  ]);
+  for (const id of ['6701', '6702', '6703']) {
+    script.jdShellUrls.add(`https://www.linkedin.com/jobs/view/${id}/`);
+  }
+  seedTrivialUrl(script, URL_2, '6800');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(undefined, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  // Pinned deliberately rather than left unknown: with nothing captured,
+  // the trip leaves the fire in exactly the shape the pre-existing
+  // all-urls-failed guard is built to shout about, and spec §4.5 step 6
+  // keeps those rules applying unchanged. So this run DOES fail loud — the
+  // throttle guard changes what the next fire does, not whether this one
+  // reports an outage it genuinely had.
+  await assert.rejects(() => lane.source(fakeCtx()), /all 1 attempted url\(s\) failed/);
+
+  // The breaker must have been written BEFORE that throw — otherwise the
+  // next fire would relearn the block the expensive way instead of
+  // skipping cheaply, which is the entire point of the guard.
+  const state = fs.current();
+  assert.equal(state?.openedAt, NOW.toISOString());
+  assert.equal(state?.tripCount, 1);
+  // And it stopped early all the same: URL_2 was never opened.
+  assert.equal(provider.handle?.pages.length, 1);
 });
 
 test('trip: an ok between shells resets the streak — a mostly-healthy fire never trips', async () => {

@@ -113,6 +113,86 @@ test('readBreaker: an unreadable file (EACCES) -> undefined, never throws', () =
   assert.equal(readBreaker(USER_DATA_DIR, deps), undefined);
 });
 
+// onCorrupt exists so a silently-disabled guard is distinguishable from
+// "no breaker yet" (spec §5 row 1). Both halves matter: firing on a
+// missing file would cry wolf on every healthy first fire, which is
+// exactly how a real warning gets tuned out.
+test('readBreaker: onCorrupt fires with a reason for a file that exists but is unusable', () => {
+  const cases: Array<{ name: string; raw: string }> = [
+    { name: 'unparseable JSON', raw: '{not json' },
+    {
+      name: 'wrong shape',
+      raw: JSON.stringify({ openedAt: '2026-07-28T09:00:00.000Z', tripCount: 'two' }),
+    },
+    { name: 'valid JSON but not an object', raw: '"just a string"' },
+  ];
+  for (const { name, raw } of cases) {
+    const details: string[] = [];
+    assert.equal(
+      readBreaker(USER_DATA_DIR, storedDeps(raw), (detail) => details.push(detail)),
+      undefined,
+      name,
+    );
+    assert.equal(details.length, 1, name);
+    // The detail must name the offending file — a warning that doesn't say
+    // what to go delete is not actionable.
+    assert.match(details[0] ?? '', /jobbunny-linkedin-breaker\.json/, name);
+  }
+});
+
+test('readBreaker: onCorrupt fires for an existing-but-unreadable file (EACCES), carrying the fs message', () => {
+  const details: string[] = [];
+  const deps = fakeDeps({
+    existsSync: () => true,
+    readFileSync: () => {
+      throw new Error('EACCES: permission denied');
+    },
+  });
+
+  assert.equal(
+    readBreaker(USER_DATA_DIR, deps, (detail) => details.push(detail)),
+    undefined,
+  );
+  assert.equal(details.length, 1);
+  assert.match(details[0] ?? '', /EACCES: permission denied/);
+});
+
+test('readBreaker: onCorrupt does NOT fire when there is simply no file', () => {
+  const details: string[] = [];
+
+  assert.equal(
+    readBreaker(USER_DATA_DIR, fakeDeps(), (detail) => details.push(detail)),
+    undefined,
+  );
+  assert.deepEqual(details, []);
+});
+
+test('readBreaker: onCorrupt does NOT fire for a well-formed file', () => {
+  const details: string[] = [];
+  const raw = JSON.stringify({ openedAt: '2026-07-28T09:00:00.000Z', tripCount: 1 });
+
+  assert.deepEqual(
+    readBreaker(USER_DATA_DIR, storedDeps(raw), (detail) => details.push(detail)),
+    { openedAt: '2026-07-28T09:00:00.000Z', tripCount: 1 },
+  );
+  assert.deepEqual(details, []);
+});
+
+test('readBreaker: an existsSync that itself throws is silent — it is not evidence of corruption', () => {
+  const details: string[] = [];
+  const deps = fakeDeps({
+    existsSync: () => {
+      throw new Error('EIO: i/o error');
+    },
+  });
+
+  assert.equal(
+    readBreaker(USER_DATA_DIR, deps, (detail) => details.push(detail)),
+    undefined,
+  );
+  assert.deepEqual(details, []);
+});
+
 // --- breakerPhase ---
 
 function stateOpenedAt(iso: string): LinkedinBreakerState {

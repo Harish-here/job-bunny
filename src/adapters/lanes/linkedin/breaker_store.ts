@@ -68,6 +68,16 @@ function isBreakerShape(value: unknown): value is LinkedinBreakerState {
  * wrong-shaped file is `undefined` — which `breakerPhase` turns into
  * `closed`, i.e. farm normally (D12).
  *
+ * `onCorrupt` fires ONLY when a file that EXISTS could not be turned into
+ * usable state (unreadable, unparseable, or wrong-shaped), never for the
+ * ordinary no-file case (spec §5 row 1: "treated as closed; warn logged").
+ * Without it, "no breaker" and "the guard is silently disabled because its
+ * state file is garbage" are indistinguishable to the caller — the lane
+ * would keep farming into a block with nothing in the log to say why the
+ * guard never fired. It is a callback rather than a returned discriminator
+ * so the store keeps its "always degrade to undefined" signature and the
+ * lane keeps ownership of how it reports (ctx.logger).
+ *
  * Unlike the Chrome pid file this never self-heals by deleting a bad file:
  * deleting is a write, writes can fail, and a corrupt breaker file is
  * already harmless (it reads as closed). Leaving it in place also leaves
@@ -76,15 +86,27 @@ function isBreakerShape(value: unknown): value is LinkedinBreakerState {
 export function readBreaker(
   userDataDir: string,
   deps: LinkedinBreakerDeps,
+  onCorrupt?: (detail: string) => void,
 ): LinkedinBreakerState | undefined {
+  const path = linkedinBreakerPath(userDataDir);
   try {
-    const path = linkedinBreakerPath(userDataDir);
+    // Deliberately outside the reporting try below: an existsSync that
+    // throws cannot tell us whether a file is even there, so it is not
+    // evidence of corruption and must stay silent.
     if (!deps.existsSync(path)) return undefined;
-    const parsed: unknown = JSON.parse(deps.readFileSync(path));
-    return isBreakerShape(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
+  try {
+    const parsed: unknown = JSON.parse(deps.readFileSync(path));
+    if (isBreakerShape(parsed)) return parsed;
+    onCorrupt?.(`${path} does not hold a valid breaker state object`);
+  } catch (err) {
+    onCorrupt?.(
+      `${path} could not be read or parsed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return undefined;
 }
 
 /** Phase for `state` at `now` (spec §4.4). A missing state, or one whose

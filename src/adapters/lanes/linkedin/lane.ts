@@ -468,7 +468,16 @@ export class LinkedInLane implements FarmingLane {
     // LinkedIn is the only browser lane in farm, so this is also what stops
     // Chrome from being launched at all.
     const breakerState = this.breaker
-      ? readBreaker(this.breaker.userDataDir, this.breaker.deps)
+      ? readBreaker(this.breaker.userDataDir, this.breaker.deps, (detail) =>
+          // Corrupt state reads as `closed`, i.e. this fire farms with no
+          // guard at all (D12, spec §5 row 1). That is the right failure
+          // direction but it must not be silent: without this line the
+          // only symptom is a breaker that mysteriously never fires.
+          ctx.logger.warn(
+            'linkedin lane: breaker state unreadable — throttle guard disabled this fire',
+            { detail },
+          ),
+        )
       : undefined;
     const phase = this.breaker
       ? breakerPhase(breakerState, this.breaker.deps.now(), THROTTLE_COOLDOWN_MS)
@@ -567,19 +576,26 @@ export class LinkedInLane implements FarmingLane {
     // caught here.
     const handle = await this.browser.launch(ctx);
     try {
+      // True once this run has actually requested a search url. Gates the
+      // inter-url pause so it never fires before the first attempt, and —
+      // because it is declared outside the group loop — still fires across a
+      // group boundary. Declared above the probe branch because a successful
+      // probe IS such a request (see below).
+      let attemptedAnyUrl = false;
+
       if (phase === 'half-open' && this.breaker && breakerState) {
         const probe = await this.runProbe(handle, ctx);
         const { userDataDir, deps } = this.breaker;
         if (probe.result === 'shell') {
           // Still blocked. Re-open for another full cooldown, keeping the
           // record that a probe ran. ~2 requests spent instead of a fire.
-          openBreaker(userDataDir, deps, {
+          const breakerWritten = openBreaker(userDataDir, deps, {
             ...breakerState,
             lastProbeAt: deps.now().toISOString(),
           });
           ctx.logger.warn(
             'linkedin lane: half-open probe still got a server-withheld shell — breaker re-opened, ending this fire',
-            { tripCount: breakerState.tripCount + 1 },
+            { tripCount: breakerState.tripCount + 1, breakerWritten },
           );
           return {
             jobs: [],
@@ -591,10 +607,10 @@ export class LinkedInLane implements FarmingLane {
         if (probe.result === 'inconclusive') {
           // A broken page proves nothing (spec §5) — leave openedAt where
           // it is so the next fire past the window probes again.
-          recordProbe(userDataDir, deps, breakerState);
+          const breakerWritten = recordProbe(userDataDir, deps, breakerState);
           ctx.logger.warn(
             'linkedin lane: half-open probe was inconclusive — breaker left open, ending this fire',
-            { message: probe.message },
+            { message: probe.message, breakerWritten },
           );
           return {
             jobs: [],
@@ -609,16 +625,19 @@ export class LinkedInLane implements FarmingLane {
         closeBreaker(userDataDir, deps);
         await captureStore.append(this.storage, probe.jd);
         processedIds.add(probe.cardId);
+        // The probe just navigated and JD-opened against the very url the
+        // main loop is about to request again (it deliberately populates no
+        // UrlStat, so that re-navigation is by design). Marking the fire as
+        // having attempted a url makes the loop pace that repeat like any
+        // other — otherwise recovery, the moment LinkedIn is most watchful,
+        // would open the same url twice back-to-back with no gap at all.
+        attemptedAnyUrl = true;
         ctx.logger.info(
           'linkedin lane: half-open probe returned real JD text — breaker closed, continuing this fire',
           { cardId: probe.cardId },
         );
       }
 
-      // True once this run has actually attempted a url. Gates the inter-url
-      // pause so it never fires before the first attempt, and — because it is
-      // declared outside the group loop — still fires across a group boundary.
-      let attemptedAnyUrl = false;
       for (const group of this.urls) {
         const inv = this.inventories.find((candidate) => candidate.page === group.page);
         if (!inv) {
@@ -848,7 +867,17 @@ export class LinkedInLane implements FarmingLane {
                   // Was this a server-withheld shell (throttle) or a
                   // missing jdRoot (selector drift)? They demand opposite
                   // responses, so ask the page rather than guess.
-                  if (throttle && page) {
+                  //
+                  // A ZodError is excluded structurally, not incidentally:
+                  // it means openJd SUCCEEDED and JDSchema then rejected the
+                  // card's identity fields, so jdRoot is present and full of
+                  // text — the presence probe would answer 'shell' and a
+                  // drifted title/company selector would masquerade as a
+                  // throttle, the exact misdiagnosis this module exists to
+                  // end (throttle.ts's header). Today that is unreachable
+                  // only because the two JDSchema.parse calls happen to
+                  // agree; this makes it not depend on that.
+                  if (throttle && page && !(err instanceof z.ZodError)) {
                     const outcome = await this.classifyJdOutcome(page, inv, ctx);
                     if (outcome === 'shell') shellJdFailures += 1;
                     throttle.record(outcome);
