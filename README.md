@@ -70,7 +70,7 @@ Useful day-2 commands:
 | `jobbunny lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
 | `/page-analyse` | Rebuild a page inventory from live DOM analysis |
 | `jobbunny serve start\|stop\|status` | Start/stop/check the in-process scheduling daemon (cross-profile) |
-| `jobbunny autostart enable\|disable` | Register/remove a login LaunchAgent that runs `serve start` at boot (darwin only) |
+| `jobbunny autostart enable\|disable` | Register/remove a login LaunchAgent that runs `serve start` at login (darwin only) |
 | `jobbunny reconcile --profile <name>` | Rebuild the local cache from your Notion database |
 | `jobbunny routine cleanup --profile <name>` | Archive stale Notion entries (dry-run by default) |
 | `jobbunny profile build --profile <name>` | Regenerate filter/rank config from an edited `resume.json` |
@@ -92,7 +92,7 @@ Set times in your profile's `profile.json`:
 "schedule": { "times": ["09:00", "14:00", "19:00"] }
 ```
 
-then start the daemon once: `jobbunny serve start`. It ticks a wall clock every 30 seconds and reasons about "is a run owed right now" against local time — so a reboot or a sleeping laptop produces a *late* run within `schedule.graceMinutes` (default 90) of the missed slot, never a silently skipped one. Each firing runs `jobbunny run --profile <name> --headless` with the same per-stage timeout/stall watchdogs as any other invocation, plus an external SIGTERM/SIGKILL backstop; profiles sharing a time slot run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — farming resumes per URL (`--resume`). Per-profile run logs land in `profiles/<name>/data/runs/<date>/<HH-MM>/` (one folder per invocation, local start time); the daemon's own log and every spawned run's captured stdout/stderr land in `~/.jobbunny/logs/`.
+then start the daemon once: `jobbunny serve start`. It ticks a wall clock every 30 seconds and reasons about "is a run owed right now" against local time — so a reboot or a sleeping laptop produces a *late* run within `schedule.graceMinutes` (default 90) of the missed slot, never a silently skipped one. Each firing runs `jobbunny run --profile <name> --headless` with the same per-stage timeout/stall watchdogs as any other invocation, plus an external SIGTERM/SIGKILL backstop; profiles sharing a time slot run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — the LinkedIn lane skips job ids already present in the Notion-backed cache. Per-profile run logs land in `profiles/<name>/data/runs/<date>/<HH-MM>/` (one folder per invocation, local start time); the daemon's own log and every spawned run's captured stdout/stderr land in `~/.jobbunny/logs/`.
 
 - `jobbunny serve status` reports whether the daemon is running, its uptime, whether it appears wedged, and the next scheduled slot.
 - `jobbunny serve stop` shuts it down cleanly.
