@@ -44,3 +44,5 @@ During the refactor sequence only, the test carries a *temporary pin list*: each
 - Markdown/docs file sizes (specs and plans are historical records).
 - Cyclomatic-complexity or per-function limits.
 - Any behavior or feature change in the files being split.
+
+**Status (completed 2026-07-29): all offenders split (PRs #61–#65); the pin machinery was removed in the final PR.**
