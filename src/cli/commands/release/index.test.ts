@@ -1,112 +1,20 @@
 /**
- * release.test.ts (P9 pre-cutover) — TDD for `releaseCommand`. No real git/gh/npm
- * ever runs: `execCommand` is a fake dispatcher matched on `${cmd} ${args.join(' ')}`
- * prefixes, `readFile`/`writeFile` are in-memory maps, `confirm` and `sleep` are
- * injected fakes. Mirrors v0 `scripts/ops/release.test.js`'s pure-function coverage
- * (parseVersion/changelogHasVersionBlock/packageJsonVersion/updateReadmeBadge/
- * resolveResumeStage) plus orchestration coverage the v0 test deliberately left out
- * (it only shells out to real tools there) — required here because nothing else
- * exercises the resume-state detection, the merge-confirmation gate, or the
- * checks/tag failure paths end to end.
+ * index.test.ts (split from release.test.ts) — TDD for `releaseCommand`. No
+ * real git/gh/npm ever runs: `execCommand` is a fake dispatcher matched on
+ * `${cmd} ${args.join(' ')}` prefixes, `readFile`/`writeFile` are in-memory
+ * maps, `confirm` and `sleep` are injected fakes. Orchestration coverage
+ * v0's `scripts/ops/release.test.js` deliberately left out (it only shells
+ * out to real tools there) — required here because nothing else exercises
+ * the resume-state detection, the merge-confirmation gate, or the
+ * checks/tag failure paths end to end. Pure-function coverage for
+ * `parseVersion`/`changelogHasVersionBlock`/`packageJsonVersion`/
+ * `updateReadmeBadge`/`npmSwallowedFlags` lives in `version.test.ts`;
+ * `resolveResumeStage` coverage lives in `resume.test.ts`.
  */
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import {
-  changelogHasVersionBlock,
-  npmSwallowedFlags,
-  packageJsonVersion,
-  parseVersion,
-  type ReleaseDeps,
-  releaseCommand,
-  resolveResumeStage,
-  STAGE,
-  updateReadmeBadge,
-} from './release.ts';
-
-// ---------- pure functions ----------
-
-test('parseVersion accepts a plain X.Y.Z version', () => {
-  assert.deepEqual(parseVersion('1.3.0'), {
-    version: '1.3.0',
-    major: 1,
-    minor: 3,
-    patch: 0,
-  });
-});
-
-test('parseVersion rejects a leading v prefix', () => {
-  assert.throws(() => parseVersion('v1.3.0'));
-});
-
-test('parseVersion rejects a 2-part version', () => {
-  assert.throws(() => parseVersion('1.3'));
-});
-
-test('parseVersion rejects a prerelease suffix', () => {
-  assert.throws(() => parseVersion('1.3.0-beta'));
-});
-
-test('changelogHasVersionBlock matches the exact em-dash heading', () => {
-  const text = '## [1.2.1] — 2026-07-14\n';
-  assert.equal(changelogHasVersionBlock(text, '1.2.1'), true);
-});
-
-test('changelogHasVersionBlock rejects a missing date', () => {
-  assert.equal(changelogHasVersionBlock('## [1.2.1]\n', '1.2.1'), false);
-});
-
-test('packageJsonVersion extracts the version field', () => {
-  assert.equal(packageJsonVersion('{"name":"job-bunny","version":"1.2.1"}'), '1.2.1');
-});
-
-test('updateReadmeBadge reports found:false when the badge is missing entirely', () => {
-  const r = updateReadmeBadge('# README with no badge', '1.2.1');
-  assert.equal(r.found, false);
-  assert.equal(r.changed, false);
-});
-
-test('npmSwallowedFlags: detects flags npm consumed in a release lifecycle', () => {
-  assert.deepEqual(
-    npmSwallowedFlags({
-      npm_lifecycle_event: 'release',
-      npm_config_dry_run: 'true',
-      npm_config_yes: 'true',
-      npm_config_merge: '',
-    }),
-    ['--dry-run', '--no-merge', '--yes'],
-  );
-});
-
-test('npmSwallowedFlags: empty when the flags were forwarded via -- (env unset)', () => {
-  assert.deepEqual(npmSwallowedFlags({ npm_lifecycle_event: 'release' }), []);
-});
-
-test('npmSwallowedFlags: empty outside an npm release lifecycle', () => {
-  assert.deepEqual(
-    npmSwallowedFlags({ npm_config_dry_run: 'true', npm_config_yes: 'true' }),
-    [],
-  );
-});
-
-const baseResumeState = {
-  tagExistsLocal: false,
-  tagExistsRemote: false,
-  branchExistsLocal: false,
-  branchExistsRemote: false,
-  pkgVersionMatches: false,
-  readmeBadgeMatches: false,
-  hasUncommittedVersionSyncDiff: false,
-  prState: null,
-};
-
-test('resolveResumeStage: FRESH when nothing exists yet', () => {
-  assert.equal(resolveResumeStage(baseResumeState), STAGE.FRESH);
-});
-
-test('resolveResumeStage: throws on a closed-without-merged PR (anomaly)', () => {
-  assert.throws(() => resolveResumeStage({ ...baseResumeState, prState: 'CLOSED' }));
-});
+import { type ReleaseDeps, releaseCommand } from './index.ts';
 
 // ---------- orchestration fakes ----------
 

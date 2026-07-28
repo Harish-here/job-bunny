@@ -41,7 +41,7 @@ import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
 import { reconcileCommand } from './commands/reconcile.ts';
-import { npmSwallowedFlags, releaseCommand } from './commands/release.ts';
+import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
 import { serveCommand } from './commands/serve.ts';
