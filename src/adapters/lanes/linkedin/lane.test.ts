@@ -131,9 +131,14 @@ interface Script {
   anchorOnlyUrls: Set<string>;
   /** JD urls where jdRoot IS present in the DOM but holds no text — the
    * server-withheld shell LinkedIn serves a soft-blocked session. Pair
-   * with an absent `jdTextByUrl` entry so openJd fails AND the presence
-   * probe reports '1'. */
+   * with an absent `jdTextByUrl` entry so openJd fails AND the tri-state
+   * jdRoot read reports 'empty'. */
   jdShellUrls: Set<string>;
+  /** JD urls whose open fails while jdRoot is present AND still holds text
+   * — a stale/previous JD pane left behind by e.g. a goto timeout. Pair
+   * with an absent `jdTextByUrl` entry (so openJd fails) to model the
+   * failure D4 must classify as neutral, never as a shell. */
+  jdStalePaneUrls: Set<string>;
 }
 
 function newScript(): Script {
@@ -144,6 +149,7 @@ function newScript(): Script {
     jdTextByUrl: new Map(),
     anchorOnlyUrls: new Set(),
     jdShellUrls: new Set(),
+    jdStalePaneUrls: new Set(),
   };
 }
 
@@ -173,10 +179,16 @@ class FakePage implements PageHandle {
   async evaluate<T>(fn: string): Promise<T> {
     // buildJdRootPresenceScript's source carries a stable `jd-root-presence`
     // marker, the same routing trick the harvest branch below uses with
-    // `cardListSel`. It answers "did jdRoot match anything", independent of
-    // whether jdTextByUrl has text for this url.
+    // `cardListSel`. It answers the tri-state question "did jdRoot match,
+    // and did it hold text": 'empty' (the shell), 'text' (a pane that
+    // matched and still has content — a stale one for a card whose own
+    // open failed), or '' (no match at all).
     if (fn.includes('jd-root-presence')) {
-      return (this.script.jdShellUrls.has(this.lastUrl) ? '1' : '') as unknown as T;
+      if (this.script.jdShellUrls.has(this.lastUrl)) return 'empty' as unknown as T;
+      const hasText =
+        this.script.jdStalePaneUrls.has(this.lastUrl) ||
+        this.script.jdTextByUrl.has(this.lastUrl);
+      return (hasText ? 'text' : '') as unknown as T;
     }
     // buildHarvestScript's source always declares `cardListSel` — a JD-text
     // script (buildJdTextScript) never does. This lets one fake `evaluate`
@@ -2735,3 +2747,66 @@ test('all-urls-failed evidence: shell JD failures are reported as server-withhel
   assert.doesNotMatch(message, /page_inventory/);
   assert.doesNotMatch(message, /page-analyse/);
 });
+
+test('no trip: 3 consecutive JD-open failures whose jdRoot is present AND still holds text (a stale pane) leave the breaker closed (D4)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // Three cards in a row whose JD open fails while jdRoot matches an
+  // element that still holds text — e.g. a goto timeout leaving the
+  // PREVIOUS card's JD pane on screen. Under presence-only classification
+  // these read as three shells and open a 4-hour breaker for something
+  // that is not a throttle at all.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: '/jobs/view/7101/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Globex',
+      location: 'Remote',
+      href: '/jobs/view/7102/',
+    },
+    {
+      title: 'Frontend Engineer',
+      company: 'Initech',
+      location: 'Remote',
+      href: '/jobs/view/7103/',
+    },
+  ]);
+  for (const id of ['7101', '7102', '7103']) {
+    script.jdStalePaneUrls.add(`https://www.linkedin.com/jobs/view/${id}/`);
+  }
+  seedTrivialUrl(script, URL_2, '7200');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(undefined, NOW);
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn([]),
+    0,
+    0,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.equal(fs.current(), undefined, 'a stale populated pane must never trip');
+  assert.deepEqual(fs.writes, []);
+  // The fire ran to completion: URL_2 was still visited and captured.
+  assert.equal(result.skipped, undefined);
+  assert.equal(provider.handle?.pages.length, 2);
+  assert.ok(result.jobs.some((j) => j.identity.id === 'li-7200'));
+});
+

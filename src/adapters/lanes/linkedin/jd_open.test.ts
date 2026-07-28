@@ -439,19 +439,21 @@ test('buildJdAnchorScript honors a custom anchor phrase and minimum length', asy
 
 // --- buildJdRootPresenceScript, evaluated over a fake `document` via node:vm ---
 
-/** Fake `document` whose querySelector matches `selector` and nothing else.
- * The returned element deliberately has NO text — the whole point of the
- * presence script is that a matched-but-empty jdRoot (the server-withheld
- * shell, spec §1) is distinguishable from no match at all. */
-function fakePresenceDocument(selector: string | null): unknown {
+/** Fake `document` whose querySelector matches `selector` (with the given
+ * text on the matched element) and nothing else. The three states this can
+ * model are the three the script must distinguish: matched-and-empty (the
+ * server-withheld shell, spec §1), matched-with-text (a failed open that
+ * left a populated pane behind — NOT a throttle, D4), and no match at all
+ * (selector drift). */
+function fakePresenceDocument(selector: string | null, text = ''): unknown {
   return {
     querySelector(s: string) {
-      return selector !== null && s === selector ? { textContent: '' } : null;
+      return selector !== null && s === selector ? { textContent: text } : null;
     },
   };
 }
 
-test("buildJdRootPresenceScript returns '1' for a matched element even when it holds no text (the shell signature)", async () => {
+test("buildJdRootPresenceScript returns 'empty' for a matched element that holds no text (the shell signature)", async () => {
   const selector = '[componentkey^="JobDetails_AboutTheJob"]';
   const document = fakePresenceDocument(selector);
 
@@ -459,7 +461,34 @@ test("buildJdRootPresenceScript returns '1' for a matched element even when it h
     document,
   });
 
-  assert.equal(result, '1');
+  assert.equal(result, 'empty');
+});
+
+test("buildJdRootPresenceScript returns 'text' for a matched element that still holds text (a stale JD pane, never a throttle)", async () => {
+  const selector = '[componentkey^="JobDetails_AboutTheJob"]';
+  // Whitespace-only would still be 'empty' — the shell verdict is about
+  // trimmed emptiness, so this carries real characters.
+  const document = fakePresenceDocument(
+    selector,
+    '  About the job — the PREVIOUS card  ',
+  );
+
+  const result = await vm.runInNewContext(buildJdRootPresenceScript(selector), {
+    document,
+  });
+
+  assert.equal(result, 'text');
+});
+
+test("buildJdRootPresenceScript returns 'empty' for a matched element holding only whitespace (a shell, not text)", async () => {
+  const selector = '[componentkey^="JobDetails_AboutTheJob"]';
+  const document = fakePresenceDocument(selector, '   \n\t  ');
+
+  const result = await vm.runInNewContext(buildJdRootPresenceScript(selector), {
+    document,
+  });
+
+  assert.equal(result, 'empty');
 });
 
 test("buildJdRootPresenceScript returns '' when the selector matches nothing (selector drift, not a throttle)", async () => {

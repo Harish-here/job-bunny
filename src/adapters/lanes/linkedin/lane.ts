@@ -360,25 +360,30 @@ export class LinkedInLane implements FarmingLane {
     await this.sleepFn(ms, ctx.signal);
   }
 
-  /** Classifies a JD open that already FAILED: was jdRoot present but
-   * empty (`shell` — the server withheld the content, D4) or absent
-   * (`missing` — selector drift, explicitly not a throttle signal)?
+  /** Classifies a JD open that already FAILED, from the tri-state jdRoot
+   * read (`buildJdRootPresenceScript`, spec D4). ONLY `'empty'` — jdRoot
+   * matched and its text is empty — is `shell`, the server-withheld
+   * content that counts toward a throttle. Everything else is `missing`,
+   * the neutral verdict that never trips: `''` (matched nothing, i.e.
+   * selector drift) and `'text'` (matched a pane that still holds text —
+   * a stale/previous JD left in the DOM by e.g. a goto timeout, which is
+   * a failed open but emphatically not a withheld one).
    *
    * Never returns `ok`: a successful open is recorded directly at the call
-   * site. Any failure of the probe itself (dead page, timeout) is
-   * classified `missing`, the conservative answer — an unknown must never
-   * push the counter toward opening the breaker. */
+   * site. Any failure of the read itself (dead page, timeout) is
+   * classified `missing` too, the conservative answer — an unknown must
+   * never push the counter toward opening the breaker. */
   private async classifyJdOutcome(
     page: PageHandle,
     inv: Inventory,
     ctx: RunContext,
   ): Promise<JdOutcome> {
     try {
-      const present = await page.evaluate<string>(
+      const jdRoot = await page.evaluate<string>(
         buildJdRootPresenceScript(inv.selectors.jdRoot),
         { timeoutMs: JD_ROOT_PRESENCE_TIMEOUT_MS },
       );
-      return present === '1' ? 'shell' : 'missing';
+      return jdRoot === 'empty' ? 'shell' : 'missing';
     } catch (err) {
       ctx.logger.debug(
         'linkedin lane: jdRoot presence check failed — classifying as missing',
