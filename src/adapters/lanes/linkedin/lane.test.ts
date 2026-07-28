@@ -16,8 +16,10 @@ import type { LinkedinBreakerDeps, LinkedinBreakerState } from './breaker_store.
 import { CAPTURE_PATH } from './capture_store.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { buildPageUrl, jitterMs, LinkedInLane, parseSearchUrls } from './lane.ts';
+import { LinkedInLane } from './lane.ts';
+import { buildPageUrl, jitterMs } from './pacing/index.ts';
 import { RESUME_STATE_PATH } from './resume_state.ts';
+import { parseSearchUrls } from './search_urls.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
