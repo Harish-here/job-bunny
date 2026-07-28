@@ -18,7 +18,7 @@
  * run's own `runCapMs` watchdog abort it gracefully.
  *
  * This test constructs the REAL stage factories (the same ones
- * `cli/wire.ts` calls) with minimal placeholder ports that are NEVER
+ * `cli/wire/compose.ts` calls) with minimal placeholder ports that are NEVER
  * invoked — `.run()` is never called on any resulting `StageDef`, only
  * `.name`/`.timeoutMs`/`.retries` are read. That construction is
  * fragile: it holds only as long as no stage factory does real work at
