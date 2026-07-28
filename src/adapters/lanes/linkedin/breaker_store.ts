@@ -44,6 +44,29 @@ export interface LinkedinBreakerDeps {
   now(): Date;
 }
 
+/** Everything the lane needs to reach the session-scoped breaker file.
+ *
+ * `userDataDir` is a plain string, NOT an import of
+ * `adapters/browser/cdp-chrome`'s `DEFAULT_USER_DATA_DIR`: those are two
+ * different adapter families and `.dependency-cruiser.cjs`'s
+ * `adapters-no-cross-family` rule forbids the cross-import. `cli/wire.ts`
+ * — the one file allowed to import any adapter — reads the constant and
+ * passes it in here.
+ *
+ * The whole config is OPTIONAL on the constructor: omitted, the lane has
+ * no breaker at all (no read, no write, no jdRoot presence probe), which
+ * is what every pre-existing direct `new LinkedInLane(...)` call site
+ * relies on. Production supplies it in `cli/wire.ts`.
+ *
+ * Defined here (not in `lane.ts`) so `fire/url_runner.ts` can reach the
+ * type without a circular import back through `lane.ts` -> `fire/index.ts`
+ * -> `fire/url_runner.ts` -> `lane.ts`; `lane.ts` and `index.ts` both
+ * import it from here instead. */
+export interface LinkedinBreakerConfig {
+  userDataDir: string;
+  deps: LinkedinBreakerDeps;
+}
+
 /** Derived, never stored as a string (spec §4.4). */
 export type BreakerPhase = 'closed' | 'open' | 'half-open';
 
