@@ -62,12 +62,12 @@ test('happy path: resolves with the child process stdout', async () => {
   assert.equal(result, 'Say OK');
 });
 
-test('spawns `claude -p --output-format text --bare` with the prompt via stdin, not argv', async () => {
+test('spawns `claude -p --output-format text` with the prompt via stdin, not argv', async () => {
   const provider = new ClaudeCliProvider({ ...PRINT_ARGS, timeoutMs: 5_000 });
   const result = await provider.complete('irrelevant prompt text', {
     signal: new AbortController().signal,
   });
-  assert.equal(result.trim(), '-p --output-format text --bare');
+  assert.equal(result.trim(), '-p --output-format text');
 });
 
 test('non-zero exit rejects with stderr text in the error message', async () => {

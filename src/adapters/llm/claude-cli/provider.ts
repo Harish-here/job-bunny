@@ -18,7 +18,7 @@ export interface ClaudeCliProviderOptions {
    * script instead of the real `claude` binary. */
   command?: string;
   /** Extra argv inserted before the provider's own fixed `-p
-   * --output-format text --bare` args. Always empty in production. Test-only
+   * --output-format text` args. Always empty in production. Test-only
    * seam: lets a test point `command` at `process.execPath` and pass
    * `['-e', '<inline script>', '--']` so the fake "claude" is a real,
    * portable node child process rather than a POSIX-only `#!/bin/sh` fixture
@@ -87,16 +87,21 @@ function runClaudeCli(
       return;
     }
 
-    const child = spawn(
-      command,
-      [...argsPrefix, '-p', '--output-format', 'text', '--bare'],
-      {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        // Headless launchd runs hang on a queued macOS "Local Network" prompt
-        // (IDE-connection auto-detection) unless this is disabled.
-        env: { ...process.env, CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' },
-      },
-    );
+    const child = spawn(command, [...argsPrefix, '-p', '--output-format', 'text'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // `--bare` used to sit here alongside CLAUDE_CODE_AUTO_CONNECT_IDE
+      // to dodge a headless-launchd hang (a queued macOS "Local Network"
+      // prompt from IDE-connection auto-detection). Removed: under claude
+      // CLI >=2.1.x, `--bare` disables keychain/OAuth auth and requires
+      // ANTHROPIC_API_KEY, which this project deliberately has none of
+      // (the CLI *is* the provider) — so every scheduled structure call
+      // was exiting 1 instantly with "Not logged in" on stdout.
+      // CLAUDE_CODE_AUTO_CONNECT_IDE=false alone still suppresses the
+      // auto-connect prompt that caused the original hang; any residual
+      // stall is caught by the stage timeout, the stall watchdog
+      // (pipeline/runner/guard.ts), and the daemon's run-cap backstop.
+      env: { ...process.env, CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' },
+    });
 
     let stdout = '';
     let stderr = '';

@@ -249,6 +249,37 @@ test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does no
   assert.equal(resultJson.outcome, 'failed');
 });
 
+test('mid-failure: failure.json error appends the wrapped cause message', async () => {
+  const dataDir = join(root, 'mid-failure-cause');
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
+  const { ctx } = fakeCtx();
+
+  const stage: StageDef<StagePayload, StagePayload> = fakeStage({
+    name: 'stage',
+    timeoutMs: 1_000,
+    retries: 0,
+    async run() {
+      throw new Error('root cause boom');
+    },
+  });
+
+  const result = await runPipeline([stage], ctx, folder, {
+    runCapMs: 5_000,
+    stallMs: 5_000,
+  });
+
+  assert.equal(result.outcome, 'failed');
+
+  const failure = JSON.parse(await readFile(join(folder.dir, 'failure.json'), 'utf8'));
+  // guardStage wraps the original throw in `stage "..." failed after N
+  // attempt(s)` with `{ cause: <original error> }` — the cause's message
+  // must still surface here, not just the wrapper's.
+  assert.equal(
+    failure.error,
+    'stage "stage" failed after 1 attempt(s) — cause: root cause boom',
+  );
+});
+
 test('resume: seeded from an earlier folder, fast-forwards past its latest checkpoint, reuses its payload, and writes into its OWN folder', async () => {
   const dataDir = join(root, 'resume');
   // The prior (earlier same-day) run's folder — the seed source, per the
