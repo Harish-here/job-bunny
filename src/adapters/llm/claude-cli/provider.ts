@@ -17,6 +17,15 @@ export interface ClaudeCliProviderOptions {
   /** Executable to spawn. Overridable so unit tests point it at a stub
    * script instead of the real `claude` binary. */
   command?: string;
+  /** Extra argv inserted before the provider's own fixed `-p
+   * --output-format text --bare` args. Always empty in production. Test-only
+   * seam: lets a test point `command` at `process.execPath` and pass
+   * `['-e', '<inline script>', '--']` so the fake "claude" is a real,
+   * portable node child process rather than a POSIX-only `#!/bin/sh` fixture
+   * — windows-latest can't spawn those directly (EFTYPE). `--` stops node
+   * from parsing the provider's own args (e.g. `-p`) as node CLI flags; the
+   * inline script then reads them back via `process.argv.slice(1)`. */
+  argsPrefix?: string[];
   /** Per-call deadline, combined with the caller's `opts.signal`. */
   timeoutMs?: number;
   /** Grace period between SIGTERM and SIGKILL escalation on abort, mirroring
@@ -28,22 +37,31 @@ export interface ClaudeCliProviderOptions {
 export class ClaudeCliProvider implements LlmProvider {
   readonly name = 'claude-cli';
   private readonly command: string;
+  private readonly argsPrefix: string[];
   private readonly timeoutMs: number;
   private readonly killGraceMs: number;
 
   constructor({
     command = 'claude',
+    argsPrefix = [],
     timeoutMs = 300_000,
     killGraceMs = 5000,
   }: ClaudeCliProviderOptions = {}) {
     this.command = command;
+    this.argsPrefix = argsPrefix;
     this.timeoutMs = timeoutMs;
     this.killGraceMs = killGraceMs;
   }
 
   async complete(prompt: string, opts: { signal: AbortSignal }): Promise<string> {
     const deadline = AbortSignal.any([opts.signal, AbortSignal.timeout(this.timeoutMs)]);
-    return runClaudeCli(this.command, prompt, deadline, this.killGraceMs);
+    return runClaudeCli(
+      this.command,
+      this.argsPrefix,
+      prompt,
+      deadline,
+      this.killGraceMs,
+    );
   }
 }
 
@@ -58,6 +76,7 @@ export class ClaudeCliProvider implements LlmProvider {
  * 'error'. */
 function runClaudeCli(
   command: string,
+  argsPrefix: string[],
   prompt: string,
   signal: AbortSignal,
   killGraceMs: number,
@@ -68,12 +87,16 @@ function runClaudeCli(
       return;
     }
 
-    const child = spawn(command, ['-p', '--output-format', 'text', '--bare'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // Headless launchd runs hang on a queued macOS "Local Network" prompt
-      // (IDE-connection auto-detection) unless this is disabled.
-      env: { ...process.env, CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' },
-    });
+    const child = spawn(
+      command,
+      [...argsPrefix, '-p', '--output-format', 'text', '--bare'],
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Headless launchd runs hang on a queued macOS "Local Network" prompt
+        // (IDE-connection auto-detection) unless this is disabled.
+        env: { ...process.env, CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' },
+      },
+    );
 
     let stdout = '';
     let stderr = '';

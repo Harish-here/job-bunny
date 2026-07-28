@@ -4,12 +4,43 @@ import { fileURLToPath } from 'node:url';
 import { ClaudeCliProvider } from './provider.ts';
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
-const ECHO_STDIN = `${FIXTURES}echo-stdin.sh`;
-const PRINT_ARGS = `${FIXTURES}print-args.sh`;
-const FAIL = `${FIXTURES}fail.sh`;
 const HANG = `${FIXTURES}hang.sh`;
 const CLOSE_STDIN = `${FIXTURES}close-stdin.sh`;
 const IGNORE_SIGTERM = `${FIXTURES}ignore-sigterm.sh`;
+
+// ECHO_STDIN/PRINT_ARGS/FAIL used to be `#!/bin/sh` fixture scripts like the
+// three above, but windows-latest can't spawn a shell script directly
+// (`spawn EFTYPE`). These three are the only tests that assert on the
+// resolved VALUE (stdout content / argv shape / a specific stderr message),
+// so a wrong-reason pass isn't available to them the way it is for the
+// reject-only tests below — they need a fixture "binary" that actually runs
+// cross-platform. `process.execPath` is always a real, spawnable executable
+// on every OS, so each points `command` there and drives an inline `-e`
+// script via `argsPrefix` (see `ClaudeCliProviderOptions.argsPrefix`) — still
+// a real child process, proving the same stdout-capture / stdin-piping /
+// argv-shape / stderr-on-nonzero behavior the original shell scripts did.
+function nodeFixture(script: string): { command: string; argsPrefix: string[] } {
+  return { command: process.execPath, argsPrefix: ['-e', script, '--'] };
+}
+
+// Mirrors echo-stdin.sh: `cat` — echo stdin back to stdout, exit 0.
+const ECHO_STDIN = nodeFixture('process.stdin.pipe(process.stdout);');
+
+// Mirrors print-args.sh: `echo "$@"; cat >/dev/null; exit 0` — print the
+// argv received (everything after the `--`, via `process.argv.slice(1)`),
+// then drain and discard stdin.
+const PRINT_ARGS = nodeFixture(
+  "process.stdout.write(process.argv.slice(1).join(' ') + '\\n'); " +
+    "process.stdin.resume(); process.stdin.on('data', () => {}); " +
+    "process.stdin.on('end', () => process.exit(0));",
+);
+
+// Mirrors fail.sh: drain stdin, write to stderr, exit 1.
+const FAIL = nodeFixture(
+  "process.stdin.resume(); process.stdin.on('data', () => {}); " +
+    "process.stdin.on('end', () => { process.stderr.write('boom: something broke\\n'); " +
+    'process.exitCode = 1; });',
+);
 
 test('name is exactly "claude-cli"', () => {
   const provider = new ClaudeCliProvider();
@@ -24,7 +55,7 @@ test('constructor defaults: command "claude", timeoutMs 300_000', () => {
 });
 
 test('happy path: resolves with the child process stdout', async () => {
-  const provider = new ClaudeCliProvider({ command: ECHO_STDIN, timeoutMs: 5_000 });
+  const provider = new ClaudeCliProvider({ ...ECHO_STDIN, timeoutMs: 5_000 });
   const result = await provider.complete('Say OK', {
     signal: new AbortController().signal,
   });
@@ -32,7 +63,7 @@ test('happy path: resolves with the child process stdout', async () => {
 });
 
 test('spawns `claude -p --output-format text --bare` with the prompt via stdin, not argv', async () => {
-  const provider = new ClaudeCliProvider({ command: PRINT_ARGS, timeoutMs: 5_000 });
+  const provider = new ClaudeCliProvider({ ...PRINT_ARGS, timeoutMs: 5_000 });
   const result = await provider.complete('irrelevant prompt text', {
     signal: new AbortController().signal,
   });
@@ -40,7 +71,7 @@ test('spawns `claude -p --output-format text --bare` with the prompt via stdin, 
 });
 
 test('non-zero exit rejects with stderr text in the error message', async () => {
-  const provider = new ClaudeCliProvider({ command: FAIL, timeoutMs: 5_000 });
+  const provider = new ClaudeCliProvider({ ...FAIL, timeoutMs: 5_000 });
   await assert.rejects(
     () => provider.complete('Say OK', { signal: new AbortController().signal }),
     /boom: something broke/,
