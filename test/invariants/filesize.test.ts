@@ -27,7 +27,11 @@ const PINS = new Map<string, number>([
   // settings,builders,compose}.ts + index.ts, and wire.test.ts's tests were
   // split by target into {config,registry,settings,compose}.test.ts plus a
   // shared testkit.ts fixture file — every result is under its cap.
-  ['src/cli/commands/release.ts', 705],
+  // release.ts's pin is gone too (task 3 of the split brief, 2026-07-29):
+  // release.ts became src/cli/commands/release/{version,resume,steps}.ts +
+  // index.ts, and release.test.ts's tests were split by target into
+  // {version,resume}.test.ts plus index.test.ts (the orchestration suite)
+  // — every result is under its cap.
   ['src/cli/commands/serve.ts', 513],
   ['src/adapters/browser/cdp-chrome/provider.ts', 582],
   ['src/adapters/browser/cdp-chrome/provider.test.ts', 877],
@@ -62,7 +66,7 @@ test('every src .ts file fits its cap (impl <= 400, test <= 800); pins shrink-on
   // Guard against a vacuous pass (the depcruise cruising-0-modules trap).
   assert.ok(files.length > 50, `expected to walk src/, found only ${files.length} files`);
   // The pin list may only shrink. Never pin a NEW file — split it instead.
-  assert.ok(PINS.size <= 8, `pin list grew to ${PINS.size} — 8 remain after wire.ts's split (task 2, 2026-07-28)`);
+  assert.ok(PINS.size <= 7, `pin list grew to ${PINS.size} — 7 remain after release.ts's split (task 3, 2026-07-29)`);
 
   const problems: string[] = [];
   for (const file of files) {
