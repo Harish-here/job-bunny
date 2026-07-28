@@ -10,7 +10,6 @@ import { test } from 'node:test';
 const IMPL_CAP = 400;
 const TEST_CAP = 800;
 
-
 const ROOT = join(import.meta.dirname, '..', '..');
 
 function sourceFiles(): string[] {
