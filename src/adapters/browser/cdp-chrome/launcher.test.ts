@@ -14,20 +14,12 @@ import {
   buildLaunchArgv,
   CHROME_MAX_AGE_MS,
   CHROME_PATH_CANDIDATES,
-  clearSessionState,
   killChrome,
   launchChrome,
   resolveChromePath,
-  SESSION_CLEAR_PROFILE_DIR,
-  SESSION_CLEAR_SKIP_ENV,
 } from './launcher.ts';
 import type { ChromePidfile, ChromePidfileDeps } from './ownership/index.ts';
-
-/** Real fs, pointed only at a throwaway temp dir this file creates and
- * removes — clearSessionState's own tests deliberately exercise the real
- * implementation (not mocked fs calls) so the auth-preservation guarantee
- * is proven against actual files, never against `.chrome-debug/` itself. */
-const realFsDeps = { existsSync, rmSync, readFileSync, writeFileSync };
+import { SESSION_CLEAR_PROFILE_DIR, SESSION_CLEAR_SKIP_ENV } from './session_clear.ts';
 
 /** Builds `<tmp>/Default/...` with a Sessions dir, a Preferences file, and
  * a handful of auth-bearing files/dirs — the same shape confirmed on disk
@@ -329,106 +321,6 @@ test('killChrome does not throw if SIGKILL races an already-exited process', asy
 
 test('CHROME_MAX_AGE_MS is 24 hours', () => {
   assert.equal(CHROME_MAX_AGE_MS, 24 * 60 * 60 * 1000);
-});
-
-test('clearSessionState removes Sessions/tab-restore files from a temp fixture', () => {
-  const { userDataDir, profileDir } = makeProfileFixture();
-  try {
-    const result = clearSessionState(userDataDir, realFsDeps);
-    assert.equal(result.attempted, true);
-    assert.ok(result.removedEntries.includes('Sessions'));
-    assert.equal(existsSync(join(profileDir, 'Sessions')), false);
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
-});
-
-test('clearSessionState normalizes Preferences exit_type/exited_cleanly while preserving every other key byte-for-byte', () => {
-  const { userDataDir, profileDir } = makeProfileFixture();
-  try {
-    const before = JSON.parse(readFileSync(join(profileDir, 'Preferences'), 'utf8'));
-    const result = clearSessionState(userDataDir, realFsDeps);
-    assert.equal(result.preferencesNormalized, true);
-
-    const after = JSON.parse(readFileSync(join(profileDir, 'Preferences'), 'utf8'));
-    assert.equal(after.profile.exit_type, 'Normal');
-    assert.equal(after.profile.exited_cleanly, true);
-
-    // Everything else — including deeply nested unrelated keys and
-    // sibling top-level keys — must be untouched.
-    assert.equal(after.profile.name, before.profile.name);
-    assert.deepEqual(after.profile.unrelated_nested, before.profile.unrelated_nested);
-    assert.deepEqual(after.some_other_top_level_key, before.some_other_top_level_key);
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
-});
-
-test('clearSessionState never touches auth-bearing files (Cookies, Login Data, Local Storage/)', () => {
-  const { userDataDir, profileDir } = makeProfileFixture();
-  try {
-    const cookiesBefore = readFileSync(join(profileDir, 'Cookies'), 'utf8');
-    const loginDataBefore = readFileSync(join(profileDir, 'Login Data'), 'utf8');
-    const localStorageFile = join(profileDir, 'Local Storage', 'leveldb-file.ldb');
-    const localStorageBefore = readFileSync(localStorageFile, 'utf8');
-
-    clearSessionState(userDataDir, realFsDeps);
-
-    assert.equal(existsSync(join(profileDir, 'Cookies')), true);
-    assert.equal(readFileSync(join(profileDir, 'Cookies'), 'utf8'), cookiesBefore);
-    assert.equal(existsSync(join(profileDir, 'Login Data')), true);
-    assert.equal(readFileSync(join(profileDir, 'Login Data'), 'utf8'), loginDataBefore);
-    assert.equal(existsSync(localStorageFile), true);
-    assert.equal(readFileSync(localStorageFile, 'utf8'), localStorageBefore);
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
-});
-
-test('clearSessionState is a no-op (fail-soft) when the Sessions dir is missing', () => {
-  const userDataDir = mkdtempSync(join(tmpdir(), 'jobbunny-chrome-fixture-'));
-  try {
-    mkdirSync(join(userDataDir, SESSION_CLEAR_PROFILE_DIR), { recursive: true });
-    assert.doesNotThrow(() => clearSessionState(userDataDir, realFsDeps));
-    const result = clearSessionState(userDataDir, realFsDeps);
-    assert.equal(result.attempted, true);
-    assert.deepEqual(result.removedEntries, []);
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
-});
-
-test('clearSessionState is a no-op (fail-soft) when Preferences is malformed JSON', () => {
-  const { userDataDir, profileDir } = makeProfileFixture();
-  try {
-    writeFileSync(join(profileDir, 'Preferences'), '{ not valid json', 'utf8');
-    const result = clearSessionState(userDataDir, realFsDeps);
-    assert.equal(result.preferencesNormalized, false);
-    assert.ok(result.warnings.length > 0);
-    // Left completely untouched, not rewritten.
-    assert.equal(
-      readFileSync(join(profileDir, 'Preferences'), 'utf8'),
-      '{ not valid json',
-    );
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
-});
-
-test('clearSessionState skips entirely when SingletonLock is present (Chrome already running)', () => {
-  const { userDataDir, profileDir } = makeProfileFixture();
-  try {
-    writeFileSync(join(userDataDir, 'SingletonLock'), 'lock');
-    const sessionsBefore = existsSync(join(profileDir, 'Sessions'));
-    const result = clearSessionState(userDataDir, realFsDeps);
-    assert.equal(result.attempted, false);
-    assert.ok(result.warnings.some((w) => w.includes('SingletonLock')));
-    // Nothing removed, Preferences untouched.
-    assert.equal(existsSync(join(profileDir, 'Sessions')), sessionsBefore);
-    assert.equal(result.preferencesNormalized, false);
-  } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
 });
 
 test('launchChrome runs the session clear before spawning (Sessions dir gone after launch)', () => {
