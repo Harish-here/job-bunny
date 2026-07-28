@@ -16,12 +16,12 @@ const TEST_CAP = 800;
 // entirely in the final PR of the file-size effort.
 const PINS = new Map<string, number>([
   // lane.ts's own pin is gone (item 7 of the split brief landed it at
-  // exactly 400 lines, at the cap). lane.test.ts's pin shrinks in lockstep
-  // as the test-split dispatch peels suites off into their own files
-  // (lane_features.test.ts, pacing/pagination.test.ts, pacing/pacing.test.ts,
-  // search_urls.test.ts, lane_breaker.test.ts) — this pin is removed
-  // entirely once the file lands under the 800-line cap.
-  ['src/adapters/lanes/linkedin/lane.test.ts', 1420],
+  // exactly 400 lines, at the cap). lane.test.ts's pin is gone too: the
+  // test-split dispatch broke the 2958-line file into lane.test.ts,
+  // lane_features.test.ts, lane_breaker.test.ts, pacing/pagination.test.ts,
+  // pacing/pacing.test.ts, and search_urls.test.ts, plus a shared
+  // testkit/ (browser_fakes.ts, fixtures.ts) for fixtures — every result
+  // is under the 800-line cap.
   ['src/cli/wire.ts', 772],
   ['src/cli/wire.test.ts', 882],
   ['src/cli/commands/release.ts', 705],
@@ -59,7 +59,7 @@ test('every src .ts file fits its cap (impl <= 400, test <= 800); pins shrink-on
   // Guard against a vacuous pass (the depcruise cruising-0-modules trap).
   assert.ok(files.length > 50, `expected to walk src/, found only ${files.length} files`);
   // The pin list may only shrink. Never pin a NEW file — split it instead.
-  assert.ok(PINS.size <= 12, `pin list grew to ${PINS.size} — 12 were grandfathered on 2026-07-28`);
+  assert.ok(PINS.size <= 10, `pin list grew to ${PINS.size} — 10 were grandfathered on 2026-07-28`);
 
   const problems: string[] = [];
   for (const file of files) {
