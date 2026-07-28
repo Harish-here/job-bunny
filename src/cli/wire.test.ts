@@ -25,6 +25,13 @@ import {
  * `src/cli` except `wire.ts` itself (see `.dependency-cruiser.cjs`).
  */
 
+// The rest of this file is free to pass `root: '/repo'` (a POSIX-literal
+// input string, never resolved by the OS) into `wire()`/loadPipelineConfig
+// etc — but production code composes lookups via `path.join`, so any fixture
+// KEY or path EXPECTATION derived from that root must go through `join` too,
+// or it silently misses on windows-latest (backslash-joined paths).
+const REPO_ROOT = '/repo';
+
 function baseConfig(overrides: Partial<PipelineConfig> = {}): PipelineConfig {
   return {
     lanes: [],
@@ -63,6 +70,18 @@ function fakeReadFile(files: Record<string, string>): (path: string) => Promise<
     if (Object.hasOwn(files, path)) return files[path] as string;
     throw enoent(path);
   };
+}
+
+function profilePath(name: string, root: string = REPO_ROOT): string {
+  return join(root, 'profiles', name, 'profile.json');
+}
+
+function filterPath(name: string, root: string = REPO_ROOT): string {
+  return join(root, 'profiles', name, 'filter.json');
+}
+
+function dataPath(name: string, root: string = REPO_ROOT): string {
+  return join(root, 'profiles', name, 'data');
 }
 
 // --- resolveInventoryMaxAgeDays ---
@@ -287,7 +306,7 @@ const VALID_PROFILE_JSON = JSON.stringify({
 test('loadPipelineConfig: parses a valid v2-shaped profile.json', async () => {
   const config = await loadPipelineConfig('rajni', {
     root: '/repo',
-    readFile: fakeReadFile({ '/repo/profiles/rajni/profile.json': VALID_PROFILE_JSON }),
+    readFile: fakeReadFile({ [profilePath('rajni')]: VALID_PROFILE_JSON }),
   });
 
   assert.equal(config.connector, 'notion');
@@ -306,7 +325,7 @@ test('loadPipelineConfig: throws loudly when profile.json fails schema validatio
     loadPipelineConfig('rajni', {
       root: '/repo',
       readFile: fakeReadFile({
-        '/repo/profiles/rajni/profile.json': JSON.stringify({ lanes: ['linkedin'] }),
+        [profilePath('rajni')]: JSON.stringify({ lanes: ['linkedin'] }),
       }),
     }),
   );
@@ -316,7 +335,7 @@ test('loadPipelineConfig: throws loudly when profile.json is not valid JSON', as
   await assert.rejects(() =>
     loadPipelineConfig('rajni', {
       root: '/repo',
-      readFile: fakeReadFile({ '/repo/profiles/rajni/profile.json': 'not json' }),
+      readFile: fakeReadFile({ [profilePath('rajni')]: 'not json' }),
     }),
   );
 });
@@ -331,7 +350,7 @@ test('loadFilterConfig: parses a valid filter.json', async () => {
   const filterCfg = await loadFilterConfig('rajni', {
     root: '/repo',
     readFile: fakeReadFile({
-      '/repo/profiles/rajni/filter.json': VALID_FILTER_JSON,
+      [filterPath('rajni')]: VALID_FILTER_JSON,
     }),
   });
 
@@ -354,7 +373,7 @@ test('loadFilterConfig: throws loudly when filter.json fails schema validation',
     loadFilterConfig('rajni', {
       root: '/repo',
       readFile: fakeReadFile({
-        '/repo/profiles/rajni/filter.json': JSON.stringify({
+        [filterPath('rajni')]: JSON.stringify({
           locations: [{ city: '' }],
         }),
       }),
@@ -383,7 +402,7 @@ test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction 
     const result = await wire('rajni', {
       root: '/repo',
       readFile: fakeReadFile({
-        '/repo/profiles/rajni/profile.json': NOTION_ONLY_PROFILE_JSON,
+        [profilePath('rajni')]: NOTION_ONLY_PROFILE_JSON,
       }),
     });
 
@@ -417,7 +436,7 @@ const LIVE_PROFILE_JSON = JSON.stringify({
 });
 
 function fakeLiveReadFile(profileJson: string = LIVE_PROFILE_JSON) {
-  return fakeReadFile({ '/repo/profiles/rajni/profile.json': profileJson });
+  return fakeReadFile({ [profilePath('rajni')]: profileJson });
 }
 
 test('wire: returns a live ctx with config/ports/storage/notify populated', async () => {
@@ -493,7 +512,7 @@ test('wire: ctx.storage is rooted at the profile data dir, not the repo root', a
 
   assert.equal(
     (result.ctx.storage as unknown as { rootDir: string }).rootDir,
-    '/repo/profiles/rajni/data',
+    dataPath('rajni'),
   );
 });
 

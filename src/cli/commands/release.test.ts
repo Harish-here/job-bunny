@@ -10,6 +10,7 @@
  * checks/tag failure paths end to end.
  */
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   changelogHasVersionBlock,
@@ -239,15 +240,27 @@ function makeExecCommand(state: FakeState) {
   };
 }
 
+// release.ts composes each of these with `path.join(deps.root, ...)`, so a
+// POSIX-literal fixture key (or expectation) misses on windows-latest, where
+// `deps.root` is joined into a backslash path — see wire.test.ts/serve.test.ts
+// for the same pattern.
+const REPO_ROOT = '/repo';
+function repoPath(...segments: string[]): string {
+  return join(REPO_ROOT, ...segments);
+}
+
 function makeDeps(state: FakeState, overrides: Partial<ReleaseDeps> = {}): ReleaseDeps {
   const files = new Map<string, string>([
-    ['/repo/CHANGELOG.md', `## [${state.version}] — 2026-07-25\n`],
-    ['/repo/package.json', JSON.stringify({ name: 'job-bunny', version: '0.0.0' })],
-    ['/repo/README.md', '<img src="https://img.shields.io/badge/version-0.0.0-e8a0bf">'],
+    [repoPath('CHANGELOG.md'), `## [${state.version}] — 2026-07-25\n`],
+    [repoPath('package.json'), JSON.stringify({ name: 'job-bunny', version: '0.0.0' })],
+    [
+      repoPath('README.md'),
+      '<img src="https://img.shields.io/badge/version-0.0.0-e8a0bf">',
+    ],
   ]);
   const logs: string[] = [];
   return {
-    root: '/repo',
+    root: REPO_ROOT,
     execCommand: makeExecCommand(state),
     readFile: (p) => {
       const v = files.get(p);
@@ -300,9 +313,9 @@ test('rejects a CHANGELOG.md with no dated block for the version', async () => {
   const state = baseState();
   const deps = makeDeps(state);
   (deps.readFile as (p: string) => string) = (p: string) => {
-    if (p === '/repo/CHANGELOG.md') return '# Changelog\nnothing here\n';
-    if (p === '/repo/package.json') return JSON.stringify({ version: '0.0.0' });
-    if (p === '/repo/README.md')
+    if (p === repoPath('CHANGELOG.md')) return '# Changelog\nnothing here\n';
+    if (p === repoPath('package.json')) return JSON.stringify({ version: '0.0.0' });
+    if (p === repoPath('README.md'))
       return '<img src="https://img.shields.io/badge/version-0.0.0-e8a0bf">';
     throw new Error(`unexpected readFile ${p}`);
   };
