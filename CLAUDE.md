@@ -29,7 +29,7 @@ node src/cli/main.ts autostart enable|disable     # darwin only
 
 ## Profiles
 
-`--profile <name>` is required on every command except `serve` (all three sub-actions), `autostart` (darwin only), and `release` — all cross-profile by design. `src/cli/wire.ts` is the only adapter-instantiation point: it validates `profile.json` and `filter.json` and wires the enabled names to constructors; a missing/invalid `profile.json` throws at wire time (`doctor` reports the same failure without throwing).
+`--profile <name>` is required on every command except `serve` (all three sub-actions), `autostart` (darwin only), and `release` — all cross-profile by design. `src/cli/wire/compose.ts` is the only adapter-instantiation point (the module's public surface is `src/cli/wire/index.ts`): it validates `profile.json` and `filter.json` and wires the enabled names to constructors; a missing/invalid `profile.json` throws at wire time (`doctor` reports the same failure without throwing).
 
 Per profile: `profile.json`, `filter.json` (the sole geo/skills/rank authority), `resume.json` (hand-maintained), `search_urls.md` (drives `lane add-url`/`/page-analyse`). `avoid.md` is scaffolded but read by no runtime code — edit `filter.json`'s `title`/`companies` blocks instead. Greenhouse/Keka company state is auto-managed in `data/registry/companies.json`; there are no hand-maintained board watchlists. Per-run intermediates in `profiles/<name>/data/` are gitignored except the two tracked rajni fixture files.
 
@@ -37,7 +37,7 @@ Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env`, loaded once at 
 
 ## Pipeline architecture
 
-One CLI drives a frozen 10-stage in-process pipeline (`src/cli/wire.ts`); the runner (`src/pipeline/runner/`) checkpoints after every stage:
+One CLI drives a frozen 10-stage in-process pipeline (`src/cli/wire/compose.ts`); the runner (`src/pipeline/runner/`) checkpoints after every stage:
 
 ```
 reconcile → farm → source → compress → structure → assemble → filter → dedup → rank → sync
@@ -53,7 +53,7 @@ Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline
 | `ports-only-core` | `ports/` importing anything but `core` |
 | `adapters-no-cross-family` | one adapter family importing another |
 | `adapters-only-ports-core` | `adapters/` importing `pipeline`, `routines`, `ops`, or `cli` |
-| `only-wire-imports-adapters` | anything except `cli/wire.ts` importing `src/adapters/**` |
+| `only-wire-imports-adapters` | anything except `cli/wire/compose.ts` (plus `builders.ts`, and `registry.ts`'s type-only exception) importing `src/adapters/**` |
 | `nothing-imports-cli` | anything importing `cli` |
 
 Note: `boundaries` parses via `@swc/core` with `tsConfig` omitted — setting `tsConfig` silently cruises 0 modules (dependency-cruiser's typescript resolver caps below TS7).
@@ -91,7 +91,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **Seeding never clobbers.** `jobbunny profile build` fills gaps in user-tuned `filter.json`, never overwrites — reruns propose a diff.
 - **`profile remove` is dry-run by default and refuses `rajni`** (the committed fixture); `--force` actually deletes `profiles/<name>/`. It never touches Notion.
 - **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
-- **The LinkedIn lane paces itself and trips a throttle breaker.** 5–12s jitter per navigation plus a 20–45s pause between saved-search URLs (`settings.linkedin.jitterMinMs/jitterMaxMs/interUrlDelayMinMs/interUrlDelayMaxMs`, defaults in `cli/wire.ts`). Three **consecutive** server-withheld JD shells (`jdRoot` present, text empty — a soft-block, never selector drift) open a 4-hour circuit breaker persisted at `.chrome-debug/.jobbunny-linkedin-breaker.json` — session-scoped, shared by every profile, thresholds are lane constants. An open breaker makes the lane return a **skipped** result without launching Chrome; `farm` excludes skipped lanes from its total-outage denominator, so the rest of the pipeline still runs.
+- **The LinkedIn lane paces itself and trips a throttle breaker.** 5–12s jitter per navigation plus a 20–45s pause between saved-search URLs (`settings.linkedin.jitterMinMs/jitterMaxMs/interUrlDelayMinMs/interUrlDelayMaxMs`, defaults in `cli/wire/settings.ts`). Three **consecutive** server-withheld JD shells (`jdRoot` present, text empty — a soft-block, never selector drift) open a 4-hour circuit breaker persisted at `.chrome-debug/.jobbunny-linkedin-breaker.json` — session-scoped, shared by every profile, thresholds are lane constants. An open breaker makes the lane return a **skipped** result without launching Chrome; `farm` excludes skipped lanes from its total-outage denominator, so the rest of the pipeline still runs.
 - **Markdown is code here.** `.claude/commands/*.md`, `.claude/agents/*.md`, `src/adapters/lanes/linkedin/page_inventory/*.md`, and this file are LLM instructions loaded into context — state each rule once; tighten an existing line before adding a new one.
 
 ## Conventions
@@ -99,7 +99,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - ESM, TypeScript 7 (strict, erasable-syntax-only — no enums/namespaces), zod for schemas, Biome for lint/format. Runtime deps stay at three: `@notionhq/client`, `playwright`, `zod` (Telegram via `fetch`, CLI via `node:util` `parseArgs`, tests via `node:test`).
 - **Two-pair rule:** every module is a folder with an `index.ts` public surface; internals aren't imported across module boundaries. A folder exceeding two implementation files (test pairs and `index.ts` excluded) gets split into subfolders first.
 - Colocated tests (`foo.ts` + `foo.test.ts`).
-- Pipeline code never names a concrete adapter — it sees only port types; `cli/wire.ts` is the one file allowed to instantiate one.
+- Pipeline code never names a concrete adapter — it sees only port types; `cli/wire/compose.ts` is the one file allowed to instantiate one.
 - Per-module contracts, the baked-in KB in `.claude/agents/explainer.md`, and the rules in `.claude/agents/executor.md` are architecture docs as code — update them in the same change that alters behavior.
 
 ## Known limitations
