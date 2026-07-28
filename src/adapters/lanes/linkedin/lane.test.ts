@@ -1895,6 +1895,187 @@ test('jitter: an already-aborted ctx.signal makes the (real, default) jitter rej
   );
 });
 
+// ---------- inter-url pacing (throttle guard D2, 2026-07-28) ----------
+
+const URL_3 =
+  'https://www.linkedin.com/jobs/search/?keywords=Principal+Frontend+Engineer&f_TPR=r86400&sortBy=R';
+
+/** Seeds one url with a single gate-passing card whose JD opens cleanly —
+ * just enough for the url loop to complete an iteration and move on. */
+function seedTrivialUrl(script: Script, url: string, jobId: string): void {
+  script.harvestByUrl.set(url, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      href: `/jobs/view/${jobId}/`,
+    },
+  ]);
+  script.jdTextByUrl.set(
+    `https://www.linkedin.com/jobs/view/${jobId}/`,
+    `JD text — ${jobId}`,
+  );
+}
+
+test('inter-url pause: 3 attempted urls produce exactly 2 pauses, each the configured midpoint', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedTrivialUrl(script, URL_1, '3001');
+  seedTrivialUrl(script, URL_2, '3002');
+  seedTrivialUrl(script, URL_3, '3003');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2, URL_3] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined, // maxCardsPerUrl: default
+    0, // jitterMinMs — jitter OFF, so every recorded sleep is an inter-url pause
+    0, // jitterMaxMs
+    () => 0.5, // randomFn: deterministic midpoint
+    spySleepFn(sleepCalls),
+    20_000, // interUrlDelayMinMs
+    45_000, // interUrlDelayMaxMs
+  );
+
+  await lane.source(fakeCtx());
+
+  // Never before the first url, never after the last: N - 1 pauses.
+  assert.equal(sleepCalls.length, 2);
+  for (const ms of sleepCalls) {
+    assert.equal(ms, 20_000 + Math.floor(0.5 * (45_000 - 20_000)));
+    assert.ok(ms >= 20_000 && ms < 45_000);
+  }
+});
+
+test('inter-url pause: a single url produces zero pauses', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedTrivialUrl(script, URL_1, '3101');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+    20_000,
+    45_000,
+  );
+
+  await lane.source(fakeCtx());
+
+  assert.equal(sleepCalls.length, 0);
+});
+
+test('inter-url pause: a zero-length range is a no-op — the sleepFn is never called', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedTrivialUrl(script, URL_1, '3201');
+  seedTrivialUrl(script, URL_2, '3202');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+    0, // interUrlDelayMinMs
+    0, // interUrlDelayMaxMs
+  );
+
+  await lane.source(fakeCtx());
+
+  assert.equal(sleepCalls.length, 0);
+});
+
+test('inter-url pause: a url skipped as already-done costs no pause — only attempted urls are paced', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedTrivialUrl(script, URL_1, '3301');
+  seedTrivialUrl(script, URL_2, '3302');
+  seedTrivialUrl(script, URL_3, '3303');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const today = new Date().toISOString().slice(0, 10);
+  // The MIDDLE url was already captured by an earlier fire today, so this
+  // fire attempts URL_1 and URL_3 only — 2 attempts, 1 pause between them.
+  storage.set(RESUME_STATE_PATH, { date: today, done: { [URL_2]: 1 } });
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2, URL_3] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+    20_000,
+    45_000,
+  );
+
+  await lane.source(fakeCtx());
+
+  assert.equal(sleepCalls.length, 1);
+});
+
+test('inter-url pause: pauses between urls that live in DIFFERENT page groups too', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  seedTrivialUrl(script, URL_1, '3401');
+  seedTrivialUrl(script, URL_2, '3402');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    // Two groups of one url each, both resolving to the same inventory.
+    [
+      { page: inv.page, urls: [URL_1] },
+      { page: inv.page, urls: [URL_2] },
+    ],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+    20_000,
+    45_000,
+  );
+
+  await lane.source(fakeCtx());
+
+  assert.equal(sleepCalls.length, 1);
+});
+
 // ---------- parseSearchUrls ----------
 
 test('parseSearchUrls parses the rajni search_urls.md fixture into page groups with their urls', async () => {

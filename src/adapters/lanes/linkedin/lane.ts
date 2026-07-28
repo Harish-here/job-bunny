@@ -54,6 +54,15 @@ const DEFAULT_MAX_CARDS_PER_URL = 40;
 const DEFAULT_JITTER_MIN_MS = 0;
 const DEFAULT_JITTER_MAX_MS = 0;
 
+/** Randomized pause BETWEEN saved-search urls (throttle guard D2,
+ * 2026-07-28). Same no-op-by-default posture as the jitter constants
+ * directly above: `(0, 0)` here so every pre-existing `new LinkedInLane(...)`
+ * call site keeps its original speed, with the real production range
+ * (20_000, 45_000) applied once at wiring time by
+ * `resolveInterUrlDelayRange` in `cli/wire.ts`. */
+const DEFAULT_INTER_URL_DELAY_MIN_MS = 0;
+const DEFAULT_INTER_URL_DELAY_MAX_MS = 0;
+
 /** PURE — [minMs, maxMs) jitter amount, v0 parity
  * (scripts/lib/page_actions.js's jitterMs). `rand` is injectable for
  * deterministic tests — mirrors v0's own `rand = Math.random` param. */
@@ -244,6 +253,8 @@ export class LinkedInLane implements FarmingLane {
   private readonly jitterMaxMs: number;
   private readonly randomFn: () => number;
   private readonly sleepFn: (ms: number, signal: AbortSignal) => Promise<void>;
+  private readonly interUrlDelayMinMs: number;
+  private readonly interUrlDelayMaxMs: number;
 
   constructor(
     browser: BrowserProvider,
@@ -259,6 +270,11 @@ export class LinkedInLane implements FarmingLane {
     // so no test suite run ever really waits seconds (see lane.test.ts).
     randomFn: () => number = Math.random,
     sleepFn: (ms: number, signal: AbortSignal) => Promise<void> = sleep,
+    // Appended after sleepFn (rather than beside the jitter pair) so every
+    // existing positional call site — this file's whole test suite —
+    // compiles unchanged.
+    interUrlDelayMinMs: number = DEFAULT_INTER_URL_DELAY_MIN_MS,
+    interUrlDelayMaxMs: number = DEFAULT_INTER_URL_DELAY_MAX_MS,
   ) {
     this.browser = browser;
     this.inventories = inventories;
@@ -270,6 +286,8 @@ export class LinkedInLane implements FarmingLane {
     this.jitterMaxMs = jitterMaxMs;
     this.randomFn = randomFn;
     this.sleepFn = sleepFn;
+    this.interUrlDelayMinMs = interUrlDelayMinMs;
+    this.interUrlDelayMaxMs = interUrlDelayMaxMs;
   }
 
   /** Randomized inter-request pacing (v0 parity — see DEFAULT_JITTER_MIN_MS
@@ -278,6 +296,18 @@ export class LinkedInLane implements FarmingLane {
    * e.g. a test) is a no-op rather than a wasted timer tick. */
   private async jitter(ctx: RunContext): Promise<void> {
     const ms = jitterMs(this.jitterMinMs, this.jitterMaxMs, this.randomFn);
+    if (ms <= 0) return;
+    await this.sleepFn(ms, ctx.signal);
+  }
+
+  /** Randomized pause between saved-search urls (D2). Distinct from
+   * `jitter`, which paces individual navigations inside one url: this is
+   * the gap that stops 21 saved searches from arriving as one burst, the
+   * pattern that most likely provoked the 2026-07-28 soft block. Shares
+   * `jitterMs` + `sleepFn` + `randomFn` with jitter, so it is abort-aware
+   * for free and a zero-length range is a no-op. */
+  private async interUrlPause(ctx: RunContext): Promise<void> {
+    const ms = jitterMs(this.interUrlDelayMinMs, this.interUrlDelayMaxMs, this.randomFn);
     if (ms <= 0) return;
     await this.sleepFn(ms, ctx.signal);
   }
@@ -353,6 +383,10 @@ export class LinkedInLane implements FarmingLane {
     // caught here.
     const handle = await this.browser.launch(ctx);
     try {
+      // True once this run has actually attempted a url. Gates the inter-url
+      // pause so it never fires before the first attempt, and — because it is
+      // declared outside the group loop — still fires across a group boundary.
+      let attemptedAnyUrl = false;
       for (const group of this.urls) {
         const inv = this.inventories.find((candidate) => candidate.page === group.page);
         if (!inv) {
@@ -372,6 +406,14 @@ export class LinkedInLane implements FarmingLane {
             ctx.logger.info('linkedin lane: skipping already-done url', { url });
             continue;
           }
+
+          // Placed AFTER the skip check on purpose: a url this fire never
+          // touches must not cost 20-45s of wall clock. Deliberately outside
+          // the per-url try/catch below — the only way sleepFn rejects is an
+          // aborted ctx.signal, which must propagate loud (the run is over),
+          // not be recorded as this url's SoftError.
+          if (attemptedAnyUrl) await this.interUrlPause(ctx);
+          attemptedAnyUrl = true;
 
           const stat: UrlStat = {
             url,

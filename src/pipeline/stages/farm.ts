@@ -10,13 +10,16 @@ import { CompaniesSeenSchema } from './source.ts';
 const COMPANIES_SEEN_PATH = 'registry/companies_seen.json';
 
 /** 90-minute ceiling over a browser-driven farming run. LinkedIn navigation is
- * slower than API-only staging (source.ts's 300s). The LinkedIn lane adds 2–5s
- * jitter per JD open and per URL navigation (v0 parity, anti-bot-detection),
- * requiring this larger ceiling. Each FarmingLane owns its own bounded per-URL/
- * per-card timeouts internally (adapters/lanes/linkedin), so this is a stage
- * ceiling, not a per-URL budget. This is a ceiling, not typical runtime: real
- * card counts drop well below maxCardsPerUrl (40) via title/avoid card-gating
- * and Notion-cache skips. */
+ * slower than API-only staging (source.ts's 300s). The LinkedIn lane adds 5–12s
+ * jitter per JD open and per URL navigation, plus a 20–45s pause between
+ * saved-search URLs (throttle guard, 2026-07-28 — LinkedIn soft-blocked the
+ * shared session under the previous 2–5s cadence). That puts a typical 21-URL
+ * fire at roughly 25 minutes, still ~3.5x inside this ceiling, so the value
+ * below is deliberately UNCHANGED by that pacing work. Each FarmingLane owns its
+ * own bounded per-URL/per-card timeouts internally (adapters/lanes/linkedin), so
+ * this is a stage ceiling, not a per-URL budget. This is a ceiling, not typical
+ * runtime: real card counts drop well below maxCardsPerUrl (40) via title/avoid
+ * card-gating and Notion-cache skips. */
 const TIMEOUT_MS = 5_400_000;
 
 /**
