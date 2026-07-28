@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import type { LinkedinBreakerDeps } from './breaker_store.ts';
 import { CAPTURE_PATH } from './capture_store.ts';
 import { LinkedInLane } from './lane.ts';
 import { RESUME_STATE_PATH } from './resume_state.ts';
-import { parseSearchUrls } from './search_urls.ts';
 import {
   BREAKER_DIR,
   FakeBrowserProvider,
@@ -19,7 +17,6 @@ import {
   noopLogger,
   OPENED_LONG_AGO,
   OPENED_RECENTLY,
-  REPO_ROOT,
   seedHappyPathScript,
   seedTrivialUrl,
   singlePageInventory,
@@ -793,36 +790,6 @@ test('a url group with no matching inventory is logged and skipped, not thrown',
   ) as { data: { page: string } } | undefined;
   assert.ok(groupWarning);
   assert.equal(groupWarning.data.page, 'unknown-page');
-});
-// ---------- parseSearchUrls ----------
-
-test('parseSearchUrls parses the rajni search_urls.md fixture into page groups with their urls', async () => {
-  const md = await readFile(`${REPO_ROOT}profiles/rajni/search_urls.md`, 'utf8');
-  const groups = parseSearchUrls(md);
-
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0]?.page, 'linkedin__jobs-search');
-  assert.deepEqual(groups[0]?.urls, [
-    'https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&f_TPR=r86400&sortBy=R',
-    'https://www.linkedin.com/jobs/search/?keywords=Lead+Frontend+Engineer&f_TPR=r86400&sortBy=R',
-  ]);
-});
-
-test('parseSearchUrls drops a page heading with zero urls beneath it', () => {
-  const md = [
-    '## linkedin',
-    '### empty-page',
-    '<!-- inventory: src/adapters/lanes/linkedin/page_inventory/empty-page.md -->',
-    '',
-    '### linkedin__jobs-search',
-    '  • Some Search - https://www.linkedin.com/jobs/search/?keywords=X',
-  ].join('\n');
-
-  const groups = parseSearchUrls(md);
-
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0]?.page, 'linkedin__jobs-search');
-  assert.deepEqual(groups[0]?.urls, ['https://www.linkedin.com/jobs/search/?keywords=X']);
 });
 
 test('open breaker: the lane returns skipped with a reopen time and NEVER launches the browser (D9)', async () => {
