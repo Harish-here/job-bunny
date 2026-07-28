@@ -10,7 +10,7 @@
  * a plain child process (D3); this file never touches an adapter, and
  * derives its one adapter-adjacent number (`runCapMs`) from the pipeline's
  * own static `STAGE_BUDGETS` table (`pipeline/stages/budgets.ts`, Task 8,
- * not an adapter) rather than `cli/wire.ts` — see the plan's Task 9
+ * not an adapter) rather than `cli/wire/`'s `compose.ts` — see the plan's Task 9
  * design note, and Task 8's `test/invariants/stage_budgets.test.ts` for
  * the drift guard that keeps that table honest.
  */

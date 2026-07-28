@@ -48,10 +48,15 @@ module.exports = {
     {
       name: 'only-wire-imports-adapters',
       severity: 'error',
-      comment: 'cli/wire.ts is the single composition point',
+      comment:
+        'cli/wire/compose.ts is the single composition point; builders.ts is a ' +
+        'sibling split out purely to keep compose.ts under the file-size cap; ' +
+        "registry.ts's exception is TYPE-ONLY (RuntimeDeps's notionApi/" +
+        'browserReachable fields are typed against adapter-owned structural ' +
+        'interfaces predating this split — see registry.ts\'s doc comment)',
       from: {
         path: '^src/(pipeline|routines|ops|cli)',
-        pathNot: '^src/cli/wire\\.ts$',
+        pathNot: '^src/cli/wire/(compose|builders|registry)\\.ts$',
       },
       to: { path: '^src/adapters' },
     },

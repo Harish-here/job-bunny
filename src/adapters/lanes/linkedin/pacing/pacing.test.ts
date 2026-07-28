@@ -116,7 +116,7 @@ test('jitter: an already-aborted ctx.signal makes the (real, default) jitter rej
   // short-circuits without ever starting its 2-5s timer. A real (nonzero)
   // jitter range is passed explicitly since the class's own default is a
   // no-op (see DEFAULT_JITTER_MIN_MS's doc comment) — production's real
-  // v0-parity default lives in cli/wire.ts's resolveJitterRange instead.
+  // v0-parity default lives in cli/wire/settings.ts's resolveJitterRange instead.
   const lane = new LinkedInLane(
     provider,
     [inv],

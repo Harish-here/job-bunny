@@ -20,7 +20,7 @@
  *    (see `run_lock.ts` for the stale-lock/crash-recovery rules).
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
- * `cli/wire.ts`'s `wire`, the sole adapter-import chokepoint).
+ * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
 import { join } from 'node:path';
 import { runChecks } from '../../ops/doctor/aggregate.ts';
@@ -45,7 +45,7 @@ import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts'
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
 import type { Routine } from '../../routines/types.ts';
-import { wire as defaultWire, type WireResult } from '../wire.ts';
+import { wire as defaultWire, type WireResult } from '../wire/index.ts';
 
 // > structure provider timeout (300_000) so the stall watchdog never
 // false-kills a live batch.
@@ -83,7 +83,7 @@ export interface RunCommandOptions {
    * observability files. The path is profile-relative (no `profiles/<p>/
    * data/` prefix) because `ctx.storage` passed to the sync stage is
    * `profileStorage`, already rooted at `<repo>/profiles/<profile>/data`
-   * (see `wire.ts`'s `storage: profileStorage`) — the same root
+   * (see `wire/compose.ts`'s `storage: profileStorage`) — the same root
    * `RunFolder` uses for `runs/<date>/…`, so this must match that shape. */
   dryRun?: boolean;
   /** Operator override for the run-level cap (ms). Absent ⇒ derived from

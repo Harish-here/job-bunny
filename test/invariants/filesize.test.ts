@@ -22,8 +22,11 @@ const PINS = new Map<string, number>([
   // pacing/pacing.test.ts, and search_urls.test.ts, plus a shared
   // testkit/ (browser_fakes.ts, fixtures.ts) for fixtures — every result
   // is under the 800-line cap.
-  ['src/cli/wire.ts', 772],
-  ['src/cli/wire.test.ts', 882],
+  // wire.ts's and wire.test.ts's pins are gone too (task 2 of the split
+  // brief, 2026-07-28): wire.ts became src/cli/wire/{config,registry,
+  // settings,builders,compose}.ts + index.ts, and wire.test.ts's tests were
+  // split by target into {config,registry,settings,compose}.test.ts plus a
+  // shared testkit.ts fixture file — every result is under its cap.
   ['src/cli/commands/release.ts', 705],
   ['src/cli/commands/serve.ts', 513],
   ['src/adapters/browser/cdp-chrome/provider.ts', 582],
@@ -59,7 +62,7 @@ test('every src .ts file fits its cap (impl <= 400, test <= 800); pins shrink-on
   // Guard against a vacuous pass (the depcruise cruising-0-modules trap).
   assert.ok(files.length > 50, `expected to walk src/, found only ${files.length} files`);
   // The pin list may only shrink. Never pin a NEW file — split it instead.
-  assert.ok(PINS.size <= 10, `pin list grew to ${PINS.size} — 10 were grandfathered on 2026-07-28`);
+  assert.ok(PINS.size <= 8, `pin list grew to ${PINS.size} — 8 remain after wire.ts's split (task 2, 2026-07-28)`);
 
   const problems: string[] = [];
   for (const file of files) {

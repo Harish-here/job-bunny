@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Per-profile pipeline config (spec §3): core owns WHAT is enabled;
  * adapters own their own settings shape, validated at wire time
- * (cli/wire.ts is the single composition point). Config is the wiring —
+ * (cli/wire/compose.ts is the single composition point). Config is the wiring —
  * nothing else decides which adapters run.
  */
 

@@ -17,9 +17,9 @@
  * it here would violate that ownership.
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
- * `cli/wire.ts`'s `wire`, the sole adapter-import chokepoint).
+ * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
-import { wire as defaultWire, type WireResult } from '../wire.ts';
+import { wire as defaultWire, type WireResult } from '../wire/index.ts';
 
 export interface RoutineCommandOptions {
   profile: string;
