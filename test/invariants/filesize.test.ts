@@ -14,36 +14,15 @@ const TEST_CAP = 800;
 // A pinned file may never exceed its pin; when it shrinks, the pin must shrink with
 // it, and once the file is under its cap the pin must be removed. Delete this map
 // entirely in the final PR of the file-size effort.
-const PINS = new Map<string, number>([
-  // lane.ts's own pin is gone (item 7 of the split brief landed it at
-  // exactly 400 lines, at the cap). lane.test.ts's pin is gone too: the
-  // test-split dispatch broke the 2958-line file into lane.test.ts,
-  // lane_features.test.ts, lane_breaker.test.ts, pacing/pagination.test.ts,
-  // pacing/pacing.test.ts, and search_urls.test.ts, plus a shared
-  // testkit/ (browser_fakes.ts, fixtures.ts) for fixtures — every result
-  // is under the 800-line cap.
-  // wire.ts's and wire.test.ts's pins are gone too (task 2 of the split
-  // brief, 2026-07-28): wire.ts became src/cli/wire/{config,registry,
-  // settings,builders,compose}.ts + index.ts, and wire.test.ts's tests were
-  // split by target into {config,registry,settings,compose}.test.ts plus a
-  // shared testkit.ts fixture file — every result is under its cap.
-  // release.ts's pin is gone too (task 3 of the split brief, 2026-07-29):
-  // release.ts became src/cli/commands/release/{version,resume,steps}.ts +
-  // index.ts, and release.test.ts's tests were split by target into
-  // {version,resume}.test.ts plus index.test.ts (the orchestration suite)
-  // — every result is under its cap.
-  // provider.ts's and provider.test.ts's pins are gone too (task 4 of the
-  // split brief, 2026-07-29): provider.ts shed a handles/ subfolder
-  // (page_handle.ts, browser_handle.ts, index.ts — mirroring the existing
-  // ownership/discovery pattern), and provider.test.ts's PageHandle deadline
-  // suite moved to handles/page_handle.test.ts with its own minimal fakes
-  // — every result is under its cap.
-  ['src/cli/commands/serve.ts', 513],
-  ['src/adapters/browser/cdp-chrome/launcher.ts', 447],
-  ['src/ops/doctor/aggregate.ts', 439],
-  ['src/pipeline/stages/source.ts', 427],
-  ['src/core/rank/rank.ts', 407],
-]);
+//
+// PINS is now EMPTY — the file-size split effort is complete (task 5, the
+// final PR, 2026-07-29): serve.ts became src/cli/commands/serve/{start,
+// lifecycle,status}.ts + index.ts (serve.ts itself is gone); launcher.ts
+// shed session_clear.ts; aggregate.ts shed config_checks.ts; source.ts shed
+// gates.ts; rank.ts shed axes.ts — every result, impl and test alike, is
+// under its cap. This map, and the ceiling check below, are kept only
+// pending the final removal of this scaffold.
+const PINS = new Map<string, number>([]);
 
 const ROOT = join(import.meta.dirname, '..', '..');
 
@@ -70,7 +49,7 @@ test('every src .ts file fits its cap (impl <= 400, test <= 800); pins shrink-on
   // Guard against a vacuous pass (the depcruise cruising-0-modules trap).
   assert.ok(files.length > 50, `expected to walk src/, found only ${files.length} files`);
   // The pin list may only shrink. Never pin a NEW file — split it instead.
-  assert.ok(PINS.size <= 5, `pin list grew to ${PINS.size} — 5 remain after provider.ts's split (task 4, 2026-07-29)`);
+  assert.ok(PINS.size <= 0, `pin list grew to ${PINS.size} — it must stay empty (task 5, 2026-07-29)`);
 
   const problems: string[] = [];
   for (const file of files) {

@@ -11,7 +11,6 @@ import {
 } from '../../core/company/index.ts';
 import { isSoftError, SoftError } from '../../core/errors/index.ts';
 import { type FilterConfig, FilterConfigSchema } from '../../core/filter/config.ts';
-import { decide, evaluateCard } from '../../core/filter/engine.ts';
 import {
   CacheEntrySchema,
   type DroppedRecord,
@@ -20,6 +19,7 @@ import {
 } from '../../core/jd/index.ts';
 import type { ApiLane } from '../../ports/index.ts';
 import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
+import { newGateCounters, runJobGates } from './gates.ts';
 import { CACHE_PATH } from './reconcile.ts';
 
 const CacheSchema = z.array(CacheEntrySchema);
@@ -177,10 +177,7 @@ export function makeSourceStage(
       const fetchedJobs: JD[] = [];
       const laneDrops: DroppedRecord[] = [];
       let probesIssued = 0;
-      let cacheSkipped = 0;
-      let apiSeenSkipped = 0;
-      let cardGateDropped = 0;
-      let capDropped = 0;
+      const gateCounters = newGateCounters();
       let failedLanes = 0;
 
       for (const apiLane of apiLanes) {
@@ -269,73 +266,36 @@ export function makeSourceStage(
                   const { identity } = parsed.data;
 
                   // Gate order, cheapest first (P9 closure register §1):
-                  // 1. title/avoid card gate — pure computation, no
-                  //    lookup at all, and the workhorse that actually cuts
-                  //    volume before this job can ever reach the LLM
-                  //    `structure` stage.
-                  const verdicts = evaluateCard(
-                    { title: identity.title, company: identity.company },
-                    filterCfg,
+                  // title/avoid card gate → seen ledger → Notion cache →
+                  // maxNewPerLane backstop — see gates.ts's own doc
+                  // comment for the full rationale of each step.
+                  const gateOutcome = runJobGates(
+                    identity,
+                    {
+                      filterCfg,
+                      apiSeen,
+                      cacheIds,
+                      emittedThisLane,
+                      maxNewPerLane,
+                      laneName: apiLane.name,
+                    },
+                    gateCounters,
                   );
-                  if (decide(verdicts) === 'drop') {
-                    cardGateDropped++;
-                    laneDrops.push({
-                      jd: JDSchema.parse({ identity }),
-                      reasons: verdicts,
-                    });
-                    continue;
-                  }
-
-                  // 2. seen ledger — this exact job id was already emitted
-                  // by this lane in a prior run; skip without a
-                  // DroppedRecord (same posture as the cache gate below —
-                  // it was never freshly judged this run).
-                  if (Object.hasOwn(apiSeen, identity.id)) {
-                    apiSeenSkipped++;
-                    continue;
-                  }
-
-                  // 3. cache gate — already known to Notion. Cache hit:
-                  // this job was never a candidate that got judged, so
-                  // unlike a real drop it gets no DroppedRecord (which
-                  // carries the full `jd` payload — retaining ~3000 of
-                  // them is exactly the bloat this gate exists to remove)
-                  // and no per-job log, only the aggregate counter below.
-                  if (cacheIds.has(identity.id)) {
-                    cacheSkipped++;
-                    continue;
-                  }
-
-                  // 4. maxNewPerLane backstop — fires only once title/
-                  // avoid + seen + cache have already done the real
-                  // work. Never a silent truncation: every job the cap
-                  // drops still gets a DroppedRecord, and the cap firing
-                  // itself is logged once per lane.
-                  if (emittedThisLane >= maxNewPerLane) {
-                    capDropped++;
-                    if (!capLoggedThisLane) {
+                  if (gateOutcome.kind === 'drop') {
+                    laneDrops.push(gateOutcome.dropped);
+                    if (
+                      gateOutcome.dropped.reasons[0]?.rule === 'source.maxNewCap' &&
+                      !capLoggedThisLane
+                    ) {
                       capLoggedThisLane = true;
                       ctx.logger.warn(
                         'source: maxNewPerLane cap hit — dropping remainder',
-                        {
-                          lane: apiLane.name,
-                          maxNewPerLane,
-                        },
+                        { lane: apiLane.name, maxNewPerLane },
                       );
                     }
-                    laneDrops.push({
-                      jd: JDSchema.parse({ identity }),
-                      reasons: [
-                        {
-                          rule: 'source.maxNewCap',
-                          severity: 'hard',
-                          pass: false,
-                          detail: `maxNewPerLane=${maxNewPerLane} reached for lane "${apiLane.name}"`,
-                        },
-                      ],
-                    });
                     continue;
                   }
+                  if (gateOutcome.kind === 'skip') continue;
 
                   fetchedJobs.push(parsed.data);
                   apiSeen[identity.id] = now;
@@ -398,10 +358,10 @@ export function makeSourceStage(
 
       ctx.logger.info('source: gate summary', {
         fetched: fetchedJobs.length,
-        cardGateDropped,
-        apiSeenSkipped,
-        cacheSkipped,
-        capDropped,
+        cardGateDropped: gateCounters.cardGateDropped,
+        apiSeenSkipped: gateCounters.apiSeenSkipped,
+        cacheSkipped: gateCounters.cacheSkipped,
+        capDropped: gateCounters.capDropped,
       });
 
       return {

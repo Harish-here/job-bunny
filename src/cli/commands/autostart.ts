@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { daemonLogPath } from '../../ops/daemon/logs/index.ts';
-import { LEGACY_PLIST_REGEX, migrationCleanupBlock } from './serve.ts';
+import { LEGACY_PLIST_REGEX, migrationCleanupBlock } from './serve/index.ts';
 
 const execFileAsync = promisify(execFile);
 const fsWriteFileAsync = promisify(fsWriteFile);
