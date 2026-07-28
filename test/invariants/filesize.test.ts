@@ -16,14 +16,12 @@ const TEST_CAP = 800;
 // entirely in the final PR of the file-size effort.
 const PINS = new Map<string, number>([
   // lane.ts's own pin is gone (item 7 of the split brief landed it at
-  // exactly 400 lines, at the cap). lane.test.ts's pin moves 2956 -> 2958:
-  // its single `from './lane.ts'` import necessarily became three import
-  // statements (buildPageUrl/jitterMs and parseSearchUrls moved to
-  // pacing/index.ts and search_urls.ts respectively; only LinkedInLane
-  // stays in lane.ts) — an import-path-only edit, not new test content.
-  // The test-split dispatch removes this pin entirely once the file is
-  // broken up below the 800-line cap.
-  ['src/adapters/lanes/linkedin/lane.test.ts', 2958],
+  // exactly 400 lines, at the cap). lane.test.ts's pin shrinks in lockstep
+  // as the test-split dispatch peels suites off into their own files
+  // (lane_features.test.ts, pacing/pagination.test.ts, pacing/pacing.test.ts,
+  // search_urls.test.ts, lane_breaker.test.ts) — this pin is removed
+  // entirely once the file lands under the 800-line cap.
+  ['src/adapters/lanes/linkedin/lane.test.ts', 2246],
   ['src/cli/wire.ts', 772],
   ['src/cli/wire.test.ts', 882],
   ['src/cli/commands/release.ts', 705],
