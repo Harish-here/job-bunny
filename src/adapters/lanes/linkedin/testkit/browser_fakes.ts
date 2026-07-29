@@ -124,7 +124,7 @@ export class FakePage implements PageHandle {
       return (hasText ? 'text' : '') as unknown as T;
     }
     // buildHarvestScript's source always declares `cardListSel` — a JD-text
-    // script (buildJdTextScript) never does. This lets one fake `evaluate`
+    // script (buildJdSettleScript) never does. This lets one fake `evaluate`
     // serve both call sites without inspecting PageHandle call order.
     if (fn.includes('cardListSel')) {
       const cards = this.script.harvestByUrl.get(this.lastUrl);
@@ -136,7 +136,7 @@ export class FakePage implements PageHandle {
     // "card openJd fails" test scenario is triggered below. An
     // anchorOnly url returns text only from the anchor-fallback script
     // (buildJdAnchorScript's querySelectorAll over multiple tag names —
-    // buildJdTextScript uses a single querySelector).
+    // buildJdSettleScript uses a single querySelector).
     if (
       this.script.anchorOnlyUrls.has(this.lastUrl) &&
       !fn.includes('querySelectorAll')

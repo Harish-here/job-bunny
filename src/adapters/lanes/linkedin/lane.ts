@@ -122,11 +122,11 @@ export class LinkedInLane implements FarmingLane {
     await this.sleepFn(ms, ctx.signal);
   }
 
-  /** Randomized pause between saved-search urls (D2), distinct from
-   * `jitter` (which paces navigations inside one url): the gap that stops
-   * 21 saved searches arriving as one burst, the pattern that most likely
-   * provoked the 2026-07-28 soft block. Shares `jitterMs`/`sleepFn`/
-   * `randomFn` with jitter — abort-aware for free, no-op at zero length. */
+  /** Randomized pause between saved-search urls (D2) and between runProbe's
+   * own probe targets, distinct from `jitter` (paces navigations inside one
+   * url): stops 21 saved searches arriving as one burst, likely the
+   * 2026-07-28 soft-block cause. Shares jitter's abort-aware, no-op-at-zero
+   * sleep machinery. */
   private async interUrlPause(ctx: RunContext): Promise<void> {
     const ms = jitterMs(this.interUrlDelayMinMs, this.interUrlDelayMaxMs, this.randomFn);
     if (ms <= 0) return;
