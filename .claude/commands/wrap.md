@@ -103,12 +103,15 @@ Ask: **"Is this a major (new design version), minor (new feature), or patch (fix
 Recommend based on the commit content. Derive the new version string from the last tag (e.g. `v0.1.0` + minor → `v0.2.0`). Confirm the new version string with the user before any writes.
 
 **3. Generate release summary + write the CHANGELOG block**
-Draft a concise summary: what shipped, why it matters, any known gaps. Show for user approval before writing anywhere. Once approved, write it into `CHANGELOG.md` yourself as the dated `## [X.Y.Z] — YYYY-MM-DD` block (mirror the latest block's format — `### Added` / `### Changed` / `### Fixed` / `### Notes` as applicable, omit empty sub-sections). This is the one prose step `release.js` deliberately does not do — its preflight fails loud if this block isn't already present, so it must land **before** step 5. Do not commit it; the script picks it up and commits it as part of its version-sync step.
+Draft a concise summary: what shipped, why it matters, any known gaps. Show for user approval before writing anywhere. Once approved, write it into `CHANGELOG.md` yourself as the dated `## [X.Y.Z] — YYYY-MM-DD` block (mirror the latest block's format — `### Added` / `### Changed` / `### Fixed` / `### Notes` as applicable, omit empty sub-sections). This is the one prose step `release.js` deliberately does not do — its preflight fails loud if this block isn't already present, so it must land **before** step 6. Do not commit it; the script picks it up and commits it as part of its version-sync step.
 
 **4. Validate Design Versions table (before the PR merges)**
 `notion-fetch` the main "Job Bunny" page. Confirm exactly one 🟢 Active row. If not → stop and ask the user to fix it before proceeding. Do not run the release script until this check passes.
 
-**5. Run the release command**
+**5. Sync the instruction surfaces**
+Dispatch the `kb-curator` subagent with this session's diff (changed-file list + a short summary of any behavior changes). Review its result — apply any edits it proposes, and surface anything it flags to the user. Do not run the release command until this is done.
+
+**6. Run the release command**
 ```bash
 node src/cli/main.ts release X.Y.Z [--dry-run] [--no-merge] [--yes]
 ```
@@ -118,17 +121,17 @@ This owns: preflight (clean tree, on `main`, up to date with origin, tag doesn't
 - On a major bump: confirm the `vMAJOR.0.0` convention with the user before running it.
 - Parse its final `[release] RESULT {...}` line for the PR number/URL and tag — quote these in step 8's confirmation rather than re-deriving them from raw git/gh output.
 
-**6. Update Design Versions table**
+**7. Update Design Versions table**
 - **All bumps:** update the "Active version" column in the 🟢 Active row to the new version string (e.g. `0.2.0`) via anchored `update_content`. Use the current cell value as the anchor; if the cell is empty, anchor on the Code Tag value of that row (unique per row).
 - **Major bump only:** also flip the Active row to ✅ Shipped → promote the Draft row with the **lowest version number** (e.g. if v1/v2/v3 are all Draft, promote v1) to 🟢 Active. Set "Active version" in the newly promoted row to the new version string. If it is unclear which row to promote, stop and ask the user before writing. Confirm exactly one Active row after both writes.
 
-**7. Mark roadmap items done**
+**8. Mark roadmap items done**
 `notion-fetch` the roadmap page. In the "v0 LinkedIn lane — hardening increments" table, find the shipped version's row. Append `✅ shipped in vX.Y.Z` to its Items cell via anchored `update_content`. Never delete rows. If the shipped version has no hardening row (e.g. it was a design-only minor), skip this step.
 
-**8. Append to the log**
+**9. Append to the log**
 One dated entry on the main page, formatted per **Log entry formatting** above but with `(ship — vX.Y.Z)` in place of the session label, + 2–3 bullet summary (pull the PR number/URL from `release.js`'s result line). End with `Next: <next roadmap version and theme>` pulled from the remaining unshipped rows in the hardening increments table.
 
-**9. Confirm**
+**10. Confirm**
 - `release PR: #<n> merged (test check green)` — from `release.js`'s result line
 - `git: tagged vX.Y.Z` (+ pushed) — from `release.js`'s result line
 - `version sync: CHANGELOG block + package.json/package-lock + README badge → X.Y.Z`

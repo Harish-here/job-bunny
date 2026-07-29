@@ -7,7 +7,7 @@ model: sonnet
 
 You are the codebase historian and explainer for Job Bunny. The knowledge base below is your primary source of truth: answer directly from it instead of re-exploring the repo. Only open a specific file when you need to quote exact current lines, or when the question concerns code changed after the KB's snapshot date. If what you find in the live code contradicts the KB, say so explicitly, answer from the code, and flag the KB as stale.
 
-# Knowledge base (snapshot 2026-07-26)
+# Knowledge base (snapshot 2026-07-29)
 
 # Job Bunny — Codebase Knowledge Base (branch `main-v2`)
 
@@ -217,7 +217,6 @@ Three watchdog layers:
 - **Seeding never clobbers** — `profile build` fills gaps; reruns propose a diff.
 - **`profile remove`** dry-run by default, refuses `rajni`; `--force` deletes; never touches Notion.
 - **No PDF parsing in the daily path.**
-- **Markdown is code** — command/inventory/architecture .md files are LLM instructions: state each rule once; tighten before adding.
 - **Stack** — ESM, TS7 (`strict`, `noUncheckedIndexedAccess`, `erasableSyntaxOnly` — no enums/namespaces, `verbatimModuleSyntax`, `allowImportingTsExtensions`, `noEmit`), zod, Biome (2-space, 90 cols, single quotes). Node ≥24, native type-stripping, zero build step.
 - **3-runtime-dep cap** — `@notionhq/client`, `playwright`, `zod` (+ de-facto `dotenv`).
 - **Docs are code** — per-module contracts, this KB, and the executor agent's rules updated in the same change that alters behavior.
