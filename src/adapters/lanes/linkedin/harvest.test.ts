@@ -247,6 +247,94 @@ test('buildHarvestScript emits a hydration pass that scrolls each card into view
   assert.match(script, /hydrationBudgetMs = 8000/);
 });
 
+test('buildHarvestScript emits a settle-poll phase bounded by its own deadline, distinct from the hydration deadline', () => {
+  const inv = fixtureInventory();
+  const script = buildHarvestScript(inv);
+  assert.match(script, /needsSettle/);
+  assert.match(script, /settleDeadline/);
+  assert.match(script, /cardSettleBudgetMs = 8000/);
+});
+
+test('buildHarvestScript, evaluated with a card whose title/company populate a bit late, still returns non-empty text once it settles within the budget', async () => {
+  const inv = fixtureInventory();
+  // A fake element whose textContent starts empty and flips to real text
+  // after a few polls — mirrors a card still hydrating when the hydration
+  // pass's own deadline already elapsed.
+  function lateElement(finalText: string, readyAfterReads: number): unknown {
+    let reads = 0;
+    return {
+      get textContent() {
+        reads += 1;
+        return reads > readyAfterReads ? finalText : '';
+      },
+      getAttribute() {
+        return null;
+      },
+    };
+  }
+  const sel = inv.selectors;
+  const titleEl = lateElement('Late Title', 2);
+  const companyEl = lateElement('Late Co', 3);
+  const cardEl = {
+    querySelector(s: string) {
+      if (s === sel.cardTitle) return titleEl;
+      if (s === sel.cardCompany) return companyEl;
+      if (s === sel.cardLocation) return null;
+      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/1/' };
+      return null;
+    },
+    matches() {
+      return false;
+    },
+  };
+  const listEl = { querySelectorAll: () => [cardEl] };
+  const document = {
+    querySelector: (s: string) => (s === sel.cardList ? listEl : null),
+  };
+  const script = buildHarvestScript(inv, 2_000, 10);
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  );
+
+  assert.deepEqual(result, [
+    {
+      title: 'Late Title',
+      company: 'Late Co',
+      location: '',
+      href: '/jobs/view/1/',
+      idAttr: null,
+    },
+  ]);
+});
+
+test('buildHarvestScript, evaluated with a card whose title/company never settle, returns whatever is present without throwing', async () => {
+  const inv = fixtureInventory();
+  const sel = inv.selectors;
+  const cardEl = {
+    querySelector(s: string) {
+      if (s === sel.cardTitle) return { textContent: '', getAttribute: () => null };
+      if (s === sel.cardCompany) return null; // never present at all
+      if (s === sel.cardLocation) return null;
+      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/2/' };
+      return null;
+    },
+    matches() {
+      return false;
+    },
+  };
+  const listEl = { querySelectorAll: () => [cardEl] };
+  const document = {
+    querySelector: (s: string) => (s === sel.cardList ? listEl : null),
+  };
+  const script = buildHarvestScript(inv, 30, 10);
+
+  const result = await vm.runInNewContext(script, { document, setTimeout });
+
+  assert.deepEqual(structuredClone(result), [
+    { title: '', company: '', location: '', href: '/jobs/view/2/', idAttr: null },
+  ]);
+});
+
 test('buildHarvestScript, evaluated in a fake DOM with a card list larger than one hydration chunk, still returns every card (hydration loop covers the whole list)', async () => {
   const inv = fixtureInventory();
   const cards: FakeElSpec[] = Array.from({ length: 12 }, (_, i) => ({

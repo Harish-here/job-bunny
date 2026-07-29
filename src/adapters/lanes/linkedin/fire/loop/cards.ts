@@ -39,6 +39,7 @@ export async function processCard(
   deps: UrlRunnerDeps,
   ctx: RunContext,
 ): Promise<void> {
+  ctx.beat();
   if (deps.cacheIds.has(card.id)) {
     return;
   }
@@ -78,7 +79,6 @@ export async function processCard(
 
   state.processedIds.add(card.id);
   stat.cardsAttempted += 1;
-  ctx.beat();
   try {
     // v0 parity placement: jitter before every JD open
     // (scripts/pipeline/extract.js:282 — `await jitter();`
