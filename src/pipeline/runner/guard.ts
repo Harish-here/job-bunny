@@ -75,19 +75,20 @@ async function runOneAttempt<In, Out>(
   ctx: PipelineCtx,
   stallMs: number,
 ): Promise<Out> {
+  const stallController = new AbortController();
   const attemptSignal = AbortSignal.any([
     ctx.signal,
     AbortSignal.timeout(stage.timeoutMs),
+    stallController.signal,
   ]);
 
   let stallTimer: NodeJS.Timeout | undefined;
-  let stallReject: ((err: Error) => void) | undefined;
 
   const armStall = () => {
     if (!stage.heartbeat) return;
     if (stallTimer) clearTimeout(stallTimer);
     stallTimer = setTimeout(() => {
-      stallReject?.(
+      stallController.abort(
         new Error(`stage "${stage.name}" stalled: no beat() within ${stallMs}ms`),
       );
     }, stallMs);
@@ -103,12 +104,7 @@ async function runOneAttempt<In, Out>(
     },
   };
 
-  const stallPromise: Promise<never> | undefined = stage.heartbeat
-    ? new Promise<never>((_resolve, reject) => {
-        stallReject = reject;
-        armStall();
-      })
-    : undefined;
+  if (stage.heartbeat) armStall();
 
   const onAbort = () => abortReject?.(toAbortError(attemptSignal, stage.name));
   let abortReject: ((err: Error) => void) | undefined;
@@ -122,9 +118,7 @@ async function runOneAttempt<In, Out>(
   });
 
   try {
-    const racers: Array<Promise<Out>> = [stage.run(input, childCtx), abortPromise];
-    if (stallPromise) racers.push(stallPromise);
-    return await Promise.race(racers);
+    return await Promise.race([stage.run(input, childCtx), abortPromise]);
   } finally {
     if (stallTimer) clearTimeout(stallTimer);
     attemptSignal.removeEventListener('abort', onAbort);

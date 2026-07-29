@@ -40,7 +40,7 @@ interface RawCard {
   idAttr: string | null;
 }
 
-const DEFAULT_HARVEST_TIMEOUT_MS = 15_000;
+const DEFAULT_HARVEST_TIMEOUT_MS = 20_000;
 /** Bounded wait for the results list to attach before the in-page read.
  * Matches v0's DEFAULT_CALL_TIMEOUT_MS in scripts/pipeline/extract/cards.js. */
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
@@ -60,6 +60,20 @@ const HYDRATION_CHUNK_SIZE = 5;
 /** Yield between chunks so the IntersectionObserver actually fires and the
  * framework renders before the next chunk scrolls. */
 const HYDRATION_CHUNK_DELAY_MS = 120;
+/** In-page budget for the post-hydration settle poll: the hydration scroll
+ * pass above only nudges the IntersectionObserver into mounting a card's
+ * content, it doesn't guarantee title/company text has actually painted by
+ * the time the loop ends — a single unconditional read right after
+ * hydration can still race the paint and record an empty title/company,
+ * which then fails JDSchema.parse downstream. Same pattern as jd_open.ts's
+ * `JD_SETTLE_BUDGET_MS`/`JD_SETTLE_POLL_MS` (settle-and-read instead of a
+ * single-shot read), applied to list cards here instead of the JD detail
+ * pane there. Self-stopping deadline: never throws on budget exhaustion,
+ * just returns whatever settled (possibly still empty). */
+const CARD_SETTLE_BUDGET_MS = 8_000;
+/** Gap between re-reads during the settle poll — mirrors jd_open.ts's
+ * `JD_SETTLE_POLL_MS`. */
+const CARD_SETTLE_POLL_MS = 250;
 const JOB_ID_RE = /\/jobs\/view\/(\d+)/;
 const LINKEDIN_ORIGIN = 'https://www.linkedin.com';
 
@@ -77,8 +91,19 @@ const LINKEDIN_ORIGIN = 'https://www.linkedin.com';
  * 2026-07-17 stall lesson in harvestCards' doc comment) so LinkedIn's
  * virtualized results list actually mounts every card's content, bounded by
  * HYDRATION_BUDGET_MS so a pathological page can't hang the call.
+ *
+ * `cardSettleBudgetMs`/`cardSettlePollMs` default to
+ * CARD_SETTLE_BUDGET_MS/CARD_SETTLE_POLL_MS and exist as overridable
+ * parameters purely so tests can shrink the settle budget instead of
+ * genuinely waiting out 8 real seconds (mirrors buildJdSettleScript's
+ * `budgetMs`/`pollMs` params in jd_open.ts) — production call sites never
+ * pass them.
  */
-export function buildHarvestScript(inv: Inventory): string {
+export function buildHarvestScript(
+  inv: Inventory,
+  cardSettleBudgetMs: number = CARD_SETTLE_BUDGET_MS,
+  cardSettlePollMs: number = CARD_SETTLE_POLL_MS,
+): string {
   const sel = inv.selectors;
   const idAttrName = inv.behaviors.jobCardIdAttr ?? null;
   return `(async () => {
@@ -92,6 +117,8 @@ export function buildHarvestScript(inv: Inventory): string {
   const hydrationBudgetMs = ${HYDRATION_BUDGET_MS};
   const hydrationChunkSize = ${HYDRATION_CHUNK_SIZE};
   const hydrationChunkDelayMs = ${HYDRATION_CHUNK_DELAY_MS};
+  const cardSettleBudgetMs = ${cardSettleBudgetMs};
+  const cardSettlePollMs = ${cardSettlePollMs};
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const text = (el) => (el && el.textContent ? el.textContent.trim() : '');
   const listEl = document.querySelector(cardListSel);
@@ -114,6 +141,19 @@ export function buildHarvestScript(inv: Inventory): string {
       if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView();
     }
     await sleep(hydrationChunkDelayMs);
+  }
+
+  // Settle poll: the hydration pass above only nudges cards into mounting,
+  // it does not guarantee title/company text has actually painted by the
+  // time it ends. Re-read only the cards still missing either field, until
+  // every card has both non-empty or the budget runs out — self-stopping,
+  // so a card that never settles just returns whatever text is present
+  // (possibly still empty) rather than hanging this evaluate.
+  const needsSettle = (el) =>
+    !text(el.querySelector(titleSel)) || !text(el.querySelector(companySel));
+  const settleDeadline = Date.now() + cardSettleBudgetMs;
+  while (cardEls.some(needsSettle) && Date.now() < settleDeadline) {
+    await sleep(cardSettlePollMs);
   }
 
   return cardEls.map((el) => {

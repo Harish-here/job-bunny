@@ -163,6 +163,15 @@ export async function runUrlGroups(
             break;
           }
 
+          // Page-level heartbeat: this page's goto/harvest already
+          // constitutes real progress regardless of what gateCards
+          // decides next — a run of many consecutive zero-gate pages
+          // (e.g. filters matching almost nothing) is genuinely alive
+          // work, not a stall, and must not starve the watchdog of
+          // ticks the way per-card-only beats (cards.ts' processCard)
+          // would when `pass` ends up empty.
+          ctx.beat();
+
           const { pass, dropped: gateDropped } = gateCards(cards, deps.filterCfg);
           state.dropped.push(...gateDropped);
 

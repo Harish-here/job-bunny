@@ -138,6 +138,52 @@ test('heartbeat stage that stops beating is killed after stallMs', async () => {
   assert.ok(elapsed < 300, `expected stall kill near stallMs(40ms), took ${elapsed}ms`);
 });
 
+test('heartbeat stage that stalls has its attemptSignal actually aborted, not just raced', async () => {
+  // guardStage's own Promise.race can settle (via its abortPromise) in
+  // fewer microtask ticks than the background stage.run() promise takes to
+  // unwind its own `await ... .catch(...)` chain — so observing the stage's
+  // own signal must wait on the stage's own promise settling, not just on
+  // guardStage's rejection.
+  let resolveStageDone: (() => void) | undefined;
+  const stageDone = new Promise<void>((resolve) => {
+    resolveStageDone = resolve;
+  });
+  let observedAborted = false;
+  let sawStallMessage = false;
+  const stage = fakeStage<undefined, string>({
+    timeoutMs: 1_000,
+    retries: 0,
+    heartbeat: true,
+    async run(_input, stageCtx: StageContext) {
+      ctx.beat(); // one beat, then goes silent and awaits its own signal
+      await delay(500, undefined, { signal: stageCtx.signal }).catch((err: unknown) => {
+        observedAborted = stageCtx.signal.aborted;
+        sawStallMessage =
+          err instanceof Error &&
+          /stalled: no beat\(\)/.test((stageCtx.signal.reason as Error)?.message ?? '');
+        resolveStageDone?.();
+      });
+      return 'never';
+    },
+  });
+  const { ctx } = fakeCtx();
+
+  await assert.rejects(
+    () => guardStage(stage, undefined, ctx, { stallMs: 40 }),
+    (err) => {
+      assert.ok(err instanceof Error);
+      assert.match(
+        err.cause instanceof Error ? err.cause.message : '',
+        /stalled: no beat\(\) within 40ms/,
+      );
+      return true;
+    },
+  );
+  await stageDone;
+  assert.equal(observedAborted, true, 'stage.run must observe its own signal as aborted');
+  assert.equal(sawStallMessage, true, 'the abort reason must carry the stall message');
+});
+
 test('a stage that throws on attempt 1 but succeeds on attempt 2 resolves with attempts=2', async () => {
   let calls = 0;
   const stage = fakeStage<undefined, string>({

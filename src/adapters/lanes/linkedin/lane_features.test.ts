@@ -275,6 +275,57 @@ test('half-open: a probe re-opening a card an earlier same-day fire already capt
   const persisted = storage.get(CAPTURE_PATH) as JD[];
   assert.equal(persisted.length, 1);
 });
+test('page-level heartbeat: ctx.beat() ticks once per harvested page even when every card on that page is gated out (no card ever reaches processCard)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // Every card on every url is avoid-listed, so gateCards' `pass` is
+  // empty for both pages — processCard (and its own per-card beat) is
+  // never invoked. If the only heartbeat lived inside processCard, this
+  // run would tick zero times despite two full page harvests of real,
+  // ongoing work (the bug this test guards against).
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/1001/',
+    },
+  ]);
+  script.harvestByUrl.set(URL_2, [
+    {
+      title: 'Staff Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/2001/',
+    },
+  ]);
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  let beats = 0;
+  const ctx = fakeCtx({
+    beat() {
+      beats += 1;
+    },
+  });
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+  );
+
+  const { jobs, dropped } = await lane.source(ctx);
+
+  assert.deepEqual(jobs, []);
+  assert.ok(dropped.length >= 2);
+  // One page harvested per url (singlePageInventory has no pagination),
+  // zero cards ever gate-passed — the page-level beat is the only
+  // heartbeat source here, so it must have ticked exactly twice.
+  assert.equal(beats, 2);
+});
+
 test('pacing: the constructor puts each pacing argument in its own slot (no transposition), read via a structural cast on the four private fields', async () => {
   const inv = await singlePageInventory();
   const provider = new FakeBrowserProvider(newScript());
