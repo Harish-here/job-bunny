@@ -176,11 +176,13 @@ test('half-open: after a successful probe the first main-loop url is paced like 
   const result = await lane.source(fakeCtx());
 
   assert.equal(result.skipped, undefined);
-  // Three navigations happen this fire — probe(URL_1), URL_1, URL_2 — and
-  // the probe is deliberately unpaced, so a pause must precede BOTH
-  // main-loop urls. Without the probe marking the fire as started, URL_1
-  // would follow the probe's own request to the same url instantly, which
-  // is the one moment (recovery from a block) that burst looks worst.
+  // Three navigations happen this fire — probe(URL_1), URL_1, URL_2 — but
+  // the probe only ever visits its one target here (URL_1 succeeds
+  // immediately), so runProbe's own inter-target pause never fires; a
+  // pause must still precede BOTH main-loop urls. Without the probe
+  // marking the fire as started, URL_1 would follow the probe's own
+  // request to the same url instantly, which is the one moment (recovery
+  // from a block) that burst looks worst.
   assert.equal(sleepCalls.length, 2);
   for (const ms of sleepCalls) {
     assert.equal(ms, 20_000 + Math.floor(0.5 * (45_000 - 20_000)));
@@ -239,8 +241,11 @@ test('half-open: a probe returning a shell re-opens the breaker and ends the fir
 test('half-open: a probe that THROWS leaves the breaker open with openedAt unchanged (spec §5)', async () => {
   const inv = await singlePageInventory();
   const script = newScript();
-  // The probe url's navigation fails outright — inconclusive, not proof
-  // that the block cleared.
+  // The probe url's navigation fails outright — a real error, unlike
+  // no-candidate, still proves nothing and must not close the breaker.
+  // The fail-open path (no-candidate) must not leak into this genuine
+  // failure: a broken page is conclusive enough to hold the breaker open,
+  // not the absence-of-evidence case that closes it.
   script.gotoThrows.add(URL_1);
   seedTrivialUrl(script, URL_2, '5102');
   const provider = new FakeBrowserProvider(script);

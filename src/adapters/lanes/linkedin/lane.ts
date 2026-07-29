@@ -28,16 +28,14 @@ import { ResumeState } from './resume_state.ts';
 import type { SearchUrlGroup } from './search_urls.ts';
 import { THROTTLE_COOLDOWN_MS, ThrottleCounter } from './throttle.ts';
 
-/**
- * Path of the reconciled Notion cache, read here for the lane's own
- * cache-skip gate. Deliberately duplicated from
- * `pipeline/stages/reconcile.ts`'s `CACHE_PATH` rather than imported —
- * adapters may only import ports + core (`.dependency-cruiser.cjs`
- * `adapters-only-ports-core`), never `pipeline/**`. Same posture as
- * `adapters/lanes/greenhouse/api.ts` duplicating `htmlToText` rather than
- * cross-importing the Keka lane. Both this lane's `this.storage` and the
- * reconcile stage's `ctx.storage` are the same profile-rooted handle, so
- * the relative path must stay byte-identical to reconcile.ts's constant.
+/** Path of the reconciled Notion cache, read here for the lane's own
+ * cache-skip gate. Deliberately duplicated from `pipeline/stages/
+ * reconcile.ts`'s `CACHE_PATH` rather than imported — adapters may only
+ * import ports + core (`adapters-only-ports-core`), never `pipeline/**`,
+ * same posture as `greenhouse/api.ts` duplicating `htmlToText` rather than
+ * cross-importing Keka. Must stay byte-identical to reconcile.ts's
+ * constant: this lane's `this.storage` and the reconcile stage's
+ * `ctx.storage` are the same profile-rooted handle.
  */
 const CACHE_ENTRIES_PATH = 'cache/entries.json';
 const CacheEntriesSchema = z.array(CacheEntrySchema);
@@ -50,17 +48,15 @@ const CacheEntriesSchema = z.array(CacheEntrySchema);
  * v0 constant. */
 const DEFAULT_MAX_CARDS_PER_URL = 40;
 
-/**
- * LinkedIn farming lane (P4 Task 7): composes inventory + harvest/gate +
+/** LinkedIn farming lane (P4 Task 7): composes inventory + harvest/gate +
  * jd_open + resume_state into a FarmingLane. Owns fail-soft granularity
  * (spec §7): one URL group with no matching inventory, one URL whose
- * newPage/goto/harvest fails, or one card whose JD open fails are each
- * logged and the lane continues past them — but if EVERY attempted URL
- * fails, that's not "one flaky selector", it's shaped like an expired
- * LinkedIn session (logout wall), so source() throws loud in that case
- * (mirrors v0 extract.js's checkAggregateFailure). The lane's OWN failure
- * (browser.launch rejecting, e.g. Chrome won't launch) is always thrown
- * loud out of source().
+ * newPage/goto/harvest fails, or one card whose JD open fails are logged
+ * and the lane continues past them — but EVERY attempted URL failing is
+ * shaped like an expired LinkedIn session (logout wall), not one flaky
+ * selector, so source() throws loud then (mirrors v0 extract.js's
+ * checkAggregateFailure). The lane's OWN failure (e.g. Chrome won't
+ * launch) is always thrown loud out of source().
  */
 export class LinkedInLane implements FarmingLane {
   readonly kind = 'farming' as const;
@@ -126,12 +122,11 @@ export class LinkedInLane implements FarmingLane {
     await this.sleepFn(ms, ctx.signal);
   }
 
-  /** Randomized pause between saved-search urls (D2). Distinct from
-   * `jitter`, which paces individual navigations inside one url: this is
-   * the gap that stops 21 saved searches from arriving as one burst, the
-   * pattern that most likely provoked the 2026-07-28 soft block. Shares
-   * `jitterMs` + `sleepFn` + `randomFn` with jitter, so it is abort-aware
-   * for free and a zero-length range is a no-op. */
+  /** Randomized pause between saved-search urls (D2), distinct from
+   * `jitter` (which paces navigations inside one url): the gap that stops
+   * 21 saved searches arriving as one burst, the pattern that most likely
+   * provoked the 2026-07-28 soft block. Shares `jitterMs`/`sleepFn`/
+   * `randomFn` with jitter — abort-aware for free, no-op at zero length. */
   private async interUrlPause(ctx: RunContext): Promise<void> {
     const ms = jitterMs(this.interUrlDelayMinMs, this.interUrlDelayMaxMs, this.randomFn);
     if (ms <= 0) return;
@@ -280,7 +275,12 @@ export class LinkedInLane implements FarmingLane {
         const probeResult = await runHalfOpenProbe(
           this.breaker,
           breakerState,
-          { urls: this.urls, inventories: this.inventories, filterCfg: this.filterCfg },
+          {
+            urls: this.urls,
+            inventories: this.inventories,
+            filterCfg: this.filterCfg,
+            interUrlPause: () => this.interUrlPause(ctx),
+          },
           handle,
           { captureStore, storage: this.storage, processedIds, stats },
           ctx,
