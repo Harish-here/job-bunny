@@ -44,7 +44,7 @@ function fakeCtx(notified: NotifyEvent[]): PipelineCtx {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: {} as PipelineCtx['storage'],
-    config: {} as PipelineCtx['config'],
+    config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     async notify(event: NotifyEvent) {
       notified.push(event);
@@ -227,6 +227,33 @@ test('runCommand: overrides ctx.logger with a JsonlLogger before running the pip
   );
 
   assert.equal(observedLoggerCtor, 'JsonlLogger');
+});
+
+test('runCommand: a profile with invalid settings.logging throws before any stage runs', async () => {
+  const notified: NotifyEvent[] = [];
+  const ctx = fakeCtx(notified);
+  ctx.config = {
+    settings: { logging: { ttyLevel: 'loud' } },
+  } as unknown as PipelineCtx['config'];
+  let runPipelineCalled = false;
+
+  await assert.rejects(
+    runCommand(
+      { profile: 'rajni' },
+      {
+        wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+        runPipeline: async () => {
+          runPipelineCalled = true;
+          return passedResult();
+        },
+        now: () => new Date('2026-07-25T00:00:00Z'),
+        root: '/fake/root',
+        ...fakeLockDeps(),
+      },
+    ),
+  );
+
+  assert.equal(runPipelineCalled, false);
 });
 
 function fakeCheck(name: string, status: 'ok' | 'warn' | 'red'): DoctorCheck {

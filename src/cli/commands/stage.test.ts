@@ -41,7 +41,7 @@ function fakeCtx(): PipelineCtx {
       },
       async removeTree() {},
     },
-    config: {} as PipelineCtx['config'],
+    config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     async notify(_event: NotifyEvent) {},
   };
@@ -180,4 +180,52 @@ test("stageCommand: continues in TODAY's existing time folder (not the current f
   assert.equal(code, 0);
   const raw = await readFile(earlier.checkpointPath(1, 'compress'), 'utf8');
   assert.deepEqual(JSON.parse(raw), { jobs: [{ id: 'x' }], dropped: [] });
+});
+
+test('stageCommand: overrides ctx.logger with a JsonlLogger before running the stage', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const ctx = fakeCtx();
+  const stages = [makeStage('compress', async (i) => i)];
+
+  const code = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+      now: () => new Date('2026-07-25T00:00:00Z'),
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(ctx.logger.constructor.name, 'JsonlLogger');
+});
+
+test('stageCommand: a profile with invalid settings.logging throws before the stage runs', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const ctx = fakeCtx();
+  ctx.config = {
+    settings: { logging: { ttyLevel: 'loud' } },
+  } as unknown as PipelineCtx['config'];
+  let stageRan = false;
+  const stages = [
+    makeStage('compress', async (i) => {
+      stageRan = true;
+      return i;
+    }),
+  ];
+
+  await assert.rejects(() =>
+    stageCommand(
+      { profile, stage: 'compress' },
+      {
+        wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+        now: () => new Date('2026-07-25T00:00:00Z'),
+        root,
+        write: () => {},
+      },
+    ),
+  );
+
+  assert.equal(stageRan, false);
 });

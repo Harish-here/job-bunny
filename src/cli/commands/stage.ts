@@ -21,14 +21,18 @@
 import { join } from 'node:path';
 import {
   buildFunnel,
+  createRunLogger,
   formatRunTime,
-  JsonlLogger,
   latestTimeDir,
   RunFolder,
 } from '../../ops/observability/index.ts';
 import { guardStage } from '../../pipeline/runner/guard.ts';
 import type { StagePayload } from '../../pipeline/runner/stage.ts';
-import { wire as defaultWire, type WireResult } from '../wire/index.ts';
+import {
+  wire as defaultWire,
+  resolveLoggingSettings,
+  type WireResult,
+} from '../wire/index.ts';
 
 const STALL_MS = 360_000; // matches run.ts's DEFAULT_STALL_MS — see its header
 const SEED_PAYLOAD: StagePayload = { jobs: [], dropped: [] };
@@ -82,7 +86,13 @@ export async function stageCommand(
   const existing = await latestTimeDir(dataDir, date);
   const time = existing ?? formatRunTime(now);
   const folder = new RunFolder(dataDir, date, time);
-  ctx.logger = new JsonlLogger(folder.logPath());
+  ctx.logger = createRunLogger(
+    folder.logPath(),
+    resolveLoggingSettings(
+      ctx.config.settings?.logging,
+      process.env.JOBBUNNY_TTY_LOG_LEVEL,
+    ),
+  );
 
   const latest = await folder.readLatestCheckpoint();
   const input: StagePayload =
