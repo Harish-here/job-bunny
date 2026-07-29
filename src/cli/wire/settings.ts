@@ -7,6 +7,14 @@
  */
 import { z } from 'zod';
 import type { RegistryPolicy } from '../../core/company/schema.ts';
+import {
+  isLogLevel,
+  type LoggingConfig,
+  LoggingSettingsSchema,
+} from '../../ops/observability/index.ts';
+
+export type { LoggingConfig } from '../../ops/observability/index.ts';
+export { LoggingSettingsSchema } from '../../ops/observability/index.ts';
 
 // --- inventory freshness (linkedin lane doctor check) ---
 
@@ -147,4 +155,24 @@ export function resolveMaxNewPerLane(settings: unknown): number {
   return typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
     ? candidate
     : DEFAULT_MAX_NEW_PER_LANE;
+}
+
+// --- logging settings ---
+
+/** Parses `settings.logging` — missing/`{}` defaults quietly to
+ * `{fileLevel: 'debug', ttyLevel: 'info'}`; a present-but-invalid value
+ * throws (fail loud), same posture as `LinkedinPacingSettingsSchema`. A
+ * valid `envOverride` (the CLI's `JOBBUNNY_TTY_LOG_LEVEL`) replaces
+ * `ttyLevel` only — per-invocation verbosity is a TTY concern, and a
+ * daemon-spawned child never has a TTY to mirror to anyway. An invalid or
+ * empty override is ignored quietly (operator convenience). */
+export function resolveLoggingSettings(
+  settings: unknown,
+  envOverride?: string,
+): LoggingConfig {
+  const parsed = LoggingSettingsSchema.parse(settings ?? {});
+  if (envOverride && isLogLevel(envOverride)) {
+    return { ...parsed, ttyLevel: envOverride };
+  }
+  return parsed;
 }
