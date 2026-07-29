@@ -33,7 +33,11 @@ export interface DaemonDeps {
   scan: ScanDeps;
   pidfile: DaemonPidfileDeps;
   spawnRun: SpawnRun;
-  log(event: string, data?: Record<string, unknown>): void;
+  log(
+    event: string,
+    data?: Record<string, unknown>,
+    level?: 'info' | 'warn' | 'error',
+  ): void;
   now(): Date;
 }
 
@@ -151,10 +155,14 @@ export function createDaemon(deps: DaemonDeps): {
       // window. No ledger, no spawn: skip the entry instead. The next tick
       // re-evaluates, and a pidfile restored by then serves it normally.
       if (!ledgered) {
-        deps.log('ledger-append-failed-skipping', {
-          profile: owed.profile,
-          slot: owed.slot,
-        });
+        deps.log(
+          'ledger-append-failed-skipping',
+          {
+            profile: owed.profile,
+            slot: owed.slot,
+          },
+          'warn',
+        );
         continue;
       }
 
@@ -178,7 +186,7 @@ export function createDaemon(deps: DaemonDeps): {
       // A15.3: swallowed, never thrown out of the tick — an uncaught
       // throw here would kill the daemon (domain-1) for a domain-2-shaped
       // problem.
-      deps.log('heartbeat-write-failed', { error: String(err) });
+      deps.log('heartbeat-write-failed', { error: String(err) }, 'warn');
     }
 
     // Placed AFTER the heartbeat write (A15.1 is untouchable: the
@@ -195,7 +203,7 @@ export function createDaemon(deps: DaemonDeps): {
       // production this runs inside a bare setInterval callback, where an
       // escaping rejection kills the daemon (domain 1) over a single bad
       // batch (domain 2). Log it and let the next tick re-evaluate.
-      deps.log('tick-failed', { error: String(err) });
+      deps.log('tick-failed', { error: String(err) }, 'error');
     } finally {
       // Released whether the batch succeeded, threw, or was skipped — a
       // stuck `ticking` would silently retire the daemon.

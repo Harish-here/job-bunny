@@ -96,9 +96,17 @@ function readLastTickAt(deps: DaemonDeps): string | undefined {
 
 function baseDeps(overrides: Partial<DaemonDeps> = {}): {
   deps: DaemonDeps;
-  events: Array<{ event: string; data?: Record<string, unknown> }>;
+  events: Array<{
+    event: string;
+    data?: Record<string, unknown>;
+    level?: 'info' | 'warn' | 'error';
+  }>;
 } {
-  const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
+  const events: Array<{
+    event: string;
+    data?: Record<string, unknown>;
+    level?: 'info' | 'warn' | 'error';
+  }> = [];
   const pidfile = fakePidfileDeps();
   acquireDaemonPidfile(ROOT, 5000, pidfile);
 
@@ -108,8 +116,8 @@ function baseDeps(overrides: Partial<DaemonDeps> = {}): {
     scan: fakeScanDeps({}, {}),
     pidfile,
     spawnRun: (async () => 0) as SpawnRun,
-    log: (event, data) => {
-      events.push({ event, data });
+    log: (event, data, level) => {
+      events.push({ event, data, level });
     },
     now: () => new Date(2026, 6, 27, 14, 4), // 2026-07-27 is a Monday.
     ...overrides,
@@ -187,6 +195,7 @@ test('a heartbeat write that throws is swallowed and the tick continues', async 
   await assert.doesNotReject(() => createDaemon(deps).tick());
   assert.equal(spawnCalls.length, 1); // the batch still ran despite the heartbeat failure.
   assert.ok(events.some((e) => e.event === 'heartbeat-write-failed'));
+  assert.equal(events.find((e) => e.event === 'heartbeat-write-failed')?.level, 'warn');
 });
 
 test('a ledger entry suppresses a respawn for a slot with no run folder', async () => {
@@ -244,6 +253,10 @@ test('a pidfile that vanishes mid-tick blocks the spawn instead of storming', as
     ),
   );
   assert.equal(events.filter((e) => e.event === 'spawn').length, 0);
+  assert.equal(
+    events.find((e) => e.event === 'ledger-append-failed-skipping')?.level,
+    'warn',
+  );
 });
 
 test('an entry whose grace window expired during a predecessor run is skipped and NOT ledgered', async () => {
@@ -555,6 +568,7 @@ test('a rejecting spawn does not escape the tick, and the next tick still runs',
   // setInterval callback — an unhandled rejection there kills the daemon.
   await assert.doesNotReject(() => daemon.tick());
   assert.ok(events.some((e) => e.event === 'tick-failed'));
+  assert.equal(events.find((e) => e.event === 'tick-failed')?.level, 'error');
   assert.deepEqual(spawnCalls, ['harish']);
 
   await assert.doesNotReject(() => daemon.tick());

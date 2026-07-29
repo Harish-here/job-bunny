@@ -87,11 +87,19 @@ function fakeChild(pid: number | undefined): {
 function baseDeps(overrides: Partial<SuperviseDeps> = {}): {
   deps: SuperviseDeps;
   pidfile: DaemonPidfileDeps;
-  events: Array<{ event: string; data?: Record<string, unknown> }>;
+  events: Array<{
+    event: string;
+    data?: Record<string, unknown>;
+    level?: 'info' | 'warn' | 'error';
+  }>;
 } {
   const pidfile = fakePidfileDeps();
   acquireDaemonPidfile(ROOT, 5000, pidfile);
-  const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
+  const events: Array<{
+    event: string;
+    data?: Record<string, unknown>;
+    level?: 'info' | 'warn' | 'error';
+  }> = [];
   const deps: SuperviseDeps = {
     spawn: () => {
       throw new Error('override deps.spawn in the test');
@@ -103,8 +111,8 @@ function baseDeps(overrides: Partial<SuperviseDeps> = {}): {
     nodeBin: 'node',
     cliEntry: 'src/cli/main.ts',
     runCapMs: 1_000,
-    log: (event, data) => {
-      events.push({ event, data });
+    log: (event, data, level) => {
+      events.push({ event, data, level });
     },
     // Default: a backstop that never fires, so tests that don't care
     // about it aren't affected by an immediate synchronous expiry.
@@ -206,6 +214,7 @@ test('a spawn error event resolves to a nonzero code without throwing (A5/A7)', 
     assert.equal(await promise, 1);
   });
   assert.ok(events.some((e) => e.event === 'spawn-error'));
+  assert.equal(events.find((e) => e.event === 'spawn-error')?.level, 'error');
 });
 
 interface FakeTimerEntry {
@@ -261,6 +270,7 @@ test('the backstop fires SIGTERM, then SIGKILL after SIGKILL_GRACE_MS, on expiry
   assert.deepEqual(child.killCalls, ['SIGTERM']);
   assert.equal(timers.pending[0]?.ms, SIGKILL_GRACE_MS);
   assert.ok(events.some((e) => e.event === 'backstop-expired'));
+  assert.equal(events.find((e) => e.event === 'backstop-expired')?.level, 'warn');
 
   timers.fireEarliest(); // SIGKILL_GRACE_MS elapses.
   assert.deepEqual(child.killCalls, ['SIGTERM', 'SIGKILL']);

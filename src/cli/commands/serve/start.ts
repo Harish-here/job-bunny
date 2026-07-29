@@ -21,6 +21,7 @@ import {
   openAppendFd,
   rotateIfLarge,
 } from '../../../ops/daemon/logs/index.ts';
+import { createDaemonLogger } from '../../../ops/observability/index.ts';
 import { computeRunCapMs } from '../../../pipeline/stages/budgets.ts';
 import { LEGACY_PLIST_REGEX, migrationCleanupBlock, type ServeDeps } from './index.ts';
 
@@ -141,11 +142,19 @@ export async function runServeStartChild(deps: ServeDeps): Promise<number> {
   );
 
   const runCapMs = computeRunCapMs();
-  const log = (event: string, data?: Record<string, unknown>): void => {
-    // Lands in daemon.log via the parent's stdio redirection (§6.1) —
-    // this process's own stdout was already pointed at the fd before
-    // spawn(), so a plain console.log is all that's needed here.
-    console.log(JSON.stringify({ event, ...data, ts: new Date().toISOString() }));
+  // Lands in daemon.log via the parent's stdio redirection (§6.1) — this
+  // process's own stdout was already pointed at the fd before spawn(), so
+  // a plain console.log (via createDaemonLogger's `write`) is all that's
+  // needed here. Events now emit as {ts,level,msg,data} — the same shape
+  // every other logger in the system uses — rather than the old bespoke
+  // {event,...data,ts} shape; the mechanism (stdout -> fd) is unchanged.
+  const daemonLogger = createDaemonLogger();
+  const log = (
+    event: string,
+    data?: Record<string, unknown>,
+    level: 'info' | 'warn' | 'error' = 'info',
+  ): void => {
+    daemonLogger[level](event, data);
   };
 
   const superviseDeps: SuperviseDeps = {
