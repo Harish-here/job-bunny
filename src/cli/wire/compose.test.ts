@@ -474,3 +474,39 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// --- wire logger (N4) ---
+
+test('wire: ctx.logger is a wire logger emitting NDJSON to stderr before it is swapped', async () => {
+  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+
+  const originalConsoleError = console.error;
+  const lines: string[] = [];
+  console.error = (line: string) => lines.push(line);
+  try {
+    result.ctx.logger.error('x', { a: 1 });
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0] ?? '{}');
+  assert.equal(parsed.level, 'error');
+  assert.equal(parsed.msg, 'x');
+  assert.deepEqual(parsed.data, { a: 1 });
+  assert.equal(typeof parsed.ts, 'string');
+});
+
+test('wire: a profile with invalid settings.logging throws', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'notion',
+    notifiers: [],
+    routines: [],
+    settings: { notion: { dbId: 'db-1' }, logging: { ttyLevel: 'loud' } },
+  });
+
+  await assert.rejects(() =>
+    wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+  );
+});
