@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { LinkedinBreakerConfig } from '../breaker_store.ts';
+import { linkedinBreakerPath } from '../breaker_store.ts';
 import { CaptureStore } from '../capture_store.ts';
 import type { UrlStat } from '../evidence.ts';
 import {
@@ -64,7 +65,7 @@ test('probe finds its candidate on a later url when the first is barren — brea
   );
 
   assert.equal(result.skipped, undefined, 'the fire must not be skipped on recovery');
-  assert.deepEqual(fs.unlinks, [`${BREAKER_DIR}/.jobbunny-linkedin-breaker.json`]);
+  assert.deepEqual(fs.unlinks, [linkedinBreakerPath(BREAKER_DIR)]);
   assert.equal(fs.current(), undefined, 'breaker file must be deleted on recovery');
   assert.equal(processedIds.size, 1);
   assert.equal(stats.length, 1);
@@ -158,7 +159,7 @@ test('no-candidate everywhere fails the breaker OPEN — closed (file unlinked),
 
   // The defining assertion: no evidence must not mean a permanent block.
   // closeBreaker deletes the file — absence IS the closed state.
-  assert.deepEqual(fs.unlinks, [`${BREAKER_DIR}/.jobbunny-linkedin-breaker.json`]);
+  assert.deepEqual(fs.unlinks, [linkedinBreakerPath(BREAKER_DIR)]);
   assert.equal(fs.current(), undefined);
   assert.equal(result.skipped, undefined);
   // No card was ever attempted — pushing a zero/zero UrlStat here would
