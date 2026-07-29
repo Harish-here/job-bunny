@@ -3,6 +3,45 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [2.1.0] — 2026-07-29
+
+### Added
+- **New subagents** for repo workflows: `reviewer` (diff review against
+  architecture invariants), `triager` (diagnoses failed/degraded pipeline
+  runs from run artifacts), `kb-curator` (keeps the explainer KB/CLAUDE.md/
+  agent docs in sync with behavior changes).
+- LinkedIn lane now **skips a throttled fire and probes for recovery**
+  instead of failing outright — a half-open probe re-checks a small sample
+  before resuming full farming, closing the breaker automatically once the
+  session is no longer throttled.
+
+### Fixed
+- **Farm stage no longer silently loses harvested jobs.** The stage stall
+  watchdog declared `farm` failed without cancelling the underlying scrape,
+  so a stalled attempt kept running in the background while its checkpoint
+  stayed empty — root-caused to two heartbeat gaps (cache-hit cards, and
+  the pagination loop itself never ticking `beat()`), both closed. Card
+  title/company text is now settle-polled after the hydration scroll pass
+  instead of read once unconditionally, fixing empty-field validation
+  failures on cards whose text hadn't painted yet.
+- JD detail-pane text is now settle-polled the same way, fixing a hydration
+  race that had been misclassified as a server-withheld throttle shell.
+- The half-open recovery probe now requires an EMPTY `jdRoot` (not merely a
+  present one) to call a page a throttle shell, probes across more URLs,
+  paces itself, and fails the breaker open (not closed) on no gate-passing
+  candidate — closing the exact false-positive that held four runs' worth
+  of the breaker open earlier today before this release.
+- Corrupt breaker state is now surfaced instead of silently ignored; the
+  recovery probe's own capture is deduped and given a proper `UrlStat`.
+- The daemon's schedule-enabled check no longer throws on a missing field
+  (optional chaining).
+
+### Notes
+- A large internal refactor wave (file-size-cap enforcement) split
+  `cli/wire/`, `cdp-chrome` handles, and the `linkedin` lane into smaller
+  submodules (`fire/`, `pacing/`) with matching test reorganization — no
+  behavior change, not itemized above.
+
 ## [2.0.1] — 2026-07-27
 
 ### Fixed
