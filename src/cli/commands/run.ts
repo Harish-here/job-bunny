@@ -24,15 +24,15 @@
  */
 import { join } from 'node:path';
 import { runChecks } from '../../ops/doctor/aggregate.ts';
-import { formatDigest } from '../../ops/observability/digest.ts';
-import { JsonlLogger } from '../../ops/observability/logger.ts';
-import type { RunResult } from '../../ops/observability/result.ts';
 import {
+  formatDigest,
   formatRunTime,
+  JsonlLogger,
   latestTimeDir,
   nextTimeDir,
   RunFolder,
-} from '../../ops/observability/run_folder.ts';
+  type RunResult,
+} from '../../ops/observability/index.ts';
 import {
   type AcquireLockResult,
   acquireRunLock,

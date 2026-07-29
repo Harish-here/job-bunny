@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { JD, Verdict } from '../../core/jd/index.ts';
-import { RunFolder } from '../../ops/observability/run_folder.ts';
+import { RunFolder } from '../../ops/observability/index.ts';
 import type { Connector, Storage } from '../../ports/index.ts';
 import type { PipelineCtx, WiredPorts } from './context.ts';
 import { runPipeline } from './run.ts';

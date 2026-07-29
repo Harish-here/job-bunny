@@ -19,13 +19,13 @@
  * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
 import { join } from 'node:path';
-import { buildFunnel } from '../../ops/observability/index.ts';
-import { JsonlLogger } from '../../ops/observability/logger.ts';
 import {
+  buildFunnel,
   formatRunTime,
+  JsonlLogger,
   latestTimeDir,
   RunFolder,
-} from '../../ops/observability/run_folder.ts';
+} from '../../ops/observability/index.ts';
 import { guardStage } from '../../pipeline/runner/guard.ts';
 import type { StagePayload } from '../../pipeline/runner/stage.ts';
 import { wire as defaultWire, type WireResult } from '../wire/index.ts';

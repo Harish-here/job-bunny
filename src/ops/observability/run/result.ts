@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { StagePayload } from '../../pipeline/runner/stage.ts';
+import type { StagePayload } from '../../../pipeline/runner/stage.ts';
 
 export const RunResultSchema = z.object({
   profile: z.string(),

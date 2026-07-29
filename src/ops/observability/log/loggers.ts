@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { LogData, Logger } from '../../ports/index.ts';
+import type { LogData, Logger } from '../../../ports/index.ts';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 

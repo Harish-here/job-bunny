@@ -9,7 +9,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { RunResult } from '../../ops/observability/result.ts';
+import type { RunResult } from '../../ops/observability/index.ts';
 import type { LockInfo } from '../../ops/scheduling/run_lock.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { RunnerOptions } from '../../pipeline/runner/run.ts';

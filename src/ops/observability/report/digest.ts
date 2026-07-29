@@ -10,7 +10,7 @@
  * dependency-cruiser layering (`.dependency-cruiser.cjs`) — may import
  * `ops/**` but never `adapters/**`. Takes `RunResult` directly rather than
  * a shadow `DigestInput` type now that the formatter itself lives in
- * `ops/**` alongside `RunResult`.
+ * `ops/**` alongside `RunResult` (`ops/observability/run/result.ts`).
  *
  * Mirrors the v0 house style (`scripts/notify/telegram_format.js`): a single-line
  * `<statusIcon> Job Bunny — <profile>` banner (or `<statusIcon> Job Bunny` if
@@ -23,7 +23,7 @@
  * Alerts (`NotifyEvent.kind === 'alert'`) are NOT digests: their text is
  * used verbatim by the caller, so this module owns only digest formatting.
  */
-import type { RunResult } from './result.ts';
+import type { RunResult } from '../run/index.ts';
 
 const SEPARATOR = '────────────────';
 

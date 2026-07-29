@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { JsonlLogger } from './logger.ts';
+import { JsonlLogger } from './loggers.ts';
 
 let root: string;
 

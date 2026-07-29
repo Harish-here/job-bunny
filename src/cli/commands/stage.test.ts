@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { formatRunTime, RunFolder } from '../../ops/observability/run_folder.ts';
+import { formatRunTime, RunFolder } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
