@@ -122,7 +122,7 @@ Notable internals:
 
 Three watchdog layers:
 1. **per-stage timeout** — `guardStage` composes `AbortSignal.any([ctx.signal, AbortSignal.timeout(stage.timeoutMs)])`; each retry gets a fresh budget
-2. **heartbeat stall** — only for `heartbeat: true` stages; `childCtx.beat()` re-arms a `stallMs` timer; silence rejects the attempt. `DEFAULT_STALL_MS = 360_000` — above structure's 300s provider timeout by design
+2. **heartbeat stall** — only for `heartbeat: true` stages; `childCtx.beat()` re-arms a `stallMs` timer; silence aborts the attempt's own `AbortSignal` (folded into `attemptSignal` via `AbortSignal.any`, so the in-flight work is actually cancelled rather than a separate bespoke stall promise rejecting while the real work kept running uncancelled). `DEFAULT_STALL_MS = 360_000` — above structure's 300s provider timeout by design
 3. **global run cap** — `runCapMs`, derived by `computeRunCapMs` in `src/cli/commands/run.ts` as `Σ(timeoutMs × (retries+1)) × 1.25` (derivation closed P9 incident #2: a hardcoded 30-min cap under a ~68-min stage sum)
 
 ---
