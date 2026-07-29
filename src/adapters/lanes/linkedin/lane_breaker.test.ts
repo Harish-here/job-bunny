@@ -176,12 +176,69 @@ test('half-open: after a successful probe the first main-loop url is paced like 
   const result = await lane.source(fakeCtx());
 
   assert.equal(result.skipped, undefined);
-  // Three navigations happen this fire — probe(URL_1), URL_1, URL_2 — and
-  // the probe is deliberately unpaced, so a pause must precede BOTH
-  // main-loop urls. Without the probe marking the fire as started, URL_1
-  // would follow the probe's own request to the same url instantly, which
-  // is the one moment (recovery from a block) that burst looks worst.
+  // Three navigations happen this fire — probe(URL_1), URL_1, URL_2 — but
+  // the probe only ever visits its one target here (URL_1 succeeds
+  // immediately), so runProbe's own inter-target pause never fires; a
+  // pause must still precede BOTH main-loop urls. Without the probe
+  // marking the fire as started, URL_1 would follow the probe's own
+  // request to the same url instantly, which is the one moment (recovery
+  // from a block) that burst looks worst.
   assert.equal(sleepCalls.length, 2);
+  for (const ms of sleepCalls) {
+    assert.equal(ms, 20_000 + Math.floor(0.5 * (45_000 - 20_000)));
+  }
+});
+
+test('half-open: the probe paces its own walk past a barren url before finding its candidate on the next (lane.ts:282 wiring)', async () => {
+  const inv = await singlePageInventory();
+  const script = newScript();
+  // URL_1's only card is company-gated (Bad Co) — the probe harvests it
+  // fine but gateCards drops it, so runProbe must walk on to URL_2 rather
+  // than concluding. URL_2 carries the probe's actual candidate.
+  script.harvestByUrl.set(URL_1, [
+    {
+      title: 'Frontend Engineer',
+      company: 'Bad Co',
+      location: 'Remote',
+      href: '/jobs/view/8001/',
+    },
+  ]);
+  seedTrivialUrl(script, URL_2, '8100');
+  const provider = new FakeBrowserProvider(script);
+  const storage = new FakeStorage();
+  const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
+  const sleepCalls: number[] = [];
+
+  const lane = new LinkedInLane(
+    provider,
+    [inv],
+    [{ page: inv.page, urls: [URL_1, URL_2] }],
+    fixtureFilterConfig(),
+    storage,
+    undefined,
+    0,
+    0,
+    () => 0.5,
+    spySleepFn(sleepCalls),
+    20_000,
+    45_000,
+    { userDataDir: BREAKER_DIR, deps: fs.deps },
+  );
+
+  const result = await lane.source(fakeCtx());
+
+  assert.equal(result.skipped, undefined);
+  assert.equal(fs.current(), undefined, 'a real candidate must close the breaker');
+  assert.ok(result.jobs.some((j) => j.identity.id === 'li-8100'));
+  // Three pauses this fire: runProbe's OWN inter-target pause walking past
+  // URL_1's gated-out card to reach URL_2 — supplied only via lane.ts's
+  // `interUrlPause: () => this.interUrlPause(ctx)` field, which no other
+  // test exercises (fire/probe.test.ts injects its own closure; the
+  // sibling test above never reaches this pause because its probe
+  // succeeds on the very first target) — plus the two main-loop inter-url
+  // pauses (URL_1, URL_2) that follow. Deleting that lane.ts field drops
+  // this to 2 and every other test in this file still passes.
+  assert.equal(sleepCalls.length, 3);
   for (const ms of sleepCalls) {
     assert.equal(ms, 20_000 + Math.floor(0.5 * (45_000 - 20_000)));
   }
@@ -239,8 +296,11 @@ test('half-open: a probe returning a shell re-opens the breaker and ends the fir
 test('half-open: a probe that THROWS leaves the breaker open with openedAt unchanged (spec §5)', async () => {
   const inv = await singlePageInventory();
   const script = newScript();
-  // The probe url's navigation fails outright — inconclusive, not proof
-  // that the block cleared.
+  // The probe url's navigation fails outright — a real error, unlike
+  // no-candidate, still proves nothing and must not close the breaker.
+  // The fail-open path (no-candidate) must not leak into this genuine
+  // failure: a broken page is conclusive enough to hold the breaker open,
+  // not the absence-of-evidence case that closes it.
   script.gotoThrows.add(URL_1);
   seedTrivialUrl(script, URL_2, '5102');
   const provider = new FakeBrowserProvider(script);

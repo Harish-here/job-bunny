@@ -8,7 +8,12 @@ import type { PageHandle } from '../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { Inventory } from './inventory.ts';
 import { InventorySchema } from './inventory.ts';
-import { buildJdAnchorScript, buildJdRootPresenceScript, openJd } from './jd_open.ts';
+import {
+  buildJdAnchorScript,
+  buildJdRootPresenceScript,
+  buildJdSettleScript,
+  openJd,
+} from './jd_open.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -504,4 +509,112 @@ test("buildJdRootPresenceScript returns '' when the selector matches nothing (se
 
 test('buildJdRootPresenceScript carries the jd-root-presence marker token so a fake page can route it', () => {
   assert.match(buildJdRootPresenceScript('#x'), /jd-root-presence/);
+});
+
+// --- buildJdSettleScript, evaluated over a fake `document` via node:vm ---
+
+test('settle script: returns the text once a skeleton jdRoot hydrates mid-poll', async () => {
+  // LinkedIn attaches <div componentkey="JobDetails_AboutTheJob_<id>"> as an
+  // EMPTY skeleton at navigation time — right componentkey, real layout, no
+  // text — and fills it several seconds later. The getter models exactly
+  // that: the first two reads see the skeleton, the third sees content.
+  let reads = 0;
+  const el = {
+    get innerText() {
+      reads += 1;
+      return reads >= 3 ? 'About the job — real content.' : '';
+    },
+    textContent: '',
+  };
+  const context = vm.createContext({
+    document: { querySelector: (sel: string) => (sel === '#jd' ? el : null) },
+    setTimeout,
+    Date,
+  });
+
+  const out = await vm.runInContext(buildJdSettleScript('#jd', 2_000, 10), context);
+
+  assert.equal(out, 'About the job — real content.');
+  assert.ok(reads >= 3, `expected the script to poll at least 3 times, got ${reads}`);
+});
+
+test('settle script: gives up at the budget and returns empty when jdRoot never hydrates', async () => {
+  const el = { innerText: '', textContent: '' };
+  const context = vm.createContext({
+    document: { querySelector: () => el },
+    setTimeout,
+    Date,
+  });
+
+  const started = Date.now();
+  const out = await vm.runInContext(buildJdSettleScript('#jd', 300, 20), context);
+  const elapsed = Date.now() - started;
+
+  assert.equal(out, '');
+  // It must actually wait — a script that returned '' immediately would pass
+  // an equality check alone while reintroducing the exact race being fixed.
+  assert.ok(elapsed >= 300, `expected polling for the full budget, elapsed ${elapsed}ms`);
+  // And it must stop AT the budget, not spin forever.
+  assert.ok(elapsed < 3_000, `expected to stop near the budget, elapsed ${elapsed}ms`);
+});
+
+test('a skeleton jdRoot that hydrates after the wait is CAPTURED, not reported as empty (2026-07-28 race)', async () => {
+  const inv = await detailsPageInventory();
+  const calls: string[] = [];
+  let settleTimeoutMsSeen: number | undefined;
+  // The polling now happens IN-PAGE, so from out here a late-hydrating pane
+  // is a single evaluate that returns the hydrated text. Routing on the
+  // script source is what proves the settle script — not the old
+  // single-shot read — is the one being sent.
+  const page = fakePage(calls, {
+    evaluate: async (fn, opts) => {
+      if (fn.includes('jd-settle')) {
+        settleTimeoutMsSeen = opts?.timeoutMs;
+        return 'About the job — hydrated late.' as never;
+      }
+      return '' as never;
+    },
+  });
+
+  const { text, source } = await openJd(
+    page,
+    { id: 'li-1', url: 'https://www.linkedin.com/jobs/view/1/' },
+    inv,
+    fakeCtx(),
+  );
+
+  assert.equal(text, 'About the job — hydrated late.');
+  assert.equal(source, 'jdRoot');
+  assert.deepEqual(calls, [
+    'goto:https://www.linkedin.com/jobs/view/1/',
+    `waitFor:${inv.selectors.jdRoot}`,
+    'evaluate',
+  ]);
+  // The settle read's own evaluate is given a dedicated 15s timeout, NOT
+  // the 10s evaluate default — the only thing keeping the 8s in-page poll
+  // budget under headroom rather than 2s of it (jd_open.ts:252-254).
+  // Reverting to the default would pass every other assertion here while
+  // silently dropping that headroom, so it must be pinned explicitly.
+  assert.equal(settleTimeoutMsSeen, 15_000);
+});
+
+test('settle yielding nothing still falls through to the anchor fallback', async () => {
+  const inv = await detailsPageInventory();
+  const calls: string[] = [];
+  const page = fakePage(calls, {
+    evaluate: async (fn) =>
+      (fn.includes('jd-settle')
+        ? ''
+        : 'About the job — found by the anchor scan.') as never,
+  });
+
+  const { text, source } = await openJd(
+    page,
+    { id: 'li-2', url: 'https://www.linkedin.com/jobs/view/2/' },
+    inv,
+    fakeCtx(),
+  );
+
+  assert.equal(source, 'anchor');
+  assert.equal(text, 'About the job — found by the anchor scan.');
 });
