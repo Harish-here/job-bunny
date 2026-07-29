@@ -25,7 +25,9 @@ import {
   formatRunTime,
   latestTimeDir,
   RunFolder,
+  withScope,
 } from '../../ops/observability/index.ts';
+import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import { guardStage } from '../../pipeline/runner/guard.ts';
 import type { StagePayload } from '../../pipeline/runner/stage.ts';
 import {
@@ -98,7 +100,8 @@ export async function stageCommand(
   const input: StagePayload =
     (latest?.payload as StagePayload | undefined) ?? SEED_PAYLOAD;
 
-  const { output } = await guardStage(target, input, ctx, { stallMs: STALL_MS });
+  const stageCtx: PipelineCtx = { ...ctx, logger: withScope(ctx.logger, target.name) };
+  const { output } = await guardStage(target, input, stageCtx, { stallMs: STALL_MS });
 
   await folder.writeCheckpoint(index, target.name, output);
 

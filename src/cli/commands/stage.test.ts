@@ -9,7 +9,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { formatRunTime, RunFolder } from '../../ops/observability/index.ts';
+import {
+  formatRunTime,
+  type JsonlLogger,
+  RunFolder,
+} from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
@@ -49,7 +53,7 @@ function fakeCtx(): PipelineCtx {
 
 function makeStage(
   name: string,
-  run: (input: StagePayload) => Promise<StagePayload>,
+  run: (input: StagePayload, ctx: PipelineCtx) => Promise<StagePayload>,
 ): StageDef<StagePayload, StagePayload> {
   return { name, timeoutMs: 5_000, retries: 0, run };
 }
@@ -199,6 +203,48 @@ test('stageCommand: overrides ctx.logger with a JsonlLogger before running the s
 
   assert.equal(code, 0);
   assert.equal(ctx.logger.constructor.name, 'JsonlLogger');
+});
+
+test('stageCommand: hands guardStage a logger scoped to the target stage name', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const ctx = fakeCtx();
+  const stages = [
+    makeStage('compress', async (i, stageCtx) => {
+      stageCtx.logger.info('hi');
+      return i;
+    }),
+  ];
+  const now = new Date('2026-07-25T00:00:00Z');
+
+  const code = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+      now: () => now,
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  // `ctx.logger` is overwritten with a real JsonlLogger by stageCommand
+  // itself (the previous test), so the scope wrapping is asserted the same
+  // way the runtime smoke does: by reading the run.log this run actually
+  // wrote and finding the scoped line. `flush()` waits for the queued
+  // append to actually land before the file is read back.
+  await (ctx.logger as JsonlLogger).flush();
+  const folder = new RunFolder(
+    join(root, 'profiles', profile, 'data'),
+    '2026-07-25',
+    formatRunTime(now),
+  );
+  const raw = await readFile(folder.logPath(), 'utf8');
+  const lines = raw
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { msg: string; data?: Record<string, unknown> });
+  const line = lines.find((l) => l.msg === 'hi');
+  assert.equal(line?.data?.scope, 'compress');
 });
 
 test('stageCommand: a profile with invalid settings.logging throws before the stage runs', async () => {

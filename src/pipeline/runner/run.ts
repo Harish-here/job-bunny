@@ -2,6 +2,7 @@ import {
   buildFunnel,
   type RunFolder,
   type RunResult,
+  withScope,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from './context.ts';
 import { guardStage } from './guard.ts';
@@ -58,7 +59,11 @@ export async function runPipeline(
 
     const stageStarted = Date.now();
     try {
-      const { output, attempts } = await guardStage(stage, input, runCtx, {
+      const stageCtx: PipelineCtx = {
+        ...runCtx,
+        logger: withScope(runCtx.logger, stage.name),
+      };
+      const { output, attempts } = await guardStage(stage, input, stageCtx, {
         stallMs: opts.stallMs,
       });
       const elapsedMs = Date.now() - stageStarted;

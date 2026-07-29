@@ -367,3 +367,31 @@ test('run-cap: a hanging stage is killed at runCapMs and result is failed (no th
   assert.equal(result.failedStage, 'hanging');
   assert.ok(elapsed < 500, `expected run-cap kill near 40ms, took ${elapsed}ms`);
 });
+
+test('a stage that logs via ctx.logger is handed a logger scoped to its own stage name', async () => {
+  const dataDir = join(root, 'scoped-logger');
+  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
+  const recorded: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+  const { ctx } = fakeCtx();
+  ctx.logger = {
+    debug() {},
+    info(msg, data) {
+      recorded.push({ msg, data });
+    },
+    warn() {},
+    error() {},
+  };
+
+  const stage: StageDef<StagePayload, StagePayload> = fakeStage({
+    name: 'scoped-stage',
+    async run(input, stageCtx) {
+      stageCtx.logger.info('hi');
+      return input;
+    },
+  });
+
+  await runPipeline([stage], ctx, folder, { runCapMs: 5_000, stallMs: 5_000 });
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.data?.scope, 'scoped-stage');
+});
