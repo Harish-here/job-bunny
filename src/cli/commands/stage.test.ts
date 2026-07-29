@@ -227,11 +227,12 @@ test('stageCommand: hands guardStage a logger scoped to the target stage name', 
   );
 
   assert.equal(code, 0);
-  // `ctx.logger` is overwritten with a real JsonlLogger by stageCommand
-  // itself (the previous test), so the scope wrapping is asserted the same
-  // way the runtime smoke does: by reading the run.log this run actually
-  // wrote and finding the scoped line. `flush()` waits for the queued
-  // append to actually land before the file is read back.
+  // stageCommand unconditionally replaces `ctx.logger` with a real
+  // JsonlLogger (pinned by the assignment test above), so a fake-logger spy
+  // injected here would be clobbered. The scope wrapping is asserted the
+  // same way the runtime smoke does: by reading the run.log this run
+  // actually wrote and finding the scoped line. `flush()` waits for the
+  // queued append to actually land before the file is read back.
   await (ctx.logger as JsonlLogger).flush();
   const folder = new RunFolder(
     join(root, 'profiles', profile, 'data'),
