@@ -4,6 +4,7 @@ import {
   resolveInterUrlDelayRange,
   resolveInventoryMaxAgeDays,
   resolveJitterRange,
+  resolveLoggingSettings,
 } from './settings.ts';
 
 /**
@@ -107,4 +108,45 @@ test('both resolvers parse the SAME settings blob, so an invalid jitter range th
   assert.throws(() =>
     resolveInterUrlDelayRange({ jitterMinMs: 9_000, jitterMaxMs: 1_000 }),
   );
+});
+
+// --- resolveLoggingSettings (settings.logging) ---
+
+test('resolveLoggingSettings: missing settings default to {fileLevel: debug, ttyLevel: info}', () => {
+  assert.deepEqual(resolveLoggingSettings(undefined), {
+    fileLevel: 'debug',
+    ttyLevel: 'info',
+  });
+  assert.deepEqual(resolveLoggingSettings({}), { fileLevel: 'debug', ttyLevel: 'info' });
+});
+
+test('resolveLoggingSettings: a present-but-invalid settings.logging throws (fail loud)', () => {
+  assert.throws(() => resolveLoggingSettings({ ttyLevel: 'loud' }));
+  assert.throws(() => resolveLoggingSettings({ fileLevel: 'quiet' }));
+});
+
+test('resolveLoggingSettings: a valid env override replaces ttyLevel only', () => {
+  assert.deepEqual(resolveLoggingSettings(undefined, 'debug'), {
+    fileLevel: 'debug',
+    ttyLevel: 'debug',
+  });
+  assert.deepEqual(resolveLoggingSettings({ fileLevel: 'warn' }, 'error'), {
+    fileLevel: 'warn',
+    ttyLevel: 'error',
+  });
+});
+
+test('resolveLoggingSettings: an invalid or empty env override is ignored quietly', () => {
+  assert.deepEqual(resolveLoggingSettings(undefined, 'loud'), {
+    fileLevel: 'debug',
+    ttyLevel: 'info',
+  });
+  assert.deepEqual(resolveLoggingSettings(undefined, ''), {
+    fileLevel: 'debug',
+    ttyLevel: 'info',
+  });
+  assert.deepEqual(resolveLoggingSettings(undefined, undefined), {
+    fileLevel: 'debug',
+    ttyLevel: 'info',
+  });
 });

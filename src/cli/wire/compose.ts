@@ -62,6 +62,7 @@ import type { RegistryPolicy } from '../../core/company/schema.ts';
 import { FilterConfigSchema } from '../../core/filter/config.ts';
 import { RankConfigSchema } from '../../core/rank/index.ts';
 import { coreChecks } from '../../ops/doctor/aggregate.ts';
+import { createWireLogger } from '../../ops/observability/index.ts';
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/context.ts';
 import { FsStorage } from '../../pipeline/runner/fs_storage.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
@@ -94,6 +95,7 @@ import {
   DEFAULT_MAX_PROBES_PER_RUN,
   DEFAULT_REGISTRY_POLICY,
   resolveInventoryMaxAgeDays,
+  resolveLoggingSettings,
   resolveMaxNewPerLane,
 } from './settings.ts';
 
@@ -185,6 +187,10 @@ export async function wire(
   const readFile = overrides.readFile ?? ((p: string) => fsReadFile(p, 'utf8'));
 
   const config = await loadPipelineConfig(profileName, { root, readFile });
+  const logging = resolveLoggingSettings(
+    config.settings.logging,
+    process.env.JOBBUNNY_TTY_LOG_LEVEL,
+  );
   const filterCfg = await loadFilterConfig(profileName, { root, readFile });
 
   const searchUrlsPath = path.join(root, 'profiles', profileName, 'search_urls.md');
@@ -289,7 +295,7 @@ export async function wire(
     // before running any stage, so this is never the signal a stage
     // actually observes.
     signal: new AbortController().signal,
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    logger: createWireLogger({ ttyLevel: logging.ttyLevel }),
     // Placeholder no-op — `guardStage` (pipeline/runner/guard.ts) never
     // calls the top-level `ctx.beat` directly; it builds its own
     // stall-arming `childCtx.beat` per attempt (wrapping this one) and

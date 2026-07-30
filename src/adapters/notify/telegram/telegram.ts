@@ -10,7 +10,7 @@
  * before the env is guaranteed to be loaded.
  *
  * `NotifyEvent` already carries the final composed `text` (digest or
- * alert) — this class only transmits it; `ops/observability/digest.ts`
+ * alert) — this class only transmits it; `ops/observability/report/digest.ts`
  * owns building digest text (the `run` CLI command formats it there,
  * outside the adapter layer).
  */

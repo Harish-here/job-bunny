@@ -9,7 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import type { RunResult } from '../../ops/observability/result.ts';
+import type { RunResult } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
@@ -69,7 +69,7 @@ function fakeCtx(store: Map<string, unknown>): PipelineCtx {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: fakeStorage(store),
-    config: {} as PipelineCtx['config'],
+    config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     async notify(_event: NotifyEvent) {},
   };
@@ -169,6 +169,56 @@ test('reconcileCommand: a failed outcome prints the failure and returns 1', asyn
 
   assert.equal(code, 1);
   assert.ok(lines.some((l) => l.includes('failed')));
+});
+
+test('reconcileCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
+  const store = new Map<string, unknown>();
+  const ctx = fakeCtx(store);
+  let observedLoggerCtor: string | undefined;
+
+  const code = await reconcileCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
+      runPipeline: async (_stages, runCtx) => {
+        observedLoggerCtor = runCtx.logger.constructor.name;
+        return passedResult();
+      },
+      now: () => new Date('2026-07-25T00:00:00Z'),
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(observedLoggerCtor, 'JsonlLogger');
+});
+
+test('reconcileCommand: a profile with invalid settings.logging throws before any stage runs', async () => {
+  const store = new Map<string, unknown>();
+  const ctx = fakeCtx(store);
+  ctx.config = {
+    settings: { logging: { ttyLevel: 'loud' } },
+  } as unknown as PipelineCtx['config'];
+  let runPipelineCalled = false;
+
+  await assert.rejects(() =>
+    reconcileCommand(
+      { profile: 'rajni' },
+      {
+        wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
+        runPipeline: async () => {
+          runPipelineCalled = true;
+          return passedResult();
+        },
+        now: () => new Date('2026-07-25T00:00:00Z'),
+        root,
+        write: () => {},
+      },
+    ),
+  );
+
+  assert.equal(runPipelineCalled, false);
 });
 
 test('reconcileCommand: throws when wire() lacks a "reconcile" stage', async () => {

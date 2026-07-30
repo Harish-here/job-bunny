@@ -24,15 +24,15 @@
  */
 import { join } from 'node:path';
 import { runChecks } from '../../ops/doctor/aggregate.ts';
-import { formatDigest } from '../../ops/observability/digest.ts';
-import { JsonlLogger } from '../../ops/observability/logger.ts';
-import type { RunResult } from '../../ops/observability/result.ts';
 import {
+  createRunLogger,
+  formatDigest,
   formatRunTime,
   latestTimeDir,
   nextTimeDir,
   RunFolder,
-} from '../../ops/observability/run_folder.ts';
+  type RunResult,
+} from '../../ops/observability/index.ts';
 import {
   type AcquireLockResult,
   acquireRunLock,
@@ -45,7 +45,11 @@ import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts'
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
 import type { Routine } from '../../routines/types.ts';
-import { wire as defaultWire, type WireResult } from '../wire/index.ts';
+import {
+  wire as defaultWire,
+  resolveLoggingSettings,
+  type WireResult,
+} from '../wire/index.ts';
 
 // > structure provider timeout (300_000) so the stall watchdog never
 // false-kills a live batch.
@@ -222,7 +226,13 @@ export async function runCommand(
     const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
     const time = await nextTimeDir(dataDir, date, formatRunTime(now));
     const folder = new RunFolder(dataDir, date, time);
-    ctx.logger = new JsonlLogger(folder.logPath());
+    ctx.logger = createRunLogger(
+      folder.logPath(),
+      resolveLoggingSettings(
+        ctx.config.settings?.logging,
+        process.env.JOBBUNNY_TTY_LOG_LEVEL,
+      ),
+    );
 
     // `--resume`: seed from the latest EARLIER same-day folder's latest
     // checkpoint (never this run's own — it doesn't exist on disk yet, so

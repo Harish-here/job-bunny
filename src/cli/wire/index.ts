@@ -16,10 +16,13 @@ export type { ConfigLoaderDeps } from './config.ts';
 export { loadFilterConfig, loadPipelineConfig } from './config.ts';
 export type { AdapterRegistry, CheckFactory, RuntimeDeps } from './registry.ts';
 export { assembleAdapterChecks } from './registry.ts';
+export type { LoggingConfig } from './settings.ts';
 export {
+  LoggingSettingsSchema,
   resolveInterUrlDelayRange,
   resolveInventoryMaxAgeDays,
   resolveJitterRange,
+  resolveLoggingSettings,
   resolveMaxCardsPerUrl,
   resolveMaxNewPerLane,
 } from './settings.ts';

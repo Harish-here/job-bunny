@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { JDSchema } from '../../core/jd/index.ts';
-import type { StagePayload } from '../../pipeline/runner/stage.ts';
+import { JDSchema } from '../../../core/jd/index.ts';
+import type { StagePayload } from '../../../pipeline/runner/stage.ts';
 import { buildFunnel, RunResultSchema } from './result.ts';
 
 function fakeJD(id: string) {

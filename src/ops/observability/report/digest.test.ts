@@ -7,8 +7,8 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { RunResult } from '../run/index.ts';
 import { formatDigest } from './digest.ts';
-import type { RunResult } from './result.ts';
 
 function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   return {

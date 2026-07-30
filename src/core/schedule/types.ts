@@ -1,7 +1,7 @@
 /**
  * core/schedule/types.ts — the pure vocabulary the daemon's owed-slot
  * decision (owed.ts) is built from. Local wall-clock time throughout, never
- * UTC: run-folder names (ops/observability/run_folder.ts's formatRunTime)
+ * UTC: run-folder names (ops/observability/run/run_folder.ts's formatRunTime)
  * are local, and using UTC here is a bug this project already hit once —
  * run.log timestamps are UTC while folder names are local, and conflating
  * the two silently misaligns "is this slot served" checks.
@@ -38,7 +38,7 @@ export interface OwedRun {
   slot: string; // "HH:MM" local
 }
 
-// Matches ops/observability/run_folder.ts's TIME_DIR_RE (`^\d{2}-\d{2}(-\d+)?$`)
+// Matches ops/observability/run/run_folder.ts's TIME_DIR_RE (`^\d{2}-\d{2}(-\d+)?$`)
 // exactly: always zero-padded HH-MM, optionally suffixed -N on a same-minute
 // collision. A folder that doesn't match (e.g. "sync_dryrun.json") is not a
 // run folder at all and yields undefined.

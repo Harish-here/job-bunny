@@ -18,19 +18,23 @@
 import { join } from 'node:path';
 import { z } from 'zod';
 import { CacheEntrySchema } from '../../core/jd/index.ts';
-import { JsonlLogger } from '../../ops/observability/logger.ts';
-import type { RunResult } from '../../ops/observability/result.ts';
 import {
+  createRunLogger,
   formatRunTime,
   latestTimeDir,
   RunFolder,
-} from '../../ops/observability/run_folder.ts';
+  type RunResult,
+} from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { RunnerOptions } from '../../pipeline/runner/run.ts';
 import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import { CACHE_PATH } from '../../pipeline/stages/reconcile.ts';
-import { wire as defaultWire, type WireResult } from '../wire/index.ts';
+import {
+  wire as defaultWire,
+  resolveLoggingSettings,
+  type WireResult,
+} from '../wire/index.ts';
 
 const RUN_CAP_MS = 1_800_000;
 const STALL_MS = 360_000;
@@ -84,7 +88,13 @@ export async function reconcileCommand(
   const existing = await latestTimeDir(dataDir, date);
   const time = existing ?? formatRunTime(now);
   const folder = new RunFolder(dataDir, date, time);
-  ctx.logger = new JsonlLogger(folder.logPath());
+  ctx.logger = createRunLogger(
+    folder.logPath(),
+    resolveLoggingSettings(
+      ctx.config.settings?.logging,
+      process.env.JOBBUNNY_TTY_LOG_LEVEL,
+    ),
+  );
 
   const result = await resolved.runPipeline([reconcileStage], ctx, folder, {
     runCapMs: RUN_CAP_MS,

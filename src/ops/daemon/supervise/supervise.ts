@@ -51,7 +51,11 @@ export interface SuperviseDeps {
   nodeBin: string;
   cliEntry: string;
   runCapMs: number;
-  log(event: string, data?: Record<string, unknown>): void;
+  log(
+    event: string,
+    data?: Record<string, unknown>,
+    level?: 'info' | 'warn' | 'error',
+  ): void;
   setTimeout(cb: () => void, ms: number): { unref?(): void };
   clearTimeout(handle: unknown): void;
 }
@@ -150,7 +154,7 @@ export function createSpawnRun(deps: SuperviseDeps): SpawnRun {
       // an unconditional terminate, so this escalation collapses to a
       // single hard kill — accepted (D10), no separate code path needed.
       backstop = deps.setTimeout(() => {
-        deps.log('backstop-expired', { profile: owed.profile, slot: owed.slot });
+        deps.log('backstop-expired', { profile: owed.profile, slot: owed.slot }, 'warn');
         child.kill('SIGTERM');
         killTimer = deps.setTimeout(() => {
           child.kill('SIGKILL');
@@ -168,11 +172,15 @@ export function createSpawnRun(deps: SuperviseDeps): SpawnRun {
       // never kill the daemon. Task 7's ledger append (BEFORE calling
       // this function) already prevents a retry storm here (D19).
       child.on('error', (err: unknown) => {
-        deps.log('spawn-error', {
-          profile: owed.profile,
-          slot: owed.slot,
-          error: String(err),
-        });
+        deps.log(
+          'spawn-error',
+          {
+            profile: owed.profile,
+            slot: owed.slot,
+            error: String(err),
+          },
+          'error',
+        );
         finish(1);
       });
     });
