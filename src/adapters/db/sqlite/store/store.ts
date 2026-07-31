@@ -3,7 +3,9 @@
  * Writes ONLY the `jobs` table (ownership zones, local-DB spec §3);
  * `tracking` is read (archive candidates) but never written here.
  * `db` is public readonly so tests (and PR 2's migrate) can reach the
- * raw handle; production callers go through the methods.
+ * raw handle; production callers go through the methods. Writes use
+ * SAVEPOINT/RELEASE (not BEGIN/COMMIT) so these methods are safe to call
+ * from inside an outer transaction (e.g. PR 2's migrate).
  */
 import type { DatabaseSync } from 'node:sqlite';
 import type { CacheEntry, JD } from '../../../../core/jd/index.ts';
@@ -34,7 +36,7 @@ export class SqliteStore {
 
   upsertJobs(jobs: JD[], syncedAt: string): void {
     const stmt = this.db.prepare(UPSERT_SQL);
-    this.db.exec('BEGIN');
+    this.db.exec('SAVEPOINT jb_upsert');
     try {
       for (const jd of jobs) {
         stmt.run(
@@ -56,9 +58,10 @@ export class SqliteStore {
           syncedAt,
         );
       }
-      this.db.exec('COMMIT');
+      this.db.exec('RELEASE jb_upsert');
     } catch (err) {
-      this.db.exec('ROLLBACK');
+      this.db.exec('ROLLBACK TO jb_upsert');
+      this.db.exec('RELEASE jb_upsert');
       throw err;
     }
   }
@@ -98,14 +101,15 @@ export class SqliteStore {
       'UPDATE jobs SET archived = 1, archived_at = ? WHERE id = ? AND archived = 0',
     );
     let archived = 0;
-    this.db.exec('BEGIN');
+    this.db.exec('SAVEPOINT jb_archive');
     try {
       for (const id of ids) {
         archived += Number(stmt.run(archivedAt, id).changes);
       }
-      this.db.exec('COMMIT');
+      this.db.exec('RELEASE jb_archive');
     } catch (err) {
-      this.db.exec('ROLLBACK');
+      this.db.exec('ROLLBACK TO jb_archive');
+      this.db.exec('RELEASE jb_archive');
       throw err;
     }
     return archived;

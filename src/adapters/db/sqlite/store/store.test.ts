@@ -97,3 +97,13 @@ test('listArchiveCandidates: joins tracking status, null when no tracking row', 
   );
   assert.equal(candidates[0]?.dateFound, '2026-08-01T10:00:00.000Z');
 });
+
+test('upsertJobs and markArchived work inside an outer transaction (savepoints, not BEGIN)', () => {
+  const store = freshStore();
+  store.db.exec('BEGIN');
+  store.upsertJobs([makeJd('li-8')], '2026-08-01T11:00:00.000Z');
+  store.markArchived(['li-8'], '2026-08-01T12:00:00.000Z');
+  store.db.exec('COMMIT');
+  assert.equal(store.listCacheEntries().length, 0);
+  assert.equal(store.listArchiveCandidates().length, 0);
+});
