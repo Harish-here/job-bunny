@@ -1,7 +1,9 @@
 /**
  * SqliteStore — the pipeline-side write/read surface over jobbunny.db.
- * Writes ONLY the `jobs` table (ownership zones, local-DB spec §3);
- * `tracking` is read (archive candidates) but never written here.
+ * The pipeline's own writes touch ONLY the `jobs` table (ownership zones,
+ * local-DB spec §3); `tracking` is otherwise read here (archive candidates),
+ * never written, except via `importTracking`, an insert-only path used
+ * solely by the migrate command (never revives or overwrites a row).
  * `db` is public readonly so tests (and PR 2's migrate) can reach the
  * raw handle; production callers go through the methods. Writes use
  * SAVEPOINT/RELEASE (not BEGIN/COMMIT) so these methods are safe to call

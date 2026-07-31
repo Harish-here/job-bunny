@@ -126,8 +126,11 @@ test('importJobs does not revive an archived row (unlike upsertJobs)', () => {
   const store = freshStore();
   store.upsertJobs([makeJd('li-32')], '2026-08-01T10:00:00.000Z');
   store.markArchived(['li-32'], '2026-08-01T12:00:00.000Z');
+  const before = store.db.prepare('SELECT * FROM jobs WHERE id = ?').get('li-32');
   store.importJobs([makeJd('li-32')], '2026-08-02T10:00:00.000Z');
   assert.equal(store.listCacheEntries().length, 0);
+  const after = store.db.prepare('SELECT * FROM jobs WHERE id = ?').get('li-32');
+  assert.deepEqual(after, before); // archived + archived_at untouched
 });
 
 test('importTracking inserts rows and returns the count', () => {
