@@ -1,0 +1,87 @@
+/**
+ * openJobsDb — the ONLY place the sqlite schema is defined or evolved.
+ * Forward-only migrations keyed on PRAGMA user_version: MIGRATIONS[n]
+ * upgrades a v(n) database to v(n+1). Never edit a shipped migration —
+ * append a new one. A file stamped newer than LATEST_SCHEMA_VERSION
+ * throws loud (downgrade protection; doctor reports the same as red).
+ *
+ * Two ownership zones (local-DB spec §3): `jobs` is written only by the
+ * pipeline (via SqliteConnector); `tracking` is reserved for the app
+ * server (PR 4) and PR 2's Notion import — created now so both have a home.
+ */
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+export const LATEST_SCHEMA_VERSION = 1;
+
+const MIGRATIONS: readonly string[] = [
+  // v0 -> v1
+  `
+  CREATE TABLE jobs (
+    id            TEXT PRIMARY KEY,
+    lane          TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    company       TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    seniority     TEXT,
+    location_city TEXT,
+    work_type     TEXT,
+    timezone      TEXT,
+    skills        TEXT,
+    excitement    TEXT,
+    score         REAL,
+    match_reasons TEXT,
+    date_found    TEXT NOT NULL,
+    jd_json       TEXT NOT NULL,
+    synced_at     TEXT NOT NULL,
+    archived      INTEGER NOT NULL DEFAULT 0,
+    archived_at   TEXT
+  );
+  CREATE TABLE tracking (
+    job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
+    status           TEXT,
+    comp_range       TEXT,
+    notes            TEXT,
+    contact          TEXT,
+    date_applied     TEXT,
+    next_action      TEXT,
+    next_action_date TEXT,
+    updated_at       TEXT NOT NULL
+  );
+  CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
+  `,
+];
+
+export function openJobsDb(dbPath: string): DatabaseSync {
+  if (dbPath !== ':memory:') {
+    mkdirSync(path.dirname(dbPath), { recursive: true });
+  }
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA foreign_keys = ON;');
+  let version = (db.prepare('PRAGMA user_version').get() as { user_version: number })
+    .user_version;
+  if (version > LATEST_SCHEMA_VERSION) {
+    db.close();
+    throw new Error(
+      `jobbunny.db schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
+    );
+  }
+  while (version < LATEST_SCHEMA_VERSION) {
+    const step = MIGRATIONS[version];
+    if (!step) throw new Error(`no migration defined from schema v${version}`);
+    db.exec('BEGIN');
+    try {
+      db.exec(step);
+      db.exec(`PRAGMA user_version = ${version + 1}`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    version += 1;
+  }
+  return db;
+}
