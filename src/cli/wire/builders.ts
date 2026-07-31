@@ -1,11 +1,12 @@
 /**
  * cli/wire/builders.ts (P8, split from wire.ts) — live adapter construction
  * for connectors/notifiers/routines/lanes: `buildConnector`, `buildNotifier`,
- * `buildRoutine`, `isFarmingLane`, `isApiLane`, `buildLanes`, and
- * `buildLinkedInLane`. Sibling to `compose.ts` in the
- * `only-wire-imports-adapters` carve-out (`.dependency-cruiser.cjs`) — split
- * out purely to keep `compose.ts` under the 400-line file-size cap, not for
- * any behavioral reason.
+ * `buildRoutine`, `isFarmingLane`, `isApiLane`, `buildLanes`,
+ * `buildLinkedInLane`, `missingTokenNotionClient`, and the `MigrateWire`/
+ * `wireMigrate` composition seam for `jobbunny migrate`. Sibling to
+ * `compose.ts` in the `only-wire-imports-adapters` carve-out
+ * (`.dependency-cruiser.cjs`) — split out purely to keep `compose.ts` under
+ * the 400-line file-size cap, not for any behavioral reason.
  */
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -35,7 +36,7 @@ import {
 import { TelegramNotifier } from '../../adapters/notify/telegram/index.ts';
 import type { PipelineConfig } from '../../core/config/schema.ts';
 import type { FilterConfig } from '../../core/filter/config.ts';
-import type { MigratedRecord } from '../../core/tracking/index.ts';
+import type { MigratedRecord, TrackingFields } from '../../core/tracking/index.ts';
 import type { RunContext } from '../../ports/context.ts';
 import type { ApiLane, FarmingLane, Lane } from '../../ports/lane.ts';
 import type { Storage } from '../../ports/storage.ts';
@@ -277,10 +278,13 @@ export async function wireMigrate(
       );
       const tracking = s.importTracking(
         records
-          .filter((r) => r.tracking)
+          .filter(
+            (r): r is MigratedRecord & { tracking: TrackingFields } =>
+              r.tracking !== undefined,
+          )
           .map((r) => ({
             jobId: r.jd.identity.id,
-            fields: r.tracking!,
+            fields: r.tracking,
             updatedAt: now,
           })),
       );
