@@ -574,3 +574,20 @@ test('wireMigrate: dbId is "" when the profile has no settings.notion slice', as
 
   assert.equal(migrateWire.dbId, '');
 });
+
+test('wireMigrate: dbId is "" when settings.notion exists but has no dbId (e.g. { dryRun: true })', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'notion',
+    notifiers: [],
+    routines: [],
+    settings: { notion: { dryRun: true } },
+  });
+
+  const migrateWire = await wireMigrate('p1', {
+    root: '/repo',
+    readFile: fakeReadFile({ [profilePath('p1')]: profileJson }),
+  });
+
+  assert.equal(migrateWire.dbId, '');
+});

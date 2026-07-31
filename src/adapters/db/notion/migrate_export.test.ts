@@ -197,6 +197,18 @@ test('pageToMigratedRecord: no Date Found => scrapedAt is now; Date Found presen
   );
 });
 
+test('pageToMigratedRecord: Date Found with a time component slices to the date before appending midnight UTC', () => {
+  const raw = page('page-6666', {
+    [PROPERTIES.jobTitle.name]: titleVal('Timed Date Role'),
+    [PROPERTIES.company.name]: rt('Timed Date Co'),
+    [PROPERTIES.dateFound.name]: date('2026-07-01T10:00:00.000+05:30'),
+  });
+
+  const record = pageToMigratedRecord(raw, NOW);
+
+  assert.equal(record.jd.identity.scrapedAt, '2026-07-01T00:00:00.000Z');
+});
+
 test('exportForMigration: a two-page stub yields 2 records (pagination via queryDatabase)', async () => {
   const pages = [
     page('page-a', {
@@ -252,4 +264,23 @@ test('exportForMigration: performs ZERO Notion writes', async () => {
 
   assert.equal(createCalls, 0);
   assert.equal(updateCalls, 0);
+});
+
+test('exportForMigration: a page with a schemeless Job URL rejects, naming the page id', async () => {
+  const pages = [
+    page('page-bad-url', {
+      [PROPERTIES.jobTitle.name]: titleVal('Bad URL Role'),
+      [PROPERTIES.company.name]: rt('Bad URL Co'),
+      [PROPERTIES.jobUrl.name]: { url: 'linkedin.com/jobs/view/99' },
+    }),
+  ];
+  const api = new NotionApi({ client: stubWithPages(pages) });
+
+  await assert.rejects(
+    () => exportForMigration(api, 'db1', fakeCtx(), NOW),
+    (err: Error) => {
+      assert.match(err.message, /page-bad-url/);
+      return true;
+    },
+  );
 });

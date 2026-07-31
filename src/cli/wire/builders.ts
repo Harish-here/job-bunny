@@ -17,7 +17,6 @@ import {
   exportForMigration,
   NotionApi,
   NotionConnector,
-  NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
 import {
   openJobsDb,
@@ -235,10 +234,19 @@ export async function wireMigrate(
 
   const config = await loadPipelineConfig(profileName, { root, readFile });
 
-  const notionSettings = config.settings.notion;
-  const dbId = notionSettings
-    ? NotionConnectorSettingsSchema.parse(notionSettings).dbId
-    : '';
+  // Tolerant read, not `NotionConnectorSettingsSchema.parse`: a
+  // `settings.notion` slice that exists but omits `dbId` (e.g. `{ dryRun:
+  // true }`) must resolve to '' here so the command's clean "no
+  // settings.notion.dbId configured" exit fires, rather than a raw zod
+  // error at wire time.
+  const notionSlice = config.settings.notion;
+  const dbId =
+    notionSlice &&
+    typeof notionSlice === 'object' &&
+    'dbId' in notionSlice &&
+    typeof (notionSlice as { dbId: unknown }).dbId === 'string'
+      ? (notionSlice as { dbId: string }).dbId
+      : '';
 
   // Same posture as `wire()`: a real `NotionApi` when `NOTION_TOKEN` is
   // present, otherwise one built over the throwing stub, so `wireMigrate`

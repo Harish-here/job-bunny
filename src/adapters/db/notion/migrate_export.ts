@@ -60,7 +60,7 @@ export function pageToMigratedRecord(raw: unknown, now: string): MigratedRecord 
   const title = propText(props[PROPERTIES.jobTitle.name]) || 'Unknown title';
 
   const dateFound = propDateStart(props[PROPERTIES.dateFound.name]);
-  const scrapedAt = dateFound ? `${dateFound}T00:00:00.000Z` : now;
+  const scrapedAt = dateFound ? `${dateFound.slice(0, 10)}T00:00:00.000Z` : now;
 
   const seniority = propSelectName(props[PROPERTIES.seniorityLevel.name]);
   const titleParts =
@@ -141,5 +141,15 @@ export async function exportForMigration(
   now: string = new Date().toISOString(),
 ): Promise<MigratedRecord[]> {
   const pages = await api.queryDatabase(dbId, ctx);
-  return pages.map((page) => pageToMigratedRecord(page, now));
+  return pages.map((page) => {
+    try {
+      return pageToMigratedRecord(page, now);
+    } catch (err) {
+      const id = (page as { id?: string }).id ?? 'unknown';
+      throw new Error(
+        `migrate: Notion page ${id} failed to map — ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+  });
 }

@@ -10,6 +10,10 @@
  * No `src/adapters/**` import here — `wireMigrate` is injected (real
  * default: `cli/wire/index.ts`'s `wireMigrate`, which reaches
  * `cli/wire/builders.ts`, one of the two adapter-import chokepoints).
+ *
+ * A partial --apply (jobs imported, tracking failed) is recoverable by
+ * re-running --apply — both imports are insert-only, so completed work is
+ * never redone or clobbered.
  */
 import { readFile as fsReadFile, writeFile as fsWriteFile } from 'node:fs/promises';
 import { createWireLogger } from '../../ops/observability/index.ts';
