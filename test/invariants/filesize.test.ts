@@ -1,6 +1,5 @@
-// Invariant: no file grows past the point where it can be skimmed. Caps are
-// specified in docs/superpowers/specs/2026-07-28-file-size-caps-design.md;
-// the rule's rationale lives in .claude/agents/executor.md ("File-size caps").
+// Invariant: no file grows past the point where it can be skimmed. Caps and
+// rationale live in .claude/agents/executor.md ("File-size caps").
 
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
