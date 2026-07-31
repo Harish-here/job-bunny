@@ -324,6 +324,32 @@ test('main: "setup" dispatches with just the profile', async () => {
   assert.deepEqual(s.calls, [['setup', { profile: 'rajni' }]]);
 });
 
+test('main: "migrate" dispatches with profile and apply defaulting to false', async () => {
+  const s = spy();
+  const code = await main(['migrate', '--profile', 'rajni'], {
+    commands: { migrate: s.make('migrate') },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(s.calls, [['migrate', { profile: 'rajni', apply: false }]]);
+});
+
+test('main: "migrate --apply" carries apply through', async () => {
+  const s = spy();
+  const code = await main(['migrate', '--profile', 'rajni', '--apply'], {
+    commands: { migrate: s.make('migrate') },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(s.calls, [['migrate', { profile: 'rajni', apply: true }]]);
+});
+
+test('main: "migrate" without --profile returns 2', async () => {
+  const code = await main(['migrate'], {
+    commands: { migrate: async () => 0 },
+    stderr: () => {},
+  });
+  assert.equal(code, 2);
+});
+
 test('main: the usage line names every dispatchable command', async () => {
   const stderr = captureStderr();
   await main(['bogus'], { stderr: stderr.write });
@@ -340,6 +366,7 @@ test('main: the usage line names every dispatchable command', async () => {
     'profile',
     'setup',
     'release',
+    'migrate',
   ]) {
     assert.match(usage, new RegExp(name), `usage should mention "${name}"`);
   }

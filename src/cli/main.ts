@@ -39,6 +39,7 @@ import {
 import { autostartCommand } from './commands/autostart.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
+import { migrateCommand } from './commands/migrate.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
 import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
@@ -67,6 +68,7 @@ export interface CommandOptions {
   noMerge?: boolean;
   yes?: boolean;
   daemonChild?: boolean;
+  apply?: boolean;
 }
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
@@ -82,7 +84,8 @@ export type CommandName =
   | 'lane'
   | 'profile'
   | 'setup'
-  | 'release';
+  | 'release'
+  | 'migrate';
 
 export type CommandRegistry = Record<CommandName, CommandFn>;
 
@@ -145,6 +148,7 @@ const USAGE = [
   '  profile remove --profile <name> [--force]',
   '  setup --profile <name>',
   '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
+  '  migrate   --profile <name> [--apply]     (Notion → local sqlite import; dry-run by default)',
 ].join('\n');
 
 function defaultCommands(): CommandRegistry {
@@ -180,6 +184,11 @@ function defaultCommands(): CommandRegistry {
         noMerge: opts.noMerge ?? false,
         yes: opts.yes ?? false,
       })) as CommandFn,
+    migrate: (async (opts: CommandOptions) =>
+      migrateCommand({
+        profile: opts.profile ?? '',
+        apply: opts.apply ?? false,
+      })) as CommandFn,
   };
 }
 
@@ -195,6 +204,7 @@ const COMMAND_NAMES = new Set<string>([
   'profile',
   'setup',
   'release',
+  'migrate',
 ]);
 
 /** Per-command argv → options translation. Returns the options object, or a
@@ -213,6 +223,7 @@ function buildOptions(
     'no-merge'?: boolean;
     yes?: boolean;
     'daemon-child'?: boolean;
+    apply?: boolean;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -295,6 +306,8 @@ function buildOptions(
         yes: values.yes ?? false,
       };
     }
+    case 'migrate':
+      return needsProfile() ?? { profile, apply: values.apply ?? false };
   }
 }
 
@@ -321,6 +334,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       'no-merge': { type: 'boolean', default: false },
       yes: { type: 'boolean', default: false },
       'daemon-child': { type: 'boolean', default: false },
+      apply: { type: 'boolean', default: false },
     },
   });
 
