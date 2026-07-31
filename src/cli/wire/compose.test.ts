@@ -315,6 +315,27 @@ test('wire: existing checks behavior is unchanged alongside the live ctx/stages/
   assert.ok(result.checks.some((c) => c.name.length > 0));
 });
 
+// --- sqlite connector (P8 local-DB spec) ---
+
+test('wire: a sqlite profile builds SqliteConnector and contributes the sqlite doctor check', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'sqlite',
+    notifiers: [],
+    routines: [],
+    settings: { sqlite: {} },
+  });
+
+  const result = await wire('rajni', {
+    root: '/repo',
+    readFile: fakeLiveReadFile(profileJson),
+  });
+
+  assert.equal(result.ctx.ports.connector.name, 'sqlite');
+  assert.ok(result.checks.some((c) => c.name === 'sqlite-db-openable'));
+  assert.ok(!result.checks.some((c) => c.name === 'notion-db-reachable'));
+});
+
 // --- linkedin lane: happy path ---
 // Unlike greenhouse/keka, the linkedin lane's live construction reads a
 // per-page `Inventory` via `loadInventory(storage, page)`, and `storage` is

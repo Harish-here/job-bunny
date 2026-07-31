@@ -47,6 +47,10 @@ import {
   NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
 import {
+  SqliteConnectorSettingsSchema,
+  sqliteDbCheck,
+} from '../../adapters/db/sqlite/index.ts';
+import {
   inventoryFreshnessCheck,
   parseSearchUrls,
 } from '../../adapters/lanes/linkedin/index.ts';
@@ -126,6 +130,10 @@ const realRegistry: AdapterRegistry = {
       // missing token itself is already a red from `coreChecks`.
       if (!deps.notionApi) return [];
       return [dbReachableCheck({ api: deps.notionApi, dbId: parsed.dbId })];
+    },
+    sqlite: (settings, deps) => {
+      const parsed = SqliteConnectorSettingsSchema.parse(settings ?? {});
+      return [sqliteDbCheck({ path: parsed.path ?? deps.sqliteDefaultPath })];
     },
   },
   notifiers: {
@@ -237,6 +245,13 @@ export async function wire(
   // and the run still reported `passed`.
   const storage = new FsStorage(root);
   const profileStorage = new FsStorage(path.join(root, 'profiles', profileName, 'data'));
+  const sqliteDefaultPath = path.join(
+    root,
+    'profiles',
+    profileName,
+    'data',
+    'jobbunny.db',
+  );
 
   const deps: RuntimeDeps = {
     storage,
@@ -246,6 +261,7 @@ export async function wire(
     cdpPort: DEFAULT_CDP_PORT,
     filterCfg,
     pages,
+    sqliteDefaultPath,
     ...overrides.deps,
   };
   const registry = overrides.registry ?? realRegistry;
@@ -280,6 +296,7 @@ export async function wire(
     config.connector,
     config.settings[config.connector],
     notionApiForConnector,
+    sqliteDefaultPath,
   );
   const notifiers = config.notifiers.map((name) =>
     buildNotifier(name, config.settings[name]),

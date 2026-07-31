@@ -12,6 +12,7 @@ import type { CdpChromeProvider } from '../../adapters/browser/cdp-chrome/index.
 import { DEFAULT_USER_DATA_DIR } from '../../adapters/browser/cdp-chrome/index.ts';
 import type { NotionApi } from '../../adapters/db/notion/index.ts';
 import { NotionConnector } from '../../adapters/db/notion/index.ts';
+import { SqliteConnector } from '../../adapters/db/sqlite/index.ts';
 import { GreenhouseLane } from '../../adapters/lanes/greenhouse/index.ts';
 import { KekaLane } from '../../adapters/lanes/keka/index.ts';
 import {
@@ -36,8 +37,14 @@ import {
 
 // --- live adapter construction (ctx/ports/stages/routines) ---
 
-export function buildConnector(name: string, settings: unknown, api: NotionApi) {
+export function buildConnector(
+  name: string,
+  settings: unknown,
+  api: NotionApi,
+  defaultSqlitePath: string,
+) {
   if (name === 'notion') return new NotionConnector(settings, api);
+  if (name === 'sqlite') return new SqliteConnector(settings, defaultSqlitePath);
   throw new Error(`unknown connector "${name}"`);
 }
 

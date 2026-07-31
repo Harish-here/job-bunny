@@ -48,6 +48,10 @@ export interface RuntimeDeps {
   cdpPort: number;
   filterCfg?: FilterConfig;
   pages: string[];
+  /** `profiles/<name>/data/jobbunny.db` — the sqlite connector's default
+   * DB location; the check factory resolves `settings.sqlite.path`
+   * overrides against it. */
+  sqliteDefaultPath: string;
 }
 
 /** Builds the `DoctorCheck[]` one lane/connector/notifier contributes.
