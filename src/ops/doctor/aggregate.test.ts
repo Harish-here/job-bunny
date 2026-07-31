@@ -102,17 +102,20 @@ function fakeCheck(name: string, status: DoctorFinding['status']): DoctorCheck {
 test('envTokensCheck: ok when both tokens are present', async () => {
   const check = envTokensCheck({
     profileName: 'rajni',
+    connector: 'notion',
     env: { NOTION_TOKEN: 'secret-n', TELEGRAM_BOT_TOKEN: 'secret-t' },
   });
   const finding = await check.run();
   assert.equal(finding.status, 'ok');
 });
 
+const optsWithoutNotionToken = {
+  profileName: 'rajni',
+  env: { TELEGRAM_BOT_TOKEN: 'secret-t' },
+};
+
 test('envTokensCheck: red when NOTION_TOKEN is missing', async () => {
-  const check = envTokensCheck({
-    profileName: 'rajni',
-    env: { TELEGRAM_BOT_TOKEN: 'secret-t' },
-  });
+  const check = envTokensCheck({ ...optsWithoutNotionToken, connector: 'notion' });
   const finding = await check.run();
   assert.equal(finding.status, 'red');
   assert.match(finding.detail, /NOTION_TOKEN/);
@@ -121,6 +124,7 @@ test('envTokensCheck: red when NOTION_TOKEN is missing', async () => {
 test('envTokensCheck: warn when only TELEGRAM_BOT_TOKEN is missing', async () => {
   const check = envTokensCheck({
     profileName: 'rajni',
+    connector: 'notion',
     env: { NOTION_TOKEN: 'secret-n' },
   });
   const finding = await check.run();
@@ -131,6 +135,7 @@ test('envTokensCheck: warn when only TELEGRAM_BOT_TOKEN is missing', async () =>
 test('envTokensCheck: red (worst) when both tokens are missing, listing both', async () => {
   const check = envTokensCheck({
     profileName: 'rajni',
+    connector: 'notion',
     env: {},
   });
   const finding = await check.run();
@@ -142,10 +147,25 @@ test('envTokensCheck: red (worst) when both tokens are missing, listing both', a
 test('envTokensCheck: red when NOTION_TOKEN is an empty string', async () => {
   const check = envTokensCheck({
     profileName: 'rajni',
+    connector: 'notion',
     env: { NOTION_TOKEN: '', TELEGRAM_BOT_TOKEN: 'secret-t' },
   });
   const finding = await check.run();
   assert.equal(finding.status, 'red');
+});
+
+test('envTokensCheck: missing NOTION_TOKEN is only a warn for a non-notion connector', async () => {
+  const finding = await envTokensCheck({
+    ...optsWithoutNotionToken,
+    connector: 'sqlite',
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /only needed for the notion connector/);
+});
+
+test('envTokensCheck: connector omitted behaves like non-notion (warn)', async () => {
+  const finding = await envTokensCheck(optsWithoutNotionToken).run();
+  assert.equal(finding.status, 'warn');
 });
 
 // --- coreChecks ---

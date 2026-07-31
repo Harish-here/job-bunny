@@ -32,6 +32,11 @@ export interface CoreCheckOpts {
   /** Daemon pidfile deps for `daemonLivenessCheck`. Defaults to
    * `defaultDaemonPidfileDeps()`. */
   daemonPidfile?: DaemonPidfileDeps;
+  /** The profile's configured connector name (`profile.json`'s
+   * `connector` field). Used by `envTokensCheck` to decide whether
+   * `NOTION_TOKEN` is mandatory (`'notion'`) or merely optional
+   * (any other value, or omitted). */
+  connector?: string;
 }
 
 export function resolveReadFile(opts: CoreCheckOpts): (path: string) => Promise<string> {

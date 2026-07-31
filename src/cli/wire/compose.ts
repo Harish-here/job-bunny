@@ -251,7 +251,7 @@ export async function wire(
   const registry = overrides.registry ?? realRegistry;
 
   const checks = [
-    ...coreChecks({ profileName, root, readFile }),
+    ...coreChecks({ profileName, root, readFile, connector: config.connector }),
     ...assembleAdapterChecks(config, registry, deps),
   ];
 
