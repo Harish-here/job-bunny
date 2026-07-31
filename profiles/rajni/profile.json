@@ -15,7 +15,7 @@
   "lanes": [
     "linkedin"
   ],
-  "connector": "notion",
+  "connector": "sqlite",
   "notifiers": [],
   "routines": [],
   "settings": {
@@ -23,6 +23,7 @@
       "dbId": "7eb638f2140e49e4bb7cef10c25950e2",
       "dryRun": true
     },
+    "sqlite": {},
     "source": {
       "maxNewPerLane": 3
     },
