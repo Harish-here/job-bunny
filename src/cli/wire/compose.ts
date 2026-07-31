@@ -37,10 +37,7 @@ import {
   DEFAULT_CDP_PORT,
   defaultCdpReachable,
 } from '../../adapters/browser/cdp-chrome/index.ts';
-import type {
-  NotionApiLike,
-  NotionSdkClientLike,
-} from '../../adapters/db/notion/index.ts';
+import type { NotionApiLike } from '../../adapters/db/notion/index.ts';
 import {
   dbReachableCheck,
   NotionApi,
@@ -91,6 +88,7 @@ import {
   buildRoutine,
   isApiLane,
   isFarmingLane,
+  missingTokenNotionClient,
 } from './builders.ts';
 import { isNotFound, loadFilterConfig, loadPipelineConfig } from './config.ts';
 import type { AdapterRegistry, RuntimeDeps } from './registry.ts';
@@ -143,22 +141,6 @@ const realRegistry: AdapterRegistry = {
     },
   },
 };
-
-/** A `NotionSdkClientLike` every method of which throws the same
- * config-problem message. Used to build a `NotionApi` (not merely a
- * `NotionApiLike`) when `NOTION_TOKEN` is missing, so `wire()` itself never
- * throws (doctor must survive a missing token — `coreChecks` already
- * reports it as a red) while the live connector still fails LOUD at first
- * actual use (`rebuildCache`/`syncJobs`/`archiveStale`), never silently. */
-function missingTokenNotionClient(): NotionSdkClientLike {
-  const fail = (): never => {
-    throw new Error('NOTION_TOKEN missing — set it in .env');
-  };
-  return {
-    databases: { query: fail },
-    pages: { create: fail, update: fail },
-  };
-}
 
 // --- wire() ---
 

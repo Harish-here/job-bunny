@@ -7,12 +7,23 @@
  * out purely to keep `compose.ts` under the 400-line file-size cap, not for
  * any behavioral reason.
  */
+import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CdpChromeProvider } from '../../adapters/browser/cdp-chrome/index.ts';
 import { DEFAULT_USER_DATA_DIR } from '../../adapters/browser/cdp-chrome/index.ts';
-import type { NotionApi } from '../../adapters/db/notion/index.ts';
-import { NotionConnector } from '../../adapters/db/notion/index.ts';
-import { SqliteConnector } from '../../adapters/db/sqlite/index.ts';
+import type { NotionSdkClientLike } from '../../adapters/db/notion/index.ts';
+import {
+  exportForMigration,
+  NotionApi,
+  NotionConnector,
+  NotionConnectorSettingsSchema,
+} from '../../adapters/db/notion/index.ts';
+import {
+  openJobsDb,
+  SqliteConnector,
+  SqliteConnectorSettingsSchema,
+  SqliteStore,
+} from '../../adapters/db/sqlite/index.ts';
 import { GreenhouseLane } from '../../adapters/lanes/greenhouse/index.ts';
 import { KekaLane } from '../../adapters/lanes/keka/index.ts';
 import {
@@ -24,11 +35,13 @@ import {
 import { TelegramNotifier } from '../../adapters/notify/telegram/index.ts';
 import type { PipelineConfig } from '../../core/config/schema.ts';
 import type { FilterConfig } from '../../core/filter/config.ts';
+import type { MigratedRecord } from '../../core/tracking/index.ts';
+import type { RunContext } from '../../ports/context.ts';
 import type { ApiLane, FarmingLane, Lane } from '../../ports/lane.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
-import { isNotFound } from './config.ts';
+import { isNotFound, loadPipelineConfig } from './config.ts';
 import {
   resolveInterUrlDelayRange,
   resolveJitterRange,
@@ -168,4 +181,110 @@ async function buildLinkedInLane(
     // `adapters/browser/**` itself.
     { userDataDir: DEFAULT_USER_DATA_DIR, deps: defaultLinkedinBreakerDeps() },
   );
+}
+
+// --- missing-token Notion stub (shared by `wire()` and `wireMigrate()`) ---
+
+/** A `NotionSdkClientLike` every method of which throws the same
+ * config-problem message. Used to build a `NotionApi` (not merely a
+ * `NotionApiLike`) when `NOTION_TOKEN` is missing, so `wire()` itself never
+ * throws (doctor must survive a missing token — `coreChecks` already
+ * reports it as a red) while the live connector still fails LOUD at first
+ * actual use (`rebuildCache`/`syncJobs`/`archiveStale`), never silently. */
+export function missingTokenNotionClient(): NotionSdkClientLike {
+  const fail = (): never => {
+    throw new Error('NOTION_TOKEN missing — set it in .env');
+  };
+  return {
+    databases: { query: fail },
+    pages: { create: fail, update: fail },
+  };
+}
+
+// --- wireMigrate() (local-DB spec, PR 2 Task 4) ---
+//
+// Narrow composition seam for `jobbunny migrate` (Task 5): a Notion-read
+// handle plus a lazily-opened sqlite import handle, nothing else — no
+// pipeline, no connector, no full `wire()`. `overrides`'s type is written
+// inline (not imported from `./compose.ts`) to avoid a builders<->compose
+// type cycle.
+
+export interface MigrateWire {
+  /** '' when the profile has no settings.notion.dbId — command errors early. */
+  dbId: string;
+  /** profiles/<name>/profile.json, absolute. */
+  profileJsonPath: string;
+  /** Resolved jobbunny.db path — printed in the summary; opening is deferred. */
+  dbPath: string;
+  exportRecords(ctx: RunContext): Promise<MigratedRecord[]>;
+  /** Opens the DB on FIRST CALL — dry-run never calls it, so dry-run
+   * creates no file. Insert-only on both tables. */
+  importRecords(
+    records: MigratedRecord[],
+    now: string,
+  ): { jobs: number; tracking: number };
+}
+
+export async function wireMigrate(
+  profileName: string,
+  overrides: { root?: string; readFile?: (p: string) => Promise<string> } = {},
+): Promise<MigrateWire> {
+  const root = overrides.root ?? process.cwd();
+  const readFile = overrides.readFile ?? ((p: string) => fsReadFile(p, 'utf8'));
+
+  const config = await loadPipelineConfig(profileName, { root, readFile });
+
+  const notionSettings = config.settings.notion;
+  const dbId = notionSettings
+    ? NotionConnectorSettingsSchema.parse(notionSettings).dbId
+    : '';
+
+  // Same posture as `wire()`: a real `NotionApi` when `NOTION_TOKEN` is
+  // present, otherwise one built over the throwing stub, so `wireMigrate`
+  // itself never throws on a missing token — the command surfaces that at
+  // first actual `exportRecords` use instead.
+  let api: NotionApi;
+  try {
+    api = new NotionApi();
+  } catch {
+    api = new NotionApi({ client: missingTokenNotionClient() });
+  }
+
+  const profileJsonPath = path.join(root, 'profiles', profileName, 'profile.json');
+  const dbPath =
+    SqliteConnectorSettingsSchema.parse(config.settings.sqlite ?? {}).path ??
+    path.join(root, 'profiles', profileName, 'data', 'jobbunny.db');
+
+  // Lazy + memoized: opening `dbPath` (via `openJobsDb`) only happens on the
+  // first `importRecords` call, so `migrate --dry-run` — which never calls
+  // it — creates no database file.
+  let store: SqliteStore | undefined;
+  function getStore(): SqliteStore {
+    if (!store) store = new SqliteStore(openJobsDb(dbPath));
+    return store;
+  }
+
+  return {
+    dbId,
+    profileJsonPath,
+    dbPath,
+    exportRecords: (ctx) => exportForMigration(api, dbId, ctx),
+    importRecords(records, now) {
+      const s = getStore();
+      const jobs = s.importJobs(
+        records.map((r) => r.jd),
+        now,
+      );
+      const tracking = s.importTracking(
+        records
+          .filter((r) => r.tracking)
+          .map((r) => ({
+            jobId: r.jd.identity.id,
+            fields: r.tracking!,
+            updatedAt: now,
+          })),
+      );
+      return { jobs, tracking };
+    },
+  };
 }

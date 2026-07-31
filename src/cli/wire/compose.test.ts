@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { wireMigrate } from './builders.ts';
 import { wire } from './compose.ts';
 import { dataPath, fakeReadFile, profilePath } from './testkit.ts';
 
@@ -530,4 +531,46 @@ test('wire: a profile with invalid settings.logging throws', async () => {
   await assert.rejects(() =>
     wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
   );
+});
+
+// --- wireMigrate() (local-DB spec, PR 2 Task 4) ---
+//
+// Narrow composition seam for `jobbunny migrate` (Task 5): no store call, no
+// filesystem touch here — `importRecords` opens the sqlite DB lazily on
+// first call, which Task 3's store tests already cover.
+
+test('wireMigrate: resolves dbId/profileJsonPath/dbPath from a profile with settings.notion.dbId', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'notion',
+    notifiers: [],
+    routines: [],
+    settings: { notion: { dbId: 'db-x' } },
+  });
+
+  const migrateWire = await wireMigrate('p1', {
+    root: '/repo',
+    readFile: fakeReadFile({ [profilePath('p1')]: profileJson }),
+  });
+
+  assert.equal(migrateWire.dbId, 'db-x');
+  assert.ok(migrateWire.profileJsonPath.endsWith(join('profiles', 'p1', 'profile.json')));
+  assert.ok(migrateWire.dbPath.endsWith(join('profiles', 'p1', 'data', 'jobbunny.db')));
+});
+
+test('wireMigrate: dbId is "" when the profile has no settings.notion slice', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'sqlite',
+    notifiers: [],
+    routines: [],
+    settings: {},
+  });
+
+  const migrateWire = await wireMigrate('p1', {
+    root: '/repo',
+    readFile: fakeReadFile({ [profilePath('p1')]: profileJson }),
+  });
+
+  assert.equal(migrateWire.dbId, '');
 });
