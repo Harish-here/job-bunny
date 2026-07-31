@@ -26,12 +26,12 @@ export function sqliteDbCheck(deps: SqliteDbCheckDeps): DoctorCheck {
           detail: `no database yet at ${deps.path} — created on first run`,
         };
       }
+      let db: DatabaseSync | undefined;
       try {
-        const db = new DatabaseSync(deps.path, { readOnly: true });
+        db = new DatabaseSync(deps.path, { readOnly: true });
         const version = (
           db.prepare('PRAGMA user_version').get() as { user_version: number }
         ).user_version;
-        db.close();
         if (version > LATEST_SCHEMA_VERSION) {
           return {
             check: name,
@@ -50,6 +50,8 @@ export function sqliteDbCheck(deps: SqliteDbCheckDeps): DoctorCheck {
           status: 'red',
           detail: `database not openable: ${err instanceof Error ? err.message : String(err)}`,
         };
+      } finally {
+        db?.close();
       }
     },
   };
