@@ -107,3 +107,76 @@ test('upsertJobs and markArchived work inside an outer transaction (savepoints, 
   assert.equal(store.listCacheEntries().length, 0);
   assert.equal(store.listArchiveCandidates().length, 0);
 });
+
+test('importJobs inserts new rows, returns the count, and NEVER touches an existing row', () => {
+  const store = freshStore();
+  store.upsertJobs([makeJd('li-30')], '2026-08-01T10:00:00.000Z');
+  const before = store.db.prepare('SELECT * FROM jobs WHERE id = ?').get('li-30');
+
+  const richer = makeJd('li-30');
+  richer.identity.title = 'DIFFERENT TITLE FROM NOTION';
+  const n = store.importJobs([richer, makeJd('li-31')], '2026-08-02T10:00:00.000Z');
+
+  assert.equal(n, 1); // only li-31 inserted
+  const after = store.db.prepare('SELECT * FROM jobs WHERE id = ?').get('li-30');
+  assert.deepEqual(after, before); // byte-identical — pipeline row wins
+});
+
+test('importJobs does not revive an archived row (unlike upsertJobs)', () => {
+  const store = freshStore();
+  store.upsertJobs([makeJd('li-32')], '2026-08-01T10:00:00.000Z');
+  store.markArchived(['li-32'], '2026-08-01T12:00:00.000Z');
+  store.importJobs([makeJd('li-32')], '2026-08-02T10:00:00.000Z');
+  assert.equal(store.listCacheEntries().length, 0);
+});
+
+test('importTracking inserts rows and returns the count', () => {
+  const store = freshStore();
+  store.upsertJobs([makeJd('li-20'), makeJd('li-21')], '2026-08-02T10:00:00.000Z');
+  const n = store.importTracking([
+    {
+      jobId: 'li-20',
+      fields: { status: 'Applied', notes: 'hi' },
+      updatedAt: '2026-08-02T10:00:00.000Z',
+    },
+    { jobId: 'li-21', fields: { status: 'Lead' }, updatedAt: '2026-08-02T10:00:00.000Z' },
+  ]);
+  assert.equal(n, 2);
+  const row = store.db
+    .prepare('SELECT status, notes FROM tracking WHERE job_id = ?')
+    .get('li-20') as { status: string; notes: string };
+  assert.deepEqual({ ...row }, { status: 'Applied', notes: 'hi' });
+});
+
+test('importTracking never overwrites an existing row (board edits win)', () => {
+  const store = freshStore();
+  store.upsertJobs([makeJd('li-22')], '2026-08-02T10:00:00.000Z');
+  store.importTracking([
+    { jobId: 'li-22', fields: { status: 'Lead' }, updatedAt: '2026-08-02T10:00:00.000Z' },
+  ]);
+  const n = store.importTracking([
+    {
+      jobId: 'li-22',
+      fields: { status: 'Offer' },
+      updatedAt: '2026-08-03T10:00:00.000Z',
+    },
+  ]);
+  assert.equal(n, 0);
+  const row = store.db
+    .prepare('SELECT status FROM tracking WHERE job_id = ?')
+    .get('li-22') as { status: string };
+  assert.equal(row.status, 'Lead');
+});
+
+test('importTracking throws on a job id with no jobs row (FK enforced)', () => {
+  const store = freshStore();
+  assert.throws(() =>
+    store.importTracking([
+      {
+        jobId: 'li-404',
+        fields: { status: 'Lead' },
+        updatedAt: '2026-08-02T10:00:00.000Z',
+      },
+    ]),
+  );
+});

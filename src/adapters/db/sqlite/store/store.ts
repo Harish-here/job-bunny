@@ -7,15 +7,19 @@
  * SAVEPOINT/RELEASE (not BEGIN/COMMIT) so these methods are safe to call
  * from inside an outer transaction (e.g. PR 2's migrate).
  */
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { CacheEntry, JD } from '../../../../core/jd/index.ts';
+import type { TrackingFields } from '../../../../core/tracking/index.ts';
 
-const UPSERT_SQL = `
-INSERT INTO jobs (
+const JOB_COLUMNS = `
   id, lane, title, company, url, seniority, location_city, work_type,
   timezone, skills, excitement, score, match_reasons, date_found,
   jd_json, synced_at, archived, archived_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+`;
+const JOB_PLACEHOLDERS = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL';
+
+const UPSERT_SQL = `
+INSERT INTO jobs (${JOB_COLUMNS}) VALUES (${JOB_PLACEHOLDERS})
 ON CONFLICT(id) DO UPDATE SET
   lane = excluded.lane, title = excluded.title, company = excluded.company,
   url = excluded.url, seniority = excluded.seniority,
@@ -27,6 +31,11 @@ ON CONFLICT(id) DO UPDATE SET
   archived = 0, archived_at = NULL
 `;
 
+const IMPORT_JOBS_SQL = `
+INSERT INTO jobs (${JOB_COLUMNS}) VALUES (${JOB_PLACEHOLDERS})
+ON CONFLICT(id) DO NOTHING
+`;
+
 export class SqliteStore {
   readonly db: DatabaseSync;
 
@@ -34,29 +43,33 @@ export class SqliteStore {
     this.db = db;
   }
 
+  private jobRowValues(jd: JD, syncedAt: string): SQLInputValue[] {
+    return [
+      jd.identity.id,
+      jd.identity.lane,
+      jd.identity.title,
+      jd.identity.company,
+      jd.identity.url,
+      jd.structured?.titleParts.seniority ?? null,
+      jd.structured?.locations[0]?.city ?? null,
+      jd.structured?.workType ?? null,
+      jd.structured?.timezone ?? null,
+      jd.structured ? JSON.stringify(jd.structured.skills) : null,
+      jd.evaluation?.excitement ?? null,
+      jd.evaluation?.score ?? null,
+      jd.evaluation ? JSON.stringify(jd.evaluation.matchReasons) : null,
+      jd.identity.scrapedAt,
+      JSON.stringify(jd),
+      syncedAt,
+    ];
+  }
+
   upsertJobs(jobs: JD[], syncedAt: string): void {
     const stmt = this.db.prepare(UPSERT_SQL);
     this.db.exec('SAVEPOINT jb_upsert');
     try {
       for (const jd of jobs) {
-        stmt.run(
-          jd.identity.id,
-          jd.identity.lane,
-          jd.identity.title,
-          jd.identity.company,
-          jd.identity.url,
-          jd.structured?.titleParts.seniority ?? null,
-          jd.structured?.locations[0]?.city ?? null,
-          jd.structured?.workType ?? null,
-          jd.structured?.timezone ?? null,
-          jd.structured ? JSON.stringify(jd.structured.skills) : null,
-          jd.evaluation?.excitement ?? null,
-          jd.evaluation?.score ?? null,
-          jd.evaluation ? JSON.stringify(jd.evaluation.matchReasons) : null,
-          jd.identity.scrapedAt,
-          JSON.stringify(jd),
-          syncedAt,
-        );
+        stmt.run(...this.jobRowValues(jd, syncedAt));
       }
       this.db.exec('RELEASE jb_upsert');
     } catch (err) {
@@ -64,6 +77,60 @@ export class SqliteStore {
       this.db.exec('RELEASE jb_upsert');
       throw err;
     }
+  }
+
+  importJobs(jobs: JD[], syncedAt: string): number {
+    const stmt = this.db.prepare(IMPORT_JOBS_SQL);
+    let inserted = 0;
+    this.db.exec('SAVEPOINT jb_jobs_import');
+    try {
+      for (const jd of jobs) {
+        inserted += Number(stmt.run(...this.jobRowValues(jd, syncedAt)).changes);
+      }
+      this.db.exec('RELEASE jb_jobs_import');
+    } catch (err) {
+      this.db.exec('ROLLBACK TO jb_jobs_import');
+      this.db.exec('RELEASE jb_jobs_import');
+      throw err;
+    }
+    return inserted;
+  }
+
+  importTracking(
+    rows: { jobId: string; fields: TrackingFields; updatedAt: string }[],
+  ): number {
+    const stmt = this.db.prepare(
+      `INSERT INTO tracking (
+         job_id, status, comp_range, notes, contact,
+         date_applied, next_action, next_action_date, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(job_id) DO NOTHING`,
+    );
+    let inserted = 0;
+    this.db.exec('SAVEPOINT jb_track_import');
+    try {
+      for (const row of rows) {
+        inserted += Number(
+          stmt.run(
+            row.jobId,
+            row.fields.status ?? null,
+            row.fields.compRange ?? null,
+            row.fields.notes ?? null,
+            row.fields.contact ?? null,
+            row.fields.dateApplied ?? null,
+            row.fields.nextAction ?? null,
+            row.fields.nextActionDate ?? null,
+            row.updatedAt,
+          ).changes,
+        );
+      }
+      this.db.exec('RELEASE jb_track_import');
+    } catch (err) {
+      this.db.exec('ROLLBACK TO jb_track_import');
+      this.db.exec('RELEASE jb_track_import');
+      throw err;
+    }
+    return inserted;
   }
 
   listCacheEntries(): CacheEntry[] {
