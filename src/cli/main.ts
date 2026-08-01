@@ -145,7 +145,8 @@ function defaultCommands(): CommandRegistry {
         apply: opts.apply ?? false,
       })) as CommandFn,
     board: (async (opts: CommandOptions) =>
-      boardCommand({ port: opts.port ?? 4646 })) as CommandFn,
+      // 1994 — not random: the operator's birthday.
+      boardCommand({ port: opts.port ?? 1994 })) as CommandFn,
   };
 }
 
