@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { TrackingPatchBody, TrackingRow } from '../../lib/api/types';
   import { patchTracking } from './api';
-  import { applyPatch } from './tracking';
+  import { commitField } from './tracking';
 
   let {
     profile,
@@ -21,25 +21,13 @@
   let saveError = $state<string | null>(null);
 
   async function commit(field: keyof TrackingPatchBody, raw: string) {
-    const previous = tracking?.[field] ?? '';
-    if (raw === previous || (raw.trim() === '' && previous === '')) return; // no-op edit
-    // Cast erases the status literal union — safe here because the select's
-    // options come from /meta (the server vocab), and the server rejects
-    // anything else with a 400 that rolls back below.
-    const patch = { [field]: raw.trim() === '' ? null : raw } as TrackingPatchBody;
-    const snapshot = tracking;
-    ontracking(jobId, applyPatch(tracking, jobId, patch)); // optimistic
     saving = true;
-    saveError = null;
-    try {
-      const res = await patchTracking(profile, jobId, patch);
-      ontracking(jobId, res.tracking); // server truth (real updatedAt)
-    } catch (err) {
-      ontracking(jobId, snapshot); // rollback
-      saveError = err instanceof Error ? err.message : String(err);
-    } finally {
-      saving = false;
-    }
+    saveError = await commitField(jobId, field, raw, {
+      read: () => tracking,
+      patch: (p) => patchTracking(profile, jobId, p).then((r) => r.tracking),
+      apply: (t) => ontracking(jobId, t),
+    });
+    saving = false;
   }
 </script>
 
