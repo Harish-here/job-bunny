@@ -65,7 +65,7 @@ const MINIMAL_FILTER_CONFIG = {};
 
 const SEARCH_URLS_TEMPLATE = `# Search URLs
 
-Hierarchical: Channel -> page -> labeled URLs. One page-type = one inventory in \`src/adapters/lanes/linkedin/page_inventory/<page>.md\`; many URLs may live beneath it.
+Hierarchical: Channel -> page -> labeled URLs. One page-type = one inventory in \`src/adapters/lanes/linkedin/page_inventory/<page>.json\`; many URLs may live beneath it.
 Add URLs with \`lane add-url\` (strips ephemeral params). Format: \`  • <label> - <url>\`
 `;
 

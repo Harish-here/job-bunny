@@ -149,7 +149,7 @@ test('laneAddUrlCommand creates search_urls.md with channel/page nodes and the U
     assert.match(text, /### linkedin__jobs-search/);
     assert.match(
       text,
-      /<!-- inventory: src\/adapters\/lanes\/linkedin\/page_inventory\/linkedin__jobs-search\.md -->/,
+      /<!-- inventory: src\/adapters\/lanes\/linkedin\/page_inventory\/linkedin__jobs-search\.json -->/,
     );
     assert.match(
       text,
@@ -172,7 +172,10 @@ test('laneAddUrlCommand does not warn when the page inventory exists', async () 
       'page_inventory',
     );
     await mkdir(inventoryDir, { recursive: true });
-    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.md'), '# inventory\n');
+    await writeFile(
+      path.join(inventoryDir, 'linkedin__jobs-search.json'),
+      '# inventory\n',
+    );
 
     const warnings: string[] = [];
     const code = await laneAddUrlCommand(

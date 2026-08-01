@@ -32,7 +32,8 @@ test('setupCommand on a completely empty root: seeds scaffold, everything else n
     // scaffold got seeded even though nothing existed before
     await readFile(path.join(root, 'profiles', 'acme', 'profile.json'), 'utf8');
     assert.ok(lines.some((l) => l.includes('profile scaffold: done')));
-    assert.ok(lines.some((l) => l.includes('.env NOTION_TOKEN: needs-action')));
+    // scaffold defaults to a local sqlite profile — no Notion token needed
+    assert.ok(lines.some((l) => l.includes('.env NOTION_TOKEN: skipped')));
     assert.ok(lines.some((l) => l.includes('resume.json: needs-action')));
     assert.ok(lines.some((l) => l.includes('search_urls.md: needs-action')));
     assert.ok(lines.some((l) => l.includes('page_inventory coverage: skipped')));
@@ -48,7 +49,7 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
     await writeFile(path.join(profileDir, 'resume.json'), '{}');
     await writeFile(
       path.join(profileDir, 'search_urls.md'),
-      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.md -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
+      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
     const inventoryDir = path.join(
       root,
@@ -59,7 +60,10 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
       'page_inventory',
     );
     await mkdir(inventoryDir, { recursive: true });
-    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.md'), '# inventory\n');
+    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.json'), '{}\n');
+    const uiDistDir = path.join(root, 'ui', 'dist');
+    await mkdir(uiDistDir, { recursive: true });
+    await writeFile(path.join(uiDistDir, 'index.html'), '<!doctype html>\n');
 
     const lines: string[] = [];
     const code = await setupCommand(
@@ -74,6 +78,12 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
 test('setupCommand never prints or leaks the NOTION_TOKEN value', async () => {
   await withTmpRoot(async (root) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
+    const profileDir = path.join(root, 'profiles', 'acme');
+    // pre-write a notion profile.json so the token path still runs
+    await writeFile(
+      path.join(profileDir, 'profile.json'),
+      JSON.stringify({ connector: 'notion' }),
+    );
     await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=super-secret-value\n');
 
     const lines: string[] = [];
@@ -86,6 +96,12 @@ test('setupCommand never prints or leaks the NOTION_TOKEN value', async () => {
 test('setupCommand: .env present but NOTION_TOKEN empty is needs-action', async () => {
   await withTmpRoot(async (root) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
+    const profileDir = path.join(root, 'profiles', 'acme');
+    // pre-write a notion profile.json so the token path still runs
+    await writeFile(
+      path.join(profileDir, 'profile.json'),
+      JSON.stringify({ connector: 'notion' }),
+    );
     await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=\n');
 
     const lines: string[] = [];
@@ -104,7 +120,7 @@ test('setupCommand: search_urls.md present with a referenced page but missing in
     const profileDir = path.join(root, 'profiles', 'acme');
     await writeFile(
       path.join(profileDir, 'search_urls.md'),
-      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.md -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
+      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
 
     const lines: string[] = [];
@@ -167,5 +183,148 @@ test('setupCommand never mutates outside profiles/<p>/: does not touch .env or p
       inventoryExists = false;
     }
     assert.equal(inventoryExists, false);
+  });
+});
+
+// ---------- Notion-conditional token step ----------
+
+test('sqlite-only profile: .env NOTION_TOKEN is skipped even with no .env', async () => {
+  await withTmpRoot(async (root) => {
+    // fresh root, no .env — setupCommand's own scaffold step seeds
+    // profile.json with connector "sqlite" (the PR-4 default)
+    const lines: string[] = [];
+    const code = await setupCommand(
+      { profile: 'zz' },
+      { root, write: (l) => lines.push(l) },
+    );
+    const tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /skipped — local sqlite profile/);
+    // exit code may still be 1 (resume.json etc. need action) — token must not be the cause
+    assert.equal(code, 1);
+  });
+});
+
+test('connector "notion" still requires the token', async () => {
+  await withTmpRoot(async (root) => {
+    const profileDir = path.join(root, 'profiles', 'zz');
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      path.join(profileDir, 'profile.json'),
+      JSON.stringify({ connector: 'notion' }),
+    );
+
+    // no .env → needs-action
+    const lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    const tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /needs-action/);
+  });
+});
+
+test('sqlite profile with settings.notion.mirror=true AND a dbId requires the token', async () => {
+  await withTmpRoot(async (root) => {
+    const profileDir = path.join(root, 'profiles', 'zz');
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      path.join(profileDir, 'profile.json'),
+      JSON.stringify({
+        connector: 'sqlite',
+        settings: { notion: { dbId: 'x', mirror: true } },
+      }),
+    );
+
+    // no NOTION_TOKEN → needs-action
+    let lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    let tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /needs-action/);
+
+    // with NOTION_TOKEN in .env → done
+    await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=abc\n');
+    lines = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /done/);
+  });
+});
+
+test('mirror=true WITHOUT a dbId does not require the token (matches mirrorSettings())', async () => {
+  await withTmpRoot(async (root) => {
+    const profileDir = path.join(root, 'profiles', 'zz');
+    await mkdir(profileDir, { recursive: true });
+    // compose.test.ts pins this slice as no-mirror — token step must be skipped
+    await writeFile(
+      path.join(profileDir, 'profile.json'),
+      JSON.stringify({ connector: 'sqlite', settings: { notion: { mirror: true } } }),
+    );
+
+    const lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    const tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /skipped/);
+  });
+});
+
+test('unparseable profile.json makes the token step needs-action, not a crash', async () => {
+  await withTmpRoot(async (root) => {
+    const profileDir = path.join(root, 'profiles', 'zz');
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(path.join(profileDir, 'profile.json'), '{nope');
+
+    const lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    const tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /needs-action — profile\.json is not valid JSON/);
+  });
+});
+
+// ---------- ui build step ----------
+
+test('ui build: needs-action without ui/dist, done with it', async () => {
+  await withTmpRoot(async (root) => {
+    let lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    assert.ok(
+      lines.some((l) =>
+        l.includes(
+          '[setup] ui build: needs-action — board UI not built — run: npm run ui:build',
+        ),
+      ),
+    );
+
+    await mkdir(path.join(root, 'ui', 'dist'), { recursive: true });
+    await writeFile(path.join(root, 'ui', 'dist', 'index.html'), '<!doctype html>\n');
+
+    lines = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    assert.ok(lines.some((l) => l.includes('[setup] ui build: done — ui/dist present')));
+  });
+});
+
+// ---------- page_inventory .json authority ----------
+
+test('page_inventory coverage accepts .json inventory files', async () => {
+  await withTmpRoot(async (root) => {
+    const profileDir = path.join(root, 'profiles', 'zz');
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      path.join(profileDir, 'search_urls.md'),
+      '## linkedin\n### search-results\n  • eng - https://example.com/jobs\n',
+    );
+    const inventoryDir = path.join(
+      root,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+    );
+    await mkdir(inventoryDir, { recursive: true });
+    // pins the .md->.json bugfix — with .md-only lookup this reports missing
+    await writeFile(path.join(inventoryDir, 'search-results.json'), '{}\n');
+
+    const lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    assert.ok(lines.some((l) => l.includes('page_inventory coverage: done')));
   });
 });
