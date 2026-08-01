@@ -12,8 +12,9 @@ You are the code-writing agent for Job Bunny (`main-v2` branch, `src/` TypeScrip
 Ask what kind of thing you're adding, in this order:
 
 - **Pure domain logic, zero I/O** (a schema, a scorer, a pure transition function) → `src/core/<module>/`. Existing modules for reference: `core/jd` (the universal JD schema), `core/config`, `core/filter`, `core/dedup`, `core/rank`, `core/company`, `core/profile`, `core/errors`, `core/async`. No `Date.now()`/`Math.random()` inside scorers; pass `now` in as a parameter.
-- **A new capability interface** (something pipeline code needs to call but shouldn't know the concrete implementation of) → `src/ports/`. Existing ports: `browser`, `connector`, `context`, `doctor`, `lane` (`FarmingLane`/`ApiLane`), `llm`, `notifier`, `storage`. Interface only, no implementation, and it may import nothing but `core`.
-- **An implementation of a port** — a new lane, connector, notifier, LLM provider, or browser provider → `src/adapters/<family>/<name>/` (families: `browser/`, `db/`, `lanes/`, `llm/`, `notify/`). Wire it in **only** `src/cli/wire/compose.ts` (its sibling `builders.ts` if the construction logic needs a second file to stay under the size cap) — no other file may import `src/adapters/**`. Example: a third ATS is one new `ApiLane` adapter under `src/adapters/lanes/<name>/`; the shared probe/fetch loop in `source` does the rest. (The scheduling daemon, `src/ops/daemon/`, is orchestration — `ops/` — not an adapter family: it spawns child processes directly rather than registering jobs with an external OS scheduler, so it has no port of its own and no `scheduler/` family exists anymore.)
+- **A new capability interface** (something pipeline code needs to call but shouldn't know the concrete implementation of) → `src/ports/`. Existing ports: `board` (`BoardStore`/`BoardSource`), `browser`, `connector`, `context`, `doctor`, `lane` (`FarmingLane`/`ApiLane`), `llm`, `notifier`, `storage`. Interface only, no implementation, and it may import nothing but `core`.
+- **An implementation of a port** — a new lane, connector, notifier, LLM provider, or browser provider → `src/adapters/<family>/<name>/` (families: `browser/`, `db/`, `lanes/`, `llm/`, `notify/`). Wire it in **only** `src/cli/wire/compose.ts` (siblings `builders.ts` and, for the board server, `board.ts` — each split out purely to stay under the size cap) — no other file may import `src/adapters/**`. Example: a third ATS is one new `ApiLane` adapter under `src/adapters/lanes/<name>/`; the shared probe/fetch loop in `source` does the rest. (The scheduling daemon, `src/ops/daemon/`, is orchestration — `ops/` — not an adapter family: it spawns child processes directly rather than registering jobs with an external OS scheduler, so it has no port of its own and no `scheduler/` family exists anymore.)
+- **A local HTTP/API surface over ports+core** (the job board server, or any future profile-less service) → `src/app/<feature>/`, vertical slices (`shared/`, `server/`, `features/<name>/`) importing ONLY `ports/` + `core/` (+ zod + node builtins) — an adapter reaches `app/` only by injection from `cli/wire/<name>.ts` (e.g. `wireBoard`), never a direct import. `cli/` is the ONLY layer allowed to import `app/`.
 - **Stage or runner logic** (a new pipeline stage, checkpoint/watchdog behavior) → `src/pipeline/`. New stages join the frozen order (`reconcile → farm → source → compress → structure → assemble → filter → dedup → rank → sync`) only with explicit sign-off — this order is a locked decision, not a default to extend casually.
 - **Recurring maintenance** (cleanup-style work attached to a run) → `src/routines/`, shaped as `{ name, when: 'pre-run'|'post-sync'|'standalone', run(ctx: PipelineCtx) }` — note it takes the *full* `PipelineCtx`, unlike a stage.
 - **Doctor checks, observability, locking** → `src/ops/` (`doctor/`, `observability/`, `scheduling/run_lock.ts`).
@@ -21,20 +22,24 @@ Ask what kind of thing you're adding, in this order:
 
 State the proposed location and which rule justifies it before writing code. If a change genuinely spans layers (e.g. a new stage needs a new port), say so explicitly rather than picking one layer and hoping the rest follows.
 
-## 2. The 6 boundary rules (`.dependency-cruiser.cjs`, enforced by `npm run boundaries`)
+## 2. The 8 boundary rules (`.dependency-cruiser.cjs`, enforced by `npm run boundaries`)
 
-1. `core-is-pure` — `src/core` may not import `ports|adapters|pipeline|routines|ops|cli`.
+1. `core-is-pure` — `src/core` may not import `ports|adapters|pipeline|routines|ops|cli|app`.
    Why: core is the one layer testable with zero mocks; letting it import outward breaks that.
-2. `ports-only-core` — `src/ports` may not import `adapters|pipeline|routines|ops|cli`.
+2. `ports-only-core` — `src/ports` may not import `adapters|pipeline|routines|ops|cli|app`.
    Why: ports are pure contracts; if a port needed an adapter it would no longer be swappable.
 3. `adapters-no-cross-family` — one adapter family may not import another (e.g. `lanes/linkedin` may not import `db/notion`).
    Why: keeps adapter families independently replaceable and testable in isolation.
-4. `adapters-only-ports-core` — `src/adapters` may not import `pipeline|routines|ops|cli`.
+4. `adapters-only-ports-core` — `src/adapters` may not import `pipeline|routines|ops|cli|app`.
    Why: adapters implement ports; they must not reach up into orchestration code.
-5. `only-wire-imports-adapters` — nothing except `src/cli/wire/compose.ts` (plus its sibling `builders.ts`, and a TYPE-ONLY exception for `registry.ts` — see that file's doc comment) may import `src/adapters/**`.
+5. `only-wire-imports-adapters` — nothing except `src/cli/wire/compose.ts` (plus siblings `builders.ts` and `board.ts`, and a TYPE-ONLY exception for `registry.ts` — see that file's doc comment) may import `src/adapters/**`.
    Why: `wire/compose.ts` is the single composition point — the only place a concrete adapter is chosen. The rest of `src/cli/wire/` (`config.ts`, `registry.ts`, `settings.ts`) plus `index.ts` is that module's own internal structure and public surface.
 6. `nothing-imports-cli` — nothing imports `cli`.
    Why: `cli` is the outermost layer; anything importing it would create a cycle back into the entry point.
+7. `app-only-ports-core` (2026-08-02) — `src/app` may not import `adapters|pipeline|routines|ops|cli`.
+   Why: `src/app` (the board server's vertical slices) is product logic over port types; a concrete adapter arrives only by injection from `cli/wire`.
+8. `only-cli-imports-app` (2026-08-02) — nothing except `src/cli` may import `src/app`.
+   Why: mirrors rule 6 one layer in — `app` is the CLI's own HTTP surface, not something pipeline/ops/adapters code should ever reach into.
 
 Two documented exceptions, both pre-existing and not precedent for new ones: `cli/commands/stage.ts` imports `pipeline/runner/guard.ts` directly (single-stage runs need identical timeout/retry/stall semantics), and `test/invariants/run_cap_backstop.test.ts` lives outside `src/` so it can import both `cli/` and `adapters/`.
 
