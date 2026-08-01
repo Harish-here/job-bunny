@@ -3,8 +3,9 @@
  * strictly to `uiDir`: every resolved path is checked with
  * `startsWith(uiDir + path.sep)` before the file is read, so a `..`
  * segment (or an absolute path smuggled into the URL) can never escape the
- * directory — refused as a 404, never surfaced as a 403 (no information
- * about what does/doesn't exist outside `uiDir`).
+ * directory — traversal attempts fall through to the SPA-fallback/no-UI
+ * response (HTTP 200), never surfaced as a 403 or 404 (no information about
+ * what does/doesn't exist outside `uiDir`).
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -47,7 +48,8 @@ async function readWithinUiDir(uiDir: string, filePath: string): Promise<Buffer 
 
 function rawBody(body: Buffer): BoardResponse['body'] {
   // BoardResponse.body is `unknown`; the server writes it back as-is for
-  // non-JSON responses (see server.ts's writeResponse branch).
+  // non-JSON responses (see server.ts's request handler, which writes
+  // static responses inline via res.writeHead/res.end).
   return body;
 }
 

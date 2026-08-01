@@ -276,3 +276,36 @@ test('updateTracking savepoint is released cleanly — sequential updates both s
   assert.equal(final?.tracking?.status, 'Applied');
   assert.equal(final?.tracking?.updatedAt, t2);
 });
+
+test('listJobs: an inherited-prototype sort key does not reach raw SQL — falls back to date_found', () => {
+  const { store, board } = freshDbs();
+  store.upsertJobs(
+    [
+      makeJd('w-1', { scrapedAt: '2026-08-01T09:00:00.000Z' }),
+      makeJd('w-2', { company: 'B Co', scrapedAt: '2026-08-02T09:00:00.000Z' }),
+    ],
+    NOW,
+  );
+
+  // 'constructor' is not a valid BoardQuery['sort'] value; the cast
+  // simulates a caller that bypassed the zod boundary. The whitelist must
+  // reject it structurally (Object.create(null) / hasOwn), not throw a SQL
+  // error from an interpolated `Object() { [native code] }` identifier.
+  const { rows } = board.listJobs({ sort: 'constructor' as unknown as 'date_found' });
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ['w-2', 'w-1'],
+  );
+});
+
+test('updateTracking: an explicitly-undefined patch value keeps the existing field, not clears it', () => {
+  const { store, board } = freshDbs();
+  store.upsertJobs([makeJd('u-1')], NOW);
+  const t1 = '2026-08-02T10:00:00.000Z';
+  board.updateTracking('u-1', { status: 'Applied' }, t1);
+
+  const t2 = '2026-08-02T11:00:00.000Z';
+  const patched = board.updateTracking('u-1', { status: undefined, notes: 'x' }, t2);
+  assert.equal(patched?.status, 'Applied');
+  assert.equal(patched?.notes, 'x');
+});

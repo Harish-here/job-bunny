@@ -54,7 +54,7 @@ module.exports = {
         "registry.ts's exception is TYPE-ONLY (RuntimeDeps's notionApi/" +
         'browserReachable fields are typed against adapter-owned structural ' +
         "interfaces predating this split — see registry.ts's doc comment); " +
-        "board.ts (arrives Task 7) is the board server's own composition point. " +
+        "board.ts is the board server's own composition point. " +
         'The `app` addition to `from` is redundant-with-`app-only-ports-core` ' +
         'defense-in-depth (belt-and-braces).',
       from: {

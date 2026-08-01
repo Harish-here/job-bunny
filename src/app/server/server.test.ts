@@ -240,7 +240,7 @@ test('one http log line is emitted per request, including error responses', asyn
   assert.equal(typeof httpLogs[0]?.data?.ms, 'number');
 });
 
-// --- Review findings: fix round 1 ---------------------------------------
+// --- Hostile/edge request handling: malformed targets, zod leaks, double close ---
 
 test('a malformed absolute-form request target is a 400 bad_request envelope, not a crash', async () => {
   // `fetch()` can only ever send an origin-form request-target, so this

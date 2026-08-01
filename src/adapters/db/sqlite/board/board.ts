@@ -25,10 +25,10 @@ import type {
 
 const JOIN = 'jobs LEFT JOIN tracking ON tracking.job_id = jobs.id';
 
-const SORT_WHITELIST: Record<'date_found' | 'score', string> = {
-  date_found: 'jobs.date_found',
-  score: 'jobs.score',
-};
+const SORT_WHITELIST: Record<'date_found' | 'score', string> = Object.assign(
+  Object.create(null),
+  { date_found: 'jobs.date_found', score: 'jobs.score' },
+);
 
 const SELECT_COLUMNS = `
   jobs.id, jobs.lane, jobs.title, jobs.company, jobs.url, jobs.seniority,
@@ -177,7 +177,11 @@ function trackingRowToFieldMap(row: RawTrackingRow | undefined): FieldMap {
 function mergeFields(patch: TrackingPatch, existing: FieldMap): FieldMap {
   const merged = {} as FieldMap;
   for (const key of FIELDS) {
-    merged[key] = key in patch ? (patch[key] ?? null) : existing[key];
+    // Present-and-null clears, present-and-value sets, undefined/absent
+    // keeps the existing value (port contract, ports/board.ts:30) — an
+    // explicitly-undefined patch value must behave the same as an absent
+    // key, never as a clear.
+    merged[key] = patch[key] !== undefined ? (patch[key] ?? null) : existing[key];
   }
   return merged;
 }
@@ -221,7 +225,8 @@ export class SqliteBoardStore implements BoardStore {
 
   listJobs(query: BoardQuery): { rows: BoardJobRow[]; total: number } {
     const { from, where, params } = this.whereFor(query);
-    const sortCol = SORT_WHITELIST[query.sort ?? 'date_found'];
+    const sortCol =
+      SORT_WHITELIST[query.sort ?? 'date_found'] ?? SORT_WHITELIST.date_found;
     const order = query.order === 'asc' ? 'ASC' : 'DESC';
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
