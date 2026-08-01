@@ -1961,7 +1961,9 @@ git add ui/src/features/board
 git commit -m "feat(ui): job detail drawer with optimistic tracking edits + rollback"
 ```
 
----### Task 7: src-side polish — no-UI message + CI ui job
+---
+
+### Task 7: src-side polish — no-UI message + CI ui job
 
 **Files:**
 - Modify: `src/app/server/static.ts` (NO_UI_MESSAGE), `src/app/server/static.test.ts:94` (expectation)
