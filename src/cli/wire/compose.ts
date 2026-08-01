@@ -84,10 +84,12 @@ import type { Routine } from '../../routines/types.ts';
 import {
   buildConnector,
   buildLanes,
+  buildMirroredConnector,
   buildNotifier,
   buildRoutine,
   isApiLane,
   isFarmingLane,
+  mirrorDbId,
   missingTokenNotionClient,
 } from './builders.ts';
 import { isNotFound, loadFilterConfig, loadPipelineConfig } from './config.ts';
@@ -252,6 +254,14 @@ export async function wire(
     ...coreChecks({ profileName, root, readFile, connector: config.connector }),
     ...assembleAdapterChecks(config, registry, deps),
   ];
+  // Opt-in sqlite→Notion mirror (local-DB spec PR 3): a mirrored profile
+  // gets the same `notion-db-reachable` check a plain `notion` connector
+  // would, on top of whatever `assembleAdapterChecks` already contributed
+  // for `sqlite`.
+  const mirrorTarget = mirrorDbId(config);
+  if (mirrorTarget && deps.notionApi) {
+    checks.push(dbReachableCheck({ api: deps.notionApi, dbId: mirrorTarget }));
+  }
 
   // --- live ports ---
   // llm/browser are NOT part of PipelineConfig (spec: selected by
@@ -274,11 +284,15 @@ export async function wire(
     filterCfg,
     browser,
   });
-  const connector = buildConnector(
-    config.connector,
-    config.settings[config.connector],
+  const connector = buildMirroredConnector(
+    buildConnector(
+      config.connector,
+      config.settings[config.connector],
+      notionApiForConnector,
+      sqliteDefaultPath,
+    ),
+    config,
     notionApiForConnector,
-    sqliteDefaultPath,
   );
   const notifiers = config.notifiers.map((name) =>
     buildNotifier(name, config.settings[name]),

@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import type { JD } from '../../core/jd/index.ts';
+import type { RunContext } from '../../ports/context.ts';
 import { wireMigrate } from './builders.ts';
 import { wire } from './compose.ts';
 import { dataPath, fakeReadFile, profilePath } from './testkit.ts';
@@ -335,6 +337,150 @@ test('wire: a sqlite profile builds SqliteConnector and contributes the sqlite d
   assert.equal(result.ctx.ports.connector.name, 'sqlite');
   assert.ok(result.checks.some((c) => c.name === 'sqlite-db-openable'));
   assert.ok(!result.checks.some((c) => c.name === 'notion-db-reachable'));
+});
+
+// --- mirror connector (P8 local-DB spec, PR 3 Task 2) ---
+//
+// `builders.ts`'s `mirrorDbId`/`buildMirroredConnector` own the opt-in
+// decision: `settings.notion.mirror: true` on a sqlite profile wraps the
+// live connector in a `MirrorConnector` and adds the notion reachability
+// check alongside the sqlite one. No adapter class is imported here
+// (`only-wire-imports-adapters` has no test-file exemption) — identity is
+// asserted purely via `.name` strings and doctor-check names.
+
+function fakeQueryableNotionApi() {
+  return { queryDatabase: async () => [] };
+}
+
+test('wire: a sqlite profile with settings.notion.mirror wraps the connector in a MirrorConnector and adds notion-db-reachable', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'sqlite',
+    notifiers: [],
+    routines: [],
+    settings: { sqlite: {}, notion: { dbId: 'db-x', mirror: true } },
+  });
+
+  const result = await wire('rajni', {
+    root: '/repo',
+    readFile: fakeLiveReadFile(profileJson),
+    deps: { notionApi: fakeQueryableNotionApi() },
+  });
+
+  assert.equal(result.ctx.ports.connector.name, 'sqlite+notion');
+  assert.ok(result.checks.some((c) => c.name === 'notion-db-reachable'));
+  assert.ok(result.checks.some((c) => c.name === 'sqlite-db-openable'));
+});
+
+test('wire: settings.notion.mirror true but no dbId does not wrap and does not add notion-db-reachable', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'sqlite',
+    notifiers: [],
+    routines: [],
+    settings: { sqlite: {}, notion: { mirror: true } },
+  });
+
+  const result = await wire('rajni', {
+    root: '/repo',
+    readFile: fakeLiveReadFile(profileJson),
+    deps: { notionApi: fakeQueryableNotionApi() },
+  });
+
+  assert.equal(result.ctx.ports.connector.name, 'sqlite');
+  assert.ok(!result.checks.some((c) => c.name === 'notion-db-reachable'));
+});
+
+test('wire: a sqlite profile with settings.notion.dbId but no mirror flag does not wrap', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'sqlite',
+    notifiers: [],
+    routines: [],
+    settings: { sqlite: {}, notion: { dbId: 'db-x' } },
+  });
+
+  const result = await wire('rajni', {
+    root: '/repo',
+    readFile: fakeLiveReadFile(profileJson),
+    deps: { notionApi: fakeQueryableNotionApi() },
+  });
+
+  assert.equal(result.ctx.ports.connector.name, 'sqlite');
+  assert.ok(!result.checks.some((c) => c.name === 'notion-db-reachable'));
+});
+
+test('wire: settings.notion.mirror on a notion profile is a no-op (gate is sqlite-only)', async () => {
+  const profileJson = JSON.stringify({
+    lanes: [],
+    connector: 'notion',
+    notifiers: [],
+    routines: [],
+    settings: { notion: { dbId: 'db-1', mirror: true } },
+  });
+
+  const result = await wire('rajni', {
+    root: '/repo',
+    readFile: fakeLiveReadFile(profileJson),
+    deps: { notionApi: fakeQueryableNotionApi() },
+  });
+
+  assert.equal(result.ctx.ports.connector.name, 'notion');
+});
+
+test('wire: a mirrored sqlite connector writes locally and best-effort pushes to a failing Notion mirror without throwing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'jb-wire-mirror-'));
+  const originalToken = process.env.NOTION_TOKEN;
+  delete process.env.NOTION_TOKEN;
+  try {
+    const profileJson = JSON.stringify({
+      lanes: [],
+      connector: 'sqlite',
+      notifiers: [],
+      routines: [],
+      settings: { sqlite: {}, notion: { dbId: 'db-x', mirror: true } },
+    });
+    const result = await wire('rajni', {
+      root,
+      readFile: fakeReadFile({ [profilePath('rajni', root)]: profileJson }),
+    });
+
+    assert.equal(result.ctx.ports.connector.name, 'sqlite+notion');
+
+    const warnings: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+    result.ctx.logger = {
+      debug() {},
+      info() {},
+      warn: (msg, data) => warnings.push({ msg, data }),
+      error() {},
+    };
+
+    const job: JD = {
+      identity: {
+        id: 'job-1',
+        lane: 'greenhouse',
+        url: 'https://example.com/job-1',
+        company: 'Acme',
+        title: 'Staff Engineer',
+        scrapedAt: new Date().toISOString(),
+      },
+    };
+    const runCtx: RunContext = {
+      profile: 'rajni',
+      signal: new AbortController().signal,
+      logger: result.ctx.logger,
+      beat() {},
+    };
+
+    await assert.doesNotReject(() => result.ctx.ports.connector.syncJobs([job], runCtx));
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]?.msg ?? '', /mirror/);
+    assert.match(String(warnings[0]?.data?.error ?? ''), /NOTION_TOKEN/);
+  } finally {
+    if (originalToken === undefined) delete process.env.NOTION_TOKEN;
+    else process.env.NOTION_TOKEN = originalToken;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 // --- linkedin lane: happy path ---

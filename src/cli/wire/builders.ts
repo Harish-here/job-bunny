@@ -2,8 +2,10 @@
  * cli/wire/builders.ts (P8, split from wire.ts) — live adapter construction
  * for connectors/notifiers/routines/lanes: `buildConnector`, `buildNotifier`,
  * `buildRoutine`, `isFarmingLane`, `isApiLane`, `buildLanes`,
- * `buildLinkedInLane`, `missingTokenNotionClient`, and the `MigrateWire`/
- * `wireMigrate` composition seam for `jobbunny migrate`. Sibling to
+ * `buildLinkedInLane`, `missingTokenNotionClient`, `mirrorDbId`/
+ * `buildMirroredConnector` (the opt-in sqlite→Notion mirror decision, local-DB
+ * spec PR 3), and the `MigrateWire`/`wireMigrate` composition seam for
+ * `jobbunny migrate`. Sibling to
  * `compose.ts` in the `only-wire-imports-adapters` carve-out
  * (`.dependency-cruiser.cjs`) — split out purely to keep `compose.ts` under
  * the 400-line file-size cap, not for any behavioral reason.
@@ -12,6 +14,7 @@ import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CdpChromeProvider } from '../../adapters/browser/cdp-chrome/index.ts';
 import { DEFAULT_USER_DATA_DIR } from '../../adapters/browser/cdp-chrome/index.ts';
+import { MirrorConnector } from '../../adapters/db/mirror/index.ts';
 import type { NotionSdkClientLike } from '../../adapters/db/notion/index.ts';
 import {
   exportForMigration,
@@ -36,6 +39,7 @@ import { TelegramNotifier } from '../../adapters/notify/telegram/index.ts';
 import type { PipelineConfig } from '../../core/config/schema.ts';
 import type { FilterConfig } from '../../core/filter/config.ts';
 import type { MigratedRecord, TrackingFields } from '../../core/tracking/index.ts';
+import type { Connector } from '../../ports/connector.ts';
 import type { RunContext } from '../../ports/context.ts';
 import type { ApiLane, FarmingLane, Lane } from '../../ports/lane.ts';
 import type { Storage } from '../../ports/storage.ts';
@@ -59,6 +63,34 @@ export function buildConnector(
   if (name === 'notion') return new NotionConnector(settings, api);
   if (name === 'sqlite') return new SqliteConnector(settings, defaultSqlitePath);
   throw new Error(`unknown connector "${name}"`);
+}
+
+/** The Notion dbId a sqlite profile's mirror should push to — '' when the
+ * mirror doesn't apply: connector isn't sqlite, no notion slice, mirror
+ * flag absent/false, or dbId missing/empty. Tolerant structural read
+ * (same posture as wireMigrate's dbId read above): malformed slices mean
+ * 'no mirror', never a throw. */
+export function mirrorDbId(config: PipelineConfig): string {
+  if (config.connector !== 'sqlite') return '';
+  const notionSlice = config.settings.notion;
+  if (!notionSlice || typeof notionSlice !== 'object') return '';
+  const slice = notionSlice as { mirror?: unknown; dbId?: unknown };
+  if (slice.mirror !== true) return '';
+  return typeof slice.dbId === 'string' && slice.dbId.length > 0 ? slice.dbId : '';
+}
+
+/** Wraps `connector` in a MirrorConnector pushing to Notion when the
+ * profile opts in (mirrorDbId !== ''); returns it unchanged otherwise.
+ * Deliberately does NOT check NOTION_TOKEN presence — a token-less mirror
+ * wraps and warns once per run; the warn is the operator's reminder. */
+export function buildMirroredConnector(
+  connector: Connector,
+  config: PipelineConfig,
+  api: NotionApi,
+): Connector {
+  const dbId = mirrorDbId(config);
+  if (!dbId) return connector;
+  return new MirrorConnector(connector, new NotionConnector(config.settings.notion, api));
 }
 
 export function buildNotifier(name: string, settings: unknown) {
