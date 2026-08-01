@@ -38,6 +38,7 @@ export interface CommandOptions {
   yes?: boolean;
   daemonChild?: boolean;
   apply?: boolean;
+  port?: number;
 }
 
 export type CommandName =
@@ -52,7 +53,8 @@ export type CommandName =
   | 'profile'
   | 'setup'
   | 'release'
-  | 'migrate';
+  | 'migrate'
+  | 'board';
 
 export const COMMAND_NAMES = new Set<string>([
   'run',
@@ -67,6 +69,7 @@ export const COMMAND_NAMES = new Set<string>([
   'setup',
   'release',
   'migrate',
+  'board',
 ]);
 
 export const USAGE = [
@@ -85,6 +88,7 @@ export const USAGE = [
   '  setup --profile <name>',
   '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
   '  migrate   --profile <name> [--apply]     (Notion → local sqlite import; dry-run by default)',
+  '  board     [--port <n>]                    (job board server on 127.0.0.1; profile-less)',
 ].join('\n');
 
 /** The one `parseArgs` options literal every command's flags are drawn
@@ -100,6 +104,7 @@ export const PARSE_ARGS_OPTIONS = {
   yes: { type: 'boolean', default: false },
   'daemon-child': { type: 'boolean', default: false },
   apply: { type: 'boolean', default: false },
+  port: { type: 'string' },
 } as const satisfies ParseArgsOptionsConfig;
 
 /** Per-command argv → options translation. Returns the options object, or a
@@ -119,6 +124,7 @@ export function buildOptions(
     yes?: boolean;
     'daemon-child'?: boolean;
     apply?: boolean;
+    port?: string;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -203,5 +209,16 @@ export function buildOptions(
     }
     case 'migrate':
       return needsProfile() ?? { profile, apply: values.apply ?? false };
+    case 'board': {
+      // Profile-less, like `serve`/`autostart` — no `needsProfile()` gate.
+      let port: number | undefined;
+      if (values.port !== undefined) {
+        port = Number(values.port);
+        if (!Number.isInteger(port) || port < 0) {
+          return { error: 'board: --port must be a non-negative integer' };
+        }
+      }
+      return port === undefined ? {} : { port };
+    }
   }
 }

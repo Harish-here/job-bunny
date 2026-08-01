@@ -350,6 +350,40 @@ test('main: "migrate" without --profile returns 2', async () => {
   assert.equal(code, 2);
 });
 
+test('main: "board" dispatches profile-less, parsing --port to a number', async () => {
+  const s = spy();
+  const noPort = await main(['board'], { commands: { board: s.make('board') } });
+  const withPort = await main(['board', '--port', '0'], {
+    commands: { board: s.make('board') },
+  });
+  assert.equal(noPort, 0);
+  assert.equal(withPort, 0);
+  assert.deepEqual(s.calls, [
+    ['board', {}],
+    ['board', { port: 0 }],
+  ]);
+});
+
+test('main: a non-numeric --port for "board" returns 2', async () => {
+  const stderr = captureStderr();
+  const code = await main(['board', '--port', 'abc'], {
+    commands: { board: async () => 0 },
+    stderr: stderr.write,
+  });
+  assert.equal(code, 2);
+  assert.match(stderr.lines.join('\n'), /board: --port must be a non-negative integer/);
+});
+
+test('main: a negative --port for "board" returns 2', async () => {
+  const stderr = captureStderr();
+  const code = await main(['board', '--port=-1'], {
+    commands: { board: async () => 0 },
+    stderr: stderr.write,
+  });
+  assert.equal(code, 2);
+  assert.match(stderr.lines.join('\n'), /board: --port must be a non-negative integer/);
+});
+
 test('main: the usage line names every dispatchable command', async () => {
   const stderr = captureStderr();
   await main(['bogus'], { stderr: stderr.write });

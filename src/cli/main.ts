@@ -45,6 +45,7 @@ import {
   USAGE,
 } from './args.ts';
 import { autostartCommand } from './commands/autostart.ts';
+import { boardCommand } from './commands/board.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { migrateCommand } from './commands/migrate.ts';
@@ -143,6 +144,8 @@ function defaultCommands(): CommandRegistry {
         profile: opts.profile ?? '',
         apply: opts.apply ?? false,
       })) as CommandFn,
+    board: (async (opts: CommandOptions) =>
+      boardCommand({ port: opts.port ?? 4646 })) as CommandFn,
   };
 }
 
