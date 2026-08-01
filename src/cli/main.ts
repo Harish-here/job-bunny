@@ -36,6 +36,14 @@ import {
   HEARTBEAT_STALE_MS,
   readDaemonPidfile,
 } from '../ops/daemon/index.ts';
+import {
+  buildOptions,
+  COMMAND_NAMES,
+  type CommandName,
+  type CommandOptions,
+  PARSE_ARGS_OPTIONS,
+  USAGE,
+} from './args.ts';
 import { autostartCommand } from './commands/autostart.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
@@ -49,43 +57,7 @@ import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 
-/** The union of every command's option shape. `main` builds each object
- * with ONLY the keys its command actually reads — a command never receives
- * an irrelevant key set to `undefined`. */
-export interface CommandOptions {
-  profile?: string;
-  resume?: boolean;
-  headless?: boolean;
-  dryRun?: boolean;
-  runCapMs?: number;
-  stage?: string;
-  routine?: string;
-  action?: string;
-  url?: string;
-  label?: string;
-  force?: boolean;
-  version?: string;
-  noMerge?: boolean;
-  yes?: boolean;
-  daemonChild?: boolean;
-  apply?: boolean;
-}
-
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
-
-export type CommandName =
-  | 'run'
-  | 'doctor'
-  | 'reconcile'
-  | 'stage'
-  | 'routine'
-  | 'serve'
-  | 'autostart'
-  | 'lane'
-  | 'profile'
-  | 'setup'
-  | 'release'
-  | 'migrate';
 
 export type CommandRegistry = Record<CommandName, CommandFn>;
 
@@ -133,24 +105,6 @@ function defaultCheckDaemonLiveness(): string | undefined {
   return undefined;
 }
 
-const USAGE = [
-  'usage: jobbunny <command> [options]',
-  '',
-  '  run       --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]',
-  '  doctor    --profile <name>',
-  '  reconcile --profile <name>',
-  '  stage <stage-name> --profile <name>',
-  '  routine <routine-name> --profile <name>',
-  '  serve start|stop|status              (cross-profile — no --profile)',
-  '  autostart enable|disable             (cross-profile — darwin only)',
-  '  lane add-url <url> [label] --profile <name>',
-  '  profile build --profile <name>',
-  '  profile remove --profile <name> [--force]',
-  '  setup --profile <name>',
-  '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
-  '  migrate   --profile <name> [--apply]     (Notion → local sqlite import; dry-run by default)',
-].join('\n');
-
 function defaultCommands(): CommandRegistry {
   return {
     run: runCommand as unknown as CommandFn,
@@ -192,125 +146,6 @@ function defaultCommands(): CommandRegistry {
   };
 }
 
-const COMMAND_NAMES = new Set<string>([
-  'run',
-  'doctor',
-  'reconcile',
-  'stage',
-  'routine',
-  'serve',
-  'autostart',
-  'lane',
-  'profile',
-  'setup',
-  'release',
-  'migrate',
-]);
-
-/** Per-command argv → options translation. Returns the options object, or a
- * usage message describing what was missing. Kept separate from dispatch so
- * every "did the user give us enough" rule lives in one readable place. */
-function buildOptions(
-  command: CommandName,
-  rest: string[],
-  values: {
-    profile?: string;
-    resume?: boolean;
-    headless?: boolean;
-    force?: boolean;
-    'dry-run'?: boolean;
-    'run-cap-ms'?: string;
-    'no-merge'?: boolean;
-    yes?: boolean;
-    'daemon-child'?: boolean;
-    apply?: boolean;
-  },
-): CommandOptions | { error: string } {
-  const profile = values.profile;
-  const needsProfile = (): { error: string } | undefined =>
-    profile ? undefined : { error: 'missing required --profile' };
-
-  switch (command) {
-    case 'run': {
-      let runCapMs: number | undefined;
-      if (values['run-cap-ms'] !== undefined) {
-        runCapMs = Number(values['run-cap-ms']);
-        if (!Number.isFinite(runCapMs) || runCapMs <= 0) {
-          return {
-            error: `--run-cap-ms must be a positive number, got "${values['run-cap-ms']}"`,
-          };
-        }
-      }
-      return (
-        needsProfile() ?? {
-          profile,
-          resume: values.resume ?? false,
-          headless: values.headless ?? false,
-          dryRun: values['dry-run'] ?? false,
-          ...(runCapMs === undefined ? {} : { runCapMs }),
-        }
-      );
-    }
-    case 'doctor':
-    case 'reconcile':
-    case 'setup':
-      return needsProfile() ?? { profile };
-    case 'stage': {
-      const stage = rest[0];
-      if (!stage) return { error: 'missing stage name' };
-      return needsProfile() ?? { profile, stage };
-    }
-    case 'routine': {
-      const routine = rest[0];
-      if (!routine) return { error: 'missing routine name' };
-      return needsProfile() ?? { profile, routine };
-    }
-    case 'serve': {
-      const action = rest[0];
-      if (action !== 'start' && action !== 'stop' && action !== 'status') {
-        return { error: 'serve takes "start", "stop", or "status"' };
-      }
-      return { action, ...(values['daemon-child'] ? { daemonChild: true } : {}) };
-    }
-    case 'autostart': {
-      const action = rest[0];
-      if (action !== 'enable' && action !== 'disable') {
-        return { error: 'autostart takes "enable" or "disable"' };
-      }
-      return { action };
-    }
-    case 'lane': {
-      if (rest[0] !== 'add-url') return { error: 'lane takes "add-url"' };
-      const url = rest[1];
-      if (!url) return { error: 'missing url' };
-      const label = rest[2];
-      return (
-        needsProfile() ?? { profile, url, ...(label === undefined ? {} : { label }) }
-      );
-    }
-    case 'profile': {
-      const action = rest[0];
-      if (action !== 'build' && action !== 'remove') {
-        return { error: 'profile takes "build" or "remove"' };
-      }
-      if (action === 'build') return needsProfile() ?? { action, profile };
-      return needsProfile() ?? { action, profile, force: values.force ?? false };
-    }
-    case 'release': {
-      const version = rest[0];
-      if (!version) return { error: 'missing version — expected X.Y.Z' };
-      return {
-        version,
-        dryRun: values['dry-run'] ?? false,
-        noMerge: values['no-merge'] ?? false,
-        yes: values.yes ?? false,
-      };
-    }
-    case 'migrate':
-      return needsProfile() ?? { profile, apply: values.apply ?? false };
-  }
-}
-
 export async function main(argv: string[], deps: MainDeps = {}): Promise<number> {
   const commands = { ...defaultCommands(), ...deps.commands };
   const stderr = deps.stderr ?? ((line: string) => console.error(line));
@@ -324,18 +159,7 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: {
-      profile: { type: 'string' },
-      resume: { type: 'boolean', default: false },
-      headless: { type: 'boolean', default: false },
-      force: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
-      'run-cap-ms': { type: 'string' },
-      'no-merge': { type: 'boolean', default: false },
-      yes: { type: 'boolean', default: false },
-      'daemon-child': { type: 'boolean', default: false },
-      apply: { type: 'boolean', default: false },
-    },
+    options: PARSE_ARGS_OPTIONS,
   });
 
   const commandName = positionals[0];
