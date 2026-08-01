@@ -16,7 +16,7 @@
  * needs it.
  */
 
-import { STATUS_OPTIONS } from '../../../core/tracking/index.ts';
+import { EXCITEMENT_OPTIONS, STATUS_OPTIONS } from '../../../core/tracking/index.ts';
 
 /** The Notion property types actually used by DB_PROPERTIES in v0. */
 export type NotionPropertyType =
@@ -85,8 +85,7 @@ export const AUTOMATED_FIELDS = [
 export const SENIORITY_OPTIONS = ['Staff', 'Lead', 'Mid', 'Manager', 'Senior'] as const;
 export const WORK_TYPE_OPTIONS = ['Remote', 'Hybrid', 'On-site'] as const;
 export const TIMEZONE_OPTIONS = ['APAC', 'EMEA'] as const;
-export const EXCITEMENT_OPTIONS = ['Vera level', 'Kandipa podu', 'Try panalam'] as const;
-export { STATUS_OPTIONS };
+export { EXCITEMENT_OPTIONS, STATUS_OPTIONS };
 
 /** Keyed by the PROPERTIES logical name each group belongs to. */
 export const OPTIONS = {

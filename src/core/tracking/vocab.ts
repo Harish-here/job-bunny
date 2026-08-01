@@ -21,3 +21,9 @@ export type TrackingStatus = (typeof STATUS_OPTIONS)[number];
 
 /** The status ArchivePolicy.passedOlderThanDays keys on. */
 export const PASSED_STATUS = 'Passed' satisfies TrackingStatus;
+
+/** Excitement vocabulary — single authority (local-DB spec §5). Producers
+ * (core/rank) and projections (notion select, board meta) all import from
+ * here; the strings are byte-exact Notion select options. */
+export const EXCITEMENT_OPTIONS = ['Vera level', 'Kandipa podu', 'Try panalam'] as const;
+export type ExcitementLevel = (typeof EXCITEMENT_OPTIONS)[number];

@@ -24,7 +24,12 @@
  * not a one-page casualty.
  */
 import { isSoftError, type SoftError } from '../../../core/errors/soft_error.ts';
-import type { JD, SyncedJD, WorkType } from '../../../core/jd/index.ts';
+import {
+  type JD,
+  reviewFlags,
+  type SyncedJD,
+  type WorkType,
+} from '../../../core/jd/index.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { NotionApi } from './client.ts';
 import {
@@ -122,11 +127,9 @@ export function buildAutomatedProperties(job: JD): Record<string, unknown> {
   // verdict's detail into `matchReasons` too (see core/rank/rank.ts), so
   // this recomputes the same soft-fail subset from `evaluation.verdicts` as
   // the closest available analogue, rather than leaving the column empty.
-  const reviewFlags = (job.evaluation?.verdicts ?? [])
-    .filter((v) => v.severity === 'soft' && !v.pass)
-    .map((v) => v.detail ?? `${v.rule}: soft-fail`);
-  if (reviewFlags.length > 0)
-    props[PROPERTIES.reviewFlags.name] = richTextProp(reviewFlags.join('; '));
+  const flags = reviewFlags(job.evaluation);
+  if (flags.length > 0)
+    props[PROPERTIES.reviewFlags.name] = richTextProp(flags.join('; '));
 
   return props;
 }

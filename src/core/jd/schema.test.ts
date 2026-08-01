@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { JDSchema, VerdictSchema } from './schema.ts';
+import { JDSchema, reviewFlags, VerdictSchema } from './schema.ts';
 
 const identity = {
   id: 'li-4021337',
@@ -60,4 +60,22 @@ test('rejects bad url, bad severity, out-of-range score, empty rawText', () => {
 
 test('rejects a JD with no identity', () => {
   assert.throws(() => JDSchema.parse({ content: { rawText: 'x' } }));
+});
+
+test('reviewFlags: detail wins, rule fallback, soft-fails only', () => {
+  const flags = reviewFlags({
+    verdicts: [
+      { rule: 'geo', severity: 'soft', pass: false, detail: 'timezone overlap thin' },
+      { rule: 'skills', severity: 'soft', pass: false },
+      { rule: 'title', severity: 'hard', pass: false, detail: 'ignored — hard' },
+      { rule: 'yoe', severity: 'soft', pass: true, detail: 'ignored — passed' },
+    ],
+    matchReasons: [],
+  });
+  assert.deepEqual(flags, ['timezone overlap thin', 'skills: soft-fail']);
+});
+
+test('reviewFlags: undefined evaluation and empty verdicts give []', () => {
+  assert.deepEqual(reviewFlags(undefined), []);
+  assert.deepEqual(reviewFlags({ verdicts: [], matchReasons: [] }), []);
 });

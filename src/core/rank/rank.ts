@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { EvaluatedJD, StructuredJD } from '../jd/index.ts';
+import { EXCITEMENT_OPTIONS } from '../tracking/index.ts';
 import {
   clamp,
   computeLocation,
@@ -179,9 +180,10 @@ export type RankConfig = z.infer<typeof RankConfigSchema>;
  * every band — including the top one — is reachable without adjusting v0's
  * thresholds. */
 function excitementFor(score: number): string {
-  if (score >= 85) return 'Vera level';
-  if (score >= 65) return 'Kandipa podu';
-  return 'Try panalam';
+  const [top, mid, low] = EXCITEMENT_OPTIONS;
+  if (score >= 85) return top;
+  if (score >= 65) return mid;
+  return low;
 }
 
 /** Score a single StructuredJD against `cfg`. Exported for unit-level
