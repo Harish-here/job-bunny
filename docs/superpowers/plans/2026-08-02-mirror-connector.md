@@ -1,6 +1,6 @@
 # Mirror Connector (PR 3 of local-DB adoption) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 > Rev 2 — reworked after opus design review (4 blocking changes applied).
 
 **Goal:** Opt-in one-way Notion mirror for sqlite profiles: `settings.notion.mirror: true` makes wire wrap the sqlite connector in a composite whose `syncJobs` writes local authoritatively, then best-effort pushes the same jobs to Notion — where **neither a Notion failure NOR Notion slowness can ever fail a run** (the push has its own deadline inside the sync stage's budget).
@@ -88,7 +88,7 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
 
 - The mirror receives the ORIGINAL `jobs` (the primary returns stamped copies, never mutates its input — so no `sync.pageId` leaks in and `NotionConnector.syncJobs` takes its create path).
 
-- [ ] **Step 1: Failing tests** — `connector.test.ts` with fake `Connector` object literals and a capturing logger (record `{level, msg, data}` tuples):
+- [x] **Step 1: Failing tests** — `connector.test.ts` with fake `Connector` object literals and a capturing logger (record `{level, msg, data}` tuples):
 
 ```typescript
 // 1. name is 'sqlite+notion' when primary/mirror are so named.
@@ -107,9 +107,9 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
 //    with { pushed, of }.
 ```
 
-- [ ] **Step 2: Run** `node --test src/adapters/db/mirror/connector.test.ts` — FAIL (module not found).
-- [ ] **Step 3: Implement** `connector.ts` per the contract (file header: composite pattern, never-fail-never-stall invariant, primary-only reads/archive, dryRun-inert note) and `index.ts` (`export { MIRROR_BUDGET_MS, MirrorConnector } from './connector.ts';`).
-- [ ] **Step 4: Run** — PASS. **Step 5:** `npm run check`; commit `feat(adapters): MirrorConnector — budgeted best-effort mirror, failures and stalls never fail a run`.
+- [x] **Step 2: Run** `node --test src/adapters/db/mirror/connector.test.ts` — FAIL (module not found).
+- [x] **Step 3: Implement** `connector.ts` per the contract (file header: composite pattern, never-fail-never-stall invariant, primary-only reads/archive, dryRun-inert note) and `index.ts` (`export { MIRROR_BUDGET_MS, MirrorConnector } from './connector.ts';`).
+- [x] **Step 4: Run** — PASS. **Step 5:** `npm run check`; commit `feat(adapters): MirrorConnector — budgeted best-effort mirror, failures and stalls never fail a run`.
 
 ---
 
@@ -145,7 +145,7 @@ export function buildMirroredConnector(
 - Modify: `src/cli/wire/compose.ts` — exactly three touches: import the two helpers; wrap the construction `const connector = buildMirroredConnector(buildConnector(config.connector, config.settings[config.connector], notionApiForConnector, sqliteDefaultPath), config, notionApiForConnector);`; after the `checks` assembly, append `if (mirrorDbId(config) && deps.notionApi) checks.push(dbReachableCheck({ api: deps.notionApi, dbId: mirrorDbId(config) }));` (call it once into a local const). compose.ts stays ≤ 400.
 - Test: `src/cli/wire/compose.test.ts`
 
-- [ ] **Step 1: Failing tests** (compose.test.ts, existing fake-root idiom):
+- [x] **Step 1: Failing tests** (compose.test.ts, existing fake-root idiom):
 
 ```typescript
 // 1. sqlite profile + settings.notion { dbId: 'db-x', mirror: true } → connector.name
@@ -162,8 +162,8 @@ export function buildMirroredConnector(
 //    delegation behaviorally — and say so in NOTES.
 ```
 
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement.** **Step 4: Run** compose tests — PASS.
-- [ ] **Step 5:** `npm run check`; commit `feat(wire): assemble sqlite+notion MirrorConnector on settings.notion.mirror opt-in`.
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement.** **Step 4: Run** compose tests — PASS.
+- [x] **Step 5:** `npm run check`; commit `feat(wire): assemble sqlite+notion MirrorConnector on settings.notion.mirror opt-in`.
 
 ---
 
@@ -177,8 +177,8 @@ export function buildMirroredConnector(
 - Modify: `src/ops/doctor/aggregate.test.ts` — two new cases: sqlite + `notionMirror: true` + missing token → warn matching `/mirror is enabled/`; sqlite + flag absent → existing `/only needed for the notion connector/` message unchanged.
 - Modify: `src/cli/wire/compose.ts` — the `coreChecks({...})` callsite adds `notionMirror: mirrorDbId(config) !== ''` (helper from Task 2).
 
-- [ ] **Step 1:** Failing tests first (schema case + the two doctor cases). **Step 2: Run** — new cases FAIL. **Step 3: Implement.** **Step 4: Run** — PASS.
-- [ ] **Step 5:** `npm run check`; commit `feat(doctor): mirror-aware NOTION_TOKEN messaging; notion settings gain mirror flag`.
+- [x] **Step 1:** Failing tests first (schema case + the two doctor cases). **Step 2: Run** — new cases FAIL. **Step 3: Implement.** **Step 4: Run** — PASS.
+- [x] **Step 5:** `npm run check`; commit `feat(doctor): mirror-aware NOTION_TOKEN messaging; notion settings gain mirror flag`.
 
 ---
 
@@ -186,18 +186,18 @@ export function buildMirroredConnector(
 
 **Files:** none committed.
 
-- [ ] **Step 1:** `npm run check` green.
-- [ ] **Step 2:** `node src/cli/main.ts profile build --profile zzmirrorcheck`; edit `profiles/zzmirrorcheck/profile.json`: `"connector": "sqlite"`, `"settings": { "sqlite": {}, "notion": { "dbId": "deadbeef", "mirror": true } }`.
-- [ ] **Step 3:** `env -u NOTION_TOKEN node src/cli/main.ts doctor --profile zzmirrorcheck` — Expected: exit 0; `env-tokens` warn matching `mirror is enabled`; `sqlite-db-openable` ok; NO `notion-db-reachable` line (no token ⇒ no api handle ⇒ mirror check skipped — same posture as pure-notion).
-- [ ] **Step 4:** `env -u NOTION_TOKEN node src/cli/main.ts stage reconcile --profile zzmirrorcheck` — Expected: exit 0 (reads primary only even with a dead token).
-- [ ] **Step 4b — the invariant proving itself live (sync with Notion fully dead):** seed a checkpoint by hand (`stage` reads the latest checkpoint payload unvalidated): create `profiles/zzmirrorcheck/data/runs/<today YYYY-MM-DD>/09-00/09-rank.json` containing
+- [x] **Step 1:** `npm run check` green.
+- [x] **Step 2:** `node src/cli/main.ts profile build --profile zzmirrorcheck`; edit `profiles/zzmirrorcheck/profile.json`: `"connector": "sqlite"`, `"settings": { "sqlite": {}, "notion": { "dbId": "deadbeef", "mirror": true } }`.
+- [x] **Step 3:** `env -u NOTION_TOKEN node src/cli/main.ts doctor --profile zzmirrorcheck` — Expected: exit 0; `env-tokens` warn matching `mirror is enabled`; `sqlite-db-openable` ok; NO `notion-db-reachable` line (no token ⇒ no api handle ⇒ mirror check skipped — same posture as pure-notion). **Correction (execution):** doctor exits 1 here — the pre-existing `empty-lanes` red (scaffolded profiles have `lanes: []`; check predates this branch) drives the exit code; all three mirror-specific expectations (env-tokens mirror warn, sqlite-db-openable ok, no notion-db-reachable line) hold as written.
+- [x] **Step 4:** `env -u NOTION_TOKEN node src/cli/main.ts stage reconcile --profile zzmirrorcheck` — Expected: exit 0 (reads primary only even with a dead token).
+- [x] **Step 4b — the invariant proving itself live (sync with Notion fully dead):** seed a checkpoint by hand (`stage` reads the latest checkpoint payload unvalidated): create `profiles/zzmirrorcheck/data/runs/<today YYYY-MM-DD>/09-00/09-rank.json` containing
 
 ```json
 {"jobs":[{"identity":{"id":"li-mirror-1","lane":"linkedin","url":"https://example.com/j/1","company":"Acme","title":"Staff Engineer","scrapedAt":"2026-08-02T09:00:00.000Z"},"content":{"rawText":"synthetic"}}],"dropped":[]}
 ```
 
 then `env -u NOTION_TOKEN node src/cli/main.ts stage sync --profile zzmirrorcheck` — Expected: exit 0; `sync: 1 -> 1`; run.log contains a `mirror: push failed` warn naming `NOTION_TOKEN missing` (ONE warn — the stub's plain Error is non-retryable and propagates out of the first Notion call, not once per job); and the row exists in `profiles/zzmirrorcheck/data/jobbunny.db` (verify via `node --input-type=module -e` with a readOnly `DatabaseSync`: `SELECT id FROM jobs` returns `li-mirror-1`). Any deviation → BLOCKED. Notion fully dead, local write committed, run passes — that is the PR.
-- [ ] **Step 5:** `node src/cli/main.ts profile remove --profile zzmirrorcheck --force`; `git status --porcelain` clean. Any failure → BLOCKED.
+- [x] **Step 5:** `node src/cli/main.ts profile remove --profile zzmirrorcheck --force`; `git status --porcelain` clean. Any failure → BLOCKED.
 
 ---
 
@@ -212,3 +212,20 @@ then `env -u NOTION_TOKEN node src/cli/main.ts stage sync --profile zzmirrorchec
 
 - Mirror anchored-updates / archive mirroring (needs a local `notion_page_id` home via forward migration; only if pushed-page lifecycle management ever becomes a real need).
 - Existing follow-ups list (Review Flags column, city truthiness, pragma order, close() lifecycle, stage.ts UTC bug).
+
+## Execution record (2026-08-01)
+
+Executed via the SDD loop (ledger: `.superpowers/sdd/2026-08-02-mirror-connector/progress.md`, git-excluded). Commits on `feat/mirror-connector`: `dfeb13d` (Task 1, mirror family), `86cc0a5` (Task 2, wire assembly), `e045a8a` (Task 3, settings flag + doctor messaging), `5250d24` (fix wave), `ff1c9d1` (KB sync). Gate `npm run check` exit 0 at every commit; 1197/1197 tests at the fix-wave HEAD, verified independently by the controller.
+
+Whole-branch review (opus): 2 blockers (in-repo evidence — this section; KB sync — `ff1c9d1`), 2 Importants, both fixed in `5250d24` and confirmed by scoped re-review:
+- I1: malformed mirror slice threw at wire time via NotionConnector's strict parse — `mirrorSettings()` (structural gate, then `NotionConnectorSettingsSchema.safeParse`) is now the single mirror authority; malformed slice ⇒ no mirror anywhere, never a throw.
+- I2: mirror's `notion-db-reachable` red failed doctor for a healthy sqlite profile — `mirrorReachableCheck` downgrades red→warn (` — mirror only; local runs are unaffected`).
+
+Task 4 runtime proof — run twice (lead's run, then the advisor's independent replication at `ff1c9d1`), throwaway profile `zzmirrorcheck`, `env -u NOTION_TOKEN`, both identical:
+- Step 4b: `stage sync` exit 0, `sync: 1 -> 1`, exactly ONE warn:
+  `{"level":"warn","msg":"mirror: push failed — run continues, local store is authoritative","data":{"mirror":"notion","error":"NOTION_TOKEN missing — set it in .env","scope":"sync"}}`
+  and `SELECT id, company, title FROM jobs` returns `li-mirror-1 / Acme / Staff Engineer` from `profiles/zzmirrorcheck/data/jobbunny.db`. Notion fully dead, local write committed, run passed.
+- Advisor extra (I1 fix smoke): `settings.notion.dryRun: "yes"` (invalid type) ⇒ doctor/reconcile run without throwing, env-tokens reverts to the generic non-mirror wording, no reachability check — mirror coherently off.
+- Step 3 doctor exits 1 solely from the pre-existing `empty-lanes` red (correction noted inline above); Step 5 cleanup verified, tree clean.
+
+Deferred minors are ledgered in the SDD workspace; follow-ups (doctor warn for mirror-flag-set-but-malformed-slice, ctx.signal-abort log wording, mirror push of persisted-subset, mirrorDbId defensive-branch tests, compose.test.ts at exactly 800/800) carry to the project follow-up list.
