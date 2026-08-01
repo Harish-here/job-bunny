@@ -24,13 +24,13 @@ module.exports = {
       severity: 'error',
       comment: 'core imports nothing from other layers',
       from: { path: '^src/core' },
-      to: { path: '^src/(ports|adapters|pipeline|routines|ops|cli)' },
+      to: { path: '^src/(ports|adapters|pipeline|routines|ops|cli|app)' },
     },
     {
       name: 'ports-only-core',
       severity: 'error',
       from: { path: '^src/ports' },
-      to: { path: '^src/(adapters|pipeline|routines|ops|cli)' },
+      to: { path: '^src/(adapters|pipeline|routines|ops|cli|app)' },
     },
     {
       name: 'adapters-no-cross-family',
@@ -43,7 +43,7 @@ module.exports = {
       name: 'adapters-only-ports-core',
       severity: 'error',
       from: { path: '^src/adapters' },
-      to: { path: '^src/(pipeline|routines|ops|cli)' },
+      to: { path: '^src/(pipeline|routines|ops|cli|app)' },
     },
     {
       name: 'only-wire-imports-adapters',
@@ -53,18 +53,39 @@ module.exports = {
         'sibling split out purely to keep compose.ts under the file-size cap; ' +
         "registry.ts's exception is TYPE-ONLY (RuntimeDeps's notionApi/" +
         'browserReachable fields are typed against adapter-owned structural ' +
-        'interfaces predating this split — see registry.ts\'s doc comment)',
+        "interfaces predating this split — see registry.ts's doc comment); " +
+        "board.ts (arrives Task 7) is the board server's own composition point. " +
+        'The `app` addition to `from` is redundant-with-`app-only-ports-core` ' +
+        'defense-in-depth (belt-and-braces).',
       from: {
-        path: '^src/(pipeline|routines|ops|cli)',
-        pathNot: '^src/cli/wire/(compose|builders|registry)\\.ts$',
+        path: '^src/(pipeline|routines|ops|cli|app)',
+        pathNot: '^src/cli/wire/(compose|builders|registry|board)\\.ts$',
       },
       to: { path: '^src/adapters' },
     },
     {
       name: 'nothing-imports-cli',
       severity: 'error',
-      from: { path: '^src/(core|ports|adapters|pipeline|routines|ops)' },
+      comment:
+        'the `app` addition here is redundant-with-`only-cli-imports-app` ' +
+        'defense-in-depth (belt-and-braces): app never imports cli, cli imports app.',
+      from: { path: '^src/(core|ports|adapters|pipeline|routines|ops|app)' },
       to: { path: '^src/cli' },
+    },
+    {
+      name: 'app-only-ports-core',
+      severity: 'error',
+      comment:
+        'src/app is product logic over port types: adapters arrive only by ' +
+        'injection from cli/wire (local-DB spec §5).',
+      from: { path: '^src/app' },
+      to: { path: '^src/(adapters|pipeline|routines|ops|cli)' },
+    },
+    {
+      name: 'only-cli-imports-app',
+      severity: 'error',
+      from: { path: '^src/(core|ports|adapters|pipeline|routines|ops)' },
+      to: { path: '^src/app' },
     },
   ],
 };
