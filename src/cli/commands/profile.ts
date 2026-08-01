@@ -48,13 +48,12 @@ export interface SeedResult {
   status: 'created' | 'kept';
 }
 
-// Minimal-but-valid: connector must name a real adapter for `wire()` to
-// resolve later.
-// New profiles still scaffold to 'notion' — the default flips to 'sqlite'
-// once the migrate command lands (local-DB spec §8).
+// Minimal-but-valid: connector must name a real adapter for wire() to
+// resolve. Local-first default since the migrate command proved out
+// (local-DB spec §8); 'notion' remains a valid opt-in.
 const MINIMAL_PIPELINE_CONFIG = {
   lanes: [],
-  connector: 'notion',
+  connector: 'sqlite',
   notifiers: [],
   routines: [],
   settings: {},

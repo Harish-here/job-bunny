@@ -44,6 +44,23 @@ test('profileBuildCommand creates the profile dir and seeds all four scaffold fi
   });
 });
 
+test('profile build scaffolds connector sqlite (local-first default, spec §8)', async () => {
+  await withTmpRoot(async (root) => {
+    const code = await profileBuildCommand(
+      { profile: 'acme' },
+      { root, write: () => {} },
+    );
+    assert.equal(code, 0);
+
+    const profileDir = path.join(root, 'profiles', 'acme');
+    const parsed = JSON.parse(
+      await readFile(path.join(profileDir, 'profile.json'), 'utf8'),
+    );
+    assert.equal(parsed.connector, 'sqlite');
+    assert.deepEqual(parsed.settings, {});
+  });
+});
+
 test('profileBuildCommand leaves an existing file byte-for-byte untouched and reports it as kept', async () => {
   await withTmpRoot(async (root) => {
     const profileDir = path.join(root, 'profiles', 'acme');
