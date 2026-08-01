@@ -90,8 +90,8 @@ test('uiDir undefined always serves the no-UI page', async () => {
   assert.equal(res.contentType, 'text/plain; charset=utf-8');
   assert.equal(
     res.body,
-    'Job Bunny board API is running. UI not built yet — run: npm run ui:build ' +
-      '(arrives with PR 5). API: GET /api/profiles',
+    'Job Bunny board API is running. UI not built yet — run: npm run ui:build. ' +
+      'API: GET /api/profiles',
   );
 });
 

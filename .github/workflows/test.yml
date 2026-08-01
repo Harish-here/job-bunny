@@ -26,15 +26,30 @@ jobs:
       - run: npm run boundaries
       - run: npm test
 
+  # The UI workspace has its own gate (svelte-check + vitest + vite build).
+  # One OS is enough — it produces a platform-independent static bundle.
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - run: npm run ui:check
+      - run: npm run ui:build
+
   # Branch protection pins the check name `test`. `if: always()` is load-bearing:
   # without it a failing matrix leaves this job SKIPPED, and a skipped required
   # check can satisfy protection vacuously. Run always, then fail explicitly
   # unless every `check` matrix leg succeeded.
   test:
     if: always()
-    needs: [check]
+    needs: [check, ui]
     runs-on: ubuntu-latest
     steps:
       - run: echo ok
-      - if: needs.check.result != 'success'
+      - if: needs.check.result != 'success' || needs.ui.result != 'success'
         run: exit 1

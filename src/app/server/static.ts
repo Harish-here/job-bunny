@@ -1,6 +1,6 @@
 /**
- * Static file serving for the board UI (`ui/dist`, arrives PR 5). Confined
- * strictly to `uiDir`: every resolved path is checked with
+ * Static file serving for the board UI (`ui/dist`, built via `npm run
+ * ui:build`). Confined strictly to `uiDir`: every resolved path is checked with
  * `startsWith(uiDir + path.sep)` before the file is read, so a `..`
  * segment (or an absolute path smuggled into the URL) can never escape the
  * directory — traversal attempts fall through to the SPA-fallback/no-UI
@@ -13,7 +13,7 @@ import type { BoardResponse } from '../shared/index.ts';
 
 const NO_UI_MESSAGE =
   'Job Bunny board API is running. UI not built yet — ' +
-  'run: npm run ui:build (arrives with PR 5). API: GET /api/profiles';
+  'run: npm run ui:build. API: GET /api/profiles';
 
 const CONTENT_TYPES: Record<string, string> = {
   html: 'text/html; charset=utf-8',
