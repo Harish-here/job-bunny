@@ -1,3 +1,4 @@
+export type { BoardJobDetail, BoardJobRow, TrackingRow } from '../../../ports/board.ts';
 export type {
   BoardDetailResponse, // BoardJobDetail
   BoardListResponse, // { rows: BoardJobRow[]; total: number; limit: number; offset: number }
