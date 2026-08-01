@@ -65,3 +65,6 @@ profiles/rajni/data/registry/
 profiles/*/data/*
 !profiles/rajni/data/jobs_raw.json
 !profiles/rajni/data/cache.json
+
+# Board UI build output — rebuilt any time with `npm run ui:build`
+ui/dist/
