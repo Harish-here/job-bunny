@@ -7,7 +7,7 @@ model: sonnet
 
 You are the codebase historian and explainer for Job Bunny. The knowledge base below is your primary source of truth: answer directly from it instead of re-exploring the repo. Only open a specific file when you need to quote exact current lines, or when the question concerns code changed after the KB's snapshot date. If what you find in the live code contradicts the KB, say so explicitly, answer from the code, and flag the KB as stale.
 
-# Knowledge base (snapshot 2026-08-02)
+# Knowledge base (snapshot 2026-08-01)
 
 # Job Bunny — Codebase Knowledge Base (branch `main-v2`)
 
@@ -89,7 +89,7 @@ Eight rules in `.dependency-cruiser.cjs`, run via `npm run boundaries`:
 
 **Parser gotcha:** parsing goes through `@swc/core` with `tsConfig` **omitted**. dependency-cruiser 18.x caps at typescript <7.0.0; setting `tsConfig` silently cruises 0 modules (a vacuous pass). swc tracks `import type` edges — which is what makes these rules fire, since most cross-boundary imports here are type-only.
 
-`includeOnly: '^src'` means the `src/` → `scripts/` boundary is **not** mechanically enforced.
+`includeOnly: '^src'` means the `src/` → `scripts/` boundary, and everything under the separate `ui/` npm workspace, are **not** mechanically enforced by `boundaries` (nor by root `biome check src`/`filesize`, which likewise only target `src/`); `ui/`'s sole contact with `src/` is a type-only import of `src/app/features/*/index.ts` contract types via `ui/src/lib/api/types.ts` (erased at compile time by `verbatimModuleSyntax`, so no `src/` code is ever bundled into the frontend), gated instead by its own `ui:check`/`ui:build`.
 
 Two documented exceptions inside `src/`: `cli/commands/stage.ts` imports `pipeline/runner/guard.ts` directly (single-stage runs get identical timeout/retry/stall semantics), and `test/invariants/run_cap_backstop.test.ts` lives outside `src/` so it can import both `cli/` and `adapters/`.
 
@@ -187,6 +187,14 @@ Three watchdog layers:
 ### `src/cli/`
 `main.ts` (bin entry, 2026-08-02: shrunk to ≈215 lines — `CommandName`/`COMMAND_NAMES`/`USAGE`/`buildOptions` extracted to the new `args.ts`; `import 'dotenv/config'` **first and only here** — a daemon-spawned scheduled run hands a minimal env), `args.ts` (2026-08-02, ≈195 lines: the extracted parseArgs config/USAGE/option-builder module), `wire/` (§2.3), `commands/`: run, doctor, reconcile, stage, routine, serve, autostart, lane, profile, setup, release, migrate, board (2026-08-02, profile-less). (`schedule` was deleted 2026-07-27 — see §2.1/§6.) Commands **return** exit codes; only the bin guard touches `process.exitCode`.
 
+### `src/app/` — vertical feature-slice HTTP layer over ports+core (2026-08-02, local-DB spec PR 4/5)
+- `server/` — `server.ts`'s `createBoardServer(opts)`: assembles the route table from `makeProfilesRoutes`+`makeBoardRoutes`, binds `127.0.0.1` only (`DEFAULT_HOST`; `host` overridable, tests only), and wraps every request in `handleRequest`: `/api/*` dispatches via `shared/router.ts`'s `matchRoute`, everything else falls through to `static.ts`. Errors become the JSON envelope `{"error":{code,message}}` via `jsonError` — `HttpError`/`z.ZodError` map to their own status+code, anything else is `logger.error`-logged and returned as a bare 500 `internal` with `err.message` never in the body. One `logger.info('http', {method,path,status,ms})` line per request regardless of outcome. `index.ts` re-exports `createBoardServer`/`BoardServer`/`BoardServerOptions`. `static.ts` serves `uiDir` (`ui/dist`) behind a path-containment guard (`resolved === uiDir || resolved.startsWith(uiDir + path.sep)`, else treated as not-found — traversal gets the same response as a missing file, never a 403/404), SPA-falls-back to `index.html` when the exact path is missing, then to a plain-text "UI not built yet — run: npm run ui:build" message (also the response when `uiDir` itself is `undefined`) — every static response is HTTP 200.
+- `shared/` — `http.ts` (`HttpError{status,code,message}`, `jsonError`, `readJsonBody` — 1 MiB cap (`DEFAULT_LIMIT_BYTES`), rejects `HttpError(413,'too_large')` over cap or `HttpError(400,'bad_json')` on parse failure, resolves `undefined` for an empty body) and `router.ts` (`matchRoute(routes, method, pathname)` — segment-wise match, `:param` binding; `param(req, key)` accessor throws `400 bad_request` on a missing param — required under `noUncheckedIndexedAccess`). `RouteDef.method` is `'GET' | 'PATCH'` only — no other verb is wired.
+- `features/profiles/` — one route, `GET /api/profiles` → `source.listProfiles()`, no store touched.
+- `features/board/` — `routes.ts` (the two request zod schemas + the four store-backed routes below; two-pair rule keeps this slice at `routes.ts`+`service.ts` only, no separate `schemas.ts`) + `service.ts` (`boardService(store)`: thin `list`/`get`/`patchTracking` wrapper translating a missing job into `HttpError(404,'not_found')`). The five API routes: `GET /api/profiles`, `GET /api/profiles/:name/jobs`, `GET /api/profiles/:name/jobs/:id`, `PATCH /api/profiles/:name/jobs/:id/tracking`, `GET /api/profiles/:name/meta` — the last is deliberately store-less (tracking vocabulary is profile-independent, sourced from `core/tracking` alone, so an unknown `:name` still returns 200); the other three resolve `:name` to a store via `openStoreOrThrow`, returning a fixed `404 no_local_db` for a pure-Notion profile. Both barrels (`features/profiles/index.ts`, `features/board/index.ts`) re-export their route file's request/response TYPES (`ListQuery`, `BoardListResponse`, `BoardDetailResponse`, `TrackingPatchBody`, `TrackingPatchResponse`, `BoardMetaResponse`, `ProfilesResponse`) — this is the PR-5 contract surface `ui/src/lib/api/types.ts` imports type-only (§2.2).
+
+Placement/dependencies: `app` imports only `ports`+`core` (plus its own `shared/`) — `.dependency-cruiser.cjs`'s `app-only-ports-core` and `only-cli-imports-app` (§2.2 rules 7–8) enforce it; `app` never imports an adapter directly. Adapters reach it by injection: `cli/wire/board.ts`'s `wireBoard()` builds the `BoardSource` from real sqlite adapters (§2.3), and `cli/commands/board.ts` — the one legal `cli → app` edge — hands that `BoardSource` to `createBoardServer`. Ownership zone: the app writes ONLY the `tracking` table, via `BoardStore.updateTracking` (`ports/board.ts`) — never `jobs`, which only the pipeline's `SqliteStore` writes.
+
 ---
 
 ## 4. Data flow & state
@@ -230,14 +238,14 @@ Three watchdog layers:
 - **Stack** — ESM, TS7 (`strict`, `noUncheckedIndexedAccess`, `erasableSyntaxOnly` — no enums/namespaces, `verbatimModuleSyntax`, `allowImportingTsExtensions`, `noEmit`), zod, Biome (2-space, 90 cols, single quotes). Node ≥24, native type-stripping, zero build step.
 - **3-runtime-dep cap** — `@notionhq/client`, `playwright`, `zod` (+ de-facto `dotenv`).
 - **Docs are code** — per-module contracts, this KB, and the executor agent's rules updated in the same change that alters behavior.
-- **The gate**: `npm run check` = typecheck && lint && boundaries && test. CI's `test` check is exactly this. `main` protected — land via PR.
+- **The gate**: `npm run check` = typecheck && lint && boundaries && test. CI's `test` check now ALSO requires the separate `ui` job (`ui:check` = svelte-check + vitest, then `ui:build` = vite build) to pass — the `ui/` workspace (`workspaces: ["ui"]` in root `package.json`) is not part of `npm run check` itself. `main` protected — land via PR.
 - **Node 24 is the machine default** (since 2026-07-26; `nvm alias default 24`) and `.nvmrc` pins the repo, so plain commands just work; fall back to `source ~/.nvm/nvm.sh && nvm use 24 && <command>` only if `node -v` ever regresses below 24.
 
 ---
 
 ## 6. Ops
 
-**CLI surface** (`src/cli/main.ts` USAGE): run / doctor / reconcile / stage / routine / serve start|stop|status (cross-profile) / autostart enable|disable (cross-profile, darwin only) / lane add-url / profile build|remove (2026-08-02: `build` now scaffolds `connector: 'sqlite'` by default, local-DB spec §8 — `'notion'` remains a valid opt-in) / setup / release / migrate [--apply] (2026-08-02: one-shot Notion → local sqlite import, dry-run by default; `--apply` imports insert-only then flips `profile.json`'s `connector` to `sqlite`) / board [--port <n>] (2026-08-02: profile-less local job-board HTTP server, binds `127.0.0.1` only, default port 4646, foreground until SIGINT/SIGTERM). `--profile` required except `serve`, `autostart`, `release`, and `board`.
+**CLI surface** (`src/cli/main.ts` USAGE): run / doctor / reconcile / stage / routine / serve start|stop|status (cross-profile) / autostart enable|disable (cross-profile, darwin only) / lane add-url / profile build|remove (2026-08-02: `build` now scaffolds `connector: 'sqlite'` by default, local-DB spec §8 — `'notion'` remains a valid opt-in) / setup (idempotent step checklist: profile scaffold, `.env NOTION_TOKEN` — skipped unless `connector: notion` or the sqlite→Notion mirror is active, mirroring `mirrorSettings()` in `cli/wire/builders.ts` — resume.json, search_urls.md, page_inventory coverage checked against the `.json` files (the runtime authority), and `ui build` checking `ui/dist/index.html`) / release / migrate [--apply] (2026-08-02: one-shot Notion → local sqlite import, dry-run by default; `--apply` imports insert-only then flips `profile.json`'s `connector` to `sqlite`) / board [--port <n>] (2026-08-02: profile-less local job-board HTTP server, binds `127.0.0.1` only, default port 4646, foreground until SIGINT/SIGTERM). `--profile` required except `serve`, `autostart`, `release`, and `board`.
 
 **`run` order**: acquire cross-process lock (skip, don't queue) → doctor preflight → pre-run routines → `runPipeline` → post-sync routines only if passed → digest exactly once → release lock. A crash before a `RunResult` exists exits 1 without notifying.
 
