@@ -1,6 +1,6 @@
 # Board App Layer (PR 4) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A local-only `jobbunny board` HTTP server (127.0.0.1) exposing the per-profile job board API — browse `jobs`, edit `tracking` — via a new `src/app/` layer and a `BoardStore` port implemented in the sqlite adapter; plus the vocabulary single-authority relocation and the scaffold connector flip to sqlite.
 
@@ -37,7 +37,7 @@
   - `type ExcitementLevel = (typeof EXCITEMENT_OPTIONS)[number]`
   - `reviewFlags(evaluation: JD['evaluation']): string[]` (from `core/jd`)
 
-- [ ] **Step 1: Failing tests.** In `vocab.test.ts` (after the rename) add:
+- [x] **Step 1: Failing tests.** In `vocab.test.ts` (after the rename) add:
 
 ```typescript
 test('EXCITEMENT_OPTIONS is the frozen 3-level vocabulary, high to low', () => {
@@ -68,8 +68,8 @@ test('reviewFlags: undefined evaluation and empty verdicts give []', () => {
 
 (Adjust the verdict literal fields to the real `Verdict` shape in `core/jd/schema.ts` — keep the four cases: soft-fail-with-detail, soft-fail-without, hard-fail, soft-pass.)
 
-- [ ] **Step 2: Run** `node --test src/core/tracking/vocab.test.ts src/core/jd/schema.test.ts` — FAIL (missing exports).
-- [ ] **Step 3: Implement.**
+- [x] **Step 2: Run** `node --test src/core/tracking/vocab.test.ts src/core/jd/schema.test.ts` — FAIL (missing exports).
+- [x] **Step 3: Implement.**
   - `vocab.ts`: keep `STATUS_OPTIONS`/`TrackingStatus`/`PASSED_STATUS` verbatim; add
 
 ```typescript
@@ -107,8 +107,8 @@ export function reviewFlags(evaluation: JD['evaluation']): string[] {
 ```
 
   - `adapters/db/notion/sync.ts:125-129`: replace the inline filter/map with `const flags = reviewFlags(job.evaluation);` (import from `core/jd`), keeping the `if (flags.length > 0) props[...] = richTextProp(flags.join('; '));` lines byte-identical in behavior.
-- [ ] **Step 4: Adapter-boundary pin + run.** First ADD one test to `adapters/db/notion/sync.test.ts` (additive only — existing pins untouched): a job with TWO soft-fails, one with `detail: 'timezone thin'`, one without (rule `skills`) → the built page property is exactly `'timezone thin; skills: soft-fail'` — this pins the `?? \`${rule}: soft-fail\`` fallback AND the `'; '` join at the adapter boundary, not only in the new core test. Then run the five suites: `node --test src/core/tracking/vocab.test.ts src/core/jd/schema.test.ts src/core/rank/rank.test.ts src/adapters/db/notion/sync.test.ts src/adapters/db/notion/schema.test.ts` — ALL PASS with zero edits to `rank.test.ts` and `schema.test.ts` (the single-authority proof). Self-check the `sync.ts` diff: exactly the inline filter/map replaced by the `reviewFlags()` call — `flags.join('; ')` and the `if (flags.length > 0)` guard byte-unchanged. This unit-level pinning is the deliberate whole gate for the notion refactor: Task 10 runs token-less, and a 5-line behavior-preserving extract does not warrant a live Notion push.
-- [ ] **Step 5: Gate + commit** — `npm run check`; commit `refactor(core): excitement + review-flags single authority in core (notion/rank adopt)`.
+- [x] **Step 4: Adapter-boundary pin + run.** First ADD one test to `adapters/db/notion/sync.test.ts` (additive only — existing pins untouched): a job with TWO soft-fails, one with `detail: 'timezone thin'`, one without (rule `skills`) → the built page property is exactly `'timezone thin; skills: soft-fail'` — this pins the `?? \`${rule}: soft-fail\`` fallback AND the `'; '` join at the adapter boundary, not only in the new core test. Then run the five suites: `node --test src/core/tracking/vocab.test.ts src/core/jd/schema.test.ts src/core/rank/rank.test.ts src/adapters/db/notion/sync.test.ts src/adapters/db/notion/schema.test.ts` — ALL PASS with zero edits to `rank.test.ts` and `schema.test.ts` (the single-authority proof). Self-check the `sync.ts` diff: exactly the inline filter/map replaced by the `reviewFlags()` call — `flags.join('; ')` and the `if (flags.length > 0)` guard byte-unchanged. This unit-level pinning is the deliberate whole gate for the notion refactor: Task 10 runs token-less, and a 5-line behavior-preserving extract does not warrant a live Notion push.
+- [x] **Step 5: Gate + commit** — `npm run check`; commit `refactor(core): excitement + review-flags single authority in core (notion/rank adopt)`.
 
 ---
 
@@ -202,10 +202,10 @@ export interface BoardSource {
 }
 ```
 
-- [ ] **Step 1: Failing test.** In `contracts.test.ts`, following its existing pattern for other ports, add a structural-conformance test: a plain-object `BoardStore` literal and `BoardSource` literal typed against the interfaces (e.g. `const s: BoardStore = { listJobs: () => ({ rows: [], total: 0 }), getJob: () => null, updateTracking: () => null, close() {} };` plus an assert that calling each returns the literal values). It fails to compile until `board.ts` exists.
-- [ ] **Step 2: Run** `node --test src/ports/contracts.test.ts` — FAIL (module not found).
-- [ ] **Step 3: Implement** `board.ts` exactly as above; add the barrel line.
-- [ ] **Step 4: Run** — PASS. **Step 5: Gate + commit** — `npm run check`; commit `feat(ports): BoardStore/BoardSource — the board's read-jobs/write-tracking port`.
+- [x] **Step 1: Failing test.** In `contracts.test.ts`, following its existing pattern for other ports, add a structural-conformance test: a plain-object `BoardStore` literal and `BoardSource` literal typed against the interfaces (e.g. `const s: BoardStore = { listJobs: () => ({ rows: [], total: 0 }), getJob: () => null, updateTracking: () => null, close() {} };` plus an assert that calling each returns the literal values). It fails to compile until `board.ts` exists.
+- [x] **Step 2: Run** `node --test src/ports/contracts.test.ts` — FAIL (module not found).
+- [x] **Step 3: Implement** `board.ts` exactly as above; add the barrel line.
+- [x] **Step 4: Run** — PASS. **Step 5: Gate + commit** — `npm run check`; commit `feat(ports): BoardStore/BoardSource — the board's read-jobs/write-tracking port`.
 
 ---
 
@@ -225,7 +225,7 @@ export interface BoardSource {
 - `updateTracking`: `SELECT 1 FROM jobs WHERE id = ?` → null when absent. Read existing tracking row; merge in JS (patch key present: `null`→SQL NULL, string→value; absent: keep existing); full-row UPSERT `INSERT ... ON CONFLICT(job_id) DO UPDATE SET` all 7 fields + `updated_at = ?`; wrap in `SAVEPOINT jb_board_track` / `RELEASE` / `ROLLBACK TO`+`RELEASE` (house convention, `store.ts:8-10`); return the merged `TrackingRow`.
 - `close()`: `this.db.close()`.
 
-- [ ] **Step 1: Failing tests** (`board.test.ts`, `:memory:` pattern from `store/store.test.ts` — reuse its `makeJd`-style factory locally; seed via `new SqliteStore(db).upsertJobs([...])` — importing the sibling `store/` module inside the same adapter family is legal). Cases:
+- [x] **Step 1: Failing tests** (`board.test.ts`, `:memory:` pattern from `store/store.test.ts` — reuse its `makeJd`-style factory locally; seed via `new SqliteStore(db).upsertJobs([...])` — importing the sibling `store/` module inside the same adapter family is legal). Cases:
 
 ```
 1. listJobs on empty DB → { rows: [], total: 0 }.
@@ -251,9 +251,9 @@ export interface BoardSource {
     overkill — instead assert savepoint released: two sequential updates succeed).
 ```
 
-- [ ] **Step 2: Run** `node --test src/adapters/db/sqlite/board/board.test.ts` — FAIL (module not found).
-- [ ] **Step 3: Implement** `board.ts` per the contract (private `whereFor(query)` returning `{ from, where, params }` shared by list+count — the count MUST reuse the same FROM incl. the LEFT JOIN — keeps it well under 400). `index.ts` barrel: `export { SqliteBoardStore } from './board.ts';`
-- [ ] **Step 4: Run** — PASS, 3× for stability. **Step 5: Gate + commit** — `npm run check`; commit `feat(adapters): SqliteBoardStore — board reads jobs, writes tracking (sqlite)`.
+- [x] **Step 2: Run** `node --test src/adapters/db/sqlite/board/board.test.ts` — FAIL (module not found).
+- [x] **Step 3: Implement** `board.ts` per the contract (private `whereFor(query)` returning `{ from, where, params }` shared by list+count — the count MUST reuse the same FROM incl. the LEFT JOIN — keeps it well under 400). `index.ts` barrel: `export { SqliteBoardStore } from './board.ts';`
+- [x] **Step 4: Run** — PASS, 3× for stability. **Step 5: Gate + commit** — `npm run check`; commit `feat(adapters): SqliteBoardStore — board reads jobs, writes tracking (sqlite)`.
 
 ---
 
@@ -301,7 +301,7 @@ export function matchRoute(routes: RouteDef[], method: string, pathname: string)
   { route: RouteDef; params: Record<string, string> } | null;
 ```
 
-- [ ] **Step 1: dependency-cruiser first** (so every later app file is cruised from birth). In `.dependency-cruiser.cjs`:
+- [x] **Step 1: dependency-cruiser first** (so every later app file is cruised from birth). In `.dependency-cruiser.cjs`:
   - Add two rules (mirror the `ports-only-core` block shape):
 
 ```js
@@ -322,9 +322,9 @@ export function matchRoute(routes: RouteDef[], method: string, pathname: string)
 
   - Extend existing alternations — load-bearing: `core-is-pure` `to`, `ports-only-core` `to`, `adapters-only-ports-core` `to` each gain `|app` (without these, core/ports/adapters could import app); and the `pathNot` carve-out of `only-wire-imports-adapters` becomes `'^src/cli/wire/(compose|builders|registry|board)\\.ts$'` (board.ts arrives in Task 7 — adding it now is inert). Belt-and-braces (redundant with `app-only-ports-core` but kept as defense-in-depth — say so in the rule comment): `nothing-imports-cli` `from` gains `|app`; `only-wire-imports-adapters` `from` gains `|app`.
   - Run `npx depcruise src` — must report the same module count as before (~300, NOT 0 — the vacuous-pass trap) and no violations.
-- [ ] **Step 2: Failing tests.** `router.test.ts`: literal match; `:name`/`:id` params extracted (assert `matchRoute(routes,'GET','/api/profiles/rajni/jobs/li-1')` yields `{ name: 'rajni', id: 'li-1' }`); method mismatch → null; trailing-slash and extra-segment → null; no decode crash on `%` (decodeURIComponent each param, invalid escapes → segment kept raw or 400 — pick: wrap in try, keep raw). `http.test.ts`: `jsonError` envelope shape; `readJsonBody` over a fake `IncomingMessage` (a `Readable.from([...chunks])` cast) — valid JSON resolves, garbage rejects HttpError 400, > limit rejects 413, empty resolves undefined.
-- [ ] **Step 3: Run** — FAIL. **Step 4: Implement** (`matchRoute` splits on '/', compares segment-wise; ~40 lines). `index.ts` barrel exports all names above.
-- [ ] **Step 5: Run** — PASS. **Step 6: Gate + commit** — `npm run check`; commit `feat(app): app layer skeleton — dependency rules + shared http/router plumbing`.
+- [x] **Step 2: Failing tests.** `router.test.ts`: literal match; `:name`/`:id` params extracted (assert `matchRoute(routes,'GET','/api/profiles/rajni/jobs/li-1')` yields `{ name: 'rajni', id: 'li-1' }`); method mismatch → null; trailing-slash and extra-segment → null; no decode crash on `%` (decodeURIComponent each param, invalid escapes → segment kept raw or 400 — pick: wrap in try, keep raw). `http.test.ts`: `jsonError` envelope shape; `readJsonBody` over a fake `IncomingMessage` (a `Readable.from([...chunks])` cast) — valid JSON resolves, garbage rejects HttpError 400, > limit rejects 413, empty resolves undefined.
+- [x] **Step 3: Run** — FAIL. **Step 4: Implement** (`matchRoute` splits on '/', compares segment-wise; ~40 lines). `index.ts` barrel exports all names above.
+- [x] **Step 5: Run** — PASS. **Step 6: Gate + commit** — `npm run check`; commit `feat(app): app layer skeleton — dependency rules + shared http/router plumbing`.
 
 ---
 
@@ -379,8 +379,8 @@ const TrackingPatchSchema = z.strictObject({
 - `GET /api/profiles/:name/meta` — `{ status: 200, body: { statusOptions: [...STATUS_OPTIONS], excitementOptions: [...EXCITEMENT_OPTIONS] } }` — no store needed; MUST work for hasDb=false profiles, and (deliberately) returns 200 even for unknown `:name` — the vocab is profile-independent; document this in the route's comment so a UI switcher bug isn't mistaken for a live profile.
 - Store resolution shared by the three store-backed routes: `source.openStore(param(req, 'name'))` (the `param()` accessor from shared — `req.params.name` alone won't compile under `noUncheckedIndexedAccess`); null → `HttpError(404, 'no_local_db', 'profile has no local database (pure-Notion profiles are read via Notion)')`.
 
-- [ ] **Step 1: Failing tests.** All with a plain-object fake `BoardStore`/`BoardSource` (calls-recording closures, canned returns — `migrate.test.ts` pattern). `routes.test.ts` drives handlers directly with hand-built `BoardRequest`s: list happy path + defaults; `?status=Applied` reaches store as `{ status: 'Applied', archived: false, ... }`; `?limit=999` → 400 validation envelope; `?archived=true` maps to boolean; get 200/404; patch happy (fake returns row; assert `now` is an ISO string arg), patch `{}` → 400, patch unknown-field → 400 (strict), patch on null-store profile → 404 `no_local_db`; meta lists both vocabularies without touching the store (fake `openStore` that throws if called proves it). `service.test.ts`: 404 translation. `profiles/routes.test.ts`: returns `listProfiles()` verbatim.
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement** (service ~40 lines; routes ~150 — if a slice file threatens its cap or a third impl file, split that slice into subfolders per the two-pair rule, e.g. `features/board/routes/`; pre-declared here so nobody improvises). Barrels — the PR-5 API contract (spec §5, type-only imports) is REQUIRED, exact exports from each slice `index.ts`:
+- [x] **Step 1: Failing tests.** All with a plain-object fake `BoardStore`/`BoardSource` (calls-recording closures, canned returns — `migrate.test.ts` pattern). `routes.test.ts` drives handlers directly with hand-built `BoardRequest`s: list happy path + defaults; `?status=Applied` reaches store as `{ status: 'Applied', archived: false, ... }`; `?limit=999` → 400 validation envelope; `?archived=true` maps to boolean; get 200/404; patch happy (fake returns row; assert `now` is an ISO string arg), patch `{}` → 400, patch unknown-field → 400 (strict), patch on null-store profile → 404 `no_local_db`; meta lists both vocabularies without touching the store (fake `openStore` that throws if called proves it). `service.test.ts`: 404 translation. `profiles/routes.test.ts`: returns `listProfiles()` verbatim.
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement** (service ~40 lines; routes ~150 — if a slice file threatens its cap or a third impl file, split that slice into subfolders per the two-pair rule, e.g. `features/board/routes/`; pre-declared here so nobody improvises). Barrels — the PR-5 API contract (spec §5, type-only imports) is REQUIRED, exact exports from each slice `index.ts`:
 
 ```typescript
 // features/board/index.ts
@@ -396,7 +396,7 @@ export type {                                                          // plain 
 export { makeProfilesRoutes } from './routes.ts';
 export type { ProfilesResponse } from './routes.ts'; // { profiles: BoardProfile[] }
 ```
-- [ ] **Step 4: Run** — PASS. **Step 5: Gate + commit** — `npm run check`; commit `feat(app): profiles + board feature slices — list/get/patch-tracking/meta routes`.
+- [x] **Step 4: Run** — PASS. **Step 5: Gate + commit** — `npm run check`; commit `feat(app): profiles + board feature slices — list/get/patch-tracking/meta routes`.
 
 ---
 
@@ -431,7 +431,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer;
 - The server never throws out of the request handler (top-level try/catch — this is also what turns a throwing `source.openStore` into a 500 envelope; pin that with a test); `close()` awaits `server.close()` then `source.close()`.
 - Two accepted realities, note them in the file header so nobody "fixes" them: (a) `BoardStore` is synchronous inside async handlers — a slow query blocks the event loop, i.e. effectively a single-request server; fine for one local user, do NOT add worker threads; (b) if the sandbox running tests blocks loopback `fetch`, fall back to `node:http`'s `http.request` against the same `127.0.0.1:<port>` — do not weaken to handler-only tests.
 
-- [ ] **Step 1: Failing tests.** `static.test.ts` (pure, temp dir via `mkdtemp`): serves index.html at `/`; `../../etc/passwd` traversal → no-UI/404 path, NOT file contents; `.js` content-type; missing uiDir → fallback message. `server.test.ts` — the repo's first socket test, `node:test` + real `fetch`, `listen(0)`:
+- [x] **Step 1: Failing tests.** `static.test.ts` (pure, temp dir via `mkdtemp`): serves index.html at `/`; `../../etc/passwd` traversal → no-UI/404 path, NOT file contents; `.js` content-type; missing uiDir → fallback message. `server.test.ts` — the repo's first socket test, `node:test` + real `fetch`, `listen(0)`:
 
 ```typescript
 const server = createBoardServer({ source: fakeSource, logger: silentLogger });
@@ -448,8 +448,8 @@ try {
 ```
 
   Assert `close()` called `fakeSource.close`.
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement** (`server.ts` ~140 lines, `static.ts` ~80). **Step 4: Run** — PASS, 3× (watch for port/teardown flake; every test closes in `finally`).
-- [ ] **Step 5: Gate + commit** — `npm run check`; commit `feat(app): board http server — route mounting, error envelope, static ui serving`.
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement** (`server.ts` ~140 lines, `static.ts` ~80). **Step 4: Run** — PASS, 3× (watch for port/teardown flake; every test closes in `finally`).
+- [x] **Step 5: Gate + commit** — `npm run check`; commit `feat(app): board http server — route mounting, error envelope, static ui serving`.
 
 ---
 
@@ -480,9 +480,9 @@ export function wireBoard(overrides?: BoardWireOverrides): BoardSource;
 - `close()`: closes every memoized store, clears the map, idempotent.
 - Discovery is at-call (each `listProfiles()` re-reads the dir; store memo survives — a profile created while the server runs appears on next call).
 
-- [ ] **Step 1: Failing tests** (`board.test.ts`, real temp dirs `mkdtemp` — filesystem discovery is the subject; identity via `.name`-less duck-typing: assert `openStore` returns an object with `listJobs`, never `instanceof`): temp root with `profiles/{a,b,rajni-like}/`: `a` valid sqlite profile WITH a db file created via `openJobsDb` then closed; `b` has `profile.json` `connector: 'notion'`, no db → `{ hasDb: false }`, `openStore('b')` null; malformed json dir → `connector: ''`, no throw; unknown name → null; **traversal probes: `openStore('../a')` and `openStore('a/../a')` both null (membership gate, not path normalization)**; memoization (two `openStore('a')` calls → same reference); `close()` then `openStore('a')` → fresh instance works; `openStore` on hasDb-false NEVER creates the file (assert `existsSync` still false after).
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement** (~110 lines, module doc header explaining the carve-out membership + tolerant posture, mirroring `builders.ts:73-80`'s comment style).
-- [ ] **Step 4: Run** — PASS; `npx depcruise src` clean (board.ts is already in the carve-out from Task 4). **Step 5: Gate + commit** — `npm run check`; commit `feat(wire): wireBoard — cross-profile BoardSource with lazy sqlite stores`.
+- [x] **Step 1: Failing tests** (`board.test.ts`, real temp dirs `mkdtemp` — filesystem discovery is the subject; identity via `.name`-less duck-typing: assert `openStore` returns an object with `listJobs`, never `instanceof`): temp root with `profiles/{a,b,rajni-like}/`: `a` valid sqlite profile WITH a db file created via `openJobsDb` then closed; `b` has `profile.json` `connector: 'notion'`, no db → `{ hasDb: false }`, `openStore('b')` null; malformed json dir → `connector: ''`, no throw; unknown name → null; **traversal probes: `openStore('../a')` and `openStore('a/../a')` both null (membership gate, not path normalization)**; memoization (two `openStore('a')` calls → same reference); `close()` then `openStore('a')` → fresh instance works; `openStore` on hasDb-false NEVER creates the file (assert `existsSync` still false after).
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement** (~110 lines, module doc header explaining the carve-out membership + tolerant posture, mirroring `builders.ts:73-80`'s comment style).
+- [x] **Step 4: Run** — PASS; `npx depcruise src` clean (board.ts is already in the carve-out from Task 4). **Step 5: Gate + commit** — `npm run check`; commit `feat(wire): wireBoard — cross-profile BoardSource with lazy sqlite stores`.
 
 ---
 
@@ -509,13 +509,13 @@ export interface BoardDeps {
 
 **Two sub-steps, TWO commits:**
 
-- [ ] **Step 1 (mechanical split): create `src/cli/args.ts`** — move `CommandName`, `CommandOptions`, `COMMAND_NAMES`, `USAGE`, `buildOptions`, and the `parseArgs` options literal out of `main.ts` (exports; `main.ts` imports them). `CommandFn`/`CommandRegistry` STAY in `main.ts` — that keeps `main.test.ts`'s `import { type CommandFn, main } from './main.ts'` untouched. ONE required non-verbatim change: the extracted options literal MUST be declared `as const satisfies ParseArgsOptionsConfig` (type from `node:util`) — a bare module-level const widens `type: 'string'` to `string` (TS2322) and degrades the inferred `values` shape `buildOptions` consumes. Acceptance: `npm run typecheck` clean AND `node --test src/cli/main.test.ts` passes with ZERO test edits. `main.ts` lands ≈ 215 lines; `args.ts` ≈ 195 — both capped fine. Gate; commit `refactor(cli): extract args.ts (CommandName/USAGE/buildOptions) — cap headroom for board`.
-- [ ] **Step 2: Failing tests** (`board.test.ts`, fake deps object literals): default port used when flag absent; `--port 0` accepted (ephemeral) — command prints the BOUND port from `listen()`'s return; prints `board: http://127.0.0.1:<port>` and one line per profile (`<name> — local db | notion-only`); resolves 0 after `waitForStop()` resolves and `server.close()` was awaited (order-assert via call log); wire/server construction errors propagate (main.ts catch → exit 1). In `main.test.ts` add the dispatch case following the existing `spy()` pattern (449/800 — room).
-- [ ] **Step 3: Run** — FAIL. **Step 4: Implement.**
+- [x] **Step 1 (mechanical split): create `src/cli/args.ts`** — move `CommandName`, `CommandOptions`, `COMMAND_NAMES`, `USAGE`, `buildOptions`, and the `parseArgs` options literal out of `main.ts` (exports; `main.ts` imports them). `CommandFn`/`CommandRegistry` STAY in `main.ts` — that keeps `main.test.ts`'s `import { type CommandFn, main } from './main.ts'` untouched. ONE required non-verbatim change: the extracted options literal MUST be declared `as const satisfies ParseArgsOptionsConfig` (type from `node:util`) — a bare module-level const widens `type: 'string'` to `string` (TS2322) and degrades the inferred `values` shape `buildOptions` consumes. Acceptance: `npm run typecheck` clean AND `node --test src/cli/main.test.ts` passes with ZERO test edits. `main.ts` lands ≈ 215 lines; `args.ts` ≈ 195 — both capped fine. Gate; commit `refactor(cli): extract args.ts (CommandName/USAGE/buildOptions) — cap headroom for board`.
+- [x] **Step 2: Failing tests** (`board.test.ts`, fake deps object literals): default port used when flag absent; `--port 0` accepted (ephemeral) — command prints the BOUND port from `listen()`'s return; prints `board: http://127.0.0.1:<port>` and one line per profile (`<name> — local db | notion-only`); resolves 0 after `waitForStop()` resolves and `server.close()` was awaited (order-assert via call log); wire/server construction errors propagate (main.ts catch → exit 1). In `main.test.ts` add the dispatch case following the existing `spy()` pattern (449/800 — room).
+- [x] **Step 3: Run** — FAIL. **Step 4: Implement.**
   - `board.ts`: wire → createServer → `listen(opts.port)` → print URL + profile lines → `await waitForStop()` → `await server.close()` → return 0.
   - `args.ts`: `'board'` in `CommandName` + `COMMAND_NAMES`; USAGE line `  board     [--port <n>]                    (job board server on 127.0.0.1; profile-less)`; parseArgs `port: { type: 'string' }`; `buildOptions` case `'board'`: profile-less (like `serve`), `port` via the `run-cap-ms` numeric-validation template (`main.ts:236-243` pattern), default `4646`, reject non-integer/negative with `{ error: 'board: --port must be a non-negative integer' }`.
   - `main.ts`: `defaultCommands` entry `board: (async (opts: CommandOptions) => boardCommand({ port: opts.port ?? 4646 })) as CommandFn`; `CommandOptions` gains `port?: number` (in args.ts now).
-- [ ] **Step 5: Run** `node --test src/cli/commands/board.test.ts src/cli/main.test.ts` — PASS. **Step 6: Gate + commit** — `npm run check`; commit `feat(cli): jobbunny board — profile-less local board server command`.
+- [x] **Step 5: Run** `node --test src/cli/commands/board.test.ts src/cli/main.test.ts` — PASS. **Step 6: Gate + commit** — `npm run check`; commit `feat(cli): jobbunny board — profile-less local board server command`.
 
 ---
 
@@ -525,7 +525,7 @@ export interface BoardDeps {
 - Modify: `src/cli/commands/profile.ts:53-57` (the `MINIMAL_PIPELINE_CONFIG` literal + its stale comment)
 - Test: `src/cli/commands/profile.test.ts` (add the missing pin)
 
-- [ ] **Step 1: Failing test** — in `profile.test.ts`, after the existing build-path test's read-back (line ~35 pattern):
+- [x] **Step 1: Failing test** — in `profile.test.ts`, after the existing build-path test's read-back (line ~35 pattern):
 
 ```typescript
 test('profile build scaffolds connector sqlite (local-first default, spec §8)', async () => {
@@ -536,8 +536,8 @@ test('profile build scaffolds connector sqlite (local-first default, spec §8)',
 });
 ```
 
-- [ ] **Step 2: Run** — FAIL (`'notion'`). **Step 3: Implement** — `connector: 'sqlite'` at line 57; rewrite the comment (lines 51-54) to: `// Minimal-but-valid: connector must name a real adapter for wire() to resolve. Local-first default since the migrate command proved out (local-DB spec §8); 'notion' remains a valid opt-in.` Confirm `PipelineConfigSchema.parse` accepts it (it must — rajni already runs this shape).
-- [ ] **Step 4: Run** — PASS (and the existing "kept" test still passes — it hand-writes `'notion'`). **Step 5: Gate + commit** — `npm run check`; commit `feat(cli): profile build scaffolds sqlite connector — local-first default (spec §8)`.
+- [x] **Step 2: Run** — FAIL (`'notion'`). **Step 3: Implement** — `connector: 'sqlite'` at line 57; rewrite the comment (lines 51-54) to: `// Minimal-but-valid: connector must name a real adapter for wire() to resolve. Local-first default since the migrate command proved out (local-DB spec §8); 'notion' remains a valid opt-in.` Confirm `PipelineConfigSchema.parse` accepts it (it must — rajni already runs this shape).
+- [x] **Step 4: Run** — PASS (and the existing "kept" test still passes — it hand-writes `'notion'`). **Step 5: Gate + commit** — `npm run check`; commit `feat(cli): profile build scaffolds sqlite connector — local-first default (spec §8)`.
 
 ---
 
@@ -547,16 +547,16 @@ test('profile build scaffolds connector sqlite (local-first default, spec §8)',
 
 Hard rails: throwaway profile `zzboardcheck` ONLY; NEVER touch `profiles/harish/**` or `profiles/rajni/**`; while the server is up, NEVER request a store-backed endpoint for any profile other than `zzboardcheck` (`openStore` on an existing DB writes WAL sidecars and runs pending migrations — `GET /api/profiles` listing is safe, it only stats files); `env -u NOTION_TOKEN` on every command; no `--apply`; delete the profile at the end.
 
-- [ ] **Step 1:** `npm run check` green at HEAD.
-- [ ] **Step 2:** `node src/cli/main.ts profile build --profile zzboardcheck` — then assert the scaffold: `grep '"connector": "sqlite"' profiles/zzboardcheck/profile.json` (Task 9 live).
-- [ ] **Step 3:** Seed one job through the real pipeline write path: create `profiles/zzboardcheck/data/runs/$(date -u +%F)/23-50/08-rank.json` — the date is **UTC** (`stage.ts:82` keys the run folder on `toISOString().slice(0,10)`; using the local date makes the seed invisible in negative-offset-crossing hours and sync silently reports `0 -> 0`), and rank is stage index **08** (zero-padded; an 09 file would tie with sync's own `09-sync.json` on later re-runs) — containing
+- [x] **Step 1:** `npm run check` green at HEAD.
+- [x] **Step 2:** `node src/cli/main.ts profile build --profile zzboardcheck` — then assert the scaffold: `grep '"connector": "sqlite"' profiles/zzboardcheck/profile.json` (Task 9 live).
+- [x] **Step 3:** Seed one job through the real pipeline write path: create `profiles/zzboardcheck/data/runs/$(date -u +%F)/23-50/08-rank.json` — the date is **UTC** (`stage.ts:82` keys the run folder on `toISOString().slice(0,10)`; using the local date makes the seed invisible in negative-offset-crossing hours and sync silently reports `0 -> 0`), and rank is stage index **08** (zero-padded; an 09 file would tie with sync's own `09-sync.json` on later re-runs) — containing
 
 ```json
 {"jobs":[{"identity":{"id":"li-board-1","lane":"linkedin","url":"https://example.com/j/1","company":"Acme","title":"Staff Engineer","scrapedAt":"2026-08-02T09:00:00.000Z"},"content":{"rawText":"synthetic"},"evaluation":{"verdicts":[{"rule":"geo","severity":"soft","pass":false,"detail":"timezone overlap thin"}],"matchReasons":["skills: 3/4"],"score":72,"excitement":"Kandipa podu"}}],"dropped":[]}
 ```
 
   (field names must match `JDSchema` — check `core/jd/schema.ts` and adjust before running) then `env -u NOTION_TOKEN node src/cli/main.ts stage sync --profile zzboardcheck` → exit 0, `sync: 1 -> 1`, row present in `profiles/zzboardcheck/data/jobbunny.db`.
-- [ ] **Step 4 — the board proving itself live:** `env -u NOTION_TOKEN node src/cli/main.ts board --port 4646 &` (background it; capture PID). Then, all against `http://127.0.0.1:4646`:
+- [x] **Step 4 — the board proving itself live:** `env -u NOTION_TOKEN node src/cli/main.ts board --port 4646 &` (background it; capture PID). Then, all against `http://127.0.0.1:4646`:
   - `GET /api/profiles` → 200, contains `{"name":"zzboardcheck","connector":"sqlite","hasDb":true}` (rajni listed too, `hasDb` per its data dir state — flagged, never erroring).
   - `GET /api/profiles/zzboardcheck/jobs` → 200, `total: 1`, row `id === 'li-board-1'`, `reviewFlags: ["timezone overlap thin"]`, `tracking: null`.
   - `GET /api/profiles/zzboardcheck/jobs/li-board-1` → 200 with full `jd`.
@@ -564,8 +564,8 @@ Hard rails: throwaway profile `zzboardcheck` ONLY; NEVER touch `profiles/harish/
   - `PATCH` body `{"status":"NotAStatus"}` → 400 `{"error":{"code":"validation",...}}`; `GET /api/profiles/zzboardcheck/jobs/nope` → 404; `GET /api/profiles/nope/jobs` → 404 `no_local_db` or `not_found` (assert envelope shape).
   - `GET /api/profiles/zzboardcheck/meta` → both vocab lists, excitement `["Vera level","Kandipa podu","Try panalam"]`.
   - `GET /` → the no-UI text naming `npm run ui:build`.
-- [ ] **Step 5 — WAL coexistence (spec §7):** with the server STILL RUNNING, re-run `env -u NOTION_TOKEN node src/cli/main.ts stage sync --profile zzboardcheck` → exit 0 (upsert of the same row; busy_timeout absorbs any overlap); then `GET .../jobs` again → still `total: 1` AND `tracking.status` still `"Applied"` — the pipeline write did not clobber the tracking zone. Any deviation → BLOCKED.
-- [ ] **Step 6:** kill the server PID; `node src/cli/main.ts profile remove --profile zzboardcheck --force`; `git status --porcelain` clean. Any failure → BLOCKED.
+- [x] **Step 5 — WAL coexistence (spec §7):** with the server STILL RUNNING, re-run `env -u NOTION_TOKEN node src/cli/main.ts stage sync --profile zzboardcheck` → exit 0 (upsert of the same row; busy_timeout absorbs any overlap); then `GET .../jobs` again → still `total: 1` AND `tracking.status` still `"Applied"` — the pipeline write did not clobber the tracking zone. Any deviation → BLOCKED.
+- [x] **Step 6:** kill the server PID; `node src/cli/main.ts profile remove --profile zzboardcheck --force`; `git status --porcelain` clean. Any failure → BLOCKED.
 
 ---
 
@@ -584,3 +584,13 @@ Hard rails: throwaway profile `zzboardcheck` ONLY; NEVER touch `profiles/harish/
 - `review_flags` column (spec §3): v1 derives it from `jd_json` at read time (Task 3) — add the column via forward migration only if list latency ever makes it worth it.
 - Rate limiting / concurrent-writer arbitration beyond WAL+busy_timeout (single local user).
 - Existing follow-ups: doctor warn for mirror-flag-set-but-malformed-slice; mirror pushes input array not persisted subset; `compose.test.ts` 800/800; `listCacheEntries` truthy city check; migrations pragma order; Connector `close()` lifecycle (board's `BoardStore.close()` partially lands this — the pipeline Connector side remains); `stage.ts` UTC run-folder date.
+
+## Execution record (2026-08-01)
+
+Executed via the SDD loop (ledger: `.superpowers/sdd/2026-08-02-board-app-layer/progress.md`, git-excluded). Code commits on `feat/board-app-layer`: `d627f28` (T1 vocab/reviewFlags authority), `92586fc` (T2 ports/board), `7ff7be1` (T3 SqliteBoardStore), `c91075c` (T4 rules+shared), `2ba9d15` (T5 slices), `a6924ef` (T6 server; 1 fix round — traversal-test rm-rf-/ hazard and malformed-target unhandled rejection, both caught in review), `3297934` (T7 wireBoard), `75214c7`+`8db3fe2` (T8 args split + board command; 1 fix round), `6504c39` (T9 scaffold flip), `64be887` (post-review fix wave: prototype-proof sort whitelist, undefined-keeps patch semantics, comment accuracy), plus KB sync. Gate exit 0 at every commit; 1286/1286 at the fix-wave HEAD, controller-verified.
+
+Whole-branch review (opus): MERGE, 0 Critical. I1 (docs-as-code) closed by the KB sync commit; M1/M2/M3/M4/M7 fixed in `64be887`; M5 (store opened before validation), M6 (close() vs keep-alive sockets — PR-5 concern), M8 (--port upper bound), M9 (cli/wire at 7 impl files — wants subfolders) deferred to follow-ups.
+
+Runtime verification run TWICE (lead's Task 10 at `6504c39`; advisor's independent replication at `64be887`), throwaway profile `zzboardcheck`, `env -u NOTION_TOKEN`: sqlite scaffold confirmed live; seeded `08-rank.json` (UTC folder) → `stage sync` exit 0, `sync: 1 -> 1`; all endpoints proven — list (reviewFlags `["timezone overlap thin"]` derived from jd_json), detail, PATCH (merged TrackingRow returned), status filter, validation/not_found/no_local_db envelopes, traversal probe `..%2Frajni` rejected by the membership gate, meta (both vocabularies), no-UI root page; WAL coexistence: second `stage sync` with the server up → exit 0, tracking row byte-identical (`updatedAt` unchanged) — pipeline never touches the tracking zone; no rajni `-wal`/`-shm` sidecars ever appeared; cleanup verified, tree clean.
+
+Open user items at closure: authorize the dedicated `src/app/` §3 module-map entry in the explainer KB (curator declined agent-chain authorization — outline preserved in its report); decide whether `/setup` gains a sqlite-only, zero-Notion onboarding branch.
