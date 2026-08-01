@@ -1,6 +1,6 @@
 # UI Workspace (Board SPA) + Local-First Setup Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Ship PR 5 of the local-DB adoption (spec §6): a `ui/` npm workspace holding a Vite + Svelte + TypeScript SPA (sidebar shell, hash router, profile switcher, live Board with filter/sort/detail-drawer/inline tracking edits, stubbed Analytics/Onboarding), served by the existing `jobbunny board` static handler — plus the user-approved fold-in: a local-first `/setup` flow (`jobbunny setup` skips the Notion token for sqlite-only profiles, checks the UI build, and the `/setup` wizard makes Notion an opt-in mirror branch).
 
@@ -86,7 +86,7 @@ src/cli/commands/setup.test.ts      # extended
 - Consumes: nothing.
 - Produces: workspace commands later tasks rely on — root `npm run ui:build` (emits `ui/dist/`), `npm run ui:check` (delegates to ui's `check` script = `svelte-check` for now; Task 2 appends `&& vitest run`), `npm run ui:dev` (Vite dev server proxying `/api` → `http://127.0.0.1:4646`). Entry chain `index.html → src/main.ts → src/App.svelte` + global stylesheet `src/app.css`.
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 cd /Users/harishamutha/Job-bunny-local-db
@@ -95,7 +95,7 @@ git checkout -b feat/ui-workspace
 bash -c "npm run check"   # baseline green: 1286 tests, EXIT:0
 ```
 
-- [ ] **Step 2: Root `package.json`** — add a `workspaces` key after `"private": true`, and three scripts. The `dependencies`/`devDependencies` blocks are NOT touched.
+- [x] **Step 2: Root `package.json`** — add a `workspaces` key after `"private": true`, and three scripts. The `dependencies`/`devDependencies` blocks are NOT touched.
 
 ```json
   "private": true,
@@ -110,7 +110,7 @@ Scripts block gains (keep existing entries verbatim):
     "ui:check": "npm run check --workspace ui",
 ```
 
-- [ ] **Step 3: `.gitignore`** — append at the end:
+- [x] **Step 3: `.gitignore`** — append at the end:
 
 ```
 # Board UI build output — rebuilt any time with `npm run ui:build`
@@ -119,7 +119,7 @@ ui/dist/
 
 (`ui/node_modules/` needs no rule — the existing bare `node_modules/` pattern matches nested directories.)
 
-- [ ] **Step 4: `ui/package.json`** (exact content):
+- [x] **Step 4: `ui/package.json`** (exact content):
 
 ```json
 {
@@ -147,7 +147,7 @@ ui/dist/
 
 Note: `typescript` here is deliberately ^5 (svelte-check's peer range) while the root has TS 7 (the Go port — svelte-check cannot bind its API). npm must resolve the conflict by nesting BOTH `svelte-check` and `typescript@5` under `ui/node_modules/`. **Watch-item:** after `npm install`, run `ls ui/node_modules` — `svelte-check` and `typescript` must both appear there (nested); if either hoisted to the root, svelte-check will bind root TS 7 and crash or misbehave. Fallback if so: pin `"typescript": "5.9.2"` exact (no caret) in `ui/package.json`, `rm -rf node_modules ui/node_modules package-lock.json && npm install`, re-probe; if still hoisted, report BLOCKED rather than improvising. (`vitest run` before Task 2 adds test files exits non-zero with "No test files found" — expected; no task runs it before then.)
 
-- [ ] **Step 5: `ui/tsconfig.json`** (exact content):
+- [x] **Step 5: `ui/tsconfig.json`** (exact content):
 
 ```json
 {
@@ -169,7 +169,7 @@ Note: `typescript` here is deliberately ^5 (svelte-check's peer range) while the
 
 `"node"` is load-bearing: the type chase from `ui/src/lib/api/types.ts` reaches `src/app/shared/http.ts`, which imports `IncomingMessage` from `node:http` — without `@types/node` (a root devDependency, hoisted and resolvable from `ui/`) the chased types silently degrade to `any` and every UI type check becomes vacuous.
 
-- [ ] **Step 6: `ui/vite.config.ts`** (exact content):
+- [x] **Step 6: `ui/vite.config.ts`** (exact content):
 
 ```ts
 /// <reference types="vitest/config" />
@@ -194,7 +194,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 7: `ui/index.html`** (exact content):
+- [x] **Step 7: `ui/index.html`** (exact content):
 
 ```html
 <!doctype html>
@@ -211,7 +211,7 @@ export default defineConfig({
 </html>
 ```
 
-- [ ] **Step 8: `ui/src/main.ts`** (exact content):
+- [x] **Step 8: `ui/src/main.ts`** (exact content):
 
 ```ts
 import { mount } from 'svelte';
@@ -221,7 +221,7 @@ import App from './App.svelte';
 mount(App, { target: document.getElementById('app') as HTMLElement });
 ```
 
-- [ ] **Step 9: placeholder `ui/src/App.svelte`** (replaced wholesale in Task 4):
+- [x] **Step 9: placeholder `ui/src/App.svelte`** (replaced wholesale in Task 4):
 
 ```svelte
 <script lang="ts">
@@ -246,7 +246,7 @@ body {
 }
 ```
 
-- [ ] **Step 10: Install + verify**
+- [x] **Step 10: Install + verify**
 
 ```bash
 cd /Users/harishamutha/Job-bunny-local-db
@@ -261,7 +261,7 @@ git status --porcelain            # ui/dist must NOT appear (gitignore works); n
 bash -c "npm run check"           # root gate untouched: 1286 tests, EXIT:0
 ```
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add package.json package-lock.json .gitignore ui/package.json ui/tsconfig.json ui/vite.config.ts ui/index.html ui/src/main.ts ui/src/App.svelte ui/src/app.css
@@ -285,7 +285,7 @@ git commit -m "feat(ui): scaffold ui/ npm workspace (vite + svelte 5 + vitest)"
   - `client.ts`: `class ApiError extends Error { status: number; code: string }`; `buildQuery(params: object): string`; `getJson<T>(path: string): Promise<T>`; `patchJson<T>(path: string, body: unknown): Promise<T>`.
   - `board/api.ts`: `listJobs(profile: string, query: ListQuery): Promise<BoardListResponse>`; `getJob(profile: string, id: string): Promise<BoardDetailResponse>`; `patchTracking(profile: string, id: string, patch: TrackingPatchBody): Promise<TrackingPatchResponse>`; `getMeta(profile: string): Promise<BoardMetaResponse>`.
 
-- [ ] **Step 1: src barrel re-exports (make the feature barrels the complete contract surface).** Append to `src/app/features/board/index.ts`:
+- [x] **Step 1: src barrel re-exports (make the feature barrels the complete contract surface).** Append to `src/app/features/board/index.ts`:
 
 ```ts
 export type { BoardJobDetail, BoardJobRow, TrackingRow } from '../../../ports/board.ts';
@@ -299,7 +299,7 @@ export type { BoardProfile } from '../../../ports/board.ts';
 
 Run `bash -c "npm run check"` — green (app→ports is allowed by `app-only-ports-core`; type-only, no behavior change, 1286 tests).
 
-- [ ] **Step 2: Write the failing tests.** `ui/src/lib/api/client.test.ts`:
+- [x] **Step 2: Write the failing tests.** `ui/src/lib/api/client.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -432,7 +432,7 @@ describe('board api paths', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 ```bash
 npm run test --workspace ui
@@ -440,7 +440,7 @@ npm run test --workspace ui
 
 Expected: FAIL — cannot resolve `./client` / `./api`.
 
-- [ ] **Step 4: Implement.** `ui/src/lib/api/types.ts` (exact content — the ONLY file that crosses the workspace boundary; type-only, so nothing from `src/` reaches the bundle):
+- [x] **Step 4: Implement.** `ui/src/lib/api/types.ts` (exact content — the ONLY file that crosses the workspace boundary; type-only, so nothing from `src/` reaches the bundle):
 
 ```ts
 /**
@@ -566,13 +566,13 @@ export function getMeta(profile: string): Promise<BoardMetaResponse> {
 }
 ```
 
-- [ ] **Step 5: Enable vitest in the ui gate.** In `ui/package.json`, change the check script to:
+- [x] **Step 5: Enable vitest in the ui gate.** In `ui/package.json`, change the check script to:
 
 ```json
     "check": "svelte-check --tsconfig ./tsconfig.json && vitest run",
 ```
 
-- [ ] **Step 6: Run to verify green**
+- [x] **Step 6: Run to verify green**
 
 ```bash
 npm run test --workspace ui     # all client/api tests pass
@@ -591,7 +591,7 @@ Run `npm run ui:check` — Expected: **exactly one error** (`string` not assigna
 
 **Watch-item:** if svelte-check reports diagnostics *inside* `src/**` files (they enter the program via the type chase), do not edit `src/**` — align `ui/tsconfig.json` compiler options with the root's strictness instead, and report what was needed.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/app/features/board/index.ts src/app/features/profiles/index.ts ui/src/lib/api ui/src/features/board/api.ts ui/src/features/board/api.test.ts ui/package.json
@@ -611,7 +611,7 @@ git commit -m "feat(ui): typed api client over the board contract (type-only src
   - `router.ts`: `type RouteName = 'board' | 'analytics' | 'onboarding'`; `parseHash(hash: string): RouteName`; `createRouter(win): Router` where `Router = { route: Readable<RouteName>; navigate(to: RouteName): void }` and `win` needs `{ location: { hash: string }; addEventListener(type: 'hashchange', listener: () => void): void }`.
   - `profile.ts`: `createProfileStore(storage: Pick<Storage, 'getItem' | 'setItem'>): ProfileStore` where `ProfileStore = { current: Readable<string | null>; init(profiles: BoardProfile[]): void; choose(name: string): void }`. Storage key: `'jobbunny.profile'`.
 
-- [ ] **Step 1: Write the failing tests.** `ui/src/lib/router.test.ts`:
+- [x] **Step 1: Write the failing tests.** `ui/src/lib/router.test.ts`:
 
 ```ts
 import { get } from 'svelte/store';
@@ -725,7 +725,7 @@ describe('createProfileStore', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npm run test --workspace ui
@@ -733,7 +733,7 @@ npm run test --workspace ui
 
 Expected: FAIL — cannot resolve `./router` / `./profile`.
 
-- [ ] **Step 3: Implement.** `ui/src/lib/router.ts` (exact content):
+- [x] **Step 3: Implement.** `ui/src/lib/router.ts` (exact content):
 
 ```ts
 import { type Readable, writable } from 'svelte/store';
@@ -805,13 +805,13 @@ export function createProfileStore(storage: StorageLike): ProfileStore {
 }
 ```
 
-- [ ] **Step 4: Run to verify green**
+- [x] **Step 4: Run to verify green**
 
 ```bash
 npm run test --workspace ui && npm run ui:check
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add ui/src/lib/router.ts ui/src/lib/router.test.ts ui/src/lib/profile.ts ui/src/lib/profile.test.ts
@@ -832,7 +832,7 @@ git commit -m "feat(ui): hash router and localStorage-backed profile store"
 
 This task has no unit tests (components are gated by `svelte-check` + `vite build`; the shell's logic lives in Task 3's tested modules). Acceptance = both green plus the placeholder page rendering.
 
-- [ ] **Step 1: `ui/src/App.svelte`** (exact content — final form, not touched by later tasks):
+- [x] **Step 1: `ui/src/App.svelte`** (exact content — final form, not touched by later tasks):
 
 ```svelte
 <script lang="ts">
@@ -888,7 +888,7 @@ This task has no unit tests (components are gated by `svelte-check` + `vite buil
 </div>
 ```
 
-- [ ] **Step 2: `ui/src/features/shell/Sidebar.svelte`** (exact content):
+- [x] **Step 2: `ui/src/features/shell/Sidebar.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -926,7 +926,7 @@ This task has no unit tests (components are gated by `svelte-check` + `vite buil
 </aside>
 ```
 
-- [ ] **Step 3: `ui/src/features/shell/ProfileSwitcher.svelte`** (exact content):
+- [x] **Step 3: `ui/src/features/shell/ProfileSwitcher.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -950,7 +950,7 @@ This task has no unit tests (components are gated by `svelte-check` + `vite buil
 </label>
 ```
 
-- [ ] **Step 4: stub pages.** `ui/src/features/analytics/AnalyticsPage.svelte`:
+- [x] **Step 4: stub pages.** `ui/src/features/analytics/AnalyticsPage.svelte`:
 
 ```svelte
 <section class="stub">
@@ -984,7 +984,7 @@ Placeholder `ui/src/features/board/BoardPage.svelte` (replaced wholesale in Task
 </section>
 ```
 
-- [ ] **Step 5: `ui/src/app.css`** (replace wholesale — exact content; feature-specific styles stay component-scoped in Tasks 5–6):
+- [x] **Step 5: `ui/src/app.css`** (replace wholesale — exact content; feature-specific styles stay component-scoped in Tasks 5–6):
 
 ```css
 :root {
@@ -1072,7 +1072,7 @@ main {
 }
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 ```bash
 npm run ui:check && npm run ui:build
@@ -1080,7 +1080,7 @@ npm run ui:check && npm run ui:build
 
 Expected: svelte-check 0 errors; build emits `ui/dist`. Optional a11y *warnings* are acceptable; errors are not.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add ui/src/App.svelte ui/src/app.css ui/src/features/shell ui/src/features/analytics ui/src/features/onboarding ui/src/features/board/BoardPage.svelte
@@ -1102,7 +1102,7 @@ git commit -m "feat(ui): app shell — sidebar, profile switcher, hash-routed pa
   - `FilterBar` props: `{ query: ListQuery; meta: BoardMetaResponse | null; onchange: (patch: Partial<ListQuery>) => void }`.
   - `JobTable` props: `{ rows: BoardJobRow[]; sort: 'date_found' | 'score'; order: 'asc' | 'desc'; onsort: (col: 'date_found' | 'score') => void; onselect: (id: string) => void }`.
 
-- [ ] **Step 1: `ui/src/features/board/BoardPage.svelte`** (exact content):
+- [x] **Step 1: `ui/src/features/board/BoardPage.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -1270,7 +1270,7 @@ git commit -m "feat(ui): app shell — sidebar, profile switcher, hash-routed pa
 
 **Implementer note:** `selectedId` and `onTracking` are intentionally written-but-unused in this task — Task 6 wires them to the drawer. Do NOT remove them, and do NOT remove the `<!-- JobDrawer mounts here… -->` comment: Task 6 replaces that exact line. Unused-symbol hints from svelte-check are warnings, not errors.
 
-- [ ] **Step 2: `ui/src/features/board/FilterBar.svelte`** (exact content):
+- [x] **Step 2: `ui/src/features/board/FilterBar.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -1371,7 +1371,7 @@ git commit -m "feat(ui): app shell — sidebar, profile switcher, hash-routed pa
 
 Archived semantics (from the PR-4 adapter, see Global Constraints): two-state, never "all" — the adapter always emits `jobs.archived = ?` with absent coerced to `false`. Hence an Active/Archived select, not an "include archived" checkbox. (For the other filters, `{ status: undefined }` etc. in a spread DOES override the old value — `patchQuery` relies on that to clear a filter.)
 
-- [ ] **Step 3: `ui/src/features/board/JobTable.svelte`** (exact content):
+- [x] **Step 3: `ui/src/features/board/JobTable.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -1478,7 +1478,7 @@ Archived semantics (from the PR-4 adapter, see Global Constraints): two-state, n
 
 (Row selection is a real `<button>` in the title cell — keyboard-accessible, no `onclick`-on-`<tr>` a11y warnings.)
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npm run ui:check && npm run ui:build
@@ -1486,7 +1486,7 @@ npm run ui:check && npm run ui:build
 
 Expected: svelte-check 0 errors, build green. Vitest suite unchanged-green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add ui/src/features/board/BoardPage.svelte ui/src/features/board/FilterBar.svelte ui/src/features/board/JobTable.svelte
@@ -1508,7 +1508,7 @@ git commit -m "feat(ui): board page — filterable, sortable, paginated job tabl
   - `JobDrawer` props: `{ profile: string; jobId: string; statusOptions: string[]; onclose: () => void; ontracking: (jobId: string, tracking: TrackingRow | null) => void }`.
   - `TrackingForm` props: `{ profile: string; jobId: string; tracking: TrackingRow | null; statusOptions: string[]; ontracking: (jobId: string, tracking: TrackingRow | null) => void }`.
 
-- [ ] **Step 1: Write the failing test.** `ui/src/features/board/tracking.test.ts`:
+- [x] **Step 1: Write the failing test.** `ui/src/features/board/tracking.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -1554,7 +1554,7 @@ describe('applyPatch', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 npm run test --workspace ui
@@ -1562,7 +1562,7 @@ npm run test --workspace ui
 
 Expected: FAIL — cannot resolve `./tracking`.
 
-- [ ] **Step 3: Implement `ui/src/features/board/tracking.ts`** (exact content):
+- [x] **Step 3: Implement `ui/src/features/board/tracking.ts`** (exact content):
 
 ```ts
 import type { TrackingPatchBody, TrackingRow } from '../../lib/api/types';
@@ -1591,13 +1591,13 @@ export function applyPatch(
 }
 ```
 
-- [ ] **Step 4: Run to verify green**
+- [x] **Step 4: Run to verify green**
 
 ```bash
 npm run test --workspace ui
 ```
 
-- [ ] **Step 5: `ui/src/features/board/TrackingForm.svelte`** (exact content):
+- [x] **Step 5: `ui/src/features/board/TrackingForm.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -1768,7 +1768,7 @@ npm run test --workspace ui
 
 An invalid inline edit (e.g. a status string the server's `z.strictObject` rejects — unreachable through the select, but reachable for dates) comes back as a 400 `validation` envelope → rollback + the message shown. That's the required "optimistic update + rollback on failure".
 
-- [ ] **Step 6: `ui/src/features/board/JobDrawer.svelte`** (exact content):
+- [x] **Step 6: `ui/src/features/board/JobDrawer.svelte`** (exact content):
 
 ```svelte
 <script lang="ts">
@@ -1926,7 +1926,7 @@ An invalid inline edit (e.g. a status string the server's `z.strictObject` rejec
 </style>
 ```
 
-- [ ] **Step 7: Mount the drawer.** In `ui/src/features/board/BoardPage.svelte`, add to the imports:
+- [x] **Step 7: Mount the drawer.** In `ui/src/features/board/BoardPage.svelte`, add to the imports:
 
 ```ts
   import JobDrawer from './JobDrawer.svelte';
@@ -1946,7 +1946,7 @@ and replace the closing comment line `<!-- JobDrawer mounts here in the next tas
   {/if}
 ```
 
-- [ ] **Step 8: Verify**
+- [x] **Step 8: Verify**
 
 ```bash
 npm run ui:check && npm run ui:build
@@ -1954,7 +1954,7 @@ npm run ui:check && npm run ui:build
 
 Expected: svelte-check 0 errors, vitest green (client + api + router + profile + tracking suites), build green.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add ui/src/features/board
@@ -1973,7 +1973,7 @@ git commit -m "feat(ui): job detail drawer with optimistic tracking edits + roll
 - Consumes: Task 1's root scripts (`ui:check`, `ui:build`).
 - Produces: nothing downstream — closure-only hygiene.
 
-- [ ] **Step 1: Update the test first.** In `src/app/server/static.test.ts` (the expectation string around line 94), change the fragment `'(arrives with PR 5). API: GET /api/profiles'` so the full expected message reads exactly:
+- [x] **Step 1: Update the test first.** In `src/app/server/static.test.ts` (the expectation string around line 94), change the fragment `'(arrives with PR 5). API: GET /api/profiles'` so the full expected message reads exactly:
 
 ```
 Job Bunny board API is running. UI not built yet — run: npm run ui:build. API: GET /api/profiles
@@ -1981,7 +1981,7 @@ Job Bunny board API is running. UI not built yet — run: npm run ui:build. API:
 
 Run: `node --test src/app/server/static.test.ts` — Expected: FAIL (message mismatch).
 
-- [ ] **Step 2: Update the implementation.** In `src/app/server/static.ts:14-16` replace:
+- [x] **Step 2: Update the implementation.** In `src/app/server/static.ts:14-16` replace:
 
 ```ts
 const NO_UI_MESSAGE =
@@ -2001,7 +2001,7 @@ In the same file, the header comment (around line 2) still says the UI "arrives 
 
 Run: `node --test src/app/server/static.test.ts` — Expected: PASS.
 
-- [ ] **Step 3: CI.** In `.github/workflows/test.yml`, insert a `ui` job between `check` and `test`, and extend the wrapper. The file's `check` job is untouched. New `ui` job (exact text, same indentation style as `check`):
+- [x] **Step 3: CI.** In `.github/workflows/test.yml`, insert a `ui` job between `check` and `test`, and extend the wrapper. The file's `check` job is untouched. New `ui` job (exact text, same indentation style as `check`):
 
 ```yaml
   # The UI workspace has its own gate (svelte-check + vitest + vite build).
@@ -2033,7 +2033,7 @@ And the `test` wrapper becomes (only `needs` and the failure condition change; t
         run: exit 1
 ```
 
-- [ ] **Step 4: Verify + commit**
+- [x] **Step 4: Verify + commit**
 
 ```bash
 bash -c "npm run check"    # root gate green (same count as baseline — no new tests)
@@ -2060,7 +2060,7 @@ Three behavior changes, each pinned by a test written first:
 2. **New `ui build` step**: `done` when `<root>/ui/dist/index.html` exists, else `needs-action — run: npm run ui:build`.
 3. **Authority fix (pre-existing, verified in design review):** `stepInventory` checks `page_inventory/<page>.md`, but the runtime authority is `<page>.json` (`src/adapters/lanes/linkedin/inventory.ts:30` — the lane loads only `.json`). Both files happen to exist today, so setup currently reports `done` off a NON-authoritative file — a stale `.md` beside a missing `.json` would pass setup and then fail the run. Fix setup to `.json`, and fix the two places that steer users toward `.md`: `profile.ts` SEARCH_URLS_TEMPLATE and the `<!-- inventory: … -->` comment `lane_add_url.ts` writes into `search_urls.md`.
 
-- [ ] **Step 1: Write the failing tests.** Extend `src/cli/commands/setup.test.ts` (follow its existing temp-dir/fake-deps helper pattern; the cases below are the required semantics — adapt helper names to the file's existing ones):
+- [x] **Step 1: Write the failing tests.** Extend `src/cli/commands/setup.test.ts` (follow its existing temp-dir/fake-deps helper pattern; the cases below are the required semantics — adapt helper names to the file's existing ones):
 
 ```ts
 test('sqlite-only profile: .env NOTION_TOKEN is skipped even with no .env', async (t) => {
@@ -2116,7 +2116,7 @@ test('page_inventory coverage accepts .json inventory files', async (t) => {
 
 Line numbers are approximate — locate each by its test name.
 
-- [ ] **Step 2: Run to verify the new tests fail**
+- [x] **Step 2: Run to verify the new tests fail**
 
 ```bash
 node --test src/cli/commands/setup.test.ts
@@ -2124,7 +2124,7 @@ node --test src/cli/commands/setup.test.ts
 
 Expected: FAIL on each new case (token step unconditional today; no `ui build` step; `.md` lookup).
 
-- [ ] **Step 3: Implement in `src/cli/commands/setup.ts`.**
+- [x] **Step 3: Implement in `src/cli/commands/setup.ts`.**
 
 (a) New helper after `envHasKey`:
 
@@ -2228,14 +2228,14 @@ async function stepUiBuilt(root: string, deps: SetupDeps): Promise<StepResult> {
 
 Also refresh the file-header comment (the step list it describes) to match. Keep `setup.ts` under the 400-line cap (currently 196 — comfortably fits).
 
-- [ ] **Step 4: Run to verify green**
+- [x] **Step 4: Run to verify green**
 
 ```bash
 node --test src/cli/commands/setup.test.ts   # all cases pass
 bash -c "npm run check"                       # full gate green (count grows by the new tests)
 ```
 
-- [ ] **Step 5: Replace `.claude/commands/setup.md` with exactly this content** (user-approved fold-in; frontmatter unchanged):
+- [x] **Step 5: Replace `.claude/commands/setup.md` with exactly this content** (user-approved fold-in; frontmatter unchanged):
 
 ```markdown
 ---
@@ -2281,7 +2281,7 @@ Idempotent: creates `profiles/<profile>/` and seeds any missing `profile.json` /
 Report a short summary at the end: what's done, what's still red (if anything), and the one-line next action (usually `node src/cli/main.ts run --profile <profile>`).
 ```
 
-- [ ] **Step 6: Final verify + commit**
+- [x] **Step 6: Final verify + commit**
 
 ```bash
 bash -c "npm run check"
@@ -2298,9 +2298,9 @@ git commit -m "feat(cli): local-first setup — Notion token only when needed, u
 
 Never touch `profiles/harish/**` or `profiles/rajni/**`; PATCH only the throwaway profile. All commands from `/Users/harishamutha/Job-bunny-local-db`.
 
-- [ ] **Step 1:** `bash -c "npm run check"` green at HEAD; `npm run ui:check` green; `npm run ui:build` fresh (note: `ui/dist` is gitignored — `git status --porcelain` stays clean).
+- [x] **Step 1:** `bash -c "npm run check"` green at HEAD; `npm run ui:check` green; `npm run ui:build` fresh (note: `ui/dist` is gitignored — `git status --porcelain` stays clean).
 
-- [ ] **Step 2: Seed a sqlite profile with one job.**
+- [x] **Step 2: Seed a sqlite profile with one job.**
 
 ```bash
 node src/cli/main.ts profile build --profile zzuicheck
@@ -2314,7 +2314,7 @@ env -u NOTION_TOKEN node src/cli/main.ts stage sync --profile zzuicheck
 
 Expected: exit 0, `sync: 1 -> 1` (the checkpoint filename `08-rank.json` + UTC date matches what `stage` reads — the exact procedure PR 4's Task 10 verified at `64be887`).
 
-- [ ] **Step 3: Setup smoke (Task 8 live).**
+- [x] **Step 3: Setup smoke (Task 8 live).**
 
 ```bash
 node src/cli/main.ts setup --profile zzuicheck; echo "EXIT:$?"
@@ -2322,7 +2322,7 @@ node src/cli/main.ts setup --profile zzuicheck; echo "EXIT:$?"
 
 Expected: `.env NOTION_TOKEN: skipped — local sqlite profile — Notion token not needed` (skipped because the profile is sqlite-only — the env var is irrelevant to this step, which reads `.env` from disk); `ui build: done — ui/dist present`. (Exit is 1 — `resume.json`/`search_urls.md` legitimately need action; that's correct behavior, not a failure.)
 
-- [ ] **Step 4: Board serves the built UI.**
+- [x] **Step 4: Board serves the built UI.**
 
 ```bash
 env -u NOTION_TOKEN node src/cli/main.ts board --port 4747 & echo $! > "${TMPDIR:-/tmp}/jb-board.pid"
@@ -2338,7 +2338,7 @@ curl -s http://127.0.0.1:4747/board | head -3                  # SPA fallback �
 curl --path-as-is -s "http://127.0.0.1:4747/../../../etc/passwd" | head -3   # SPA index.html, no "root:" line
 ```
 
-- [ ] **Step 5: API regression sweep through the same server.**
+- [x] **Step 5: API regression sweep through the same server.**
 
 ```bash
 curl -s http://127.0.0.1:4747/api/profiles | node -e 'process.stdin.pipe(process.stdout)'   # zzuicheck present, hasDb true
@@ -2353,7 +2353,7 @@ curl -s -X PATCH -H 'content-type: application/json' -d '{"status":"Bogus"}' \
 
 Any deviation → BLOCKED (report, don't improvise).
 
-- [ ] **Step 6: Teardown (in this order — the server must die before the profile is removed, or the open sqlite handle leaves WAL sidecars behind).**
+- [x] **Step 6: Teardown (in this order — the server must die before the profile is removed, or the open sqlite handle leaves WAL sidecars behind).**
 
 ```bash
 kill "$(cat "${TMPDIR:-/tmp}/jb-board.pid")" && rm "${TMPDIR:-/tmp}/jb-board.pid"
@@ -2378,3 +2378,19 @@ git status --porcelain    # clean
 - Mirror follow-ups: malformed-slice doctor warn; persisted-subset push.
 - `compose.test.ts` at 800/800; `src/ports` two-pair pressure; `stage.ts` UTC run-folder date bug (pre-existing).
 - UI v2 candidates (out of scope now): component render tests, debounced company filter, keyboard nav in the table, board column for `nextActionDate` due-soon highlighting.
+
+---
+
+## Execution record (2026-08-01, completed)
+
+**Branch:** `feat/ui-workspace` from `main-db` @ `15288c7`. All 9 tasks executed by the SDD lead (fresh implementer + reviewer per task); briefs/ledger/reports in `.superpowers/sdd/2026-08-02-ui-workspace/`.
+
+**Commits:** plan `7c9d903` + `923af13` (heading fix) · T1 `e653cf1` · T2 `8336f1c` · T3 `d8b8db7` · T4 `860bfe8` · T5 `d1b3fea` · T6 `df257e9` · T7 `db103ab` · T8 `b863bba` · T6 fix round `3d93ccc` (field-level rollback via tested `commitField`) · review fix wave `fe45264` (I1 per-field save state, I2 maxlength caps, M1 connector parity, M2 `unknown` sentinel, M3 `bad_response` guard) · KB sync + `src/app/` §3 entry `c9fceb6`.
+
+**Reviews:** design review (opus) round 1 FIX FIRST (4 Critical / 8 Important / 4 Nit — notably: archived filter is two-state never "all"; ui tsconfig needed `types:["node",…]` or the cross-boundary type chase silently degrades to `any`) → all folded into Rev 2 → APPROVED. Task reviews: all approved; T6 required the fix round (whole-row rollback could discard a concurrently confirmed edit — closed by `commitField` with a concurrency-race test). T4 blocked legitimately (scriptless stub `.svelte` files yield no module type) — resolved with empty `<script lang="ts">` blocks, no typing shims. Whole-branch review (opus): **MERGE, 0 Critical**; I1/I2/M1/M2/M3 fixed in `fe45264`; deferred/accepted: M4 raw `localStorage` (storage-disabled browsers), M5 router listener never removed (singleton), M6 BoardPage pager/sort logic untested in `.svelte`, M7 vite "no Svelte config" log, M8 client hardcodes limit 50 (4 sites) instead of reading the server echo, M9 archived-row dimming is a dead affordance (homogeneous result sets), M10 drawer doesn't special-case `no_local_db`, M11 no-op guard trims but sends untrimmed values, M12 `ui/` outside biome/filesize (intentional, noted).
+
+**Gates at final HEAD (advisor-replicated):** root `npm run check` **1294/1294** exit 0 (baseline 1286 + 7 setup tests + 1 fix-wave test) · `npm run ui:check` svelte-check 373 files **0 errors/0 warnings** + vitest **39/39** · `npm run ui:build` clean (130 modules).
+
+**Runtime verification (advisor, at `fe45264`):** throwaway `zzuicheck` (sqlite scaffold) seeded via UTC checkpoint + `stage sync` (1→1, exit 0, no NOTION_TOKEN). Setup smoke: `.env NOTION_TOKEN: skipped — local sqlite profile`, `ui build: done`. Board on :4747: built `index.html` served at `/`, hashed asset 200 `text/javascript`, SPA fallback `/board` 200, `--path-as-is` traversal probe returned the SPA index (0 `root:` lines). API sweep exact (profiles/list/meta/detail; PATCH valid → merged TrackingRow, invalid → 400 validation envelope). **Browser pass (Chrome):** shell + dark scheme render; profile switch rajni→zzuicheck reactively reloaded the table; drawer showed meta grid + tracking form + JD text; inline status edit Applied→Onsite propagated drawer→table optimistically and persisted server-side with only that field changed (notes untouched — field-level semantics held live); hash route `#/analytics` works; console clean. Teardown verified: profile removed, no listener/process, tree clean.
+
+**Merged to `main-db`:** ff-merge (hash recorded in the merge commit listing below by the merge operator).
