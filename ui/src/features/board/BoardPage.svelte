@@ -8,6 +8,7 @@
   } from '../../lib/api/types';
   import { getMeta, listJobs } from './api';
   import FilterBar from './FilterBar.svelte';
+  import JobDrawer from './JobDrawer.svelte';
   import JobTable from './JobTable.svelte';
 
   let { profile }: { profile: string } = $props();
@@ -136,7 +137,15 @@
     <p class="empty">Loading…</p>
   {/if}
 
-  <!-- JobDrawer mounts here in the next task, driven by selectedId/onTracking. -->
+  {#if selectedId}
+    <JobDrawer
+      {profile}
+      jobId={selectedId}
+      statusOptions={meta?.statusOptions ?? []}
+      onclose={() => (selectedId = null)}
+      ontracking={onTracking}
+    />
+  {/if}
 </section>
 
 <style>
