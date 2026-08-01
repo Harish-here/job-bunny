@@ -17,25 +17,29 @@
     ontracking: (jobId: string, tracking: TrackingRow | null) => void;
   } = $props();
 
-  let saving = $state(false);
-  let saveError = $state<string | null>(null);
+  let fieldState = $state<
+    Partial<Record<keyof TrackingPatchBody, { saving: boolean; error: string | null }>>
+  >({});
+  const anySaving = $derived(Object.values(fieldState).some((s) => s?.saving));
 
   async function commit(field: keyof TrackingPatchBody, raw: string) {
-    saving = true;
-    saveError = await commitField(jobId, field, raw, {
+    fieldState[field] = { saving: true, error: null };
+    const error = await commitField(jobId, field, raw, {
       read: () => tracking,
       patch: (p) => patchTracking(profile, jobId, p).then((r) => r.tracking),
       apply: (t) => ontracking(jobId, t),
     });
-    saving = false;
+    fieldState[field] = { saving: false, error };
   }
 </script>
 
 <form class="tracking" onsubmit={(e) => e.preventDefault()}>
-  <h3>Tracking {#if saving}<span class="saving">saving…</span>{/if}</h3>
-  {#if saveError}
-    <p class="error">Save failed — rolled back: {saveError}</p>
-  {/if}
+  <h3>Tracking {#if anySaving}<span class="saving">saving…</span>{/if}</h3>
+  {#each Object.entries(fieldState) as [f, s] (f)}
+    {#if s?.error}
+      <p class="error">Save failed on {f} — rolled back: {s.error}</p>
+    {/if}
+  {/each}
 
   <label>
     Status
@@ -62,6 +66,7 @@
   <label>
     Comp range
     <input
+      maxlength="500"
       value={tracking?.compRange ?? ''}
       onchange={(e) => commit('compRange', e.currentTarget.value)}
     />
@@ -70,6 +75,7 @@
   <label>
     Contact
     <input
+      maxlength="500"
       value={tracking?.contact ?? ''}
       onchange={(e) => commit('contact', e.currentTarget.value)}
     />
@@ -78,6 +84,7 @@
   <label>
     Next action
     <input
+      maxlength="500"
       value={tracking?.nextAction ?? ''}
       onchange={(e) => commit('nextAction', e.currentTarget.value)}
     />
@@ -96,6 +103,7 @@
     Notes
     <textarea
       rows="3"
+      maxlength="5000"
       value={tracking?.notes ?? ''}
       onchange={(e) => commit('notes', e.currentTarget.value)}
     ></textarea>

@@ -46,10 +46,17 @@ describe('getJson', () => {
     expect(err).toMatchObject({ status: 404, code: 'no_local_db' });
   });
 
-  it('throws ApiError(code internal) when an error body is not the envelope', async () => {
+  it('throws ApiError(code unknown) when an error body is not the envelope', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })));
     const err = await getJson('/api/x').catch((e: unknown) => e);
-    expect(err).toMatchObject({ status: 500, code: 'internal', message: 'HTTP 500' });
+    expect(err).toMatchObject({ status: 500, code: 'unknown', message: 'HTTP 500' });
+  });
+
+  it('throws ApiError(code bad_response) on a 200 with a non-JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
+    const err = await getJson('/api/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 200, code: 'bad_response' });
   });
 
   it('wraps network failures as ApiError(status 0, code network)', async () => {

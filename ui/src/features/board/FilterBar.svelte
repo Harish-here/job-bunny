@@ -39,6 +39,7 @@
   <input
     aria-label="Company"
     placeholder="Company…"
+    maxlength="200"
     value={query.company ?? ''}
     onchange={(e) => onchange({ company: e.currentTarget.value || undefined })}
   />

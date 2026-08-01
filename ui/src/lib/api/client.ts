@@ -38,9 +38,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const envelope = body as { error?: { code?: string; message?: string } } | undefined;
     throw new ApiError(
       res.status,
-      envelope?.error?.code ?? 'internal',
+      envelope?.error?.code ?? 'unknown',
       envelope?.error?.message ?? `HTTP ${res.status}`,
     );
+  }
+  if (body === undefined) {
+    throw new ApiError(res.status, 'bad_response', 'malformed response body');
   }
   return body as T;
 }

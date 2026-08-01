@@ -265,6 +265,25 @@ test('mirror=true WITHOUT a dbId does not require the token (matches mirrorSetti
   });
 });
 
+test('non-sqlite, non-notion connector never needs the token, even with mirror settings present', async () => {
+  await withTmpRoot(async (root) => {
+    const profileDir = path.join(root, 'profiles', 'zz');
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      path.join(profileDir, 'profile.json'),
+      JSON.stringify({
+        connector: 'weird',
+        settings: { notion: { dbId: 'x', mirror: true } },
+      }),
+    );
+
+    const lines: string[] = [];
+    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    const tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /skipped/);
+  });
+});
+
 test('unparseable profile.json makes the token step needs-action, not a crash', async () => {
   await withTmpRoot(async (root) => {
     const profileDir = path.join(root, 'profiles', 'zz');

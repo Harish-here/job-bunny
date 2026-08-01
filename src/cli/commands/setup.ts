@@ -89,6 +89,7 @@ async function readConnectorNeeds(
     // Mirrors mirrorSettings() in cli/wire/builders.ts: mirror=true without a
     // non-empty dbId is pinned as NO mirror — so no token needed either.
     const mirrorActive =
+      parsed.connector === 'sqlite' &&
       notion?.mirror === true &&
       typeof notion.dbId === 'string' &&
       notion.dbId.length > 0;
