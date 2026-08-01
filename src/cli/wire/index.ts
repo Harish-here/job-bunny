@@ -10,6 +10,8 @@
  * folder — go through this file.
  */
 
+export type { BoardWireOverrides } from './board.ts';
+export { wireBoard } from './board.ts';
 export type { MigrateWire } from './builders.ts';
 export { wireMigrate } from './builders.ts';
 export type { WireOverrides, WireResult } from './compose.ts';
