@@ -90,6 +90,7 @@ import {
   isApiLane,
   isFarmingLane,
   mirrorDbId,
+  mirrorReachableCheck,
   missingTokenNotionClient,
 } from './builders.ts';
 import { isNotFound, loadFilterConfig, loadPipelineConfig } from './config.ts';
@@ -262,11 +263,14 @@ export async function wire(
     ...assembleAdapterChecks(config, registry, deps),
   ];
   // Opt-in sqlite→Notion mirror (local-DB spec PR 3): a mirrored profile
-  // gets the same `notion-db-reachable` check a plain `notion` connector
-  // would, on top of whatever `assembleAdapterChecks` already contributed
-  // for `sqlite`.
+  // gets a `notion-db-reachable` check too, on top of whatever
+  // `assembleAdapterChecks` already contributed for `sqlite` — but through
+  // `mirrorReachableCheck` (I2), not the raw `dbReachableCheck` a plain
+  // `notion` connector gets: a broken mirror never impairs the sqlite
+  // source of truth a mirrored profile actually runs on, so its `red`
+  // findings are downgraded to `warn`.
   if (mirrorTarget && deps.notionApi) {
-    checks.push(dbReachableCheck({ api: deps.notionApi, dbId: mirrorTarget }));
+    checks.push(mirrorReachableCheck({ api: deps.notionApi, dbId: mirrorTarget }));
   }
 
   // --- live ports ---
