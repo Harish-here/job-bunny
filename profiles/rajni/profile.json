@@ -20,7 +20,7 @@
   "routines": [],
   "settings": {
     "notion": {
-      "dbId": "7eb638f2140e49e4bb7cef10c25950e2",
+      "dbId": "00000000000000000000000000000000",
       "dryRun": true
     },
     "sqlite": {},
