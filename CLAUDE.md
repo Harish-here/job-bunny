@@ -28,13 +28,14 @@ node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [-
 node src/cli/main.ts doctor --profile <name>
 node src/cli/main.ts stage <stage-name> --profile <name>
 node src/cli/main.ts routine <routine-name> --profile <name>
+node src/cli/main.ts migrate --profile <name> [--apply]  # Notion → local sqlite import; dry-run by default
 node src/cli/main.ts serve start|stop|status
 node src/cli/main.ts autostart enable|disable     # darwin only
 ```
 
 `jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — full usage in its `USAGE` string. Releases: `npm run release -- <X.Y.Z> [--dry-run] [--no-merge] [--yes]` — the `--` separator is mandatory (without it npm eats the flags; the CLI detects that and refuses).
 
-**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data, no Notion IDs) — see the `verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
+**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data) — see the `verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
 
 ## Profiles
 
@@ -75,6 +76,7 @@ Key invariants:
 - **Farm writes what source reads.** `farm` must run before `source`: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry.
 - **The runner is the single notifier.** Success and failure digests are both built from `result.json` at run end.
 - **Uniform checkpoints.** Each invocation owns its own `profiles/<name>/data/runs/<date>/<HH-MM>/` folder (local start time); the runner writes `NN-<stage>.json` there after every stage. `--resume` creates a fresh folder and seeds it from the latest checkpoint in the latest earlier same-day folder; `stage <name>` continues in today's latest existing folder instead of creating a new one, so a chain of single-stage runs shares checkpoints.
+- **Local sqlite is the source of truth when `connector: "sqlite"`.** The opt-in Notion mirror (`settings.notion.mirror: true`) is a one-way, budgeted, best-effort push — mirror failures or slowness never fail, stall, or red a run or doctor.
 
 ## Slash commands
 
