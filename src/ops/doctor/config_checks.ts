@@ -37,6 +37,11 @@ export interface CoreCheckOpts {
    * `NOTION_TOKEN` is mandatory (`'notion'`) or merely optional
    * (any other value, or omitted). */
   connector?: string;
+  /** Whether `settings.notion.mirror` is on (local-DB spec PR 3's opt-in
+   * sqlite→Notion mirror). Used by `envTokensCheck` to give a missing
+   * `NOTION_TOKEN` a mirror-specific warn detail instead of the generic
+   * "only needed for the notion connector" one. */
+  notionMirror?: boolean;
 }
 
 export function resolveReadFile(opts: CoreCheckOpts): (path: string) => Promise<string> {

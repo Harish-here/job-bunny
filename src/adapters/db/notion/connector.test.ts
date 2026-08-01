@@ -63,6 +63,14 @@ test('constructor: dryRun can be explicitly set to false', () => {
   );
 });
 
+test('constructor: mirror defaults to false, and parses true when set', () => {
+  assert.equal(NotionConnectorSettingsSchema.parse({ dbId: 'x' }).mirror, false);
+  assert.equal(
+    NotionConnectorSettingsSchema.parse({ dbId: 'x', mirror: true }).mirror,
+    true,
+  );
+});
+
 test('name is "notion"', () => {
   const connector = new NotionConnector(
     { dbId: 'db1' },

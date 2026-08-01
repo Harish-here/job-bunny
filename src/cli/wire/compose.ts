@@ -250,15 +250,21 @@ export async function wire(
   };
   const registry = overrides.registry ?? realRegistry;
 
+  const mirrorTarget = mirrorDbId(config);
   const checks = [
-    ...coreChecks({ profileName, root, readFile, connector: config.connector }),
+    ...coreChecks({
+      profileName,
+      root,
+      readFile,
+      connector: config.connector,
+      notionMirror: mirrorTarget !== '',
+    }),
     ...assembleAdapterChecks(config, registry, deps),
   ];
   // Opt-in sqlite→Notion mirror (local-DB spec PR 3): a mirrored profile
   // gets the same `notion-db-reachable` check a plain `notion` connector
   // would, on top of whatever `assembleAdapterChecks` already contributed
   // for `sqlite`.
-  const mirrorTarget = mirrorDbId(config);
   if (mirrorTarget && deps.notionApi) {
     checks.push(dbReachableCheck({ api: deps.notionApi, dbId: mirrorTarget }));
   }

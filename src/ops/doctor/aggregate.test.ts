@@ -168,6 +168,25 @@ test('envTokensCheck: connector omitted behaves like non-notion (warn)', async (
   assert.equal(finding.status, 'warn');
 });
 
+test('envTokensCheck: sqlite + mirror enabled + missing token warns with mirror-specific detail', async () => {
+  const finding = await envTokensCheck({
+    ...optsWithoutNotionToken,
+    connector: 'sqlite',
+    notionMirror: true,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /mirror is enabled/);
+});
+
+test('envTokensCheck: sqlite + mirror flag absent keeps the existing generic detail', async () => {
+  const finding = await envTokensCheck({
+    ...optsWithoutNotionToken,
+    connector: 'sqlite',
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /only needed for the notion connector/);
+});
+
 // --- coreChecks ---
 
 test('daemonLivenessCheck: a missing pidfile warns', async () => {

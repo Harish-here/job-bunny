@@ -68,10 +68,18 @@ export function envTokensCheck(opts: CoreCheckOpts): DoctorCheck {
         parts.push(
           notionRequired
             ? { status: 'red', detail: 'NOTION_TOKEN is not set' }
-            : {
-                status: 'warn',
-                detail: 'NOTION_TOKEN is not set (only needed for the notion connector)',
-              },
+            : opts.notionMirror === true
+              ? {
+                  status: 'warn',
+                  detail:
+                    'NOTION_TOKEN is not set — the Notion mirror is enabled but cannot ' +
+                    'push until it is',
+                }
+              : {
+                  status: 'warn',
+                  detail:
+                    'NOTION_TOKEN is not set (only needed for the notion connector)',
+                },
         );
       }
       if (!env.TELEGRAM_BOT_TOKEN) {
