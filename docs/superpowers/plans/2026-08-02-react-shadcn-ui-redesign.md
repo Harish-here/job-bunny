@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Node ≥ 24; no build step for `src/` (type stripping). Never add root runtime deps (stay: `@notionhq/client`, `playwright`, `zod`).
+- Node ≥ 24; no build step for `src/` (type stripping). Never add root runtime deps (stay exactly: `@notionhq/client`, `dotenv`, `playwright`, `zod` — `dotenv` is the CLI's one-time `.env` load in `src/cli/main.ts`; CLAUDE.md's "three runtime deps" phrasing counts the three pipeline deps and does not include it).
 - All new deps go in `ui/package.json` only (private workspace, outside the root gate).
 - Status/excitement strings are byte-exact and come from `/api/profiles/:name/meta` (`src/core/tracking/vocab.ts`): STATUS = `Lead, Applied, Recruiter Screen, Tech Round, Onsite, Offer, Rejected, Passed`; EXCITEMENT = `Vera level, Kandipa podu, Try panalam`. Never hardcode alternatives in logic; UI may hold the decide-mapping constants below.
 - Decide mapping (spec decision): Apply → `Applied`, Skip → `Passed`, Save → `Lead`. Undecided = `tracking?.status == null`. Terminal statuses for the kanban "Closed" group: `Rejected`, `Passed`.
@@ -20,6 +20,7 @@
 - Commits: conventional style, no co-author trailers, no "Generated with" lines.
 - localStorage key for selected profile stays `jobbunny.profile`.
 - Review flags: Task 2 (server-touching), Task 11 (writes rajni DB), Task 12 (CI) require reviewer pass in sdd-task-loop.
+- Spec correction (deliberate): the spec's triage tracking form lists "excitement", but excitement is a pipeline-owned field on the job row — `TrackingPatchSchema` (`src/app/features/board/routes.ts`) has no such key and the board's write surface is tracking-only. Excitement renders READ-ONLY in `JobFacts`; it is never an editable control anywhere in this plan.
 
 ---
 
@@ -28,6 +29,7 @@
 **Files:**
 - Delete: `ui/src/**` (all Svelte files + old lib), keep nothing; delete Svelte devDeps from `ui/package.json`
 - Create: `ui/package.json` (rewrite), `ui/tsconfig.json`, `ui/vite.config.ts`, `ui/index.html`, `ui/biome.json`, `ui/components.json` (shadcn), `ui/src/main.tsx`, `ui/src/App.tsx`, `ui/src/index.css`, `ui/src/assets/logo.svg` (copy of `assets/job-bunny-logo.svg`), `ui/src/lib/utils.ts` (shadcn cn helper), `ui/src/components/ui/*` (shadcn copy-ins)
+- Modify: `package-lock.json` (root)
 
 **Interfaces:**
 - Produces: a compiling, testable React app skeleton; `npm run ui:check` (root) = `tsc --noEmit` + Biome + `vitest run`; `npm run ui:build` outputs `ui/dist/index.html`. `App.tsx` renders a placeholder shell replaced in Task 5.
@@ -35,6 +37,9 @@
 - [ ] **Step 1: Remove the Svelte app**
 
 ```bash
+# Record the pre-deletion tree so Tasks 3/4 port from THIS branch's base,
+# not from a possibly-stale local origin/main ref.
+git rev-parse HEAD   # paste the sha into the plan below as <PRE_DELETE_SHA>
 git rm -r ui/src ui/index.html ui/vite.config.ts ui/tsconfig.json
 ```
 
@@ -56,14 +61,14 @@ git rm -r ui/src ui/index.html ui/vite.config.ts ui/tsconfig.json
   "dependencies": {
     "@dnd-kit/core": "^6",
     "@tanstack/react-query": "^5",
-    "lucide-react": "^0.5xx",
+    "lucide-react": "latest",
     "react": "^19",
     "react-dom": "^19",
     "sonner": "^2"
   },
   "devDependencies": {
-    "@biomejs/biome": "same major as root",
-    "@playwright/test": "^1",
+    "@biomejs/biome": "^2.5.5",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4",
     "@tanstack/react-query-devtools": "^5",
     "@testing-library/jest-dom": "^6",
@@ -81,7 +86,11 @@ git rm -r ui/src ui/index.html ui/vite.config.ts ui/tsconfig.json
 }
 ```
 
-Run `npm install --prefix ui` and let npm resolve current minors; pin whatever it writes. (`lucide-react`: latest.) Update root `package.json` script `ui:check` if it doesn't already delegate to `npm --prefix ui run check` (it does — verify, don't edit blindly).
+`lucide-react` is versionless-by-design here (`latest`); after `npm install` resolves it, rewrite the entry to the caret range npm actually recorded. `@biomejs/biome@^2.5.5` deliberately matches the root devDep major so ui and root format identically.
+
+`@playwright/test`'s range must track the root's `playwright` dependency (`^1.60.0`) exactly — a minor skew between the two makes `playwright install` fetch a browser build the test runner then refuses (`Executable doesn't exist`).
+
+Run `npm install` **from the repo root** (this is an npm workspace — `"workspaces": ["ui"]`), never `npm install --prefix ui`, which would fork a second `ui/package-lock.json` and leave the root lock stale so CI's `npm ci` fails. Let npm resolve current minors and pin whatever it writes. **`package-lock.json` (root) is part of this task's diff and must be committed with it.** Update root `package.json` script `ui:check` if it doesn't already delegate to `npm --prefix ui run check` (it does — verify, don't edit blindly).
 
 - [ ] **Step 3: `ui/vite.config.ts`** (keep the dev proxy + vitest config semantics from the old file)
 
@@ -98,6 +107,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: { proxy: { '/api': 'http://127.0.0.1:1994' } },
   test: {
+    globals: true,
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['src/test-setup.ts'],
@@ -118,16 +128,20 @@ Create `ui/src/test-setup.ts` containing `import '@testing-library/jest-dom/vite
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["vitest/globals"],
+    "types": ["node", "vite/client", "vitest/globals"],
     "baseUrl": ".",
     "paths": { "@/*": ["src/*"] }
   },
   "include": ["src"]
 }
 ```
+
+`allowImportingTsExtensions`, `"node"`, and `"vite/client"` are LOAD-BEARING, not style: `lib/api/types.ts` (Task 3) imports `src/app/features/*/index.ts` with an explicit `.ts` specifier and type-chases through `src/app/shared/http.ts` (`node:http`, `Buffer`); `vite/client` is what types the `*.svg` import in Task 5's Sidebar. See explainer KB §2.2 "The contract boundary" — do not trim this `types` array.
 
 Add `resolve: { alias: { '@': '/src' } }`-equivalent to vite config via `import path from 'node:path'` + `resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } }` (shadcn imports use `@/`).
 
@@ -226,7 +240,7 @@ Mirror the exact request/response fakes used in `board/routes.test.ts` — do no
 - [ ] **Step 3: Implement** `routes.ts` following `makeBoardRoutes`' `RouteDef` shape:
 
 ```typescript
-import type { RouteDef } from '../../server/index.ts'; // use the actual RouteDef import path found in board/routes.ts
+import type { RouteDef } from '../../shared/index.ts';
 
 export function makeAppInfoRoutes(version: string): RouteDef[] {
   return [
@@ -235,20 +249,35 @@ export function makeAppInfoRoutes(version: string): RouteDef[] {
 }
 ```
 
+`RouteDef` lives in `app/shared/` — never import it from `app/server/index.ts`: `server.ts` imports the feature barrels, so that direction is a cycle.
+
 (Match the real handler signature — copy the shape from the simplest existing handler, `metaHandler`.) `index.ts` re-exports `makeAppInfoRoutes`.
 
 - [ ] **Step 4: Wire** — `server.ts`: add `version: string` to `BoardServerOptions`; `const routes = [...makeProfilesRoutes(source), ...makeBoardRoutes(source), ...makeAppInfoRoutes(version)]`. `cli/commands/board.ts`:
 
 ```typescript
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-const pkg = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
-) as { version: string };
-// pass version: pkg.version into resolved.createServer({ source, logger, uiDir, version: pkg.version })
+// in BoardDeps, alongside uiDir:
+  /** Running server version, surfaced by `GET /api/app`. Default: the root
+   * package.json's `version` — a dep so tests need no disk read. */
+  version: string;
+
+// in defaultDeps():
+  version: (
+    JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
+    ) as { version: string }
+  ).version,
+
+// in boardCommand's createServer call:
+  const server = resolved.createServer({
+    source,
+    logger: resolved.logger,
+    uiDir: resolved.uiDir,
+    version: resolved.version,
+  });
 ```
 
-Update any other `createBoardServer` call sites (tests) the compiler flags.
+Add `version: '0.0.0-test'` to `board.test.ts`'s `baseDeps()` fakes so no test touches the filesystem. Update any other `createBoardServer` call sites (tests) the compiler flags.
 
 - [ ] **Step 5: Verify** — `node --test src/app/features/appinfo/routes.test.ts` PASS, then full gate `npm run check` (boundaries included — `app/` must not import `node:fs`).
 
@@ -259,14 +288,15 @@ Update any other `createBoardServer` call sites (tests) the compiler flags.
 ### Task 3: lib ports — router hook, api client, types, profile persistence
 
 **Files:**
-- Create: `ui/src/lib/router.ts` + `router.test.ts`, `ui/src/lib/api/client.ts` + `client.test.ts`, `ui/src/lib/api/types.ts`, `ui/src/lib/profile.ts` + `profile.test.ts`
+- Create: `ui/src/lib/router.ts` + `router.test.ts`, `ui/src/lib/api/client.ts` + `client.test.ts`, `ui/src/lib/api/types.ts`, `ui/src/lib/profile.ts` + `profile.test.ts`, `ui/src/lib/selection-memo.ts` — module-level `rememberSelection(id)/recallSelection()`, the one piece of cross-view state, so neither `features/triage` nor `features/job` imports the other
 
 **Interfaces:**
 - Produces:
   - `type Route = { name: 'triage' | 'tracker' | 'analytics' | 'onboarding' } | { name: 'job'; id: string }`
   - `parseHash(hash: string): Route`; `useRoute(): Route`; `navigate(to: Route): void` (module fn, sets `location.hash`)
   - `ApiError`, `buildQuery`, `getJson<T>`, `patchJson<T>` — identical semantics to the Svelte versions
-  - `pickProfile(stored: string | null, profiles: BoardProfile[]): string | null` (pure); `useProfile(profiles?: BoardProfile[]): { current: string | null; choose(name: string): void }` — localStorage key `jobbunny.profile`
+  - `pickProfile(stored: string | null, profiles: BoardProfile[]): string | null` (pure); `useStoredProfile(): [string | null, (name: string) => void]` — `useSyncExternalStore` over localStorage key `jobbunny.profile`
+  - `routeHash(route: Route): string` — the inverse of `parseHash`, used by `navigate` and by tests
   - `types.ts` re-exports backend contract types (type-only) from `../../../../src/app/features/board/index.ts` and `.../profiles/index.ts` — copy the old file verbatim, it is framework-free.
 
 - [ ] **Step 1: Failing tests for the router** `router.test.ts`:
@@ -334,12 +364,13 @@ export function useRoute(): Route {
 }
 ```
 
-- [ ] **Step 4: Port `client.ts` + `types.ts` verbatim from git history** (`git show origin/main:ui/src/lib/api/client.ts`) — they contain no Svelte. Port `client.test.ts` from history, converting `node:test`/svelte-isms to vitest if any (it should be plain).
+- [ ] **Step 4: Port `client.ts` + `types.ts` verbatim from git history** (`git show <PRE_DELETE_SHA>:ui/src/lib/api/client.ts`) — they contain no Svelte. Port `client.test.ts` from history, converting `node:test`/svelte-isms to vitest if any (it should be plain).
 
 - [ ] **Step 5: `profile.ts`** — failing tests first (port cases from history: stored-name-wins-if-present, falls back to first `hasDb`, then first, then null; choose persists):
 
 ```typescript
 import type { BoardProfile } from './api/types';
+import { useCallback, useSyncExternalStore } from 'react';
 
 const STORAGE_KEY = 'jobbunny.profile';
 
@@ -348,8 +379,6 @@ export function pickProfile(stored: string | null, profiles: BoardProfile[]): st
   if (stored !== null && names.includes(stored)) return stored;
   return profiles.find((p) => p.hasDb)?.name ?? names[0] ?? null;
 }
-
-import { useCallback, useSyncExternalStore } from 'react';
 
 let listeners: (() => void)[] = [];
 function emit() { for (const l of listeners) l(); }
@@ -414,7 +443,7 @@ export const jobQuery = (p: string, id: string) =>
 
 - [ ] **Step 3: `useBoardData.ts`** — thin hooks: `useJobs(p,q)`/`useJob(p,id)`/`useMeta(p)` wrapping `useQuery(xQuery(...))`. Components import ONLY these (layering rule).
 
-- [ ] **Step 4: `tracking.ts`** — port `applyPatch` verbatim from git history (`git show origin/main:ui/src/features/board/tracking.ts` — take `applyPatch` only; `commitField`'s semantics move into the mutation next step). Port the `applyPatch` test cases verbatim to vitest.
+- [ ] **Step 4: `tracking.ts`** — port `applyPatch` verbatim from git history (`git show <PRE_DELETE_SHA>:ui/src/features/board/tracking.ts` — take `applyPatch` only; `commitField`'s semantics move into the mutation next step). Port the `applyPatch` test cases verbatim to vitest.
 
 - [ ] **Step 5: Failing tests for `useTracking.ts`** (`useTracking.test.tsx`, renderHook with a real `QueryClient` and `vi.stubGlobal('fetch', …)`):
 
@@ -422,7 +451,8 @@ Cases (mirror old `commitField` tests):
 1. optimistic: cache for `job(p,id)` shows patched status before fetch resolves
 2. success: server row replaces optimistic row; `jobsPrefix` invalidated
 3. failure: only the patched field rolls back (seed cache, patch `{status}`, concurrently-updated `notes` in cache survives), toast fired (assert via sonner mock `vi.mock('sonner')`)
-4. no-op guard: `commitField(jobId, field, raw)` returns early when raw equals current value (empty-string vs absent both count as unchanged)
+4. **no-op guard (`fieldPatch`, pure):** returns `null` when `raw` equals the current value; empty-string-vs-absent both count as unchanged; a whitespace-only `raw` against a set field returns `{ [field]: null }` (clear), and a changed value returns the **trimmed** string.
+5. **tracker path (no detail cache):** seed only a `jobsPrefix` list entry whose row has `{status:'Applied', nextAction:'call'}`, mutate `{status:'Onsite'}`, assert the optimistic list row still carries `nextAction:'call'`; on failure assert it rolls back to `status:'Applied'` with `nextAction` intact.
 
 - [ ] **Step 6: Implement `useTracking.ts`**
 
@@ -442,10 +472,20 @@ export function useTrackingMutation(profile: string) {
     mutationFn: ({ jobId, patch }: Vars) => patchTracking(profile, jobId, patch),
     onMutate: async ({ jobId, patch }) => {
       await qc.cancelQueries({ queryKey: boardKeys.job(profile, jobId) });
+      await qc.cancelQueries({ queryKey: boardKeys.jobsPrefix(profile) });
+      // Seed from the detail cache when warm, else from whichever jobs-list
+      // cache holds this row — the Tracker (T9) never mounts useJob, and a
+      // null seed would blank every unpatched tracking field (and, on
+      // rollback, clear fields the server still holds).
       const detail = qc.getQueryData<BoardDetailResponse>(boardKeys.job(profile, jobId));
+      const fromList = qc
+        .getQueriesData({ queryKey: boardKeys.jobsPrefix(profile) })
+        .flatMap(([, l]) => (l as { rows?: { id: string; tracking: TrackingRow | null }[] } | undefined)?.rows ?? [])
+        .find((r) => r.id === jobId)?.tracking ?? null;
+      const existing = detail?.tracking ?? fromList;
       const previous: TrackingPatchBody = {};
       for (const key of Object.keys(patch) as (keyof TrackingPatchBody)[]) {
-        previous[key] = (detail?.tracking?.[key] ?? null) as never;
+        previous[key] = (existing?.[key] ?? null) as never;
       }
       const write = (row: TrackingRow) => {
         qc.setQueryData<BoardDetailResponse>(boardKeys.job(profile, jobId), (d) =>
@@ -455,13 +495,12 @@ export function useTrackingMutation(profile: string) {
           return l ? { ...l, rows: l.rows.map((r) => (r.id === jobId ? { ...r, tracking: row } : r)) } : l;
         });
       };
-      write(applyPatch(detail?.tracking ?? null, jobId, patch));
+      write(applyPatch(existing, jobId, patch));
       return { previous, write };
     },
     onError: (err, { jobId }, ctx) => {
       if (ctx) {
-        const detail = qc.getQueryData<BoardDetailResponse>(boardKeys.job(profile, jobId));
-        ctx.write(applyPatch(detail?.tracking ?? null, jobId, ctx.previous));
+        ctx.write(applyPatch(qc.getQueryData<BoardDetailResponse>(boardKeys.job(profile, jobId))?.tracking ?? existing, jobId, ctx.previous));
       }
       toast.error(`Save failed — rolled back: ${err instanceof Error ? err.message : String(err)}`);
     },
@@ -477,8 +516,9 @@ export function fieldPatch(
   raw: string,
 ): TrackingPatchBody | null {
   const previous = current?.[field];
-  if (raw === (previous ?? '') || (raw.trim() === '' && (previous ?? '') === '')) return null;
-  return { [field]: raw.trim() === '' ? null : raw } as TrackingPatchBody;
+  const next = raw.trim();
+  if (next === (previous ?? '')) return null;
+  return { [field]: next === '' ? null : next } as TrackingPatchBody;
 }
 ```
 
@@ -530,23 +570,28 @@ export function fieldPatch(
 
 **Files:**
 - Create: `ui/src/features/job/JobHeader.tsx`, `JobFacts.tsx`, `JdText.tsx` (shared detail components)
-- Create: `ui/src/features/triage/TriagePage.tsx`, `JobList.tsx`, `JobRow.tsx`, `FilterPopover.tsx`, `selection.ts` + `selection.test.ts`
+- Create: `ui/src/features/triage/TriagePage.tsx`, `JobList.tsx`, `JobRow.tsx`, `FilterPopover.tsx`, `selection.ts` + `selection.test.ts` (hook only)
 
 **Interfaces:**
 - Consumes: `useJobs`, `useJob`, `useMeta` (T4).
-- Produces: `TriagePage({ profile })`; `selection.ts` exports `useTriageSelection(rows: BoardJobRow[]): { selectedId: string | null; select(id: string): void; move(delta: 1 | -1): void }` and module-level `rememberSelection(id)/recallSelection()` (plain vars) used by Task 9's back-navigation.
+- Produces: `TriagePage({ profile })`; `selection.ts` exports `useTriageSelection(rows: BoardJobRow[]): { selectedId: string | null; select(id: string): void; move(delta: 1 | -1): void }` (hook only) — `rememberSelection(id)/recallSelection()` are sourced from `lib/selection-memo` (T3), not defined here.
 - Query defaults (port of old BoardPage): `{ sort: 'date_found', order: 'desc', archived: 'false', limit: 50, offset: 0 }`; filter change resets offset to 0.
 
 - [ ] **Step 1: Failing tests for `selection.ts`** — pure logic: defaults to first row when null/stale; `move(+1/-1)` clamps at ends; selection survives row refetch when id still present.
-- [ ] **Step 2: Implement selection hook** (useState + useEffect reconciling against `rows`; module-level `let lastSelection: string | null` with exported `rememberSelection`/`recallSelection`; initialize state from `recallSelection()` when the id is in `rows`).
+- [ ] **Step 2: Implement selection hook** (useState + useEffect reconciling against `rows`; imports `rememberSelection`/`recallSelection` from `lib/selection-memo` (T3) rather than holding that state itself; initialize state from `recallSelection()` when the id is in `rows`).
 - [ ] **Step 3: Build the view.** Layout:
 
 ```tsx
 // TriagePage
 <div className="grid h-screen grid-cols-[minmax(280px,360px)_1fr]">
   <section className="overflow-y-auto border-r">
-    {/* header: undecided count (rows where tracking?.status == null), sort toggle
-        (date_found/score + asc/desc), FilterPopover */}
+    {/* header: undecided count (rows where tracking?.status == null), an
+        always-mounted company search `Input` carrying `data-search-input`
+        (debounced 250ms → ListQuery.company, resets offset to 0 — this is
+        the `/` hotkey target in T7, so it must NOT live inside the
+        Popover), sort toggle (date_found/score + asc/desc), FilterPopover
+        for the remaining filters (status, excitement, dateFrom/dateTo,
+        archived) */}
     <JobList rows={rows} selectedId={selectedId} onSelect={select} />
   </section>
   <section className="overflow-y-auto p-6">
@@ -575,7 +620,7 @@ Empty/edge states: `no_local_db` → friendly empty state; empty rows → "no jo
 
 **Interfaces:**
 - Consumes: `useTrackingMutation` (T4), `useTriageSelection` (T6).
-- Produces: `DECIDE_STATUS = { apply: 'Applied', skip: 'Passed', save: 'Lead' } as const`; `nextUndecided(rows, fromId): string | null`; `DecideBar({ job, onDecide })`; keyboard: `j/k`/arrows move, `a/x/s` decide+advance, `Enter` → `navigate({name:'job', id})`, `/` focuses the filter search input (`data-search-input` attribute).
+- Produces: `DECIDE_STATUS = { apply: 'Applied', skip: 'Passed', save: 'Lead' } as const`; `nextUndecided(rows, fromId): string | null`; `DecideBar({ job, onDecide })`; keyboard: `j/k`/arrows move, `a/x/s` decide+advance, `Enter` → `navigate({name:'job', id})`, `/` focuses the always-mounted top-bar company search input (`[data-search-input]`, rendered by T6 outside the Popover) and calls `preventDefault()` so the `/` character is not typed.
 
 - [ ] **Step 1: Failing tests `decide.test.ts`**: `nextUndecided` returns the next row AFTER the current one with `tracking?.status == null`, wrapping to earlier rows, `null` when none; DECIDE_STATUS values byte-match vocab strings.
 - [ ] **Step 2: Implement `decide.ts`** (pure). 
@@ -629,7 +674,7 @@ if (t.closest('input,textarea,select,[contenteditable="true"]')) return;
 </div>
 ```
 
-dnd-kit: `DndContext` with `onDragEnd`; each card `useDraggable({ id: job.id })`, each column `useDroppable({ id: status })`; drop → `mutation.mutate({ jobId, patch: { status } })` (skip when unchanged). Click-change fallback: a small status `Select` on each card. Card: company, title, `dateApplied ?? dateFound`, `nextAction` + `nextActionDate` (red when overdue); click (not drag) → `navigate({ name: 'job', id })`. DueStrip: horizontal `Badge` list "⚡ {company} — {nextAction} ({date})", click → `navigate` to the job.
+dnd-kit: `DndContext` with `onDragEnd`; each card `useDraggable({ id: job.id })`, each column `useDroppable({ id: status })`; drop → `mutation.mutate({ jobId, patch: { status } })` (skip when unchanged). Click-change fallback: a small status `Select` on each card. Card: company, title, `dateApplied ?? dateFound`, `nextAction` + `nextActionDate` (red when overdue); click (not drag) → `navigate({ name: 'job', id })`. DueStrip: horizontal `Badge` list "⚡ {company} — {nextAction} ({date})", click scrolls the matching `KanbanCard` into view and applies a 1.5s focus ring (spec: "focuses/opens its card") — it does NOT leave the tracker.
 - [ ] **Step 4: RTL smoke (columns render from stubbed meta+jobs; due strip shows overdue). Step 5: ui:check. Step 6: Commit** — `feat(ui): tracker kanban with due strip`
 
 ---
@@ -641,7 +686,7 @@ dnd-kit: `DndContext` with `onDragEnd`; each card `useDraggable({ id: job.id })`
 - Modify: `ui/src/features/shell/Shell.tsx` (full route switch)
 
 **Interfaces:**
-- Consumes: `useJob` (T4), shared job components + `TrackingPanel` (T6/T8), `rememberSelection` (T6).
+- Consumes: `useJob` (T4), shared job components + `TrackingPanel` (T6/T8), `rememberSelection` (T3, `lib/selection-memo`).
 - Produces: `JobPage({ profile, id })` — two-column (`grid-cols-[1fr_360px]`): left JD prose (`JobHeader` + `JdText`), right `JobFacts` + `TrackingPanel`. Back button: `rememberSelection(id); history.length > 1 ? history.back() : navigate({ name: 'triage' })`. Stubs keep the existing copy verbatim: analytics "Coming soon — run stats, funnel drops, and match-quality trends will land here."; onboarding "Coming soon — guided profile onboarding in the browser. For now, run the /setup wizard in Claude Code."
 
 - [ ] **Step 1: Failing test**: JobPage renders title + tracking panel from stubbed fetch; back with empty history navigates to `#/triage`; not-found (404) renders "job not found" state.
@@ -655,7 +700,7 @@ dnd-kit: `DndContext` with `onDragEnd`; each card `useDraggable({ id: job.id })`
 
 **Files:**
 - Create: `ui/playwright.config.ts`, `ui/e2e/fixtures.ts`, `ui/e2e/seed.ts`, `ui/e2e/smoke.spec.ts`
-- Modify: `ui/package.json` (script `e2e` exists from T1), root `package.json` (add `"ui:e2e": "npm --prefix ui run e2e"`)
+- Modify: `ui/package.json` (script `e2e` exists from T1), root `package.json` (add `"ui:e2e": "npm run e2e --workspace ui"` — house style, matching `ui:build`/`ui:check`)
 
 **Interfaces:**
 - Consumes: the running board server + built `ui/dist`; sqlite adapter exports `openJobsDb`, `SqliteStore` from `src/adapters/db/sqlite/store/index.ts`; `JDSchema` from `src/core/jd/index.ts` (verify the exact export name in that index before writing fixtures).
@@ -677,9 +722,10 @@ export function makeJd(over: { id: string; title: string; company: string; statu
   return JDSchema.parse(jd); // throws at seed time if fixture drifts from schema
 }
 export const FIXTURE_JOBS = [ /* 10 jobs: ids rajni-e2e-1…10, varied scores 95…50,
-  companies AlphaCo…, 3 with tracking added at seed time via importTracking:
-  one 'Applied', one 'Tech Round' with nextActionDate = yesterday (due strip),
-  one 'Rejected' (closed column) */ ];
+  companies AlphaCo…, distinct descending `dateFound` (`rajni-e2e-1` newest) so
+  the default sort is total-ordered, 3 with tracking added at seed time via
+  importTracking: one 'Applied', one 'Tech Round' with nextActionDate =
+  yesterday (due strip), one 'Rejected' (closed column) */ ];
 ```
 
 The schema-parse guard is the correctness mechanism: the implementer shapes fixtures until `JDSchema.parse` passes — no silent drift.
@@ -737,18 +783,32 @@ Every test starts with `await page.addInitScript(() => localStorage.setItem('job
 
 - [ ] **Step 4: `ui/e2e/smoke.spec.ts`** — 8 specs:
 
-1. **board loads**: goto `/#/triage` → job rows visible, count ≥ 9 (10 minus none-archived), highest-score row selected content in detail pane
+1. **board loads**: goto `/#/triage` → exactly 10 `[data-testid="job-row"]` elements (the full un-archived fixture set under the default `limit: 50`); the first row — newest by the default `sort: 'date_found', order: 'desc'` — carries `aria-selected="true"`, and the detail pane shows that same job's title.
 2. **sidebar branding**: logo img alt "Job Bunny", text "Job Bunny", version matches `/^v\d+\.\d+\.\d+$/` (assert equals `v` + root package.json version read in the test via fs)
 3. **filter narrows**: open filter popover, set company to a fixture company → row count drops to that company's rows; clear → restored
 4. **keyboard selection**: press `j` → `aria-selected` moves to second row; `k` → back
-5. **decide persists**: select an undecided fixture job, press `a` → status badge "Applied" appears; `page.reload()` → same job still "Applied" (DB write proven)
+5. **decide persists**: click the row for `rajni-e2e-1` (undecided) to select it, press `a`; assert selection auto-advanced to the next undecided row (`[data-testid="job-row"][aria-selected="true"]` is no longer `rajni-e2e-1`) and that `rajni-e2e-1`'s row status dot reads Applied. Then `page.reload()`, click `rajni-e2e-1` again, and assert the detail pane shows status "Applied" — proving the DB write, not just the optimistic cache.
 6. **tracker kanban**: goto `/#/tracker` → columns "Lead"…"Offer" visible, `rajni-e2e-3`'s card in "Tech Round", closed column collapsed with count ≥ 1, due strip shows the overdue next action
 7. **kanban move**: on `rajni-e2e-2`'s card use the status Select → "Onsite" → card re-renders in Onsite column; reload → still there
 8. **full-page detail + back**: from triage press Enter → URL `#/job/<id>`, JD text visible; click Back → `#/triage` and the same row is selected
 
 Write real playwright assertions (`expect(page.getByRole(...)).toBeVisible()` etc.) with stable selectors — add `data-testid` attributes in components where roles are ambiguous (job rows: `data-testid="job-row"`).
 
-- [ ] **Step 5: Run locally**: `npm run ui:build && npx playwright install chromium && npm run ui:e2e` → all pass; verify `git status` shows NO changes under `profiles/rajni/` (db files are gitignored — confirm, and confirm `cache.json`/`jobs_raw.json` untouched).
+- [ ] **Step 4b: Bring `e2e/` under the ui gate.** Create `ui/tsconfig.e2e.json`:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["e2e", "playwright.config.ts"]
+}
+```
+
+and change `ui/package.json`'s `check` script to
+`"tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit && biome check src e2e && vitest run"`.
+Rationale: without this, a type error in `seed.ts` surfaces only as a `globalSetup` crash in the e2e job, after `ui:check` has already reported green.
+
+- [ ] **Step 5: Run locally**: `npm run ui:build && npm exec --workspace ui -- playwright install chromium && npm run ui:e2e` → all pass; verify `git status` shows NO changes under `profiles/rajni/` (db files are gitignored — confirm, and confirm `cache.json`/`jobs_raw.json` untouched).
 - [ ] **Step 6: Commit** — `test(ui): playwright critical-path smoke suite with rajni seeding`
 
 ---
@@ -765,11 +825,11 @@ Write real playwright assertions (`expect(page.getByRole(...)).toBeVisible()` et
 - [ ] **Step 1: Edit the `ui` job** — after the `npm run ui:build` step, add:
 
 ```yaml
-      - run: npm --prefix ui exec playwright install --with-deps chromium
+      - run: npm exec --workspace ui -- playwright install --with-deps chromium
       - run: npm run ui:e2e
 ```
 
-Note: root `npm ci` runs with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` — that's why the explicit install step exists. `--prefix ui` matters: `@playwright/test` lives in the ui workspace.
+Note: root `npm ci` runs with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` — that's why the explicit install step exists. `--workspace ui` matters: `@playwright/test` lives in the ui workspace; `npm exec --workspace ui --` resolves its CLI reliably even when npm hoists the binary to the root `node_modules/.bin`.
 - [ ] **Step 2: Verify locally** with `act` if available; otherwise validate YAML (`node -e "require('js-yaml')..."` or push and watch). Do NOT restructure the workflow.
 - [ ] **Step 3: Commit** — `ci: run board e2e smoke suite in the ui job`
 - [ ] **Step 4: Push branch + open PR** (title `feat(ui): react + shadcn board redesign`) — wait for the `test` check. Landing the PR is a separate user decision.
