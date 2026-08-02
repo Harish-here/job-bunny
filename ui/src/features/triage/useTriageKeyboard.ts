@@ -10,9 +10,13 @@ import type { DecideAction } from './decide';
  * form control, so typing in the search box (or any future input) never
  * triggers a shortcut. Also ignored whenever a modifier key is held (so
  * OS/browser chords like Cmd/Ctrl+A never fall through to a decide action)
- * or a Radix popper (Select, etc.) is open, since Radix portals its
- * `role="combobox"`/listbox content into `document.body` where the
- * form-control guard below can't see it.
+ * or a Radix Select/Popover surface is open, since Radix portals that
+ * content into `document.body` where the form-control guard below can't
+ * see it. shadcn's `SelectContent` defaults to `position="item-aligned"`,
+ * which renders WITHOUT a `[data-radix-popper-content-wrapper]` (that
+ * wrapper only exists for `position="popper"`), so we probe the `data-slot`
+ * shadcn stamps on its own components instead — present only while the
+ * content is actually mounted/open, absent once closed.
  */
 export function useTriageKeyboard({
   move,
@@ -29,7 +33,9 @@ export function useTriageKeyboard({
       const t = e.target as HTMLElement;
       if (
         t.closest('input,textarea,select,[contenteditable="true"],[role="combobox"]') ||
-        document.querySelector('[data-radix-popper-content-wrapper]')
+        document.querySelector(
+          '[data-radix-popper-content-wrapper], [data-slot="select-content"], [data-slot="popover-content"]',
+        )
       ) {
         return;
       }

@@ -1,10 +1,25 @@
-import { renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, renderHook, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/router', () => ({ navigate }));
 
 import { useTriageKeyboard } from './useTriageKeyboard';
+
+beforeAll(() => {
+  // radix Select needs these in jsdom; nothing under test exercises them.
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.releasePointerCapture = () => {};
+  Element.prototype.scrollIntoView = () => {};
+});
 
 function keydown(target: Element, key: string): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -149,16 +164,43 @@ describe('useTriageKeyboard', () => {
     expect(onDecide).not.toHaveBeenCalled();
   });
 
-  it('ignores keys anywhere while a Radix popper is open (portalled listbox)', () => {
+  it('ignores keys anywhere while a real Select is open, resumes once it closes', async () => {
     const move = vi.fn();
     const onDecide = vi.fn();
-    const popper = document.createElement('div');
-    popper.setAttribute('data-radix-popper-content-wrapper', '');
-    document.body.appendChild(popper);
     renderHook(() => useTriageKeyboard({ move, onDecide, selectedId: 'li-1' }));
+    render(
+      <Select>
+        <SelectTrigger aria-label="Status">
+          <SelectValue placeholder="pick" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="a">A</SelectItem>
+          <SelectItem value="b">B</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
 
+    await userEvent.click(screen.getByLabelText('Status'));
     keydown(document.body, 'a');
     expect(onDecide).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByText('A'));
+    keydown(document.body, 'a');
+    expect(onDecide).toHaveBeenCalledWith('apply');
+  });
+
+  it('does not swallow shortcuts when focus sits on a JobRow-like option', () => {
+    const move = vi.fn();
+    const onDecide = vi.fn();
+    const row = document.createElement('div');
+    row.setAttribute('role', 'option');
+    row.setAttribute('tabindex', '0');
+    document.body.appendChild(row);
+    row.focus();
+    renderHook(() => useTriageKeyboard({ move, onDecide, selectedId: 'li-1' }));
+
+    keydown(row, 'a');
+    expect(onDecide).toHaveBeenCalledWith('apply');
   });
 
   it('removes its listener on unmount', () => {

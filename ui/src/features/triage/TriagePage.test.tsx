@@ -63,7 +63,9 @@ function detailFor(row: BoardJobRow): BoardDetailResponse {
   } as unknown as BoardDetailResponse;
 }
 
-function stubFetch(opts: { noLocalDb?: boolean; serverError?: boolean } = {}) {
+function stubFetch(
+  opts: { noLocalDb?: boolean; serverError?: boolean; detailError?: boolean } = {},
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -79,6 +81,15 @@ function stubFetch(opts: { noLocalDb?: boolean; serverError?: boolean } = {}) {
       }
       const detailMatch = url.match(/\/jobs\/([^/?]+)$/);
       if (detailMatch?.[1]) {
+        if (opts.detailError) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({
+              error: { code: 'internal', message: 'internal server error' },
+            }),
+          } as unknown as Response;
+        }
         const row = ROWS.find((r) => r.id === detailMatch[1]) ?? (ROWS[0] as BoardJobRow);
         return {
           ok: true,
@@ -180,5 +191,20 @@ describe('TriagePage', () => {
     });
     expect(screen.queryByText(/no jobs match/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /retry/i }).length).toBeGreaterThan(0);
+  });
+
+  it('shows a detail-pane error with Retry when the list loads but the detail request fails', async () => {
+    stubFetch({ detailError: true });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Senior Engineer')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/couldn't load this job/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText('Select a job to see details.')).not.toBeInTheDocument();
   });
 });

@@ -32,6 +32,27 @@ function isNoLocalDb(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'no_local_db';
 }
 
+/** Shared shape for the list-pane and detail-pane error states — text
+ * copy plus a Retry button wired to the failed query's own `refetch`. */
+function ErrorRetry({
+  message,
+  onRetry,
+  padded = false,
+}: {
+  message: string;
+  onRetry: () => void;
+  padded?: boolean;
+}) {
+  return (
+    <div className={`flex flex-col items-start gap-2 text-sm ${padded ? 'p-4' : ''}`}>
+      <span className="text-destructive">{message}</span>
+      <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
+        Retry
+      </Button>
+    </div>
+  );
+}
+
 export function TriagePage({ profile }: { profile: string }) {
   const [query, setQuery] = useState<ListQuery>(DEFAULT_QUERY);
   const [companyDraft, setCompanyDraft] = useState('');
@@ -138,19 +159,11 @@ export function TriagePage({ profile }: { profile: string }) {
               This profile has no local database yet — run the pipeline to populate one.
             </div>
           ) : isError ? (
-            <div className="flex flex-col items-start gap-2 p-4 text-sm">
-              <span className="text-destructive">
-                Couldn&apos;t load jobs — the board server may be unreachable.
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => jobsQuery.refetch()}
-              >
-                Retry
-              </Button>
-            </div>
+            <ErrorRetry
+              padded
+              message="Couldn't load jobs — the board server may be unreachable."
+              onRetry={() => jobsQuery.refetch()}
+            />
           ) : jobsQuery.isPending ? (
             <div className="flex flex-col gap-2 p-3">
               {SKELETON_ROW_KEYS.map((key) => (
@@ -193,19 +206,15 @@ export function TriagePage({ profile }: { profile: string }) {
         {noLocalDb ? (
           <div className="text-muted-foreground">No jobs to show.</div>
         ) : isError ? (
-          <div className="flex flex-col items-start gap-2 text-sm">
-            <span className="text-destructive">
-              Couldn&apos;t load jobs — the board server may be unreachable.
-            </span>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => jobsQuery.refetch()}
-            >
-              Retry
-            </Button>
-          </div>
+          <ErrorRetry
+            message="Couldn't load jobs — the board server may be unreachable."
+            onRetry={() => jobsQuery.refetch()}
+          />
+        ) : selectedId !== null && detailQuery.isError ? (
+          <ErrorRetry
+            message="Couldn't load this job — the board server may be unreachable."
+            onRetry={() => detailQuery.refetch()}
+          />
         ) : detail ? (
           <div className="flex flex-col gap-6">
             <JobHeader job={detail} />
