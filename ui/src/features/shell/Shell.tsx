@@ -2,30 +2,30 @@ import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { pickProfile, useStoredProfile } from '../../lib/profile';
 import { navigate, type Route, useRoute } from '../../lib/router';
+import { AnalyticsPage } from '../analytics/AnalyticsPage';
+import { JobPage } from '../job/JobPage';
+import { OnboardingPage } from '../onboarding/OnboardingPage';
+import { TrackerPage } from '../tracker/TrackerPage';
+import { TriagePage } from '../triage/TriagePage';
 import { Sidebar } from './Sidebar';
 import { useAppInfo } from './useAppInfo';
 import { useProfilesQuery } from './useProfiles';
 
-/**
- * Placeholder for the route's page content — Tasks 6-10 replace each branch
- * with the real Triage/Tracker/Job/Analytics/Onboarding feature component.
- */
+/** Full route switch (T10) — the real Triage/Tracker/Job/Analytics/Onboarding
+ * feature component per route, each fed the resolved profile (and, for
+ * `job`, the route's id). */
 function Page({ route, profile }: { route: Route; profile: string }) {
   switch (route.name) {
     case 'triage':
-      return <div className="p-4">Triage — {profile}</div>;
+      return <TriagePage profile={profile} />;
     case 'tracker':
-      return <div className="p-4">Tracker — {profile}</div>;
+      return <TrackerPage profile={profile} />;
     case 'analytics':
-      return <div className="p-4">Analytics — {profile}</div>;
+      return <AnalyticsPage />;
     case 'onboarding':
-      return <div className="p-4">Onboarding — {profile}</div>;
+      return <OnboardingPage />;
     case 'job':
-      return (
-        <div className="p-4">
-          Job {route.id} — {profile}
-        </div>
-      );
+      return <JobPage profile={profile} id={route.id} />;
   }
 }
 
