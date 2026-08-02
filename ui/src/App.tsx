@@ -1,3 +1,11 @@
+import { Toaster } from 'sonner';
+import { Shell } from './features/shell/Shell';
+
 export default function App() {
-  return <div className="p-4">Job Bunny</div>;
+  return (
+    <>
+      <Shell />
+      <Toaster />
+    </>
+  );
 }
