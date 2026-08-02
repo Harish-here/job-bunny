@@ -137,7 +137,7 @@ describe('TrackerPage', () => {
     // Column headers render in vocab order, terminals excluded (the
     // select-value echoes a bare status too, so scope to the header divs).
     const headers = Array.from(
-      container.querySelectorAll('div.border-b.font-medium'),
+      container.querySelectorAll('[data-testid="kanban-column-header"]'),
     ).map((el) => el.textContent?.trim());
     expect(headers).toEqual([
       'Lead (1)',

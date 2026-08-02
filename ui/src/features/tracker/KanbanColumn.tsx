@@ -30,7 +30,10 @@ export function KanbanColumn({
         isOver && 'ring-2 ring-primary',
       )}
     >
-      <div className="border-b px-2 py-1.5 text-sm font-medium">
+      <div
+        data-testid="kanban-column-header"
+        className="border-b px-2 py-1.5 text-sm font-medium"
+      >
         {status} <span className="text-muted-foreground">({rows.length})</span>
       </div>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2">

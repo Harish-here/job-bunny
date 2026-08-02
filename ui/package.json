@@ -8,7 +8,7 @@
     "build": "vite build",
     "check": "tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit && biome check src e2e playwright.config.ts && vitest run",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "vite build && playwright test"
   },
   "dependencies": {
     "@dnd-kit/core": "^6",

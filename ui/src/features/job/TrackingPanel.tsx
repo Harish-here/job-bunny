@@ -21,6 +21,8 @@ interface Drafts {
   contact: string;
   nextAction: string;
   notes: string;
+  dateApplied: string;
+  nextActionDate: string;
 }
 
 function draftsFrom(tracking: TrackingRow | null): Drafts {
@@ -29,6 +31,8 @@ function draftsFrom(tracking: TrackingRow | null): Drafts {
     contact: tracking?.contact ?? '',
     nextAction: tracking?.nextAction ?? '',
     notes: tracking?.notes ?? '',
+    dateApplied: tracking?.dateApplied ?? '',
+    nextActionDate: tracking?.nextActionDate ?? '',
   };
 }
 
@@ -44,8 +48,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 /**
  * Shared tracking form for the triage detail pane (T8) and the full-page job
  * view (T10). Every field commits independently — blur for free-text
- * inputs, change for the status select and the two date inputs — never a
- * whole-form save. `fieldPatch` supplies the no-op guard (unchanged value
+ * inputs and the two date inputs, change for the status select — never a
+ * whole-form save. Date inputs commit on blur (not change) because a native
+ * date input mid-edit reports an empty value, which would otherwise fire a
+ * spurious clear. `fieldPatch` supplies the no-op guard (unchanged value
  * fires no PATCH) and the empty-string-clears-the-field semantics.
  */
 export function TrackingPanel({ profile, job }: { profile: string; job: BoardJobRow }) {
@@ -105,8 +111,9 @@ export function TrackingPanel({ profile, job }: { profile: string; job: BoardJob
             type="date"
             aria-label="Date applied"
             className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
-            value={tracking?.dateApplied ?? ''}
-            onChange={(e) => commit('dateApplied', e.target.value)}
+            value={drafts.dateApplied}
+            onChange={(e) => setDraft('dateApplied', e.target.value)}
+            onBlur={(e) => commit('dateApplied', e.target.value)}
           />
         </Field>
 
@@ -145,8 +152,9 @@ export function TrackingPanel({ profile, job }: { profile: string; job: BoardJob
             type="date"
             aria-label="Next action date"
             className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
-            value={tracking?.nextActionDate ?? ''}
-            onChange={(e) => commit('nextActionDate', e.target.value)}
+            value={drafts.nextActionDate}
+            onChange={(e) => setDraft('nextActionDate', e.target.value)}
+            onBlur={(e) => commit('nextActionDate', e.target.value)}
           />
         </Field>
 

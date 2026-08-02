@@ -19,4 +19,8 @@ export const metaQuery = (p: string) =>
 export const jobsQuery = (p: string, q: ListQuery) =>
   queryOptions({ queryKey: boardKeys.jobs(p, q), queryFn: () => listJobs(p, q) });
 export const jobQuery = (p: string, id: string) =>
-  queryOptions({ queryKey: boardKeys.job(p, id), queryFn: () => getJob(p, id) });
+  queryOptions({
+    queryKey: boardKeys.job(p, id),
+    queryFn: () => getJob(p, id),
+    enabled: id !== '',
+  });

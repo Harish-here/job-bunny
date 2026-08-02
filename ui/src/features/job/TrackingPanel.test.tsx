@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -119,6 +119,28 @@ describe('TrackingPanel', () => {
     const call = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
     expect(call[0]).toBe('/api/profiles/rajni/jobs/li-1/tracking');
     expect(JSON.parse(String(call[1]?.body))).toEqual({ contact: null });
+  });
+
+  it('commits a date field on blur, not on change (partial-edit safe)', async () => {
+    const fetchSpy = stubFetchOk({
+      tracking: { jobId: 'li-1', updatedAt: 't1', dateApplied: '2026-08-05' },
+    });
+    const job = makeJob({ jobId: 'li-1', updatedAt: 't0', dateApplied: '2026-08-01' });
+    renderPanel(job);
+
+    const dateApplied = screen.getByLabelText('Date applied');
+    // A native date input mid-edit briefly reports '' — change must not commit.
+    fireEvent.change(dateApplied, { target: { value: '' } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    fireEvent.change(dateApplied, { target: { value: '2026-08-05' } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    fireEvent.blur(dateApplied);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const call = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ dateApplied: '2026-08-05' });
   });
 
   it('PATCHes the status field on select change', async () => {

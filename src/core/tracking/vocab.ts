@@ -19,7 +19,10 @@ export const STATUS_OPTIONS = [
 
 export type TrackingStatus = (typeof STATUS_OPTIONS)[number];
 
-/** The status ArchivePolicy.passedOlderThanDays keys on. */
+/**
+ * The status ArchivePolicy.passedOlderThanDays keys on.
+ * Mirrored by ui/src/features/tracker/grouping.ts TERMINAL_STATUSES — update both together.
+ */
 export const PASSED_STATUS = 'Passed' satisfies TrackingStatus;
 
 /** Excitement vocabulary — single authority (local-DB spec §5). Producers

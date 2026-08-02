@@ -15,8 +15,10 @@ import type { DecideAction } from './decide';
  * see it. shadcn's `SelectContent` defaults to `position="item-aligned"`,
  * which renders WITHOUT a `[data-radix-popper-content-wrapper]` (that
  * wrapper only exists for `position="popper"`), so we probe the `data-slot`
- * shadcn stamps on its own components instead — present only while the
- * content is actually mounted/open, absent once closed.
+ * shadcn stamps on its own components instead. Radix keeps content mounted
+ * during its exit animation (`data-state="closed"`), so the probe excludes
+ * that state — otherwise a just-closed overlay would still swallow the next
+ * keystroke.
  */
 export function useTriageKeyboard({
   move,
@@ -34,7 +36,7 @@ export function useTriageKeyboard({
       if (
         t.closest('input,textarea,select,[contenteditable="true"],[role="combobox"]') ||
         document.querySelector(
-          '[data-radix-popper-content-wrapper], [data-slot="select-content"], [data-slot="popover-content"]',
+          '[data-radix-popper-content-wrapper], [data-slot="select-content"]:not([data-state="closed"]), [data-slot="popover-content"]:not([data-state="closed"])',
         )
       ) {
         return;

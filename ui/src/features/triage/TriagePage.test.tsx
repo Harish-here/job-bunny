@@ -194,7 +194,8 @@ describe('TriagePage', () => {
   });
 
   it('shows a detail-pane error with Retry when the list loads but the detail request fails', async () => {
-    stubFetch({ detailError: true });
+    const opts = { detailError: true };
+    stubFetch(opts);
     renderPage();
 
     await waitFor(() => {
@@ -206,5 +207,13 @@ describe('TriagePage', () => {
     });
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
     expect(screen.queryByText('Select a job to see details.')).not.toBeInTheDocument();
+
+    // Flip the detail route to succeed, then retry — proves detailQuery.refetch wiring.
+    opts.detailError = false;
+    await userEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Senior Engineer JD text body.')).toBeInTheDocument();
+    });
   });
 });

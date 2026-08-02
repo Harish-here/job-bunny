@@ -1,4 +1,10 @@
 /**
+ * Boundary exception (sanctioned): this fixture seeder imports
+ * src/adapters/db/sqlite directly. depcruise's only-wire-imports-adapters
+ * rule scopes to src/** and cannot see ui/e2e/**; this is the one allowed
+ * adapter consumer outside cli/wire, for test seeding only — do not copy
+ * this pattern.
+ *
  * Playwright `globalSetup` — seeds `profiles/rajni`'s local sqlite DB with
  * `FIXTURE_JOBS` before the e2e suite runs. Touches ONLY
  * `profiles/rajni/data/jobbunny.db` (+ WAL siblings): the `refusing: not
