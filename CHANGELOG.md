@@ -3,6 +3,36 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [2.2.0] — 2026-08-02
+
+### Added
+- **Local-first storage**: sqlite connector (`jobbunny.db` per profile) as source of
+  truth, `jobbunny migrate` (Notion → sqlite import, dry-run by default), opt-in
+  one-way Notion mirror (budgeted, best-effort — never fails a run), and
+  connector-aware doctor/setup.
+- **Job-board server**: `jobbunny board` (127.0.0.1:1994, all profiles) — reads
+  jobs, writes tracking only; six API routes incl. `GET /api/app` (version).
+- **React 19 + shadcn board SPA** replacing the Svelte UI: keyboard-first triage
+  split-pane (`j`/`k` navigate, `a`/`s`/`d` decide-and-advance, `/` search),
+  tracker kanban with due strip + drag-and-drop, full-page job detail, optimistic
+  per-field tracking edits with rollback.
+- **Playwright e2e smoke suite** (8 specs) seeded against the rajni fixture
+  sqlite DB, run in CI's `ui` job.
+
+### Fixed
+- **LinkedIn lane: one unsettled card no longer discards a whole URL's harvest.**
+  An identity-invalid card (title/company unpainted after the settle budget) is
+  now a per-card drop with the new `linkedin.cardIdentityInvalid` funnel rule;
+  total-outage loudness is preserved when every card on a page is invalid.
+- Triage keyboard: OS chords (Cmd+A etc.) and open Radix selects can no longer
+  trigger silent tracking writes.
+
+### Notes
+- `ui/` now carries runtime deps (React stack); root runtime deps unchanged.
+  `ui:check` = tsc + biome + vitest; e2e via `npm run ui:e2e`.
+- Live-LinkedIn verification of the gateCards fix is deferred to the first
+  post-merge scheduled run.
+
 ## [2.1.0] — 2026-07-29
 
 ### Added
