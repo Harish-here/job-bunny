@@ -51,36 +51,49 @@ function resolveEnv(opts: CoreCheckOpts): NodeJS.ProcessEnv {
   return opts.env ?? process.env;
 }
 
-/** envTokensCheck — `NOTION_TOKEN` absent/empty ⇒ red (Notion is the
- * always-present source of truth); `TELEGRAM_BOT_TOKEN` absent/empty ⇒
- * warn (optional notifier). If both are missing, reports the worst
- * (red) and names both in the detail. */
+/** envTokensCheck — `NOTION_TOKEN` absent/empty ⇒ red only when the
+ * profile's connector is notion — a local-first (sqlite) profile runs
+ * without any Notion token; `TELEGRAM_BOT_TOKEN` absent/empty ⇒ warn
+ * (optional notifier). If both are missing, reports the worst of the two
+ * and names both in the detail. */
 export function envTokensCheck(opts: CoreCheckOpts): DoctorCheck {
   const name = 'env-tokens';
   const env = resolveEnv(opts);
+  const notionRequired = opts.connector === 'notion';
   return {
     name,
     async run(): Promise<DoctorFinding> {
-      const missingNotion = !env.NOTION_TOKEN;
-      const missingTelegram = !env.TELEGRAM_BOT_TOKEN;
-      if (missingNotion && missingTelegram) {
+      const parts: { status: 'red' | 'warn'; detail: string }[] = [];
+      if (!env.NOTION_TOKEN) {
+        parts.push(
+          notionRequired
+            ? { status: 'red', detail: 'NOTION_TOKEN is not set' }
+            : opts.notionMirror === true
+              ? {
+                  status: 'warn',
+                  detail:
+                    'NOTION_TOKEN is not set — the Notion mirror is enabled but cannot ' +
+                    'push until it is',
+                }
+              : {
+                  status: 'warn',
+                  detail:
+                    'NOTION_TOKEN is not set (only needed for the notion connector)',
+                },
+        );
+      }
+      if (!env.TELEGRAM_BOT_TOKEN) {
+        parts.push({ status: 'warn', detail: 'TELEGRAM_BOT_TOKEN is not set' });
+      }
+      if (parts.length === 0) {
         return {
           check: name,
-          status: 'red',
-          detail: 'NOTION_TOKEN is not set; TELEGRAM_BOT_TOKEN is not set',
+          status: 'ok',
+          detail: 'NOTION_TOKEN and TELEGRAM_BOT_TOKEN are set',
         };
       }
-      if (missingNotion) {
-        return { check: name, status: 'red', detail: 'NOTION_TOKEN is not set' };
-      }
-      if (missingTelegram) {
-        return { check: name, status: 'warn', detail: 'TELEGRAM_BOT_TOKEN is not set' };
-      }
-      return {
-        check: name,
-        status: 'ok',
-        detail: 'NOTION_TOKEN and TELEGRAM_BOT_TOKEN are set',
-      };
+      const status = parts.some((p) => p.status === 'red') ? 'red' : 'warn';
+      return { check: name, status, detail: parts.map((p) => p.detail).join('; ') };
     },
   };
 }

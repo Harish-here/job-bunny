@@ -121,3 +121,11 @@ export const CacheEntrySchema = z.object({
   city: z.string().optional(),
 });
 export type CacheEntry = z.infer<typeof CacheEntrySchema>;
+
+/** Soft-fail verdicts projected to operator-facing strings — the one
+ * formula behind Notion's "Review Flags" and the board's reviewFlags. */
+export function reviewFlags(evaluation: JD['evaluation']): string[] {
+  return (evaluation?.verdicts ?? [])
+    .filter((v) => v.severity === 'soft' && !v.pass)
+    .map((v) => v.detail ?? `${v.rule}: soft-fail`);
+}

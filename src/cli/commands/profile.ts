@@ -48,12 +48,12 @@ export interface SeedResult {
   status: 'created' | 'kept';
 }
 
-// Minimal-but-valid: connector must name a real adapter for `wire()` to
-// resolve later — 'notion' is the only connector this repo ships, so it
-// is the only sane placeholder (see judgment call in task NOTES).
+// Minimal-but-valid: connector must name a real adapter for wire() to
+// resolve. Local-first default since the migrate command proved out
+// (local-DB spec §8); 'notion' remains a valid opt-in.
 const MINIMAL_PIPELINE_CONFIG = {
   lanes: [],
-  connector: 'notion',
+  connector: 'sqlite',
   notifiers: [],
   routines: [],
   settings: {},
@@ -65,7 +65,7 @@ const MINIMAL_FILTER_CONFIG = {};
 
 const SEARCH_URLS_TEMPLATE = `# Search URLs
 
-Hierarchical: Channel -> page -> labeled URLs. One page-type = one inventory in \`src/adapters/lanes/linkedin/page_inventory/<page>.md\`; many URLs may live beneath it.
+Hierarchical: Channel -> page -> labeled URLs. One page-type = one inventory in \`src/adapters/lanes/linkedin/page_inventory/<page>.json\`; many URLs may live beneath it.
 Add URLs with \`lane add-url\` (strips ephemeral params). Format: \`  • <label> - <url>\`
 `;
 

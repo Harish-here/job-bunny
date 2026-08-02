@@ -37,15 +37,16 @@ import {
   DEFAULT_CDP_PORT,
   defaultCdpReachable,
 } from '../../adapters/browser/cdp-chrome/index.ts';
-import type {
-  NotionApiLike,
-  NotionSdkClientLike,
-} from '../../adapters/db/notion/index.ts';
+import type { NotionApiLike } from '../../adapters/db/notion/index.ts';
 import {
   dbReachableCheck,
   NotionApi,
   NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
+import {
+  SqliteConnectorSettingsSchema,
+  sqliteDbCheck,
+} from '../../adapters/db/sqlite/index.ts';
 import {
   inventoryFreshnessCheck,
   parseSearchUrls,
@@ -83,10 +84,14 @@ import type { Routine } from '../../routines/types.ts';
 import {
   buildConnector,
   buildLanes,
+  buildMirroredConnector,
   buildNotifier,
   buildRoutine,
   isApiLane,
   isFarmingLane,
+  mirrorDbId,
+  mirrorReachableCheck,
+  missingTokenNotionClient,
 } from './builders.ts';
 import { isNotFound, loadFilterConfig, loadPipelineConfig } from './config.ts';
 import type { AdapterRegistry, RuntimeDeps } from './registry.ts';
@@ -127,6 +132,10 @@ const realRegistry: AdapterRegistry = {
       if (!deps.notionApi) return [];
       return [dbReachableCheck({ api: deps.notionApi, dbId: parsed.dbId })];
     },
+    sqlite: (settings, deps) => {
+      const parsed = SqliteConnectorSettingsSchema.parse(settings ?? {});
+      return [sqliteDbCheck({ path: parsed.path ?? deps.sqliteDefaultPath })];
+    },
   },
   notifiers: {
     telegram: (settings) => {
@@ -135,22 +144,6 @@ const realRegistry: AdapterRegistry = {
     },
   },
 };
-
-/** A `NotionSdkClientLike` every method of which throws the same
- * config-problem message. Used to build a `NotionApi` (not merely a
- * `NotionApiLike`) when `NOTION_TOKEN` is missing, so `wire()` itself never
- * throws (doctor must survive a missing token — `coreChecks` already
- * reports it as a red) while the live connector still fails LOUD at first
- * actual use (`rebuildCache`/`syncJobs`/`archiveStale`), never silently. */
-function missingTokenNotionClient(): NotionSdkClientLike {
-  const fail = (): never => {
-    throw new Error('NOTION_TOKEN missing — set it in .env');
-  };
-  return {
-    databases: { query: fail },
-    pages: { create: fail, update: fail },
-  };
-}
 
 // --- wire() ---
 
@@ -237,6 +230,13 @@ export async function wire(
   // and the run still reported `passed`.
   const storage = new FsStorage(root);
   const profileStorage = new FsStorage(path.join(root, 'profiles', profileName, 'data'));
+  const sqliteDefaultPath = path.join(
+    root,
+    'profiles',
+    profileName,
+    'data',
+    'jobbunny.db',
+  );
 
   const deps: RuntimeDeps = {
     storage,
@@ -246,14 +246,32 @@ export async function wire(
     cdpPort: DEFAULT_CDP_PORT,
     filterCfg,
     pages,
+    sqliteDefaultPath,
     ...overrides.deps,
   };
   const registry = overrides.registry ?? realRegistry;
 
+  const mirrorTarget = mirrorDbId(config);
   const checks = [
-    ...coreChecks({ profileName, root, readFile }),
+    ...coreChecks({
+      profileName,
+      root,
+      readFile,
+      connector: config.connector,
+      notionMirror: mirrorTarget !== '',
+    }),
     ...assembleAdapterChecks(config, registry, deps),
   ];
+  // Opt-in sqlite→Notion mirror (local-DB spec PR 3): a mirrored profile
+  // gets a `notion-db-reachable` check too, on top of whatever
+  // `assembleAdapterChecks` already contributed for `sqlite` — but through
+  // `mirrorReachableCheck` (I2), not the raw `dbReachableCheck` a plain
+  // `notion` connector gets: a broken mirror never impairs the sqlite
+  // source of truth a mirrored profile actually runs on, so its `red`
+  // findings are downgraded to `warn`.
+  if (mirrorTarget && deps.notionApi) {
+    checks.push(mirrorReachableCheck({ api: deps.notionApi, dbId: mirrorTarget }));
+  }
 
   // --- live ports ---
   // llm/browser are NOT part of PipelineConfig (spec: selected by
@@ -276,9 +294,14 @@ export async function wire(
     filterCfg,
     browser,
   });
-  const connector = buildConnector(
-    config.connector,
-    config.settings[config.connector],
+  const connector = buildMirroredConnector(
+    buildConnector(
+      config.connector,
+      config.settings[config.connector],
+      notionApiForConnector,
+      sqliteDefaultPath,
+    ),
+    config,
     notionApiForConnector,
   );
   const notifiers = config.notifiers.map((name) =>

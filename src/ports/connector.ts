@@ -28,4 +28,12 @@ export interface Connector {
     policy: ArchivePolicy,
     ctx: RunContext,
   ): Promise<{ archived: number; dropped: DroppedRecord[] }>;
+  /**
+   * Optional: release any held resources (open DB handles). Absent on
+   * connectors with nothing to release; callers must tolerate absence.
+   * Never called by the pipeline runner (process exit releases handles) —
+   * exists for embedders and tests, where Windows cannot delete an
+   * sqlite file whose handle is still open.
+   */
+  close?(): void;
 }

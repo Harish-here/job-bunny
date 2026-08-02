@@ -4,6 +4,9 @@ import type { JD, SyncedJD } from '../core/jd/index.ts';
 import { JDSchema } from '../core/jd/index.ts';
 import type {
   ApiLane,
+  BoardJobRow,
+  BoardSource,
+  BoardStore,
   BrowserHandle,
   BrowserProvider,
   Connector,
@@ -142,4 +145,76 @@ test('a notifier satisfies Notifier', async () => {
   };
   await notifier.send({ kind: 'digest', profile: 'rajni', text: 'hi' });
   assert.deepEqual(sent, ['digest:rajni']);
+});
+
+function fakeBoardJobRow(): BoardJobRow {
+  return {
+    id: 'f-1',
+    lane: 'fake',
+    title: 'Frontend Engineer',
+    company: 'Acme',
+    url: 'https://example.com/jobs/1',
+    seniority: null,
+    locationCity: null,
+    workType: null,
+    timezone: null,
+    skills: [],
+    excitement: null,
+    score: null,
+    matchReasons: [],
+    reviewFlags: [],
+    dateFound: '2026-07-21',
+    archived: false,
+    tracking: null,
+  };
+}
+
+test('a BoardStore satisfies the port and round-trips a query', () => {
+  const row = fakeBoardJobRow();
+  const store: BoardStore = {
+    listJobs: () => ({ rows: [row], total: 1 }),
+    getJob: (id) => (id === row.id ? { ...row, jd: fakeJD(row.id) } : null),
+    updateTracking: (id, patch, now) =>
+      id === row.id
+        ? { jobId: id, updatedAt: now, status: patch.status ?? undefined }
+        : null,
+    close() {},
+  };
+  const { rows, total } = store.listJobs({ status: 'applied' });
+  assert.deepEqual(rows, [row]);
+  assert.equal(total, 1);
+  assert.equal(store.getJob('missing'), null);
+  const detail = store.getJob(row.id);
+  assert.equal(detail?.jd.identity.id, row.id);
+  const updated = store.updateTracking(
+    row.id,
+    { status: 'applied' },
+    '2026-07-21T09:10:00.000Z',
+  );
+  assert.deepEqual(updated, {
+    jobId: row.id,
+    updatedAt: '2026-07-21T09:10:00.000Z',
+    status: 'applied',
+  });
+  assert.equal(store.updateTracking('missing', {}, '2026-07-21T09:10:00.000Z'), null);
+  store.close();
+});
+
+test('a BoardSource satisfies the port and opens a store per profile', () => {
+  const store: BoardStore = {
+    listJobs: () => ({ rows: [], total: 0 }),
+    getJob: () => null,
+    updateTracking: () => null,
+    close() {},
+  };
+  const source: BoardSource = {
+    listProfiles: () => [{ name: 'rajni', connector: 'notion', hasDb: true }],
+    openStore: (name) => (name === 'rajni' ? store : null),
+    close() {},
+  };
+  const profiles = source.listProfiles();
+  assert.deepEqual(profiles, [{ name: 'rajni', connector: 'notion', hasDb: true }]);
+  assert.equal(source.openStore('rajni'), store);
+  assert.equal(source.openStore('unknown-profile'), null);
+  source.close();
 });

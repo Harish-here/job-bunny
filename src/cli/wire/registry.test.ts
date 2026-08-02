@@ -40,7 +40,7 @@ function fakeCheck(name: string): DoctorCheck {
 function fakeDeps(): RuntimeDeps {
   // A throwaway fake — nothing in assembleAdapterChecks touches this, only
   // real factories (not under test here) would.
-  return {} as RuntimeDeps;
+  return { sqliteDefaultPath: '/tmp/fake/jobbunny.db' } as RuntimeDeps;
 }
 
 // --- assembleAdapterChecks ---

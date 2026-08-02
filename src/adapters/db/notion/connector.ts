@@ -27,6 +27,10 @@ export const NotionConnectorSettingsSchema = z.object({
   dbId: z.string().min(1),
   /** Dry-run default ON — see file header. */
   dryRun: z.boolean().default(true),
+  /** Read by wire (`mirrorDbId`), not by this class; only meaningful on a
+   * sqlite profile's notion slice — on a pure-notion profile the flag is
+   * inert. */
+  mirror: z.boolean().default(false),
 });
 
 export type NotionConnectorSettings = z.infer<typeof NotionConnectorSettingsSchema>;

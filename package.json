@@ -4,6 +4,7 @@
   "description": "Personal job-search companion — aggregates LinkedIn jobs daily, filters/ranks against your profile, syncs to Notion.",
   "type": "module",
   "private": true,
+  "workspaces": ["ui"],
   "bin": {
     "jobbunny": "src/cli/main.ts"
   },
@@ -17,7 +18,10 @@
     "boundaries": "depcruise src",
     "filesize": "node --test test/invariants/filesize.test.ts",
     "check": "npm run typecheck && npm run lint && npm run boundaries && npm test",
-    "release": "node src/cli/main.ts release"
+    "release": "node src/cli/main.ts release",
+    "ui:build": "npm run build --workspace ui",
+    "ui:dev": "npm run dev --workspace ui",
+    "ui:check": "npm run check --workspace ui"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",

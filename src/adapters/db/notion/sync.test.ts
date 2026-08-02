@@ -114,6 +114,30 @@ test('buildAutomatedProperties: exact key-by-key payload for a fully-structured/
   });
 });
 
+test('buildAutomatedProperties: Review Flags joins two soft-fails — detail wins, missing detail falls back to "rule: soft-fail"', () => {
+  const twoSoftFails: JD = {
+    ...FULL_JOB,
+    evaluation: {
+      verdicts: [
+        {
+          rule: 'filter.timezone',
+          severity: 'soft',
+          pass: false,
+          detail: 'timezone thin',
+        },
+        { rule: 'skills', severity: 'soft', pass: false },
+      ],
+      matchReasons: [],
+    },
+  };
+
+  const props = buildAutomatedProperties(twoSoftFails);
+
+  assert.deepEqual(props[PROPERTIES.reviewFlags.name], {
+    rich_text: [{ type: 'text', text: { content: 'timezone thin; skills: soft-fail' } }],
+  });
+});
+
 test('buildAutomatedProperties: an invalid free-form select value (seniority "Senior Staff", timezone "IST") is omitted from the payload, not written; valid values still pass through', () => {
   const invalidJob: JD = {
     ...FULL_JOB,

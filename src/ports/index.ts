@@ -1,3 +1,4 @@
+export * from './board.ts';
 export * from './browser.ts';
 export * from './connector.ts';
 export * from './context.ts';

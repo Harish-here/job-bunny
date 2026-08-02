@@ -28,56 +28,20 @@ import { type DroppedRecord, JDSchema } from '../../../core/jd/index.ts';
 import type { ArchivePolicy } from '../../../ports/connector.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { NotionApi } from './client.ts';
+import {
+  propDateStart,
+  propSelectName,
+  propText,
+  propUrl,
+  type RawPage,
+} from './properties.ts';
 import { PROPERTIES, type STATUS_OPTIONS } from './schema.ts';
-
-/** The narrow slice of a raw Notion page this module reads — title/
- * rich_text/url added alongside select/date so a page that fails to
- * archive can still be turned into a DroppedRecord (same property-reader
- * idiom as `cache.ts`'s `propText`/`propUrl`). */
-interface RawPropertyValue {
-  select?: { name: string } | null;
-  date?: { start: string } | null;
-  title?: { plain_text: string }[];
-  rich_text?: { plain_text: string }[];
-  url?: string | null;
-}
-
-interface RawPage {
-  id: string;
-  properties?: Record<string, RawPropertyValue | undefined>;
-}
 
 // A typed const referencing the option string directly (not
 // `STATUS_OPTIONS[STATUS_OPTIONS.indexOf('Passed')]`) so a future rename of
 // the 'Passed' option is a compile error here, not a silent `undefined` that
 // disables the passed-staleness rule.
 const PASSED_STATUS: (typeof STATUS_OPTIONS)[number] = 'Passed';
-
-function propSelectName(p: RawPropertyValue | undefined): string | null {
-  return p?.select?.name ?? null;
-}
-
-function propDateStart(p: RawPropertyValue | undefined): string | null {
-  return p?.date?.start ?? null;
-}
-
-/** Same reader idiom as `cache.ts`'s `plainText`/`propText`/`propUrl` — kept
- * as a private local copy (not imported) since `cache.ts` doesn't currently
- * export these and this module's own `RawPropertyValue` is a strict subset
- * anyway. */
-function plainText(parts: { plain_text: string }[] | undefined): string {
-  return (parts ?? []).map((t) => t.plain_text).join('');
-}
-
-function propText(p: RawPropertyValue | undefined): string {
-  if (p?.title) return plainText(p.title);
-  if (p?.rich_text) return plainText(p.rich_text);
-  return '';
-}
-
-function propUrl(p: RawPropertyValue | undefined): string | null {
-  return p?.url ?? null;
-}
 
 /** Builds a DroppedRecord for a page that failed to archive, so the
  * caller can account for it (same funnel-visibility idiom as `sync.ts`'s

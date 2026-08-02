@@ -129,7 +129,7 @@ export async function laneAddUrlCommand(
     // add the page node (with inventory pointer) right after the channel heading
     text = text.replace(
       channelHeading,
-      `${channelHeading}\n${pageHeading}\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.md -->`,
+      `${channelHeading}\n${pageHeading}\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->`,
     );
   }
 
@@ -155,7 +155,7 @@ export async function laneAddUrlCommand(
     'lanes',
     'linkedin',
     'page_inventory',
-    `${page}.md`,
+    `${page}.json`,
   );
   if (!(await resolved.exists(inventoryPath))) {
     resolved.warn(

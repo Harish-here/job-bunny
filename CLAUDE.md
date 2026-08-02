@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a resume profile, and syncs the results to a per-profile Notion database, with optional Telegram digests. Cross-platform (macOS, Windows, Linux): scheduling is an in-process daemon (`jobbunny serve start|stop|status`; darwin-only autostart via `jobbunny autostart enable|disable`), not launchd, and Chrome discovery resolves per-OS candidate paths rather than one hardcoded macOS path. `src/` (TypeScript) is the only pipeline; v0 lives on the `main` branch for history — never reference `scripts/` as a live path. Architecture rationale lives in the explainer agent's KB (`.claude/agents/explainer.md`) — consult it before any architecture work; the original `main-v2.md` decision log is in git history.
+Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a resume profile, and stores the results in a per-profile local SQLite DB browsed via a local job-board UI (`jobbunny board`), with opt-in one-way Notion mirroring and optional Telegram digests. Cross-platform (macOS, Windows, Linux): scheduling is an in-process daemon (`jobbunny serve start|stop|status`; darwin-only autostart via `jobbunny autostart enable|disable`), not launchd, and Chrome discovery resolves per-OS candidate paths rather than one hardcoded macOS path. `src/` (TypeScript) is the only pipeline; v0 lives on the `main` branch for history — never reference `scripts/` as a live path. Architecture rationale lives in the explainer agent's KB (`.claude/agents/explainer.md`) — consult it before any architecture work; the original `main-v2.md` decision log is in git history.
 
 ## Stability principle
 
@@ -22,19 +22,22 @@ Node ≥ 24 required (native type-stripping, no build step); the machine default
 ## Commands
 
 ```bash
-npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI runs it as a 3-OS `check` matrix (macos/ubuntu/windows) behind a `needs`-wrapper job named `test`, which keeps the branch-protection check name
+npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI runs it as a 3-OS `check` matrix (macos/ubuntu/windows) plus a ubuntu-only `ui` job (`ui:check` + `ui:build`), behind a `needs`-wrapper job named `test`, which keeps the branch-protection check name
 node --test src/core/filter/engine.test.ts        # single test file
 node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]
 node src/cli/main.ts doctor --profile <name>
 node src/cli/main.ts stage <stage-name> --profile <name>
 node src/cli/main.ts routine <routine-name> --profile <name>
+node src/cli/main.ts migrate --profile <name> [--apply]  # Notion → local sqlite import; dry-run by default
+node src/cli/main.ts board [--port <n>]           # job-board UI + API, all profiles, 127.0.0.1 only (default port 1994)
+npm run ui:build                                  # build the board SPA into ui/dist (its gate: npm run ui:check)
 node src/cli/main.ts serve start|stop|status
 node src/cli/main.ts autostart enable|disable     # darwin only
 ```
 
 `jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — full usage in its `USAGE` string. Releases: `npm run release -- <X.Y.Z> [--dry-run] [--no-merge] [--yes]` — the `--` separator is mandatory (without it npm eats the flags; the CLI detects that and refuses).
 
-**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data, no Notion IDs) — see the `verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
+**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data) — see the `verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
 
 ## Profiles
 
@@ -42,7 +45,7 @@ node src/cli/main.ts autostart enable|disable     # darwin only
 
 Per profile: `profile.json`, `filter.json` (the sole geo/skills/rank authority), `resume.json` (hand-maintained), `search_urls.md` (drives `lane add-url`/`/page-analyse`). `avoid.md` is scaffolded but read by no runtime code — edit `filter.json`'s `title`/`companies` blocks instead. Greenhouse/Keka company state is auto-managed in `data/registry/companies.json`; there are no hand-maintained board watchlists. Per-run intermediates in `profiles/<name>/data/` are gitignored except the two tracked rajni fixture files.
 
-Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env`, loaded once at `src/cli/main.ts` via `dotenv/config` (the one bin entry point — don't duplicate the load). Notion DB/page IDs live in `profile.json`, never in `.env`.
+Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env`, loaded once at `src/cli/main.ts` via `dotenv/config` (the one bin entry point — don't duplicate the load). Notion DB/page IDs live in `profile.json`, never in `.env`. `NOTION_TOKEN` is required only for `connector: "notion"` profiles or sqlite profiles with the mirror enabled — `jobbunny setup` reports it `skipped` otherwise. New profiles scaffold local-first (`connector: "sqlite"`).
 
 ## Pipeline architecture
 
@@ -54,7 +57,7 @@ reconcile → farm → source → compress → structure → assemble → filter
 
 Per-stage roles, timeouts, and failure semantics live in the explainer KB (§2.1).
 
-Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline/` + `routines/` + `ops/` + `cli/`. `npm run boundaries` (dependency-cruiser) mechanically enforces:
+Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline/` + `routines/` + `ops/` + `app/` + `cli/`. `npm run boundaries` (dependency-cruiser) mechanically enforces:
 
 | Rule | Forbids |
 |---|---|
@@ -62,7 +65,9 @@ Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline
 | `ports-only-core` | `ports/` importing anything but `core` |
 | `adapters-no-cross-family` | one adapter family importing another |
 | `adapters-only-ports-core` | `adapters/` importing `pipeline`, `routines`, `ops`, or `cli` |
-| `only-wire-imports-adapters` | anything except `cli/wire/compose.ts` (plus `builders.ts`, and `registry.ts`'s type-only exception) importing `src/adapters/**` |
+| `app-only-ports-core` | `app/` importing anything but `ports`/`core` (or its own `shared/`) |
+| `only-cli-imports-app` | anything except `cli` importing `src/app/**` |
+| `only-wire-imports-adapters` | anything except `cli/wire/compose.ts` (plus `builders.ts`, `board.ts`, and `registry.ts`'s type-only exception) importing `src/adapters/**` |
 | `nothing-imports-cli` | anything importing `cli` |
 
 Note: `boundaries` parses via `@swc/core` with `tsConfig` omitted — setting `tsConfig` silently cruises 0 modules (dependency-cruiser's typescript resolver caps below TS7).
@@ -75,6 +80,7 @@ Key invariants:
 - **Farm writes what source reads.** `farm` must run before `source`: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry.
 - **The runner is the single notifier.** Success and failure digests are both built from `result.json` at run end.
 - **Uniform checkpoints.** Each invocation owns its own `profiles/<name>/data/runs/<date>/<HH-MM>/` folder (local start time); the runner writes `NN-<stage>.json` there after every stage. `--resume` creates a fresh folder and seeds it from the latest checkpoint in the latest earlier same-day folder; `stage <name>` continues in today's latest existing folder instead of creating a new one, so a chain of single-stage runs shares checkpoints.
+- **Local sqlite is the source of truth when `connector: "sqlite"`.** The opt-in Notion mirror (`settings.notion.mirror: true`) is a one-way, budgeted, best-effort push — mirror failures or slowness never fail, stall, or red a run or doctor.
 
 ## Slash commands
 
@@ -101,6 +107,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **`profile remove` is dry-run by default and refuses `rajni`** (the committed fixture); `--force` actually deletes `profiles/<name>/`. It never touches Notion.
 - **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
 - **The LinkedIn lane paces itself and trips a throttle breaker.** 5–12s jitter per navigation plus a 20–45s pause between saved-search URLs (`settings.linkedin.jitterMinMs/jitterMaxMs/interUrlDelayMinMs/interUrlDelayMaxMs`, defaults in `cli/wire/settings.ts`). Consecutive server-withheld JD shells (`jdRoot` present, text empty — a soft-block, never selector drift) open a time-boxed, session-scoped circuit breaker shared by every profile; thresholds, duration, and state location are lane constants — see `src/adapters/lanes/linkedin/`. An open breaker makes the lane return a **skipped** result without launching Chrome; `farm` excludes skipped lanes from its total-outage denominator, so the rest of the pipeline still runs.
+- **The board server binds `127.0.0.1` and writes only the `tracking` table.** `jobs` stays pipeline-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
 
 ## Conventions
 

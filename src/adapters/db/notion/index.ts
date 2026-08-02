@@ -20,6 +20,7 @@ export {
   type NotionConnectorSettings,
   NotionConnectorSettingsSchema,
 } from './connector.ts';
+export { exportForMigration } from './migrate_export.ts';
 export {
   AUTOMATED_FIELDS,
   EXCITEMENT_OPTIONS,

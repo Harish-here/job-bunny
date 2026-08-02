@@ -23,35 +23,8 @@
 import type { CacheEntry } from '../../../ports/connector.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { NotionApi } from './client.ts';
+import { propText, propUrl, type RawPage } from './properties.ts';
 import { PROPERTIES } from './schema.ts';
-
-/** The narrow slice of a real Notion page's `properties` values this module
- * reads — title/rich_text/url are the only property types `CacheEntry`
- * needs (mirrors v0 cache.js's inline property readers). */
-interface RawPropertyValue {
-  title?: { plain_text: string }[];
-  rich_text?: { plain_text: string }[];
-  url?: string | null;
-}
-
-interface RawPage {
-  id: string;
-  properties?: Record<string, RawPropertyValue | undefined>;
-}
-
-function plainText(parts: { plain_text: string }[] | undefined): string {
-  return (parts ?? []).map((t) => t.plain_text).join('');
-}
-
-function propText(p: RawPropertyValue | undefined): string {
-  if (p?.title) return plainText(p.title);
-  if (p?.rich_text) return plainText(p.rich_text);
-  return '';
-}
-
-function propUrl(p: RawPropertyValue | undefined): string | null {
-  return p?.url ?? null;
-}
 
 /** Derives a v2-shaped `identity.id` (`li-`/`gh-`/`kk-` prefixed) from a Job
  * URL — the closest available port of v0's `extractJobId`, re-prefixed so a
@@ -61,7 +34,7 @@ function propUrl(p: RawPropertyValue | undefined): string | null {
  * URL doesn't match any known lane shape — `dedup.ts` already treats a
  * falsy `CacheEntry.id` as "no id to index", same as v0 tolerating a
  * non-derivable job_id. */
-function deriveId(url: string | null): string {
+export function deriveId(url: string | null): string {
   if (!url) return '';
   const linkedin = url.match(/\/jobs\/view\/([^/?#]+)/);
   if (linkedin) return `li-${linkedin[1]}`;
