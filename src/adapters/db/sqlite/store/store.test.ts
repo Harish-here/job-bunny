@@ -171,6 +171,13 @@ test('importTracking never overwrites an existing row (board edits win)', () => 
   assert.equal(row.status, 'Lead');
 });
 
+test('close(): releases the underlying handle — a further op on it throws', () => {
+  const store = freshStore();
+  store.upsertJobs([makeJd('li-50')], '2026-08-01T11:00:00.000Z');
+  store.close();
+  assert.throws(() => store.listCacheEntries());
+});
+
 test('importTracking throws on a job id with no jobs row (FK enforced)', () => {
   const store = freshStore();
   assert.throws(() =>

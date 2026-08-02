@@ -91,6 +91,21 @@ test('archiveStale with dryRun:false archives untouched-old rows and hides them 
   assert.deepEqual(await connector.rebuildCache(fakeCtx()), []);
 });
 
+test('close(): releases the lazily-opened handle — a subsequent op reopens and works', async () => {
+  const connector = tmpConnector();
+  await connector.syncJobs([makeJd('li-40')], fakeCtx());
+
+  connector.close();
+
+  const cache = await connector.rebuildCache(fakeCtx());
+  assert.equal(cache[0]?.id, 'li-40');
+});
+
+test('close(): before any op is a no-op that does not throw', () => {
+  const connector = tmpConnector();
+  assert.doesNotThrow(() => connector.close());
+});
+
 test('isStale: Passed uses passedOlderThanDays; untouched uses untouchedOlderThanDays; other statuses never stale', () => {
   const nowMs = Date.parse('2026-08-01T12:00:00.000Z');
   const tenDaysAgo = '2026-07-22T12:00:00.000Z';

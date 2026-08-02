@@ -183,4 +183,8 @@ export class SqliteStore {
     }
     return archived;
   }
+
+  close(): void {
+    this.db.close();
+  }
 }

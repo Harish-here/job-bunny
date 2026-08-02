@@ -95,4 +95,9 @@ export class MirrorConnector implements Connector {
     }
     return results;
   }
+
+  close(): void {
+    this.primary.close?.();
+    this.mirror.close?.();
+  }
 }

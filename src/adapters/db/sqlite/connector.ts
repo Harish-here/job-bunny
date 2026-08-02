@@ -93,4 +93,11 @@ export class SqliteConnector implements Connector {
     );
     return { archived, dropped: [] };
   }
+
+  /** Releases the lazily-opened handle, if one was opened; a later call
+   * reopens it on demand. No-op when nothing was ever opened. */
+  close(): void {
+    this.store?.close();
+    this.store = undefined;
+  }
 }

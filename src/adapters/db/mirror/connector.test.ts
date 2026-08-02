@@ -212,6 +212,33 @@ test('DEADLINE: a hanging mirror that ignores its signal still lets syncJobs res
   );
 });
 
+test('close(): calls primary.close and mirror.close when present', () => {
+  let primaryClosed = false;
+  let mirrorClosed = false;
+  const primary = namedConnector('sqlite', {
+    close: () => {
+      primaryClosed = true;
+    },
+  });
+  const mirror = namedConnector('notion', {
+    close: () => {
+      mirrorClosed = true;
+    },
+  });
+  const connector = new MirrorConnector(primary, mirror);
+  connector.close();
+  assert.equal(primaryClosed, true);
+  assert.equal(mirrorClosed, true);
+});
+
+test('close(): tolerates primary/mirror connectors without a close method', () => {
+  const connector = new MirrorConnector(
+    namedConnector('sqlite'),
+    namedConnector('notion'),
+  );
+  assert.doesNotThrow(() => connector.close());
+});
+
 test('PARTIAL: mirror resolves with fewer entries than jobs -> a WARN (not info) logged with { pushed, of }', async () => {
   const jobs = [makeJd('li-6'), makeJd('li-7')];
   const primary = namedConnector('sqlite');

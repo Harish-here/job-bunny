@@ -38,9 +38,7 @@ test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction 
   try {
     const result = await wire('rajni', {
       root: '/repo',
-      readFile: fakeReadFile({
-        [profilePath('rajni')]: NOTION_ONLY_PROFILE_JSON,
-      }),
+      readFile: fakeReadFile({ [profilePath('rajni')]: NOTION_ONLY_PROFILE_JSON }),
     });
 
     // Resolves rather than rejecting, and still carries the core checks
@@ -463,6 +461,7 @@ test('wire: a mirrored sqlite connector writes locally and best-effort pushes to
   const root = await mkdtemp(join(tmpdir(), 'jb-wire-mirror-'));
   const originalToken = process.env.NOTION_TOKEN;
   delete process.env.NOTION_TOKEN;
+  let result: Awaited<ReturnType<typeof wire>> | undefined;
   try {
     const profileJson = JSON.stringify({
       lanes: [],
@@ -471,7 +470,7 @@ test('wire: a mirrored sqlite connector writes locally and best-effort pushes to
       routines: [],
       settings: { sqlite: {}, notion: { dbId: 'db-x', mirror: true } },
     });
-    const result = await wire('rajni', {
+    result = await wire('rajni', {
       root,
       readFile: fakeReadFile({ [profilePath('rajni', root)]: profileJson }),
     });
@@ -503,13 +502,14 @@ test('wire: a mirrored sqlite connector writes locally and best-effort pushes to
       beat() {},
     };
 
-    await assert.doesNotReject(() => result.ctx.ports.connector.syncJobs([job], runCtx));
+    await result.ctx.ports.connector.syncJobs([job], runCtx); // rejects -> fails the test
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]?.msg ?? '', /mirror/);
     assert.match(String(warnings[0]?.data?.error ?? ''), /NOTION_TOKEN/);
   } finally {
     if (originalToken === undefined) delete process.env.NOTION_TOKEN;
     else process.env.NOTION_TOKEN = originalToken;
+    result?.ctx.ports.connector.close?.(); // Windows can't unlink an open db.
     await rm(root, { recursive: true, force: true });
   }
 });
