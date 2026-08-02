@@ -22,7 +22,7 @@ Node ≥ 24 required (native type-stripping, no build step); the machine default
 ## Commands
 
 ```bash
-npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI runs it as a 3-OS `check` matrix (macos/ubuntu/windows) plus a ubuntu-only `ui` job (`ui:check` + `ui:build`), behind a `needs`-wrapper job named `test`, which keeps the branch-protection check name
+npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI runs it as a 3-OS `check` matrix (macos/ubuntu/windows) plus a ubuntu-only `ui` job (`ui:check` + `ui:build` + Playwright e2e via `ui:e2e`), behind a `needs`-wrapper job named `test`, which keeps the branch-protection check name
 node --test src/core/filter/engine.test.ts        # single test file
 node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]
 node src/cli/main.ts doctor --profile <name>
