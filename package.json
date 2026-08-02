@@ -21,7 +21,8 @@
     "release": "node src/cli/main.ts release",
     "ui:build": "npm run build --workspace ui",
     "ui:dev": "npm run dev --workspace ui",
-    "ui:check": "npm run check --workspace ui"
+    "ui:check": "npm run check --workspace ui",
+    "ui:e2e": "npm run e2e --workspace ui"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",

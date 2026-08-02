@@ -15,7 +15,13 @@ afterEach(() => {
 describe('buildQuery', () => {
   it('serializes defined params and skips undefined/empty', () => {
     expect(
-      buildQuery({ status: 'Applied', company: undefined, offset: 0, sort: 'score', empty: '' }),
+      buildQuery({
+        status: 'Applied',
+        company: undefined,
+        offset: 0,
+        sort: 'score',
+        empty: '',
+      }),
     ).toBe('?status=Applied&offset=0&sort=score');
   });
 
@@ -30,7 +36,10 @@ describe('buildQuery', () => {
 
 describe('getJson', () => {
   it('returns the parsed body on 200', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { rows: [], total: 0 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { rows: [], total: 0 })),
+    );
     await expect(getJson('/api/x')).resolves.toEqual({ rows: [], total: 0 });
   });
 
@@ -38,7 +47,9 @@ describe('getJson', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        jsonResponse(404, { error: { code: 'no_local_db', message: 'profile has no local database' } }),
+        jsonResponse(404, {
+          error: { code: 'no_local_db', message: 'profile has no local database' },
+        }),
       ),
     );
     const err = await getJson('/api/x').catch((e: unknown) => e);
@@ -47,13 +58,19 @@ describe('getJson', () => {
   });
 
   it('throws ApiError(code unknown) when an error body is not the envelope', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('boom', { status: 500 })),
+    );
     const err = await getJson('/api/x').catch((e: unknown) => e);
     expect(err).toMatchObject({ status: 500, code: 'unknown', message: 'HTTP 500' });
   });
 
   it('throws ApiError(code bad_response) on a 200 with a non-JSON body', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })),
+    );
     const err = await getJson('/api/x').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err).toMatchObject({ status: 200, code: 'bad_response' });
@@ -70,7 +87,9 @@ describe('patchJson', () => {
   it('sends PATCH with json content-type and body', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(jsonResponse(200, { tracking: { jobId: 'li-1', updatedAt: 'x' } }));
+      .mockResolvedValue(
+        jsonResponse(200, { tracking: { jobId: 'li-1', updatedAt: 'x' } }),
+      );
     vi.stubGlobal('fetch', fetchMock);
     await patchJson('/api/x', { status: 'Applied' });
     expect(fetchMock).toHaveBeenCalledWith('/api/x', {

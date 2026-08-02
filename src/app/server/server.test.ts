@@ -42,6 +42,7 @@ function sendRawRequest(port: number, raw: string): Promise<string> {
 }
 
 const PROFILES: BoardProfile[] = [{ name: 'p1', connector: 'sqlite', hasDb: true }];
+const TEST_VERSION = '0.0.0-test';
 
 const silentLogger: Logger = {
   debug() {},
@@ -116,7 +117,11 @@ async function withServer(
 }
 
 test('GET /api/profiles returns the source data', async () => {
-  const server = createBoardServer({ source: fakeSource(), logger: silentLogger });
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     const res = await fetch(`http://127.0.0.1:${port}/api/profiles`);
     assert.equal(res.status, 200);
@@ -128,7 +133,11 @@ test('GET /api/profiles returns the source data', async () => {
 });
 
 test('unknown /api route is a 404 not_found envelope', async () => {
-  const server = createBoardServer({ source: fakeSource(), logger: silentLogger });
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     const res = await fetch(`http://127.0.0.1:${port}/api/nope`);
     assert.equal(res.status, 404);
@@ -142,6 +151,7 @@ test('PATCH with a body reaches the fake store parsed', async () => {
   const server = createBoardServer({
     source: fakeSource({ store }),
     logger: silentLogger,
+    version: TEST_VERSION,
   });
   await withServer(server, async (port) => {
     const res = await fetch(
@@ -166,7 +176,11 @@ test('a throwing store method is a 500 internal envelope whose message is NOT th
     },
   });
   const logger = recordingLogger();
-  const server = createBoardServer({ source: fakeSource({ store }), logger });
+  const server = createBoardServer({
+    source: fakeSource({ store }),
+    logger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/jobs`);
     assert.equal(res.status, 500);
@@ -193,7 +207,11 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     },
     close() {},
   };
-  const server = createBoardServer({ source, logger: silentLogger });
+  const server = createBoardServer({
+    source,
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/jobs`);
     assert.equal(res.status, 500);
@@ -203,7 +221,11 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
 });
 
 test('GET / with no uiDir serves the no-UI text page', async () => {
-  const server = createBoardServer({ source: fakeSource(), logger: silentLogger });
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     const res = await fetch(`http://127.0.0.1:${port}/`);
     assert.equal(res.status, 200);
@@ -218,6 +240,7 @@ test('close() calls source.close()', async () => {
   const server = createBoardServer({
     source: fakeSource({ closed }),
     logger: silentLogger,
+    version: TEST_VERSION,
   });
   const { port } = await server.listen(0);
   assert.equal(closed.value, false);
@@ -228,7 +251,11 @@ test('close() calls source.close()', async () => {
 
 test('one http log line is emitted per request, including error responses', async () => {
   const logger = recordingLogger();
-  const server = createBoardServer({ source: fakeSource(), logger });
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     await fetch(`http://127.0.0.1:${port}/api/profiles`);
     await fetch(`http://127.0.0.1:${port}/api/nope`);
@@ -249,7 +276,11 @@ test('a malformed absolute-form request target is a 400 bad_request envelope, no
   // never rejects the request line) and lands in the handler as
   // `req.url === 'http://[::bad'`, which throws inside `new URL()`.
   const logger = recordingLogger();
-  const server = createBoardServer({ source: fakeSource(), logger });
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger,
+    version: TEST_VERSION,
+  });
   await withServer(server, async (port) => {
     const raw = 'GET http://[::bad HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n';
     const response = await sendRawRequest(port, raw);
@@ -288,6 +319,7 @@ test('a real ZodError leaking from a route handler is converted to 400 validatio
   const server = createBoardServer({
     source: fakeSource({ store }),
     logger: silentLogger,
+    version: TEST_VERSION,
   });
   await withServer(server, async (port) => {
     const res = await fetch(
@@ -315,7 +347,11 @@ test('close() still calls source.close() when httpServer.close() rejects', async
       closed.value = true;
     },
   };
-  const server = createBoardServer({ source, logger: silentLogger });
+  const server = createBoardServer({
+    source,
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
   await server.listen(0);
 
   await server.close();

@@ -1,32 +1,35 @@
-import { type Readable, writable } from 'svelte/store';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { BoardProfile } from './api/types';
 
 const STORAGE_KEY = 'jobbunny.profile';
 
-type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
-
-export interface ProfileStore {
-  current: Readable<string | null>;
-  init(profiles: BoardProfile[]): void;
-  choose(name: string): void;
+export function pickProfile(
+  stored: string | null,
+  profiles: BoardProfile[],
+): string | null {
+  const names = profiles.map((p) => p.name);
+  if (stored !== null && names.includes(stored)) return stored;
+  return profiles.find((p) => p.hasDb)?.name ?? names[0] ?? null;
 }
 
-export function createProfileStore(storage: StorageLike): ProfileStore {
-  const current = writable<string | null>(null);
-  return {
-    current: { subscribe: current.subscribe },
-    init(profiles) {
-      const stored = storage.getItem(STORAGE_KEY);
-      const names = profiles.map((p) => p.name);
-      const pick =
-        stored !== null && names.includes(stored)
-          ? stored
-          : (profiles.find((p) => p.hasDb)?.name ?? names[0] ?? null);
-      current.set(pick);
+let listeners: (() => void)[] = [];
+function emit() {
+  for (const l of listeners) l();
+}
+
+export function useStoredProfile(): [string | null, (name: string) => void] {
+  const stored = useSyncExternalStore(
+    (cb) => {
+      listeners.push(cb);
+      return () => {
+        listeners = listeners.filter((l) => l !== cb);
+      };
     },
-    choose(name) {
-      storage.setItem(STORAGE_KEY, name);
-      current.set(name);
-    },
-  };
+    () => localStorage.getItem(STORAGE_KEY),
+  );
+  const choose = useCallback((name: string) => {
+    localStorage.setItem(STORAGE_KEY, name);
+    emit();
+  }, []);
+  return [stored, choose];
 }

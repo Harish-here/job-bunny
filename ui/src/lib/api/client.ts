@@ -26,7 +26,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(path, init);
   } catch (err) {
-    throw new ApiError(0, 'network', err instanceof Error ? err.message : 'network error');
+    throw new ApiError(
+      0,
+      'network',
+      err instanceof Error ? err.message : 'network error',
+    );
   }
   let body: unknown;
   try {

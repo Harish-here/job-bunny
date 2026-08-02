@@ -18,6 +18,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { z } from 'zod';
 import type { BoardSource } from '../../ports/board.ts';
 import type { Logger } from '../../ports/context.ts';
+import { makeAppInfoRoutes } from '../features/appinfo/index.ts';
 import { makeBoardRoutes } from '../features/board/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../shared/index.ts';
@@ -32,6 +33,8 @@ export interface BoardServerOptions {
   uiDir?: string;
   /** Never widened by config in v1 — this option exists for tests only. */
   host?: string;
+  /** Running server version, surfaced read-only by `GET /api/app`. */
+  version: string;
 }
 
 export interface BoardServer {
@@ -44,8 +47,12 @@ export interface BoardServer {
 const DEFAULT_HOST = '127.0.0.1';
 
 export function createBoardServer(opts: BoardServerOptions): BoardServer {
-  const { source, logger, uiDir, host = DEFAULT_HOST } = opts;
-  const routes: RouteDef[] = [...makeProfilesRoutes(source), ...makeBoardRoutes(source)];
+  const { source, logger, uiDir, host = DEFAULT_HOST, version } = opts;
+  const routes: RouteDef[] = [
+    ...makeProfilesRoutes(source),
+    ...makeBoardRoutes(source),
+    ...makeAppInfoRoutes(version),
+  ];
 
   const httpServer = createServer((req, res) => {
     // Last-resort net: `handleRequest` covers its own body in a

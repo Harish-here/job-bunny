@@ -68,3 +68,11 @@ profiles/*/data/*
 
 # Board UI build output — rebuilt any time with `npm run ui:build`
 ui/dist/
+
+# Playwright e2e run artifacts (npm run ui:e2e) — regenerated each run
+ui/test-results/
+ui/playwright-report/
+ui/blob-report/
+
+# Superpowers workflow state (local only)
+.superpowers/

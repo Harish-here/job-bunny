@@ -1,30 +1,35 @@
-import { type Readable, writable } from 'svelte/store';
+import { useSyncExternalStore } from 'react';
 
-export const ROUTES = ['board', 'analytics', 'onboarding'] as const;
+export const ROUTES = ['triage', 'tracker', 'analytics', 'onboarding'] as const;
 export type RouteName = (typeof ROUTES)[number];
+export type Route = { name: RouteName } | { name: 'job'; id: string };
 
-export function parseHash(hash: string): RouteName {
-  const name = hash.replace(/^#\/?/, '').split('/')[0] ?? '';
-  return (ROUTES as readonly string[]).includes(name) ? (name as RouteName) : 'board';
+export function parseHash(hash: string): Route {
+  const parts = hash.replace(/^#\/?/, '').split('/');
+  if (parts[0] === 'job' && parts[1])
+    return { name: 'job', id: decodeURIComponent(parts[1]) };
+  const name = parts[0] ?? '';
+  return (ROUTES as readonly string[]).includes(name)
+    ? { name: name as RouteName }
+    : { name: 'triage' };
 }
 
-interface RouterWindow {
-  location: { hash: string };
-  addEventListener(type: 'hashchange', listener: () => void): void;
+export function routeHash(route: Route): string {
+  return route.name === 'job'
+    ? `#/job/${encodeURIComponent(route.id)}`
+    : `#/${route.name}`;
 }
 
-export interface Router {
-  route: Readable<RouteName>;
-  navigate(to: RouteName): void;
+export function navigate(route: Route): void {
+  window.location.hash = routeHash(route);
 }
 
-export function createRouter(win: RouterWindow): Router {
-  const store = writable<RouteName>(parseHash(win.location.hash));
-  win.addEventListener('hashchange', () => store.set(parseHash(win.location.hash)));
-  return {
-    route: { subscribe: store.subscribe },
-    navigate(to) {
-      win.location.hash = `#/${to}`;
-    },
-  };
+function subscribe(cb: () => void): () => void {
+  window.addEventListener('hashchange', cb);
+  return () => window.removeEventListener('hashchange', cb);
+}
+
+export function useRoute(): Route {
+  const hash = useSyncExternalStore(subscribe, () => window.location.hash);
+  return parseHash(hash);
 }

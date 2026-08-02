@@ -38,6 +38,7 @@ function baseDeps(overrides: Partial<BoardDeps> = {}): Partial<BoardDeps> {
     }),
     logger: noopLogger(),
     uiDir: '/fake/ui/dist',
+    version: '0.0.0-test',
     write: () => {},
     waitForStop: async () => {},
     ...overrides,
