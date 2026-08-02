@@ -57,6 +57,8 @@ export function KanbanCard({
       {...listeners}
       role="button"
       tabIndex={0}
+      data-testid="kanban-card"
+      data-job-id={row.id}
       onClick={() => navigate({ name: 'job', id: row.id })}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

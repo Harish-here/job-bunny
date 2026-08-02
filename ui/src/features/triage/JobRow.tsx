@@ -24,6 +24,8 @@ export function JobRow({
       role="option"
       tabIndex={0}
       aria-selected={selected}
+      data-testid="job-row"
+      data-job-id={row.id}
       onClick={() => onSelect(row.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -38,6 +40,8 @@ export function JobRow({
     >
       <div className="flex items-center gap-2">
         <span
+          data-testid="job-row-status"
+          title={row.tracking?.status ?? 'Undecided'}
           className={cn('size-1.5 shrink-0 rounded-full', dotClass(row.tracking?.status))}
         />
         <span className="flex-1 truncate text-sm font-medium">{row.title}</span>

@@ -16,7 +16,7 @@ export function DueStrip({
 }) {
   if (rows.length === 0) return null;
   return (
-    <div className="flex gap-2 overflow-x-auto border-b p-2">
+    <div data-testid="due-strip" className="flex gap-2 overflow-x-auto border-b p-2">
       {rows.map((row) => (
         <button
           key={row.id}

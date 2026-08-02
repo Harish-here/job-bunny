@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "check": "tsc --noEmit && biome check src && vitest run",
+    "check": "tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit && biome check src e2e && vitest run",
     "test": "vitest run",
     "e2e": "playwright test"
   },

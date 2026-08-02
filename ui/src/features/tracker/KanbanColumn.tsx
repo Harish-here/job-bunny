@@ -23,6 +23,8 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
+      data-testid="kanban-column"
+      data-status={status}
       className={cn(
         'flex w-64 shrink-0 flex-col rounded-lg border bg-muted/20',
         isOver && 'ring-2 ring-primary',

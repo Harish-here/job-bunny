@@ -97,7 +97,10 @@ export function TrackerPage({ profile }: { profile: string }) {
             />
           ))}
 
-          <div className="flex w-64 shrink-0 flex-col rounded-lg border bg-muted/20">
+          <div
+            data-testid="closed-column"
+            className="flex w-64 shrink-0 flex-col rounded-lg border bg-muted/20"
+          >
             <button
               type="button"
               className="flex items-center gap-1 border-b px-2 py-1.5 text-sm font-medium"
