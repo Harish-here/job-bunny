@@ -20,6 +20,7 @@
  * `main.ts`'s catch, which prints and returns exit code 1, the same
  * posture every other command takes.
  */
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   type BoardServer,
@@ -43,6 +44,9 @@ export interface BoardDeps {
    * location, i.e. `<repo>/ui/dist` — a missing directory is fine, the
    * server falls back to its no-UI page (`app/server/static.ts`). */
   uiDir: string;
+  /** Running server version, surfaced by `GET /api/app`. Default: the root
+   * package.json's `version` — a dep so tests need no disk read. */
+  version: string;
   write: (line: string) => void;
   /** Resolves when the server should stop. Default: resolves on the first
    * SIGINT or SIGTERM. */
@@ -63,6 +67,14 @@ function defaultDeps(): BoardDeps {
     createServer: (o) => createBoardServer(o),
     logger: createWireLogger(),
     uiDir: fileURLToPath(new URL('../../../ui/dist', import.meta.url)),
+    version: (
+      JSON.parse(
+        readFileSync(
+          fileURLToPath(new URL('../../../package.json', import.meta.url)),
+          'utf8',
+        ),
+      ) as { version: string }
+    ).version,
     write: (line: string) => console.log(line),
     waitForStop: defaultWaitForStop,
   };
@@ -78,6 +90,7 @@ export async function boardCommand(
     source,
     logger: resolved.logger,
     uiDir: resolved.uiDir,
+    version: resolved.version,
   });
 
   const { port } = await server.listen(opts.port);
