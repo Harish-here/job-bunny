@@ -5,8 +5,9 @@
  * silently shipping a bad row; the schema is the correctness mechanism,
  * not this file's own judgment.
  */
-import { JDSchema } from '../../src/core/jd/index.ts';
+
 import type { JD, WorkType } from '../../src/core/jd/index.ts';
+import { JDSchema } from '../../src/core/jd/index.ts';
 
 interface JdOverrides {
   id: string;

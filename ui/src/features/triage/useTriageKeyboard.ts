@@ -8,7 +8,11 @@ import type { DecideAction } from './decide';
  * `/` focuses the always-mounted top-bar company search input without
  * typing the `/` character into it. Ignored whenever focus is already in a
  * form control, so typing in the search box (or any future input) never
- * triggers a shortcut.
+ * triggers a shortcut. Also ignored whenever a modifier key is held (so
+ * OS/browser chords like Cmd/Ctrl+A never fall through to a decide action)
+ * or a Radix popper (Select, etc.) is open, since Radix portals its
+ * `role="combobox"`/listbox content into `document.body` where the
+ * form-control guard below can't see it.
  */
 export function useTriageKeyboard({
   move,
@@ -21,8 +25,14 @@ export function useTriageKeyboard({
 }): void {
   useEffect(() => {
     function handleKeydown(e: KeyboardEvent): void {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target as HTMLElement;
-      if (t.closest('input,textarea,select,[contenteditable="true"]')) return;
+      if (
+        t.closest('input,textarea,select,[contenteditable="true"],[role="combobox"]') ||
+        document.querySelector('[data-radix-popper-content-wrapper]')
+      ) {
+        return;
+      }
 
       switch (e.key) {
         case 'j':

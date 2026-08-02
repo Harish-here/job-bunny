@@ -26,7 +26,7 @@ jobs:
       - run: npm run boundaries
       - run: npm test
 
-  # The UI workspace has its own gate (svelte-check + vitest + vite build).
+  # The UI workspace has its own gate (ui:check + ui:build + playwright e2e).
   # One OS is enough — it produces a platform-independent static bundle.
   ui:
     runs-on: ubuntu-latest

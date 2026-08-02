@@ -118,6 +118,49 @@ describe('useTriageKeyboard', () => {
     expect(move).not.toHaveBeenCalled();
   });
 
+  it('ignores keys held with a modifier (Cmd/Ctrl/Alt), even on document.body', () => {
+    const move = vi.fn();
+    const onDecide = vi.fn();
+    renderHook(() => useTriageKeyboard({ move, onDecide, selectedId: 'li-1' }));
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true }),
+    );
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true }),
+    );
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 's', altKey: true, bubbles: true }),
+    );
+
+    expect(onDecide).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it('ignores keys when the event target is a Radix combobox trigger', () => {
+    const move = vi.fn();
+    const onDecide = vi.fn();
+    const button = document.createElement('button');
+    button.setAttribute('role', 'combobox');
+    document.body.appendChild(button);
+    renderHook(() => useTriageKeyboard({ move, onDecide, selectedId: 'li-1' }));
+
+    keydown(button, 'a');
+    expect(onDecide).not.toHaveBeenCalled();
+  });
+
+  it('ignores keys anywhere while a Radix popper is open (portalled listbox)', () => {
+    const move = vi.fn();
+    const onDecide = vi.fn();
+    const popper = document.createElement('div');
+    popper.setAttribute('data-radix-popper-content-wrapper', '');
+    document.body.appendChild(popper);
+    renderHook(() => useTriageKeyboard({ move, onDecide, selectedId: 'li-1' }));
+
+    keydown(document.body, 'a');
+    expect(onDecide).not.toHaveBeenCalled();
+  });
+
   it('removes its listener on unmount', () => {
     const move = vi.fn();
     const onDecide = vi.fn();

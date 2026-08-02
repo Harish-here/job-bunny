@@ -4,8 +4,14 @@
  * `profiles/rajni/data/jobbunny.db` (+ WAL siblings): the `refusing: not
  * rajni` guard is a deliberate belt-and-braces check, never Notion, never
  * any other profile's data (T11 constraint).
+ *
+ * Truncates in place (`DELETE FROM` both tables) rather than deleting and
+ * recreating the file: Playwright's `webServer` plugin starts the board
+ * server (which lazily opens+memoizes this DB) BEFORE `globalSetups` run,
+ * so swapping the inode out from under an already-open handle would pin a
+ * deleted file (order-independent here; also avoids an EBUSY on Windows
+ * where the open handle blocks `rmSync`).
  */
-import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openJobsDb, SqliteStore } from '../../src/adapters/db/sqlite/store/index.ts';
@@ -21,11 +27,9 @@ export default function seed(): void {
   if (!dbPath.includes(`${path.sep}rajni${path.sep}`)) {
     throw new Error('refusing: not rajni');
   }
-  for (const suffix of ['', '-wal', '-shm']) {
-    rmSync(`${dbPath}${suffix}`, { force: true });
-  }
 
   const db = openJobsDb(dbPath);
+  db.exec('DELETE FROM tracking; DELETE FROM jobs;');
   const store = new SqliteStore(db);
   const now = new Date().toISOString();
   store.upsertJobs(FIXTURE_JOBS, now);

@@ -32,7 +32,9 @@ test('board loads', async ({ page }) => {
   const first = rows.first();
   await expect(first).toHaveAttribute('data-job-id', 'rajni-e2e-1');
   await expect(first).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('heading', { name: 'Staff Frontend Engineer' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Staff Frontend Engineer' }),
+  ).toBeVisible();
 });
 
 test('sidebar branding', async ({ page }) => {
@@ -116,7 +118,9 @@ test('tracker kanban', async ({ page }) => {
   ).toBeVisible();
 
   const closedColumn = page.getByTestId('closed-column');
-  await expect(closedColumn.getByRole('button', { name: /Closed \(\d+\)/ })).toBeVisible();
+  await expect(
+    closedColumn.getByRole('button', { name: /Closed \(\d+\)/ }),
+  ).toBeVisible();
   await expect(
     closedColumn.getByRole('button', { name: /Closed \(\d+\)/ }),
   ).toContainText('Closed (1)');
@@ -151,7 +155,9 @@ test('full-page detail + back', async ({ page }) => {
 
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#\/job\/rajni-e2e-1/);
-  await expect(page.getByRole('heading', { name: 'Staff Frontend Engineer' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Staff Frontend Engineer' }),
+  ).toBeVisible();
   await expect(page.locator('pre')).toContainText('Staff Frontend Engineer at AlphaCo');
 
   await page.getByRole('button', { name: /Back/ }).click();

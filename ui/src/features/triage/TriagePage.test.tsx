@@ -63,7 +63,7 @@ function detailFor(row: BoardJobRow): BoardDetailResponse {
   } as unknown as BoardDetailResponse;
 }
 
-function stubFetch(opts: { noLocalDb?: boolean } = {}) {
+function stubFetch(opts: { noLocalDb?: boolean; serverError?: boolean } = {}) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -92,6 +92,15 @@ function stubFetch(opts: { noLocalDb?: boolean } = {}) {
             status: 404,
             json: async () => ({
               error: { code: 'no_local_db', message: 'no local database' },
+            }),
+          } as unknown as Response;
+        }
+        if (opts.serverError) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({
+              error: { code: 'internal', message: 'internal server error' },
             }),
           } as unknown as Response;
         }
@@ -160,5 +169,16 @@ describe('TriagePage', () => {
     await waitFor(() => {
       expect(screen.getByText(/no local database/i)).toBeInTheDocument();
     });
+  });
+
+  it('shows a distinct error state (not "No jobs match") on a server failure', async () => {
+    stubFetch({ serverError: true });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/couldn't load jobs/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/no jobs match/i)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /retry/i }).length).toBeGreaterThan(0);
   });
 });

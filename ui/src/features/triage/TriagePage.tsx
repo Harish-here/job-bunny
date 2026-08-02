@@ -82,6 +82,7 @@ export function TriagePage({ profile }: { profile: string }) {
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;
   const noLocalDb = isNoLocalDb(jobsQuery.error);
+  const isError = jobsQuery.isError && !noLocalDb;
   // Guards the brief window before `useTriageSelection`'s effect resolves the
   // first row: `useJob` fires once with an empty id (Hooks must be called
   // unconditionally), and its response must never be mistaken for the
@@ -136,6 +137,20 @@ export function TriagePage({ profile }: { profile: string }) {
             <div className="p-4 text-sm text-muted-foreground">
               This profile has no local database yet — run the pipeline to populate one.
             </div>
+          ) : isError ? (
+            <div className="flex flex-col items-start gap-2 p-4 text-sm">
+              <span className="text-destructive">
+                Couldn&apos;t load jobs — the board server may be unreachable.
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => jobsQuery.refetch()}
+              >
+                Retry
+              </Button>
+            </div>
           ) : jobsQuery.isPending ? (
             <div className="flex flex-col gap-2 p-3">
               {SKELETON_ROW_KEYS.map((key) => (
@@ -177,6 +192,20 @@ export function TriagePage({ profile }: { profile: string }) {
       <section className="overflow-y-auto p-6">
         {noLocalDb ? (
           <div className="text-muted-foreground">No jobs to show.</div>
+        ) : isError ? (
+          <div className="flex flex-col items-start gap-2 text-sm">
+            <span className="text-destructive">
+              Couldn&apos;t load jobs — the board server may be unreachable.
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => jobsQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </div>
         ) : detail ? (
           <div className="flex flex-col gap-6">
             <JobHeader job={detail} />
