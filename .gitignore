@@ -68,3 +68,6 @@ profiles/*/data/*
 
 # Board UI build output — rebuilt any time with `npm run ui:build`
 ui/dist/
+
+# Superpowers workflow state (local only)
+.superpowers/
