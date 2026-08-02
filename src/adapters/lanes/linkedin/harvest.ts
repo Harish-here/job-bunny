@@ -1,10 +1,14 @@
-import type { FilterConfig } from '../../../core/filter/config.ts';
-import { decide, evaluateCard } from '../../../core/filter/engine.ts';
 import type { CardInput } from '../../../core/filter/rules/types.ts';
-import { type DroppedRecord, JDSchema } from '../../../core/jd/index.ts';
+import type { DroppedRecord } from '../../../core/jd/index.ts';
 import type { PageHandle } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { Inventory } from './inventory.ts';
+
+/** Re-exported so existing importers (adapters/lanes/linkedin/index.ts,
+ * fire/probe.ts, fire/loop/url_runner.ts) keep importing gateCards from
+ * harvest.ts — its implementation lives in card_gate.ts, split out
+ * (2026-08-02) purely to keep this file under the file-size cap. */
+export { gateCards } from './card_gate.ts';
 
 /**
  * Batch card harvest + card gate (P4 Task 4, spec §"Card harvest is batch
@@ -338,37 +342,4 @@ export async function harvestCards(
     });
   }
   return cards;
-}
-
-/**
- * Card-gate: runs the P2 evalCard rules (title, company) against each
- * harvested card. Kept cards pass through unchanged; dropped cards get an
- * identity-only JD (no content/structured yet — the card gate runs before
- * JD open) so the funnel can always answer "why did this disappear?".
- */
-export function gateCards(
-  cards: HarvestedCard[],
-  cfg: FilterConfig,
-): { pass: HarvestedCard[]; dropped: DroppedRecord[] } {
-  const pass: HarvestedCard[] = [];
-  const dropped: DroppedRecord[] = [];
-  for (const card of cards) {
-    const verdicts = evaluateCard(card, cfg);
-    if (decide(verdicts) === 'keep') {
-      pass.push(card);
-      continue;
-    }
-    const jd = JDSchema.parse({
-      identity: {
-        id: card.id,
-        lane: 'linkedin',
-        url: card.url,
-        company: card.company,
-        title: card.title,
-        scrapedAt: new Date().toISOString(),
-      },
-    });
-    dropped.push({ jd, reasons: verdicts });
-  }
-  return { pass, dropped };
 }

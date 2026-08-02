@@ -172,8 +172,35 @@ export async function runUrlGroups(
           // would when `pass` ends up empty.
           ctx.beat();
 
-          const { pass, dropped: gateDropped } = gateCards(cards, deps.filterCfg);
+          const {
+            pass,
+            dropped: gateDropped,
+            identityInvalidCount,
+          } = gateCards(cards, deps.filterCfg);
           state.dropped.push(...gateDropped);
+
+          // Total-outage guard (2026-08-02 review, restored): one
+          // unsettled card is a narrow casualty (gateCards' own doc
+          // comment) — but a page where EVERY harvested card came back
+          // identity-invalid looks like the same systemic paint-storm/
+          // selector-drift the pre-fix crash used to (accidentally)
+          // surface as a loud url failure, and must still drive
+          // lane.ts's failedUrls===attemptedUrls guard and
+          // evidence.ts's field-validation evidence branch. Recorded
+          // directly rather than by throwing — a thrown ZodError here
+          // would just be the discarded-page bug this module now fixes,
+          // reintroduced — and pagination stops for this url, mirroring
+          // what the old uncaught throw did.
+          if (cards.length > 0 && identityInvalidCount === cards.length) {
+            stat.failed = true;
+            const message =
+              `${identityInvalidCount} of ${cards.length} harvested card(s) on ` +
+              `"${inv.page}" had empty/invalid identity fields (title/company) — ` +
+              'every card on this page failed gateCards identity validation';
+            stat.failures.push({ kind: 'field-validation', message });
+            ctx.logger.warn('linkedin lane: url failed', { url, message });
+            break;
+          }
 
           // companiesSeen = post-gate (passing) card companies, deduped
           // — recorded regardless of whether this card's JD open below

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { FilterConfigSchema } from '../../../core/filter/config.ts';
 import type { PageHandle } from '../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../ports/context.ts';
-import { buildHarvestScript, gateCards, harvestCards } from './harvest.ts';
+import { buildHarvestScript, harvestCards } from './harvest.ts';
 import type { Inventory } from './inventory.ts';
 
 /** Real selectors from src/adapters/lanes/linkedin/page_inventory/
@@ -574,54 +573,6 @@ test('harvestCards prefers an href-derived id over the idAttr when both are pres
 
   assert.equal(cards[0]?.id, 'li-999');
   assert.equal(cards[0]?.url, 'https://www.linkedin.com/jobs/view/999/');
-});
-
-// --- gateCards: real FilterConfig, pass/dropped partition ---
-
-test('gateCards partitions cards by the card-gate rules and records identity-only JDs for drops', () => {
-  const cfg = FilterConfigSchema.parse({
-    companies: { avoid: ['Bad Co'] },
-  });
-  const keeper = {
-    title: 'Backend Engineer',
-    company: 'Good Co',
-    location: 'Remote',
-    url: 'https://www.linkedin.com/jobs/view/111/',
-    id: 'li-111',
-  };
-  const dropped = {
-    title: 'Backend Engineer',
-    company: 'Bad Co',
-    location: 'Remote',
-    url: 'https://www.linkedin.com/jobs/view/222/',
-    id: 'li-222',
-  };
-
-  const result = gateCards([keeper, dropped], cfg);
-
-  assert.deepEqual(result.pass, [keeper]);
-  assert.equal(result.dropped.length, 1);
-  const record = result.dropped.at(0);
-  assert.equal(record?.jd.identity.id, 'li-222');
-  assert.equal(record?.jd.identity.lane, 'linkedin');
-  assert.equal(record?.jd.identity.company, 'Bad Co');
-  assert.equal(record?.jd.identity.title, 'Backend Engineer');
-  assert.equal(record?.jd.identity.url, 'https://www.linkedin.com/jobs/view/222/');
-  assert.ok(record?.reasons.some((v) => v.rule === 'company.avoid' && v.pass === false));
-});
-
-test('gateCards keeps a card when no rule fails (empty FilterConfig ⇒ everything passes)', () => {
-  const cfg = FilterConfigSchema.parse({});
-  const card = {
-    title: 'Anything',
-    company: 'Anyone',
-    location: 'Anywhere',
-    url: 'https://www.linkedin.com/jobs/view/333/',
-    id: 'li-333',
-  };
-  const result = gateCards([card], cfg);
-  assert.deepEqual(result.pass, [card]);
-  assert.deepEqual(result.dropped, []);
 });
 
 // --- harvest readiness: the wait + the min-cards assertion ---
