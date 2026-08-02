@@ -30,7 +30,7 @@ node src/cli/main.ts stage <stage-name> --profile <name>
 node src/cli/main.ts routine <routine-name> --profile <name>
 node src/cli/main.ts migrate --profile <name> [--apply]  # Notion → local sqlite import; dry-run by default
 node src/cli/main.ts board [--port <n>]           # job-board UI + API, all profiles, 127.0.0.1 only (default port 1994)
-npm run ui:build                                  # build the board SPA into ui/dist (its gate: npm run ui:check)
+npm run ui:build                                  # build the board SPA into ui/dist (its gate: npm run ui:check; e2e smoke: npm run ui:e2e)
 node src/cli/main.ts serve start|stop|status
 node src/cli/main.ts autostart enable|disable     # darwin only
 ```
