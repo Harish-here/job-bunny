@@ -9,6 +9,7 @@ import { useTrackingMutation } from '../board/useTracking';
 import { JdText } from '../job/JdText';
 import { JobFacts } from '../job/JobFacts';
 import { JobHeader } from '../job/JobHeader';
+import { TrackingPanel } from '../job/TrackingPanel';
 import { DecideBar } from './DecideBar';
 import { DECIDE_STATUS, type DecideAction, nextUndecided } from './decide';
 import { FilterPopover } from './FilterPopover';
@@ -182,9 +183,7 @@ export function TriagePage({ profile }: { profile: string }) {
             <DecideBar job={detail} onDecide={decide} />
             <JobFacts job={detail} />
             <JdText jd={detail.jd} />
-            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-              Tracking panel — Task 8.
-            </div>
+            <TrackingPanel profile={profile} job={detail} />
           </div>
         ) : (
           <div className="text-muted-foreground">
