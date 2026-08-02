@@ -5,12 +5,16 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
 import type { ListQuery } from '../../lib/api/types';
 import { useJob, useJobs, useMeta } from '../board/useBoardData';
+import { useTrackingMutation } from '../board/useTracking';
 import { JdText } from '../job/JdText';
 import { JobFacts } from '../job/JobFacts';
 import { JobHeader } from '../job/JobHeader';
+import { DecideBar } from './DecideBar';
+import { DECIDE_STATUS, type DecideAction, nextUndecided } from './decide';
 import { FilterPopover } from './FilterPopover';
 import { JobList } from './JobList';
 import { useTriageSelection } from './selection';
+import { useTriageKeyboard } from './useTriageKeyboard';
 
 const DEFAULT_QUERY: ListQuery = {
   sort: 'date_found',
@@ -34,8 +38,18 @@ export function TriagePage({ profile }: { profile: string }) {
   const metaQuery = useMeta(profile);
   const jobsQuery = useJobs(profile, query);
   const rows = useMemo(() => jobsQuery.data?.rows ?? [], [jobsQuery.data]);
-  const { selectedId, select } = useTriageSelection(rows);
+  const { selectedId, select, move } = useTriageSelection(rows);
   const detailQuery = useJob(profile, selectedId ?? '');
+  const trackingMutation = useTrackingMutation(profile);
+
+  function decide(action: DecideAction): void {
+    if (selectedId === null) return;
+    const jobId = selectedId;
+    trackingMutation.mutate({ jobId, patch: { status: DECIDE_STATUS[action] } });
+    select(nextUndecided(rows, jobId) ?? jobId);
+  }
+
+  useTriageKeyboard({ move, onDecide: decide, selectedId });
 
   // The `/` hotkey target (T7) — an always-mounted plain Input, never inside
   // the Popover — debounced into the company filter.
@@ -165,11 +179,9 @@ export function TriagePage({ profile }: { profile: string }) {
         ) : detail ? (
           <div className="flex flex-col gap-6">
             <JobHeader job={detail} />
+            <DecideBar job={detail} onDecide={decide} />
             <JobFacts job={detail} />
             <JdText jd={detail.jd} />
-            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-              Decide bar — Task 7.
-            </div>
             <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
               Tracking panel — Task 8.
             </div>
