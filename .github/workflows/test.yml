@@ -40,6 +40,8 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       - run: npm run ui:check
       - run: npm run ui:build
+      - run: npm exec --workspace ui -- playwright install --with-deps chromium
+      - run: npm run ui:e2e
 
   # Branch protection pins the check name `test`. `if: always()` is load-bearing:
   # without it a failing matrix leaves this job SKIPPED, and a skipped required
