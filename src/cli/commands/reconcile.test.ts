@@ -172,7 +172,7 @@ test('reconcileCommand: a failed outcome prints the failure and returns 1', asyn
   assert.ok(lines.some((l) => l.includes('failed')));
 });
 
-test('reconcileCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
+test('reconcileCommand: overrides ctx.logger with a RunStoreLogger before running the pipeline', async () => {
   const store = new Map<string, unknown>();
   const ctx = fakeCtx(store);
   let observedLoggerCtor: string | undefined;
@@ -192,7 +192,7 @@ test('reconcileCommand: overrides ctx.logger with a JsonlLogger before running t
   );
 
   assert.equal(code, 0);
-  assert.equal(observedLoggerCtor, 'JsonlLogger');
+  assert.equal(observedLoggerCtor, 'RunStoreLogger');
 });
 
 test('reconcileCommand: a profile with invalid settings.logging throws before any stage runs', async () => {

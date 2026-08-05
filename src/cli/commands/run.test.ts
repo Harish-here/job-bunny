@@ -208,7 +208,7 @@ test('runCommand: --dry-run makes the digest text reflect the dry run', async ()
   assert.match(text, /DRY RUN/);
 });
 
-test('runCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
+test('runCommand: overrides ctx.logger with a RunStoreLogger before running the pipeline', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);
   let observedLoggerCtor: string | undefined;
@@ -227,7 +227,7 @@ test('runCommand: overrides ctx.logger with a JsonlLogger before running the pip
     },
   );
 
-  assert.equal(observedLoggerCtor, 'JsonlLogger');
+  assert.equal(observedLoggerCtor, 'RunStoreLogger');
 });
 
 test('runCommand: a profile with invalid settings.logging throws before any stage runs', async () => {

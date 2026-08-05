@@ -226,8 +226,11 @@ export async function runCommand(
     const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
     const time = await nextTimeDir(dataDir, date, formatRunTime(now));
     const folder = new RunFolder(dataDir, date, time);
+    // Placeholder runId — Task 6 replaces this with the real `startRun()`
+    // id once the runs-table row exists at this point in the flow.
     ctx.logger = createRunLogger(
-      folder.logPath(),
+      ctx.runStore,
+      -1,
       resolveLoggingSettings(
         ctx.config.settings?.logging,
         process.env.JOBBUNNY_TTY_LOG_LEVEL,

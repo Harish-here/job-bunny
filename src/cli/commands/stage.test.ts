@@ -11,12 +11,13 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import {
   formatRunTime,
-  type JsonlLogger,
   RunFolder,
+  type RunStoreLogger,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
+import type { RunEventRow, RunStoreWriter } from '../../ports/run_store.ts';
 import { stageCommand } from './stage.ts';
 
 let root: string;
@@ -29,7 +30,26 @@ after(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function fakeCtx(): PipelineCtx {
+/** Minimal fake `RunStoreWriter` — only `appendEvents` is exercised by
+ * `RunStoreLogger`. */
+function fakeStore(): RunStoreWriter & {
+  calls: Array<{ runId: number; events: RunEventRow[] }>;
+} {
+  const calls: Array<{ runId: number; events: RunEventRow[] }> = [];
+  return {
+    calls,
+    startRun: () => -1,
+    appendEvents: (runId, events) => {
+      calls.push({ runId, events });
+    },
+    heartbeat: () => {},
+    recordFailure: () => {},
+    recordSyncDryrun: () => {},
+    finishRun: () => {},
+  };
+}
+
+function fakeCtx(runStore?: RunStoreWriter): PipelineCtx {
   return {
     profile: 'rajni',
     signal: new AbortController().signal,
@@ -47,7 +67,7 @@ function fakeCtx(): PipelineCtx {
     },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
-    runStore: {} as PipelineCtx['runStore'],
+    runStore: (runStore ?? {}) as PipelineCtx['runStore'],
     async notify(_event: NotifyEvent) {},
   };
 }
@@ -187,7 +207,7 @@ test("stageCommand: continues in TODAY's existing time folder (not the current f
   assert.deepEqual(JSON.parse(raw), { jobs: [{ id: 'x' }], dropped: [] });
 });
 
-test('stageCommand: overrides ctx.logger with a JsonlLogger before running the stage', async () => {
+test('stageCommand: overrides ctx.logger with a RunStoreLogger before running the stage', async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
   const ctx = fakeCtx();
   const stages = [makeStage('compress', async (i) => i)];
@@ -203,12 +223,13 @@ test('stageCommand: overrides ctx.logger with a JsonlLogger before running the s
   );
 
   assert.equal(code, 0);
-  assert.equal(ctx.logger.constructor.name, 'JsonlLogger');
+  assert.equal(ctx.logger.constructor.name, 'RunStoreLogger');
 });
 
 test('stageCommand: hands guardStage a logger scoped to the target stage name', async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
-  const ctx = fakeCtx();
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
   const stages = [
     makeStage('compress', async (i, stageCtx) => {
       stageCtx.logger.info('hi');
@@ -229,23 +250,12 @@ test('stageCommand: hands guardStage a logger scoped to the target stage name', 
 
   assert.equal(code, 0);
   // stageCommand unconditionally replaces `ctx.logger` with a real
-  // JsonlLogger (pinned by the assignment test above), so a fake-logger spy
-  // injected here would be clobbered. The scope wrapping is asserted the
-  // same way the runtime smoke does: by reading the run.log this run
-  // actually wrote and finding the scoped line. `flush()` waits for the
-  // queued append to actually land before the file is read back.
-  await (ctx.logger as JsonlLogger).flush();
-  const folder = new RunFolder(
-    join(root, 'profiles', profile, 'data'),
-    '2026-07-25',
-    formatRunTime(now),
-  );
-  const raw = await readFile(folder.logPath(), 'utf8');
-  const lines = raw
-    .trim()
-    .split('\n')
-    .map((l) => JSON.parse(l) as { msg: string; data?: Record<string, unknown> });
-  const line = lines.find((l) => l.msg === 'hi');
+  // RunStoreLogger (pinned by the assignment test above), so a fake-logger
+  // spy injected here would be clobbered. The scope wrapping is asserted by
+  // flushing the buffered events out to the fake store and inspecting the
+  // batch it received, mirroring the old run.log-reading assertion.
+  (ctx.logger as RunStoreLogger).flush();
+  const line = store.calls.flatMap((c) => c.events).find((e) => e.msg === 'hi');
   assert.equal(line?.data?.scope, 'compress');
 });
 

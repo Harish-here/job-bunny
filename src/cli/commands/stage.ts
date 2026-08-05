@@ -88,8 +88,10 @@ export async function stageCommand(
   const existing = await latestTimeDir(dataDir, date);
   const time = existing ?? formatRunTime(now);
   const folder = new RunFolder(dataDir, date, time);
+  // Placeholder runId — Task 7 replaces this with the real run/stage row id.
   ctx.logger = createRunLogger(
-    folder.logPath(),
+    ctx.runStore,
+    -1,
     resolveLoggingSettings(
       ctx.config.settings?.logging,
       process.env.JOBBUNNY_TTY_LOG_LEVEL,
