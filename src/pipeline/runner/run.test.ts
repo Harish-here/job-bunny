@@ -6,7 +6,7 @@ import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { JD, Verdict } from '../../core/jd/index.ts';
 import { RunFolder } from '../../ops/observability/index.ts';
-import type { Connector, Storage } from '../../ports/index.ts';
+import type { Connector, RunFailure, RunStore, Storage } from '../../ports/index.ts';
 import type { PipelineCtx, WiredPorts } from './context.ts';
 import { runPipeline } from './run.ts';
 import type { DroppedRecord, StageDef, StagePayload } from './stage.ts';
@@ -70,7 +70,53 @@ function fakePorts(): WiredPorts {
   return { lanes: [], connector: fakeConnector(), notifiers: [] };
 }
 
-function fakeCtx(controller: AbortController = new AbortController()): {
+/** A recording fake `RunStore` — only `heartbeat`/`recordFailure` (the two
+ * methods the runner calls) do anything useful; the rest are stubs the
+ * runner never touches. */
+function fakeRunStore(): {
+  store: RunStore;
+  heartbeats: string[];
+  failures: RunFailure[];
+} {
+  const heartbeats: string[] = [];
+  const failures: RunFailure[] = [];
+  const store: RunStore = {
+    startRun() {
+      return -1;
+    },
+    appendEvents() {},
+    heartbeat(_runId, at) {
+      heartbeats.push(at);
+    },
+    recordFailure(_runId, failure) {
+      failures.push(failure);
+    },
+    recordSyncDryrun() {},
+    finishRun() {},
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+  return { store, heartbeats, failures };
+}
+
+function fakeCtx(
+  controller: AbortController = new AbortController(),
+  overrides: { runStore?: RunStore; runId?: number } = {},
+): {
   ctx: PipelineCtx;
   controller: AbortController;
 } {
@@ -88,7 +134,8 @@ function fakeCtx(controller: AbortController = new AbortController()): {
       settings: {},
     },
     ports: fakePorts(),
-    runStore: {} as PipelineCtx['runStore'],
+    runStore: overrides.runStore ?? ({} as PipelineCtx['runStore']),
+    ...(overrides.runId !== undefined ? { runId: overrides.runId } : {}),
     async notify() {},
   };
   return { ctx, controller };
@@ -108,7 +155,8 @@ function fakeStage(
 test('happy path: 3 stages checkpoint, funnel populates, result passes', async () => {
   const dataDir = join(root, 'happy');
   const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
-  const { ctx } = fakeCtx();
+  const { store, heartbeats, failures } = fakeRunStore();
+  const { ctx } = fakeCtx(undefined, { runStore: store, runId: 1 });
 
   const jobA = makeJD('a');
   const jobC = makeJD('c');
@@ -172,41 +220,20 @@ test('happy path: 3 stages checkpoint, funnel populates, result passes', async (
   const cp2 = JSON.parse(await readFile(folder.checkpointPath(2, 'assemble'), 'utf8'));
   assert.equal(cp2.jobs.length, 2);
 
-  const resultJson = JSON.parse(await readFile(join(folder.dir, 'result.json'), 'utf8'));
-  assert.equal(resultJson.outcome, 'passed');
-});
+  // Result files are retired from the runner (Phase 1) — the driver
+  // persists the returned RunResult, not runPipeline itself.
+  await assert.rejects(() => readFile(join(folder.dir, 'result.json'), 'utf8'));
 
-test('passed run clears a stale failure.json left by an earlier same-day failed run', async () => {
-  const dataDir = join(root, 'clears-stale-failure');
-  const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
-  const { ctx } = fakeCtx();
-
-  await folder.writeFailure({ stage: 'earlier-stage', error: 'boom', elapsedMs: 1 });
-
-  const stage: StageDef<StagePayload, StagePayload> = fakeStage({
-    name: 'stage',
-    async run(input) {
-      return input;
-    },
-  });
-
-  const result = await runPipeline([stage], ctx, folder, {
-    runCapMs: 5_000,
-    stallMs: 5_000,
-  });
-
-  assert.equal(result.outcome, 'passed');
-
-  const resultJson = JSON.parse(await readFile(join(folder.dir, 'result.json'), 'utf8'));
-  assert.equal(resultJson.outcome, 'passed');
-
-  await assert.rejects(() => readFile(join(folder.dir, 'failure.json'), 'utf8'));
+  // One heartbeat per stage started, no failures recorded on the pass path.
+  assert.equal(heartbeats.length, 3);
+  assert.equal(failures.length, 0);
 });
 
 test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does not throw', async () => {
   const dataDir = join(root, 'mid-failure');
   const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
-  const { ctx } = fakeCtx();
+  const { store, failures } = fakeRunStore();
+  const { ctx } = fakeCtx(undefined, { runStore: store, runId: 7 });
 
   let stage3Called = false;
 
@@ -241,19 +268,21 @@ test('mid-failure: stage 2 throws, stage 3 never runs, result failed but does no
   assert.equal(result.stages[0]?.name, 'stage1');
   assert.equal(stage3Called, false);
 
-  const failure = JSON.parse(await readFile(join(folder.dir, 'failure.json'), 'utf8'));
-  assert.equal(failure.stage, 'stage2');
-  assert.ok(typeof failure.error === 'string' && failure.error.length > 0);
-  assert.ok(typeof failure.elapsedMs === 'number');
+  assert.equal(failures.length, 1);
+  const failure = failures[0];
+  assert.equal(failure?.stage, 'stage2');
+  assert.ok(typeof failure?.error === 'string' && failure.error.length > 0);
+  assert.ok(typeof failure?.elapsedMs === 'number');
 
-  const resultJson = JSON.parse(await readFile(join(folder.dir, 'result.json'), 'utf8'));
-  assert.equal(resultJson.outcome, 'failed');
+  // Result files are retired from the runner — no result.json is written.
+  await assert.rejects(() => readFile(join(folder.dir, 'result.json'), 'utf8'));
 });
 
-test('mid-failure: failure.json error appends the wrapped cause message', async () => {
+test("recordFailure's error appends the wrapped cause message", async () => {
   const dataDir = join(root, 'mid-failure-cause');
   const folder = new RunFolder(dataDir, '2026-07-21', '09-00');
-  const { ctx } = fakeCtx();
+  const { store, failures } = fakeRunStore();
+  const { ctx } = fakeCtx(undefined, { runStore: store, runId: 3 });
 
   const stage: StageDef<StagePayload, StagePayload> = fakeStage({
     name: 'stage',
@@ -271,12 +300,12 @@ test('mid-failure: failure.json error appends the wrapped cause message', async 
 
   assert.equal(result.outcome, 'failed');
 
-  const failure = JSON.parse(await readFile(join(folder.dir, 'failure.json'), 'utf8'));
+  assert.equal(failures.length, 1);
   // guardStage wraps the original throw in `stage "..." failed after N
   // attempt(s)` with `{ cause: <original error> }` — the cause's message
   // must still surface here, not just the wrapper's.
   assert.equal(
-    failure.error,
+    failures[0]?.error,
     'stage "stage" failed after 1 attempt(s) — cause: root cause boom',
   );
 });
