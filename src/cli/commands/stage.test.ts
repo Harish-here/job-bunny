@@ -47,6 +47,7 @@ function fakeCtx(): PipelineCtx {
     },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
+    runStore: {} as PipelineCtx['runStore'],
     async notify(_event: NotifyEvent) {},
   };
 }

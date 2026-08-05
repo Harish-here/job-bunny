@@ -64,6 +64,15 @@ import {
 
 // --- live adapter construction (ctx/ports/stages/routines) ---
 
+/** Run-store DB path (Phase 1): the `sqlite` connector's own path override
+ * when `connector === 'sqlite'` (runs + jobs share one file), else `defaultPath`. */
+export function resolveSqlitePath(config: PipelineConfig, defaultPath: string): string {
+  if (config.connector !== 'sqlite') return defaultPath;
+  return (
+    SqliteConnectorSettingsSchema.parse(config.settings.sqlite ?? {}).path ?? defaultPath
+  );
+}
+
 export function buildConnector(
   name: string,
   settings: unknown,

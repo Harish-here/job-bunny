@@ -47,6 +47,7 @@ import {
   SqliteConnectorSettingsSchema,
   sqliteDbCheck,
 } from '../../adapters/db/sqlite/index.ts';
+import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
 import {
   inventoryFreshnessCheck,
   parseSearchUrls,
@@ -92,6 +93,7 @@ import {
   mirrorDbId,
   mirrorReachableCheck,
   missingTokenNotionClient,
+  resolveSqlitePath,
 } from './builders.ts';
 import { isNotFound, loadFilterConfig, loadPipelineConfig } from './config.ts';
 import type { AdapterRegistry, RuntimeDeps } from './registry.ts';
@@ -237,6 +239,9 @@ export async function wire(
     'data',
     'jobbunny.db',
   );
+  // `SqliteRunStore` opens lazily (ledger L13) — no file I/O here.
+  const sqlitePath = resolveSqlitePath(config, sqliteDefaultPath);
+  const runStore = new SqliteRunStore(sqlitePath);
 
   const deps: RuntimeDeps = {
     storage,
@@ -262,6 +267,10 @@ export async function wire(
     }),
     ...assembleAdapterChecks(config, registry, deps),
   ];
+  // `sqlite` connectors already get `sqlite-db-openable` from
+  // `assembleAdapterChecks` above — add it here only for every other
+  // connector, so every profile gets it exactly once.
+  if (config.connector !== 'sqlite') checks.push(sqliteDbCheck({ path: sqlitePath }));
   // Opt-in sqlite→Notion mirror (local-DB spec PR 3): a mirrored profile
   // gets a `notion-db-reachable` check too, on top of whatever
   // `assembleAdapterChecks` already contributed for `sqlite` — but through
@@ -328,6 +337,7 @@ export async function wire(
     storage: profileStorage,
     config,
     ports,
+    runStore,
     // A notifier failure (e.g. Telegram's `send()` throwing on a missing
     // token or a hung request) must never change the run's outcome — `run.ts`
     // calls this AFTER `runPipeline` has already produced a PASSED/FAILED

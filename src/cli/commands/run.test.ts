@@ -46,6 +46,7 @@ function fakeCtx(notified: NotifyEvent[]): PipelineCtx {
     storage: {} as PipelineCtx['storage'],
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
+    runStore: {} as PipelineCtx['runStore'],
     async notify(event: NotifyEvent) {
       notified.push(event);
     },

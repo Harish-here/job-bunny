@@ -57,6 +57,7 @@ function fakeCtx(connector: Connector): PipelineCtx {
       settings: {},
     },
     ports,
+    runStore: {} as PipelineCtx['runStore'],
     async notify(_event: NotifyEvent) {},
   };
 }

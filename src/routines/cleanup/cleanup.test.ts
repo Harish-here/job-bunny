@@ -111,6 +111,7 @@ function fakeCtx(opts?: {
       settings: opts?.settings ?? {},
     },
     ports,
+    runStore: {} as PipelineCtx['runStore'],
     async notify() {},
   };
 }
