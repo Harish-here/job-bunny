@@ -8,6 +8,7 @@ describe('parseHash', () => {
     ['#/nope', 'triage'],
     ['#/triage', 'triage'],
     ['#/tracker', 'tracker'],
+    ['#/runs', 'runs'],
     ['#/analytics', 'analytics'],
     ['#/onboarding', 'onboarding'],
   ])('%s → %s', (hash, name) => {

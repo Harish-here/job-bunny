@@ -18,3 +18,11 @@ export type {
   BoardProfile,
   ProfilesResponse,
 } from '../../../../src/app/features/profiles/index.ts';
+export type {
+  GetRunResponse,
+  ListRunEventsResponse,
+  ListRunsResponse,
+  RunDetail,
+  RunEventRow,
+  RunSummary,
+} from '../../../../src/app/features/runs/index.ts';
