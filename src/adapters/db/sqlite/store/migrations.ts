@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 1;
+export const LATEST_SCHEMA_VERSION = 2;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -50,6 +50,33 @@ const MIGRATIONS: readonly string[] = [
     updated_at       TEXT NOT NULL
   );
   CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
+  `,
+  // v1 -> v2: runs observability (Phase 1 — see run_store port)
+  `
+  CREATE TABLE runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date      TEXT NOT NULL,
+    time_dir      TEXT,
+    kind          TEXT NOT NULL,
+    resumed_from  INTEGER REFERENCES runs(id),
+    status        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    heartbeat_at  TEXT,
+    result_json   TEXT,
+    failure_json  TEXT,
+    sync_dryrun_json TEXT
+  );
+  CREATE INDEX idx_runs_date ON runs(run_date);
+  CREATE TABLE run_events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id    INTEGER NOT NULL REFERENCES runs(id),
+    ts        TEXT NOT NULL,
+    level     TEXT NOT NULL,
+    msg       TEXT NOT NULL,
+    data_json TEXT
+  );
+  CREATE INDEX idx_run_events_run ON run_events(run_id);
   `,
 ];
 
