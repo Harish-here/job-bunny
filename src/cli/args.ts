@@ -39,6 +39,8 @@ export interface CommandOptions {
   daemonChild?: boolean;
   apply?: boolean;
   port?: number;
+  /** `runs show <id>` — present ⇒ show, absent ⇒ list. */
+  runId?: number;
 }
 
 export type CommandName =
@@ -54,7 +56,8 @@ export type CommandName =
   | 'setup'
   | 'release'
   | 'migrate'
-  | 'board';
+  | 'board'
+  | 'runs';
 
 export const COMMAND_NAMES = new Set<string>([
   'run',
@@ -70,6 +73,7 @@ export const COMMAND_NAMES = new Set<string>([
   'release',
   'migrate',
   'board',
+  'runs',
 ]);
 
 export const USAGE = [
@@ -89,6 +93,8 @@ export const USAGE = [
   '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
   '  migrate   --profile <name> [--apply]     (Notion → local sqlite import; dry-run by default)',
   '  board     [--port <n>]                    (job board server on 127.0.0.1; profile-less)',
+  '  runs      --profile <name>                (run history from the DB)',
+  '  runs show <id> --profile <name>',
 ].join('\n');
 
 /** The one `parseArgs` options literal every command's flags are drawn
@@ -219,6 +225,24 @@ export function buildOptions(
         }
       }
       return port === undefined ? {} : { port };
+    }
+    case 'runs': {
+      const sub = rest[0];
+      if (sub === undefined) {
+        return needsProfile() ?? { profile };
+      }
+      if (sub !== 'show') {
+        return { error: 'runs takes no sub-action, or "show <id>"' };
+      }
+      const idArg = rest[1];
+      if (!idArg) return { error: 'runs show: missing run id' };
+      const runId = Number(idArg);
+      if (!Number.isInteger(runId) || runId <= 0) {
+        return {
+          error: `runs show: run id must be a positive integer, got "${idArg}"`,
+        };
+      }
+      return needsProfile() ?? { profile, runId };
     }
   }
 }
