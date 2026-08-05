@@ -1,6 +1,5 @@
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { RunResult } from './result.ts';
 
 const CHECKPOINT_RE = /^(\d{2})-(.+)\.json$/;
 const TIME_DIR_RE = /^\d{2}-\d{2}(-\d+)?$/;
@@ -70,10 +69,12 @@ async function pathExists(absPath: string): Promise<boolean> {
   }
 }
 
-/** One run's observability artifacts: checkpoints, heartbeat, failure and
- * result records, and the log file — rooted at
- * `<profileDataDir>/runs/<date>/<time>/`. All writes are atomic (temp +
- * rename) so a killed process never leaves a truncated file. */
+/** One run's checkpoints — rooted at
+ * `<profileDataDir>/runs/<date>/<time>/`. Heartbeat, failure, and result
+ * records live in the `runs`/`run_events` sqlite tables now (runs-
+ * observability Phase 1) — this class is checkpoint-only. Writes are
+ * atomic (temp + rename) so a killed process never leaves a truncated
+ * file. */
 export class RunFolder {
   readonly dir: string;
   readonly date: string;
@@ -119,37 +120,6 @@ export class RunFolder {
 
     const raw = await readFile(join(this.dir, best.file), 'utf8');
     return { index: best.index, stage: best.stage, payload: JSON.parse(raw) };
-  }
-
-  async writeHeartbeat(stage: string): Promise<void> {
-    await this.writeAtomic(join(this.dir, 'heartbeat.json'), {
-      stage,
-      at: new Date().toISOString(),
-    });
-  }
-
-  async writeFailure(f: {
-    stage: string;
-    error: string;
-    elapsedMs: number;
-    lastCheckpoint?: string;
-  }): Promise<void> {
-    await this.writeAtomic(join(this.dir, 'failure.json'), f);
-  }
-
-  /** Removes a stale failure.json (e.g. left by an earlier same-day failed
-   * run) so a later passed run doesn't leave a contradictory failure
-   * artifact beside its result.json. A no-op if none exists. */
-  async clearFailure(): Promise<void> {
-    await rm(join(this.dir, 'failure.json'), { force: true });
-  }
-
-  async writeResult(r: RunResult): Promise<void> {
-    await this.writeAtomic(join(this.dir, 'result.json'), r);
-  }
-
-  logPath(): string {
-    return join(this.dir, 'run.log');
   }
 
   private async writeAtomic(absPath: string, value: unknown): Promise<void> {
