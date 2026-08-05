@@ -1,1 +1,1 @@
-export { RUN_HEARTBEAT_STALE_MS, SqliteRunStore } from './store.ts';
+export { deriveStatus, RUN_HEARTBEAT_STALE_MS, SqliteRunStore } from './store.ts';

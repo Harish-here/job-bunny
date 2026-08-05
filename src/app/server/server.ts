@@ -21,6 +21,7 @@ import type { Logger } from '../../ports/context.ts';
 import { makeAppInfoRoutes } from '../features/appinfo/index.ts';
 import { makeBoardRoutes } from '../features/board/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
+import { makeRunsRoutes } from '../features/runs/index.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../shared/index.ts';
 import { HttpError, jsonError, matchRoute, readJsonBody } from '../shared/index.ts';
 import { serveStatic } from './static.ts';
@@ -51,6 +52,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
   const routes: RouteDef[] = [
     ...makeProfilesRoutes(source),
     ...makeBoardRoutes(source),
+    ...makeRunsRoutes(source),
     ...makeAppInfoRoutes(version),
   ];
 

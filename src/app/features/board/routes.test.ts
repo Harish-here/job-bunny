@@ -102,6 +102,9 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
       patchCalls.push({ id, patch, now });
       return id === SAMPLE_ROW.id ? SAMPLE_TRACKING : null;
     },
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
     close() {},
     ...overrides,
   };

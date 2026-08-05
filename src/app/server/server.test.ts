@@ -86,6 +86,15 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
       patchCalls.push({ id, patch });
       return { jobId: id, updatedAt: '2026-08-02T00:00:00.000Z', status: 'Applied' };
     },
+    listRuns() {
+      return { rows: [], total: 0 };
+    },
+    getRun() {
+      return null;
+    },
+    listRunEvents() {
+      return { rows: [], total: 0 };
+    },
     close() {},
     ...overrides,
   };
@@ -129,6 +138,41 @@ test('GET /api/profiles returns the source data', async () => {
       profiles: [{ name: 'p1', connector: 'sqlite', hasDb: true }],
     });
     assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  });
+});
+
+test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mounted)', async () => {
+  const store = fakeStore({
+    listRuns() {
+      return {
+        rows: [
+          {
+            id: 1,
+            date: '2026-08-05',
+            timeDir: '09-00',
+            kind: 'run',
+            resumedFrom: null,
+            status: 'passed',
+            startedAt: '2026-08-05T09:00:00.000Z',
+            finishedAt: '2026-08-05T09:05:00.000Z',
+            heartbeatAt: '2026-08-05T09:04:00.000Z',
+          },
+        ],
+        total: 1,
+      };
+    },
+  });
+  const server = createBoardServer({
+    source: fakeSource({ store }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/runs`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: unknown[]; total: number };
+    assert.equal(body.total, 1);
+    assert.equal(body.rows.length, 1);
   });
 });
 

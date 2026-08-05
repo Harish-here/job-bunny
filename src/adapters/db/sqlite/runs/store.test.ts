@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { RUN_HEARTBEAT_STALE_MS, SqliteRunStore } from './store.ts';
+import { deriveStatus, RUN_HEARTBEAT_STALE_MS, SqliteRunStore } from './store.ts';
 
 function freshDbPath(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'jb-runstore-'));
@@ -368,4 +368,26 @@ test('full happy path: startRun -> appendEvents x2 -> recordFailure -> finishRun
 
 test('RUN_HEARTBEAT_STALE_MS is 10 minutes', () => {
   assert.equal(RUN_HEARTBEAT_STALE_MS, 10 * 60_000);
+});
+
+test('deriveStatus: non-running statuses pass through unchanged regardless of heartbeat', () => {
+  const now = new Date('2026-08-05T12:00:00.000Z');
+  assert.equal(deriveStatus('passed', null, now), 'passed');
+  assert.equal(deriveStatus('failed', '2020-01-01T00:00:00.000Z', now), 'failed');
+  assert.equal(deriveStatus('crashed', null, now), 'crashed');
+});
+
+test('deriveStatus: running with a null heartbeat is crashed', () => {
+  const now = new Date('2026-08-05T12:00:00.000Z');
+  assert.equal(deriveStatus('running', null, now), 'crashed');
+});
+
+test('deriveStatus: running with a stale heartbeat (> 10min old) is crashed', () => {
+  const now = new Date('2026-08-05T12:00:00.000Z');
+  assert.equal(deriveStatus('running', '2026-08-05T11:49:00.000Z', now), 'crashed');
+});
+
+test('deriveStatus: running with a fresh heartbeat (<= 10min old) stays running', () => {
+  const now = new Date('2026-08-05T12:00:00.000Z');
+  assert.equal(deriveStatus('running', '2026-08-05T11:51:00.000Z', now), 'running');
 });

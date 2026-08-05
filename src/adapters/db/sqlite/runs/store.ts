@@ -29,6 +29,22 @@ import { openJobsDb } from '../store/index.ts';
 
 export const RUN_HEARTBEAT_STALE_MS = 10 * 60_000;
 
+/** Pure crash-derivation shared by `SqliteRunStore` (this file) and
+ * `SqliteBoardStore` (adapters/db/sqlite/board/board.ts, board reads the
+ * same `runs` table read-only) — a 'running' row whose heartbeat is null
+ * or older than `RUN_HEARTBEAT_STALE_MS` displays as 'crashed'; any other
+ * status passes through unchanged. Re-exported by `./index.ts`. */
+export function deriveStatus(
+  status: RunStatus,
+  heartbeatAt: string | null,
+  now: Date,
+): RunStatus {
+  if (status !== 'running') return status;
+  const cutoff = new Date(now.getTime() - RUN_HEARTBEAT_STALE_MS).toISOString();
+  if (heartbeatAt === null || heartbeatAt < cutoff) return 'crashed';
+  return status;
+}
+
 interface RunStoreDeps {
   now?: () => Date;
   warn?: (msg: string) => void;
@@ -93,16 +109,6 @@ export class SqliteRunStore implements RunStore {
     return new Date(this.nowFn().getTime() - RUN_HEARTBEAT_STALE_MS).toISOString();
   }
 
-  private displayStatus(row: {
-    status: RunStatus;
-    heartbeat_at: string | null;
-  }): RunStatus {
-    if (row.status !== 'running') return row.status;
-    if (row.heartbeat_at === null || row.heartbeat_at < this.staleCutoff())
-      return 'crashed';
-    return row.status;
-  }
-
   private toSummary(row: RunRow): RunSummary {
     return {
       id: row.id,
@@ -110,7 +116,7 @@ export class SqliteRunStore implements RunStore {
       timeDir: row.time_dir,
       kind: row.kind,
       resumedFrom: row.resumed_from,
-      status: this.displayStatus(row),
+      status: deriveStatus(row.status, row.heartbeat_at, this.nowFn()),
       startedAt: row.started_at,
       finishedAt: row.finished_at,
       heartbeatAt: row.heartbeat_at,

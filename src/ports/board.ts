@@ -1,5 +1,6 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
+import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
 
 /** One discovered profile, as the board sees it. Pure-Notion profiles are
  * listed with hasDb=false and are never an error (spec §5). */
@@ -61,6 +62,17 @@ export interface BoardStore {
   getJob(id: string): BoardJobDetail | null;
   /** Returns the merged row, or null when no such job id exists. */
   updateTracking(id: string, patch: TrackingPatch, now: string): TrackingRow | null;
+  /** Read-only runs observability (persist-to-db Phase 1) — the board
+   * never writes `runs`/`run_events`, it only surfaces them. */
+  listRuns(query: { limit?: number; offset?: number }): {
+    rows: RunSummary[];
+    total: number;
+  };
+  getRun(id: number): RunDetail | null;
+  listRunEvents(
+    id: number,
+    query: { limit?: number; offset?: number },
+  ): { rows: RunEventRow[]; total: number };
   close(): void;
 }
 
