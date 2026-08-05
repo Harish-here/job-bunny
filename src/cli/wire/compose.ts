@@ -154,11 +154,10 @@ export interface WireOverrides {
   deps?: Partial<RuntimeDeps>;
   root?: string;
   readFile?: (path: string) => Promise<string>;
-  /** P8 Task 7: when set, threaded straight into `makeSyncStage`'s
-   * `dryRunPath` opt — the sync stage writes the would-write set there
-   * instead of calling `connector.syncJobs`. `undefined` (the default)
-   * keeps the existing live-write behavior unchanged. */
-  syncDryRunPath?: string;
+  /** Threaded into `makeSyncStage`'s `dryRun` opt: the sync stage records
+   * the would-write set via `ctx.runStore.recordSyncDryrun` instead of
+   * calling `connector.syncJobs`. `undefined` (default) is unchanged. */
+  syncDryRun?: boolean;
 }
 
 export interface WireResult {
@@ -393,7 +392,7 @@ export async function wire(
     makeFilterStage(filterCfgForStage),
     dedupStage,
     makeRankStage(rankCfg),
-    makeSyncStage(connector, { dryRunPath: overrides.syncDryRunPath }),
+    makeSyncStage(connector, { dryRun: overrides.syncDryRun }),
   ];
 
   return { ctx, stages, routines, checks };

@@ -32,6 +32,7 @@ import {
   nextTimeDir,
   RunFolder,
   type RunResult,
+  type RunStoreLogger,
 } from '../../ops/observability/index.ts';
 import {
   type AcquireLockResult,
@@ -81,14 +82,12 @@ export interface RunCommandOptions {
   profile: string;
   resume?: boolean;
   headless?: boolean;
-  /** P8 Task 7: computes the sync stage's would-write set without writing
-   * to Notion — threaded into `wire()` as `syncDryRunPath` once the run
-   * date is known, so the artifact lands alongside this run's other
-   * observability files. The path is profile-relative (no `profiles/<p>/
-   * data/` prefix) because `ctx.storage` passed to the sync stage is
-   * `profileStorage`, already rooted at `<repo>/profiles/<profile>/data`
-   * (see `wire/compose.ts`'s `storage: profileStorage`) — the same root
-   * `RunFolder` uses for `runs/<date>/…`, so this must match that shape. */
+  /** P8 Task 7 (DB-backed as of runs-observability Phase 1 Task 6): computes
+   * the sync stage's would-write set without writing to Notion — threaded
+   * into `wire()` as `syncDryRun: true`, which the sync stage records via
+   * `ctx.runStore.recordSyncDryrun(ctx.runId, report)` against THIS
+   * invocation's own `runs` row (retiring the old per-date
+   * `sync_dryrun.json` and the same-day-overwrite bug that came with it). */
   dryRun?: boolean;
   /** Operator override for the run-level cap (ms). Absent ⇒ derived from
    * the wired stages' own timeout/retry budgets (`computeRunCapMs`). */
@@ -167,11 +166,7 @@ export async function runCommand(
   const date = now.toISOString().slice(0, 10);
   const { ctx, stages, routines, checks } = await resolved.wire(
     opts.profile,
-    opts.dryRun
-      ? {
-          syncDryRunPath: `runs/${date}/sync_dryrun.json`,
-        }
-      : undefined,
+    opts.dryRun ? { syncDryRun: true } : undefined,
   );
 
   // Cross-process, cross-profile exclusive lock (see `ops/scheduling/
@@ -199,6 +194,12 @@ export async function runCommand(
     return 1;
   }
 
+  // Set once the runs-observability row is open (below), so the `finally`
+  // can flush its buffered events even on an unexpected throw. Undefined
+  // only when the run never got that far (e.g. the doctor preflight abort,
+  // which returns before any row is opened).
+  let runLogger: RunStoreLogger | undefined;
+
   try {
     // Doctor preflight (P9 closure register item 1): a `red` finding must
     // abort BEFORE any stage runs — reuses doctorCommand's own aggregation
@@ -218,32 +219,24 @@ export async function runCommand(
       return 1;
     }
 
-    // This invocation always gets its OWN fresh time folder — checkpoints,
-    // run.log, heartbeat, result.json and failure.json are per-run, never
-    // last-writer-wins per day (see `RunFolder`, `formatRunTime`,
-    // `nextTimeDir`). `time` is the LOCAL clock's HH-MM, matching
-    // `schedule.times`'s own local-clock convention.
+    // This invocation always gets its OWN fresh time folder — checkpoints
+    // are per-run, never last-writer-wins per day (see `RunFolder`,
+    // `formatRunTime`, `nextTimeDir`). `time` is the LOCAL clock's HH-MM,
+    // matching `schedule.times`'s own local-clock convention.
     const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
     const time = await nextTimeDir(dataDir, date, formatRunTime(now));
     const folder = new RunFolder(dataDir, date, time);
-    // Placeholder runId — Task 6 replaces this with the real `startRun()`
-    // id once the runs-table row exists at this point in the flow.
-    ctx.logger = createRunLogger(
-      ctx.runStore,
-      -1,
-      resolveLoggingSettings(
-        ctx.config.settings?.logging,
-        process.env.JOBBUNNY_TTY_LOG_LEVEL,
-      ),
-    );
 
     // `--resume`: seed from the latest EARLIER same-day folder's latest
     // checkpoint (never this run's own — it doesn't exist on disk yet, so
     // `latestTimeDir` naturally excludes it). Folder discovery lives here,
-    // not in `runPipeline`, which only ever sees the resolved seed.
+    // not in `runPipeline`, which only ever sees the resolved seed. Looked
+    // up FIRST — before opening this invocation's own `runs` row — so
+    // `priorTime` is available to resolve `resumedFrom` below.
+    let priorTime: string | undefined;
     let resumeFrom: RunnerOptions['resumeFrom'];
     if (opts.resume ?? false) {
-      const priorTime = await latestTimeDir(dataDir, date);
+      priorTime = await latestTimeDir(dataDir, date);
       if (priorTime !== undefined) {
         const priorFolder = new RunFolder(dataDir, date, priorTime);
         const latest = await priorFolder.readLatestCheckpoint();
@@ -257,6 +250,30 @@ export async function runCommand(
       }
     }
 
+    // Runs-observability Phase 1 (Task 6): open this invocation's `runs`
+    // row before anything else touches it — `ctx.runId` is what
+    // `runPipeline` keys its heartbeat/failure recording off, and
+    // `finishRun` below closes the same row once the pipeline returns.
+    const runId = ctx.runStore.startRun({
+      date,
+      timeDir: time,
+      kind: 'run',
+      startedAt: now.toISOString(),
+      ...(priorTime !== undefined
+        ? { resumedFrom: ctx.runStore.findRunId(date, priorTime) ?? undefined }
+        : {}),
+    });
+    ctx.runId = runId;
+    runLogger = createRunLogger(
+      ctx.runStore,
+      runId,
+      resolveLoggingSettings(
+        ctx.config.settings?.logging,
+        process.env.JOBBUNNY_TTY_LOG_LEVEL,
+      ),
+    );
+    ctx.logger = runLogger;
+
     await runRoutines(routines, 'pre-run', ctx);
 
     const result = await resolved.runPipeline(stages, ctx, folder, {
@@ -264,6 +281,8 @@ export async function runCommand(
       stallMs: DEFAULT_STALL_MS,
       ...(resumeFrom ? { resumeFrom } : {}),
     });
+
+    ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
 
     if (result.outcome === 'passed') {
       await runRoutines(routines, 'post-sync', ctx);
@@ -279,6 +298,10 @@ export async function runCommand(
 
     return result.outcome === 'passed' ? 0 : 1;
   } finally {
+    // Flush any buffered run_events before releasing the lock — durability
+    // before the process is free to exit (mirrors the old `JsonlLogger`
+    // `flush()` convention this replaces).
+    runLogger?.flush();
     // Always release — including on the preflight-abort early return above
     // and on any unexpected throw — so a failed/aborted run never leaves
     // the NEXT scheduled slot permanently locked out.
