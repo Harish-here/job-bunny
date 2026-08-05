@@ -12,12 +12,13 @@ import { after, before, test } from 'node:test';
 import {
   formatRunTime,
   RunFolder,
+  type RunResult,
   type RunStoreLogger,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
-import type { RunEventRow, RunStoreWriter } from '../../ports/run_store.ts';
+import type { RunEventRow, RunFailure, RunStore } from '../../ports/run_store.ts';
 import { stageCommand } from './stage.ts';
 
 let root: string;
@@ -30,26 +31,70 @@ after(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** Minimal fake `RunStoreWriter` — only `appendEvents` is exercised by
- * `RunStoreLogger`. */
-function fakeStore(): RunStoreWriter & {
-  calls: Array<{ runId: number; events: RunEventRow[] }>;
+/** Recording `RunStore` fake — mirrors `run.test.ts`'s `fakeRunStore()`.
+ * `startRun` auto-increments ids from 1; every write is recorded verbatim
+ * for assertions. */
+function fakeStore(): RunStore & {
+  started: Array<Parameters<RunStore['startRun']>[0]>;
+  events: Array<{ runId: number; events: RunEventRow[] }>;
+  failures: Array<{ runId: number; failure: RunFailure }>;
+  finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }>;
 } {
-  const calls: Array<{ runId: number; events: RunEventRow[] }> = [];
+  const started: Array<Parameters<RunStore['startRun']>[0]> = [];
+  const events: Array<{ runId: number; events: RunEventRow[] }> = [];
+  const failures: Array<{ runId: number; failure: RunFailure }> = [];
+  const finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }> = [];
+  let nextId = 1;
   return {
-    calls,
-    startRun: () => -1,
-    appendEvents: (runId, events) => {
-      calls.push({ runId, events });
+    started,
+    events,
+    failures,
+    finished,
+    startRun(meta) {
+      started.push(meta);
+      return nextId++;
     },
-    heartbeat: () => {},
-    recordFailure: () => {},
-    recordSyncDryrun: () => {},
-    finishRun: () => {},
+    appendEvents(runId, evts) {
+      events.push({ runId, events: evts });
+    },
+    heartbeat() {},
+    recordFailure(runId, failure) {
+      failures.push({ runId, failure });
+    },
+    recordSyncDryrun() {},
+    finishRun(runId, outcome, result, finishedAt) {
+      finished.push({ runId, outcome, result, finishedAt });
+    },
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
   };
 }
 
-function fakeCtx(runStore?: RunStoreWriter): PipelineCtx {
+function fakeCtx(runStore: RunStore = fakeStore()): PipelineCtx {
   return {
     profile: 'rajni',
     signal: new AbortController().signal,
@@ -67,7 +112,7 @@ function fakeCtx(runStore?: RunStoreWriter): PipelineCtx {
     },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
-    runStore: (runStore ?? {}) as PipelineCtx['runStore'],
+    runStore,
     async notify(_event: NotifyEvent) {},
   };
 }
@@ -255,8 +300,82 @@ test('stageCommand: hands guardStage a logger scoped to the target stage name', 
   // flushing the buffered events out to the fake store and inspecting the
   // batch it received, mirroring the old run.log-reading assertion.
   (ctx.logger as RunStoreLogger).flush();
-  const line = store.calls.flatMap((c) => c.events).find((e) => e.msg === 'hi');
+  const line = store.events.flatMap((c) => c.events).find((e) => e.msg === 'hi');
   assert.equal(line?.data?.scope, 'compress');
+});
+
+test('stageCommand: opens a "stage" runs row and finishes it as passed with the funnel', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
+  const stages = [
+    makeStage('compress', async () => ({ jobs: [{ id: 'a' }] as never, dropped: [] })),
+  ];
+  const now = new Date('2026-07-25T00:00:00Z');
+
+  const code = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+      now: () => now,
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(store.started.length, 1);
+  assert.equal(store.started[0]?.kind, 'stage');
+  assert.equal(store.started[0]?.timeDir, formatRunTime(now));
+
+  assert.equal(store.finished.length, 1);
+  const finished = store.finished[0];
+  assert.equal(finished?.runId, store.started.length); // the id startRun returned
+  assert.equal(finished?.outcome, 'passed');
+  const result = finished?.result as RunResult;
+  assert.equal(result.outcome, 'passed');
+  assert.equal(result.profile, 'rajni');
+  assert.equal(result.stages[0]?.name, 'compress');
+  assert.equal(result.stages[0]?.jobsIn, 0);
+  assert.equal(result.stages[0]?.jobsOut, 1);
+});
+
+test('stageCommand: a stage that throws records the failure, finishes the row as failed, and rethrows', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
+  const stages = [
+    makeStage('compress', async () => {
+      throw new Error('boom');
+    }),
+  ];
+
+  // The rethrown error is guardStage's own wrapper (its `cause` carries the
+  // underlying "boom") — asserted generically here; the recorded
+  // `RunFailure.error` below is what preserves the underlying message.
+  await assert.rejects(() =>
+    stageCommand(
+      { profile, stage: 'compress' },
+      {
+        wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+        now: () => new Date('2026-07-25T00:00:00Z'),
+        root,
+        write: () => {},
+      },
+    ),
+  );
+
+  assert.equal(store.failures.length, 1);
+  assert.equal(store.failures[0]?.failure.stage, 'compress');
+  assert.match(store.failures[0]?.failure.error ?? '', /boom/);
+
+  assert.equal(store.finished.length, 1);
+  const finished = store.finished[0];
+  assert.equal(finished?.outcome, 'failed');
+  const result = finished?.result as RunResult;
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.failedStage, 'compress');
+  assert.deepEqual(result.stages, []);
 });
 
 test('stageCommand: a profile with invalid settings.logging throws before the stage runs', async () => {
