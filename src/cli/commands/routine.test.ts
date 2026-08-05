@@ -8,7 +8,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/context.ts';
-import type { ArchivePolicy, Connector, RunContext } from '../../ports/index.ts';
+import type {
+  ArchivePolicy,
+  Connector,
+  RunContext,
+  RunStore,
+} from '../../ports/index.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
@@ -29,6 +34,38 @@ function fakeConnector(): Connector & { archiveCalls: ArchivePolicy[] } {
       archiveCalls.push(policy);
       return { archived: 3, dropped: [] };
     },
+  };
+}
+
+/** Stub `RunStore` — this file's real-`cleanupRoutine` test needs
+ * `pruneRunsOlderThan` to exist (called unconditionally); no test here
+ * asserts on its call args, so every other method is a no-op stub. */
+function fakeRunStore(): RunStore {
+  return {
+    startRun() {
+      return -1;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun() {},
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
   };
 }
 
@@ -57,7 +94,7 @@ function fakeCtx(connector: Connector): PipelineCtx {
       settings: {},
     },
     ports,
-    runStore: {} as PipelineCtx['runStore'],
+    runStore: fakeRunStore(),
     async notify(_event: NotifyEvent) {},
   };
 }

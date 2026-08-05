@@ -8,6 +8,7 @@ import type {
   LogData,
   Logger,
   RunContext,
+  RunStore,
   Storage,
 } from '../../ports/index.ts';
 import {
@@ -89,11 +90,50 @@ function fakeRunsStorage(opts?: {
   };
 }
 
+/** Recording `RunStore` fake — `pruneRunsOlderThan` records its call args
+ * and returns `opts.prunedResult` (default 0); every other method is a
+ * stub, since this routine never calls them. */
+function fakeRunStore(opts?: { prunedResult?: number }): {
+  store: RunStore;
+  prunedCalls: Array<{ today: string; ttlDays: number }>;
+} {
+  const prunedCalls: Array<{ today: string; ttlDays: number }> = [];
+  const store: RunStore = {
+    startRun() {
+      return -1;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun() {},
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    pruneRunsOlderThan(today, ttlDays) {
+      prunedCalls.push({ today, ttlDays });
+      return opts?.prunedResult ?? 0;
+    },
+    close() {},
+  };
+  return { store, prunedCalls };
+}
+
 function fakeCtx(opts?: {
   settings?: Record<string, unknown>;
   connector?: Connector;
   logger?: Logger;
   storage?: Storage;
+  runStore?: RunStore;
 }): PipelineCtx {
   const connector = opts?.connector ?? fakeConnector();
   const ports: WiredPorts = { lanes: [], connector, notifiers: [] };
@@ -111,7 +151,7 @@ function fakeCtx(opts?: {
       settings: opts?.settings ?? {},
     },
     ports,
-    runStore: {} as PipelineCtx['runStore'],
+    runStore: opts?.runStore ?? fakeRunStore().store,
     async notify() {},
   };
 }
@@ -267,6 +307,29 @@ test('run(): prunes run folders older than runsOlderThanDays, keeps today and re
     { passedOlderThanDays: 7, untouchedOlderThanDays: 30 },
   ]);
   assert.deepEqual(storage.removedTrees, ['runs/2026-06-01']);
+});
+
+test('run(): prunes runs/run_events rows via ctx.runStore, with the same TTL and today used for the folder prune', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const { store, prunedCalls } = fakeRunStore({ prunedResult: 4 });
+  const ctx = fakeCtx({
+    connector,
+    logger,
+    runStore: store,
+    settings: { cleanup: { runsOlderThanDays: 45 } },
+  });
+
+  await cleanupRoutine.run(ctx);
+
+  assert.equal(prunedCalls.length, 1);
+  assert.equal(prunedCalls[0]?.ttlDays, 45);
+  assert.match(prunedCalls[0]?.today ?? '', /^\d{4}-\d{2}-\d{2}$/);
+
+  const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned run rows');
+  assert.ok(infoCall, 'must log the number of pruned run rows');
+  assert.equal(infoCall?.data?.prunedDbRuns, 4);
+  assert.equal(infoCall?.data?.runsOlderThanDays, 45);
 });
 
 test('run(): a removeTree failure for one run folder is warned about but does not throw, and other prunes still happen', async () => {

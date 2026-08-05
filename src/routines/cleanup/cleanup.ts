@@ -137,5 +137,18 @@ export const cleanupRoutine: Routine = {
       prunedRuns,
       runsOlderThanDays: settings.runsOlderThanDays,
     });
+
+    // Same TTL, same `today` as the folder prune above — `runs`/`run_events`
+    // rows (persist-to-db Phase 1) get pruned alongside the checkpoint
+    // folders they currently correlate to via `timeDir` (Phase 2 retires
+    // the folders; this prune stays independent of that).
+    const prunedDbRuns = ctx.runStore.pruneRunsOlderThan(
+      today,
+      settings.runsOlderThanDays,
+    );
+    ctx.logger.info('cleanup: pruned run rows', {
+      prunedDbRuns,
+      runsOlderThanDays: settings.runsOlderThanDays,
+    });
   },
 };
