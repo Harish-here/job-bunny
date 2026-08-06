@@ -8,14 +8,18 @@
  * (skip on a held lock) gets its own dedicated tests further down.
  */
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import type { RunResult } from '../../ops/observability/index.ts';
+import { formatRunTime, type RunResult } from '../../ops/observability/index.ts';
 import type { LockInfo } from '../../ops/scheduling/run_lock.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { RunnerOptions } from '../../pipeline/runner/run.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { DoctorCheck } from '../../ports/doctor.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
+import type { RunStore } from '../../ports/run_store.ts';
 import type { Routine } from '../../routines/types.ts';
 import { computeRunCapMs, type RunDeps, runCommand } from './run.ts';
 
@@ -37,7 +41,66 @@ function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   };
 }
 
-function fakeCtx(notified: NotifyEvent[]): PipelineCtx {
+/** Recording `RunStore` fake — `startRun` auto-increments ids from 1;
+ * `findRunId` returns `opts.findRunIdResult` (default `null`, "no prior row
+ * on record"). Every write is recorded verbatim for assertions. */
+function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
+  store: RunStore;
+  started: Array<Parameters<RunStore['startRun']>[0]>;
+  finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }>;
+  findRunIdCalls: Array<{ date: string; timeDir: string }>;
+} {
+  const started: Array<Parameters<RunStore['startRun']>[0]> = [];
+  const finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }> = [];
+  const findRunIdCalls: Array<{ date: string; timeDir: string }> = [];
+  let nextId = 1;
+  const store: RunStore = {
+    startRun(meta) {
+      started.push(meta);
+      return nextId++;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun(runId, outcome, result, finishedAt) {
+      finished.push({ runId, outcome, result, finishedAt });
+    },
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId(date, timeDir) {
+      findRunIdCalls.push({ date, timeDir });
+      return opts.findRunIdResult ?? null;
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+  return { store, started, finished, findRunIdCalls };
+}
+
+function fakeCtx(
+  notified: NotifyEvent[],
+  runStore: RunStore = fakeRunStore().store,
+): PipelineCtx {
   return {
     profile: 'rajni',
     signal: new AbortController().signal,
@@ -46,6 +109,7 @@ function fakeCtx(notified: NotifyEvent[]): PipelineCtx {
     storage: {} as PipelineCtx['storage'],
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
+    runStore,
     async notify(event: NotifyEvent) {
       notified.push(event);
     },
@@ -140,7 +204,7 @@ test('runCommand: pre-run routines always run before runPipeline is called', asy
   assert.equal(code, 0);
 });
 
-test('runCommand: --dry-run threads a syncDryRunPath keyed to the run date into wire()', async () => {
+test('runCommand: --dry-run threads syncDryRun: true into wire()', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);
   let receivedOverrides: unknown;
@@ -160,9 +224,7 @@ test('runCommand: --dry-run threads a syncDryRunPath keyed to the run date into 
   );
 
   assert.equal(code, 0);
-  assert.deepEqual(receivedOverrides, {
-    syncDryRunPath: 'runs/2026-07-25/sync_dryrun.json',
-  });
+  assert.deepEqual(receivedOverrides, { syncDryRun: true });
 });
 
 test('runCommand: without --dry-run, wire() gets no overrides', async () => {
@@ -207,7 +269,7 @@ test('runCommand: --dry-run makes the digest text reflect the dry run', async ()
   assert.match(text, /DRY RUN/);
 });
 
-test('runCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
+test('runCommand: overrides ctx.logger with a RunStoreLogger before running the pipeline', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);
   let observedLoggerCtor: string | undefined;
@@ -226,7 +288,164 @@ test('runCommand: overrides ctx.logger with a JsonlLogger before running the pip
     },
   );
 
-  assert.equal(observedLoggerCtor, 'JsonlLogger');
+  assert.equal(observedLoggerCtor, 'RunStoreLogger');
+});
+
+// --- runs-observability: the driver opens/closes the run row (Task 6) ---
+
+test('runCommand: a passed run opens a "run"-kind runs row and closes it with the passed outcome and the RunResult blob', async () => {
+  const notified: NotifyEvent[] = [];
+  const { store, started, finished } = fakeRunStore();
+  const ctx = fakeCtx(notified, store);
+  const result = passedResult();
+  const now = new Date('2026-07-25T09:00:00Z');
+
+  const code = await runCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+      runPipeline: async () => result,
+      now: () => now,
+      root: '/fake/root',
+      ...fakeLockDeps(),
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]?.kind, 'run');
+  assert.equal(started[0]?.date, '2026-07-25');
+  // `timeDir` is the LOCAL clock's HH-MM (`formatRunTime`) — computed the
+  // same way here rather than hardcoded, so this test is timezone-agnostic.
+  assert.equal(started[0]?.timeDir, formatRunTime(now));
+  assert.equal(started[0]?.resumedFrom, undefined, 'no --resume ⇒ no resumedFrom');
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.runId, 1);
+  assert.equal(finished[0]?.outcome, 'passed');
+  assert.deepEqual(finished[0]?.result, result);
+});
+
+test('runCommand: a failed run closes its runs row with outcome "failed"', async () => {
+  const notified: NotifyEvent[] = [];
+  const { store, finished } = fakeRunStore();
+  const ctx = fakeCtx(notified, store);
+
+  const code = await runCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+      runPipeline: async () =>
+        passedResult({ outcome: 'failed', failedStage: 'extract' }),
+      now: () => new Date('2026-07-25T09:00:00Z'),
+      root: '/fake/root',
+      ...fakeLockDeps(),
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.outcome, 'failed');
+});
+
+test('runCommand: --resume, with a prior same-day checkpoint on disk, passes resumedFrom from runStore.findRunId', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'jobbunny-run-resume-'));
+  try {
+    const date = '2026-07-25';
+    const priorTime = '08-00';
+    const runsDir = join(root, 'profiles', 'rajni', 'data', 'runs', date, priorTime);
+    await mkdir(runsDir, { recursive: true });
+    await writeFile(
+      join(runsDir, '00-farm.json'),
+      JSON.stringify({ jobs: [], dropped: [] }),
+      'utf8',
+    );
+
+    const notified: NotifyEvent[] = [];
+    const { store, started, findRunIdCalls } = fakeRunStore({ findRunIdResult: 42 });
+    const ctx = fakeCtx(notified, store);
+
+    const code = await runCommand(
+      { profile: 'rajni', resume: true },
+      {
+        wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+        runPipeline: async () => passedResult(),
+        now: () => new Date('2026-07-25T09:00:00Z'),
+        root,
+        ...fakeLockDeps(),
+      },
+    );
+
+    assert.equal(code, 0);
+    assert.deepEqual(findRunIdCalls, [{ date, timeDir: priorTime }]);
+    assert.equal(started.length, 1);
+    assert.equal(started[0]?.resumedFrom, 42);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('runCommand: --resume with no prior same-day folder never calls findRunId and starts a fresh row with no resumedFrom', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'jobbunny-run-resume-none-'));
+  try {
+    const notified: NotifyEvent[] = [];
+    const { store, started, findRunIdCalls } = fakeRunStore();
+    const ctx = fakeCtx(notified, store);
+
+    const code = await runCommand(
+      { profile: 'rajni', resume: true },
+      {
+        wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+        runPipeline: async () => passedResult(),
+        now: () => new Date('2026-07-25T09:00:00Z'),
+        root,
+        ...fakeLockDeps(),
+      },
+    );
+
+    assert.equal(code, 0);
+    assert.deepEqual(findRunIdCalls, []);
+    assert.equal(started.length, 1);
+    assert.equal(started[0]?.resumedFrom, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('runCommand: flushes the buffered RunStoreLogger events (via ctx.runStore.appendEvents) before releasing the lock, even when runPipeline throws', async () => {
+  const notified: NotifyEvent[] = [];
+  const order: string[] = [];
+  const { store } = fakeRunStore();
+  const observedStore: RunStore = {
+    ...store,
+    appendEvents(runId, events) {
+      order.push('appendEvents');
+      store.appendEvents(runId, events);
+    },
+  };
+  const ctx = fakeCtx(notified, observedStore);
+
+  await assert.rejects(
+    runCommand(
+      { profile: 'rajni' },
+      {
+        wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+        runPipeline: async (_stages, runCtx) => {
+          // Buffered (not flushed immediately) — `runLogger.flush()` in the
+          // driver's `finally` is what has to drain this before release.
+          runCtx.logger.info('about to throw');
+          throw new Error('boom');
+        },
+        now: () => new Date('2026-07-25T09:00:00Z'),
+        root: '/fake/root',
+        acquireLock: async () => ({ acquired: true }),
+        releaseLock: async () => {
+          order.push('release');
+        },
+      },
+    ),
+  );
+
+  assert.deepEqual(order, ['appendEvents', 'release']);
 });
 
 test('runCommand: a profile with invalid settings.logging throws before any stage runs', async () => {

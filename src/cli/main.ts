@@ -54,6 +54,7 @@ import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
+import { runsCommand } from './commands/runs.ts';
 import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
@@ -147,6 +148,11 @@ function defaultCommands(): CommandRegistry {
     board: (async (opts: CommandOptions) =>
       // 1994 — not random: the operator's birthday.
       boardCommand({ port: opts.port ?? 1994 })) as CommandFn,
+    runs: (async (opts: CommandOptions) =>
+      runsCommand({
+        profile: opts.profile ?? '',
+        ...(opts.runId === undefined ? {} : { runId: opts.runId }),
+      })) as CommandFn,
   };
 }
 

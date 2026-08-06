@@ -25,6 +25,7 @@ import {
   formatRunTime,
   latestTimeDir,
   RunFolder,
+  type RunResult,
   withScope,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
@@ -35,6 +36,21 @@ import {
   resolveLoggingSettings,
   type WireResult,
 } from '../wire/index.ts';
+
+/** Mirrors `pipeline/runner/run.ts`'s private `errorText` — duplicated
+ * rather than exported, since it's runner-internal (not part of the P3
+ * handoff contract) and this is the one other call site that needs the same
+ * "don't hide the underlying attempt failure behind guardStage's wrapper
+ * message" behavior for a recorded `RunFailure.error`. */
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause;
+  if (cause !== null && cause !== undefined) {
+    const causeMessage = cause instanceof Error ? cause.message : String(cause);
+    return `${err.message} — cause: ${causeMessage}`;
+  }
+  return err.message;
+}
 
 const STALL_MS = 360_000; // matches run.ts's DEFAULT_STALL_MS — see its header
 const SEED_PAYLOAD: StagePayload = { jobs: [], dropped: [] };
@@ -88,25 +104,88 @@ export async function stageCommand(
   const existing = await latestTimeDir(dataDir, date);
   const time = existing ?? formatRunTime(now);
   const folder = new RunFolder(dataDir, date, time);
-  ctx.logger = createRunLogger(
-    folder.logPath(),
+
+  // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS
+  // single-stage invocation — mirrors `runCommand` (Task 6) so the
+  // store-backed logger has a real id to key its buffered events off,
+  // instead of the previous placeholder `-1`.
+  const runId = ctx.runStore.startRun({
+    date,
+    timeDir: time,
+    kind: 'stage',
+    startedAt: now.toISOString(),
+  });
+  // Heartbeat promptly — unlike a full `run`, this command drives `guardStage`
+  // directly rather than `runPipeline` (run.ts:64), so nothing else would
+  // ever touch heartbeat_at for the row. Without this, a long single stage
+  // (e.g. `stage farm`) leaves heartbeat_at NULL for its whole duration,
+  // which the null-or-stale derivation reports as "crashed" while it's alive.
+  ctx.runStore.heartbeat(runId, resolved.now().toISOString());
+  ctx.runId = runId;
+  const runLogger = createRunLogger(
+    ctx.runStore,
+    runId,
     resolveLoggingSettings(
       ctx.config.settings?.logging,
       process.env.JOBBUNNY_TTY_LOG_LEVEL,
     ),
   );
+  ctx.logger = runLogger;
 
   const latest = await folder.readLatestCheckpoint();
   const input: StagePayload =
     (latest?.payload as StagePayload | undefined) ?? SEED_PAYLOAD;
 
-  const stageCtx: PipelineCtx = { ...ctx, logger: withScope(ctx.logger, target.name) };
-  const { output } = await guardStage(target, input, stageCtx, { stallMs: STALL_MS });
+  const stageStarted = Date.now();
+  try {
+    const stageCtx: PipelineCtx = { ...ctx, logger: withScope(ctx.logger, target.name) };
+    const { output, attempts } = await guardStage(target, input, stageCtx, {
+      stallMs: STALL_MS,
+    });
+    const elapsedMs = Date.now() - stageStarted;
 
-  await folder.writeCheckpoint(index, target.name, output);
+    await folder.writeCheckpoint(index, target.name, output);
 
-  const funnel = buildFunnel(input, output);
-  resolved.write(`${target.name}: ${funnel.jobsIn} -> ${funnel.jobsOut}`);
+    const funnel = buildFunnel(input, output);
+    const result: RunResult = {
+      profile: ctx.profile,
+      date,
+      time,
+      outcome: 'passed',
+      stages: [
+        {
+          name: target.name,
+          elapsedMs,
+          attempts,
+          jobsIn: funnel.jobsIn,
+          jobsOut: funnel.jobsOut,
+          dropsByRule: funnel.dropsByRule,
+        },
+      ],
+    };
+    ctx.runStore.finishRun(runId, 'passed', result, resolved.now().toISOString());
 
-  return 0;
+    resolved.write(`${target.name}: ${funnel.jobsIn} -> ${funnel.jobsOut}`);
+
+    return 0;
+  } catch (err) {
+    const elapsedMs = Date.now() - stageStarted;
+    ctx.runStore.recordFailure(runId, {
+      stage: target.name,
+      error: errorText(err),
+      elapsedMs,
+    });
+    const result: RunResult = {
+      profile: ctx.profile,
+      date,
+      time,
+      outcome: 'failed',
+      failedStage: target.name,
+      stages: [],
+    };
+    ctx.runStore.finishRun(runId, 'failed', result, resolved.now().toISOString());
+    throw err;
+  } finally {
+    runLogger.flush();
+  }
 }

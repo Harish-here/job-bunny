@@ -1,5 +1,5 @@
 /**
- * Critical-path smoke suite (T11) — 8 specs against a real board server
+ * Critical-path smoke suite (T11) — 9 specs against a real board server
  * (webServer in `playwright.config.ts`) over `profiles/rajni`'s seeded
  * local sqlite DB (`seed.ts` globalSetup). Every test pins the profile via
  * `localStorage` before navigating — the dev machine may hold real
@@ -165,4 +165,15 @@ test('full-page detail + back', async ({ page }) => {
   await expect(
     page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-1"]'),
   ).toHaveAttribute('aria-selected', 'true');
+});
+
+// rajni's seeded DB (seed.ts) never inserts any `runs` rows — a fresh
+// profile with jobs but no completed pipeline run is exactly the empty
+// state this smoke covers.
+test('runs page empty state', async ({ page }) => {
+  await page.goto('/#/runs');
+  await expect(page.getByRole('heading', { name: 'Runs' })).toBeVisible();
+  await expect(page.getByTestId('runs-empty')).toBeVisible();
+  await expect(page.getByTestId('runs-empty')).toContainText('No runs recorded yet');
+  await expect(page.getByText('No run selected.')).toBeVisible();
 });

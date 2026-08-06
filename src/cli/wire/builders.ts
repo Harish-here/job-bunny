@@ -7,11 +7,11 @@
  * mirror decision, local-DB spec PR 3 — `NotionConnectorSettingsSchema` is
  * the single authority on whether the mirror applies; a malformed slice
  * always means 'no mirror', never a throw, and a broken mirror's doctor
- * check warns, never reds), and the `MigrateWire`/`wireMigrate` composition
- * seam for `jobbunny migrate`. Sibling to
- * `compose.ts` in the `only-wire-imports-adapters` carve-out
- * (`.dependency-cruiser.cjs`) — split out purely to keep `compose.ts` under
- * the 400-line file-size cap, not for any behavioral reason.
+ * check warns, never reds), the `resolveSqlitePath` path resolver `board.ts`
+ * and `compose.ts` both share, and the `MigrateWire`/`wireMigrate`
+ * composition seam for `jobbunny migrate`. Sibling to `compose.ts` in the
+ * `only-wire-imports-adapters` carve-out (`.dependency-cruiser.cjs`) — split
+ * out purely to keep `compose.ts` under the 400-line cap, not behavioral.
  */
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -63,6 +63,17 @@ import {
 } from './settings.ts';
 
 // --- live adapter construction (ctx/ports/stages/routines) ---
+
+/** THE single authoritative jobbunny.db path resolver — shared by the run
+ * store (`compose.ts`), `wireMigrate` below, and `wireBoard`'s
+ * `resolveDbPath` (`board.ts`, which delegates here). Deliberately NOT
+ * gated on `connector` (D5: the DB is unconditional for every profile;
+ * connector governs only where `sync` writes). `safeParse`, not `parse`:
+ * malformed `settings.sqlite` degrades to `defaultPath`, never throws. */
+export function resolveSqlitePath(sqliteSettings: unknown, defaultPath: string): string {
+  const parsed = SqliteConnectorSettingsSchema.safeParse(sqliteSettings ?? {});
+  return (parsed.success ? parsed.data.path : undefined) ?? defaultPath;
+}
 
 export function buildConnector(
   name: string,
@@ -348,9 +359,8 @@ export async function wireMigrate(
   }
 
   const profileJsonPath = path.join(root, 'profiles', profileName, 'profile.json');
-  const dbPath =
-    SqliteConnectorSettingsSchema.parse(config.settings.sqlite ?? {}).path ??
-    path.join(root, 'profiles', profileName, 'data', 'jobbunny.db');
+  const defaultDbPath = path.join(root, 'profiles', profileName, 'data', 'jobbunny.db');
+  const dbPath = resolveSqlitePath(config.settings.sqlite, defaultDbPath);
 
   // Lazy + memoized: opening `dbPath` (via `openJobsDb`) only happens on the
   // first `importRecords` call, so `migrate --dry-run` — which never calls

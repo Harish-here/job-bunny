@@ -15,8 +15,8 @@ export interface RunnerOptions {
    * command finding an earlier same-day run folder) — the runner itself
    * never does folder discovery. Absent ⇒ start from stage 0 with the
    * empty seed payload. `checkpointPath` (when known) is only used to
-   * populate `failure.json`'s `lastCheckpoint` if the very first resumed
-   * stage fails before this run writes a checkpoint of its own. */
+   * populate the recorded failure's `lastCheckpoint` if the very first
+   * resumed stage fails before this run writes a checkpoint of its own. */
   resumeFrom?: {
     startIndex: number;
     payload: StagePayload;
@@ -27,11 +27,14 @@ export interface RunnerOptions {
 const SEED_PAYLOAD: StagePayload = { jobs: [], dropped: [] };
 
 /**
- * Runs `stages` sequentially, checkpointing each successful output and
- * writing failure.json/result.json to `folder`. Never throws — a stage
- * failure (including a run-cap/run-level abort) is captured as a 'failed'
- * RunResult and returned so the caller decides the process exit code.
- * Sends nothing to notifiers (single-sender invariant lives in P8).
+ * Runs `stages` sequentially, checkpointing each successful output to
+ * `folder`. Heartbeats and stage failures are recorded via `ctx.runStore`
+ * when `ctx.runId` is set (runs-observability Phase 1) — result/failure
+ * files are no longer written here; the driver persists the returned
+ * `RunResult` itself. Never throws — a stage failure (including a
+ * run-cap/run-level abort) is captured as a 'failed' RunResult and returned
+ * so the caller decides the process exit code. Sends nothing to notifiers
+ * (single-sender invariant lives in P8).
  */
 export async function runPipeline(
   stages: Array<StageDef<StagePayload, StagePayload>>,
@@ -56,6 +59,10 @@ export async function runPipeline(
 
   for (const [index, stage] of stages.entries()) {
     if (index < startIndex) continue;
+
+    if (ctx.runId !== undefined) {
+      ctx.runStore.heartbeat(ctx.runId, new Date().toISOString());
+    }
 
     const stageStarted = Date.now();
     try {
@@ -82,14 +89,16 @@ export async function runPipeline(
     } catch (err) {
       const elapsedMs = Date.now() - runStarted;
       const error = errorText(err);
-      await folder.writeFailure({
-        stage: stage.name,
-        error,
-        elapsedMs,
-        ...(lastCheckpointPath !== undefined
-          ? { lastCheckpoint: lastCheckpointPath }
-          : {}),
-      });
+      if (ctx.runId !== undefined) {
+        ctx.runStore.recordFailure(ctx.runId, {
+          stage: stage.name,
+          error,
+          elapsedMs,
+          ...(lastCheckpointPath !== undefined
+            ? { lastCheckpoint: lastCheckpointPath }
+            : {}),
+        });
+      }
       const result: RunResult = {
         profile: ctx.profile,
         date: folder.date,
@@ -98,7 +107,6 @@ export async function runPipeline(
         failedStage: stage.name,
         stages: resultStages,
       };
-      await folder.writeResult(result);
       return result;
     }
   }
@@ -110,13 +118,11 @@ export async function runPipeline(
     outcome: 'passed',
     stages: resultStages,
   };
-  await folder.clearFailure();
-  await folder.writeResult(result);
   return result;
 }
 
-/** Renders an error for failure.json. When `err` is an Error with a
- * non-null `cause`, the cause's message is appended (`<message> — cause:
+/** Renders an error for `recordFailure`/the returned RunResult. When `err`
+ * is an Error with a non-null `cause`, the cause's message is appended (`<message> — cause:
  * <causeMessage>`) so a wrapping error (e.g. guardStage's "stage ... failed
  * after N attempt(s)") doesn't hide the underlying attempt failure. */
 function errorText(err: unknown): string {

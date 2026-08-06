@@ -1,6 +1,11 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { LogData, Logger } from '../../../ports/index.ts';
+import type {
+  LogData,
+  Logger,
+  RunEventRow,
+  RunStoreWriter,
+} from '../../../ports/index.ts';
 
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -83,6 +88,93 @@ export class JsonlLogger implements Logger {
   private async append(line: string): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     await appendFile(this.filePath, `${line}\n`, 'utf8');
+  }
+}
+
+/** Buffer size at which `RunStoreLogger` flushes immediately, regardless of
+ * the coalescing timer — bounds worst-case memory/latency for a very chatty
+ * stage without waiting on `flushMs`. */
+const RUN_STORE_FLUSH_THRESHOLD = 200;
+const DEFAULT_RUN_STORE_FLUSH_MS = 250;
+
+/** Logger implementation writing to the `run_events` table via a
+ * `RunStoreWriter` (persist-to-db Phase 1) — the DB-backed replacement for
+ * `JsonlLogger` on the run/stage/reconcile command paths. Buffers
+ * `fileLevel`-passing lines and coalesces them into batched
+ * `store.appendEvents` calls (itself fail-soft — this class adds no
+ * try/catch of its own) rather than writing one row per log call. */
+export class RunStoreLogger implements Logger {
+  private readonly store: RunStoreWriter;
+  private readonly runId: number;
+  private readonly fileLevel: LogLevel;
+  private readonly ttyLevel: LogLevel;
+  private readonly isTTY: () => boolean;
+  private readonly flushMs: number;
+  private buffer: RunEventRow[] = [];
+  private timer: NodeJS.Timeout | undefined;
+
+  constructor(
+    store: RunStoreWriter,
+    runId: number,
+    opts: JsonlLoggerOptions & { flushMs?: number } = {},
+  ) {
+    this.store = store;
+    this.runId = runId;
+    this.fileLevel = opts.fileLevel ?? 'debug';
+    this.ttyLevel = opts.ttyLevel ?? 'debug';
+    this.isTTY = opts.isTTY ?? (() => Boolean(process.stdout.isTTY));
+    this.flushMs = opts.flushMs ?? DEFAULT_RUN_STORE_FLUSH_MS;
+  }
+
+  debug(msg: string, data?: LogData): void {
+    this.log('debug', msg, data);
+  }
+
+  info(msg: string, data?: LogData): void {
+    this.log('info', msg, data);
+  }
+
+  warn(msg: string, data?: LogData): void {
+    this.log('warn', msg, data);
+  }
+
+  error(msg: string, data?: LogData): void {
+    this.log('error', msg, data);
+  }
+
+  /** Clears any pending coalescing timer and hands the buffered batch to
+   * the store synchronously — safe to call from `log()` (threshold/error
+   * flushes) or from a caller wrapping up a run/stage. A no-op when the
+   * buffer is already empty. */
+  flush(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    if (this.buffer.length === 0) return;
+    const batch = this.buffer;
+    this.buffer = [];
+    this.store.appendEvents(this.runId, batch);
+  }
+
+  private log(level: LogLevel, msg: string, data?: LogData): void {
+    if (shouldLog(this.ttyLevel, level) && this.isTTY()) {
+      console.log(JSON.stringify({ ts: new Date().toISOString(), level, msg, data }));
+    }
+    if (!shouldLog(this.fileLevel, level)) return;
+    const row: RunEventRow =
+      data === undefined
+        ? { ts: new Date().toISOString(), level, msg }
+        : { ts: new Date().toISOString(), level, msg, data };
+    this.buffer.push(row);
+    if (level === 'error' || this.buffer.length >= RUN_STORE_FLUSH_THRESHOLD) {
+      this.flush();
+      return;
+    }
+    if (!this.timer) {
+      this.timer = setTimeout(() => this.flush(), this.flushMs);
+      this.timer.unref();
+    }
   }
 }
 

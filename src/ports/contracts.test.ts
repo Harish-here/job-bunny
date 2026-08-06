@@ -178,6 +178,9 @@ test('a BoardStore satisfies the port and round-trips a query', () => {
       id === row.id
         ? { jobId: id, updatedAt: now, status: patch.status ?? undefined }
         : null,
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
     close() {},
   };
   const { rows, total } = store.listJobs({ status: 'applied' });
@@ -205,6 +208,9 @@ test('a BoardSource satisfies the port and opens a store per profile', () => {
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
     updateTracking: () => null,
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
     close() {},
   };
   const source: BoardSource = {

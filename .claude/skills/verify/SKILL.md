@@ -82,9 +82,10 @@ kill -TERM <pid>; sleep 3; kill -0 <pid> 2>/dev/null && kill -KILL <pid>
 ```
 
 To test code that runs *before* the browser connects (e.g. resume/reset logic), poll the run's
-log file (`profiles/<profile>/data/runs/<date>/<HH-MM>/run.log` — path from
-`RunFolder.logPath()`) for a checkpoint just before the part you're testing, give it ~0.3s to
-let async writes land, then SIGTERM.
+events instead — run observability now lives in the profile's local sqlite DB, not a `run.log`
+file: `node src/cli/main.ts runs --profile rajni show <id>` (or query `run_events` directly via
+`sqlite3 profiles/rajni/data/jobbunny.db`) — for a checkpoint just before the part you're
+testing, give it ~0.3s to let the buffered `RunStoreLogger` flush land, then SIGTERM.
 
 ## Fallback: throwaway profile for scenarios Rajni doesn't cover
 

@@ -13,6 +13,7 @@ import type { RunResult } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
+import type { RunStore } from '../../ports/run_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { reconcileCommand } from './reconcile.ts';
 
@@ -62,7 +63,63 @@ function fakeStorage(store: Map<string, unknown>): Storage {
   };
 }
 
-function fakeCtx(store: Map<string, unknown>): PipelineCtx {
+/** Recording `RunStore` fake — mirrors `run.test.ts`'s `fakeRunStore()`.
+ * `startRun` auto-increments ids from 1; every write is recorded verbatim
+ * for assertions. */
+function fakeRunStore(): {
+  store: RunStore;
+  started: Array<Parameters<RunStore['startRun']>[0]>;
+  finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }>;
+} {
+  const started: Array<Parameters<RunStore['startRun']>[0]> = [];
+  const finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }> = [];
+  let nextId = 1;
+  const store: RunStore = {
+    startRun(meta) {
+      started.push(meta);
+      return nextId++;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun(runId, outcome, result, finishedAt) {
+      finished.push({ runId, outcome, result, finishedAt });
+    },
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+  return { store, started, finished };
+}
+
+function fakeCtx(
+  store: Map<string, unknown>,
+  runStore: RunStore = fakeRunStore().store,
+): PipelineCtx {
   return {
     profile: 'rajni',
     signal: new AbortController().signal,
@@ -71,6 +128,7 @@ function fakeCtx(store: Map<string, unknown>): PipelineCtx {
     storage: fakeStorage(store),
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
+    runStore,
     async notify(_event: NotifyEvent) {},
   };
 }
@@ -122,6 +180,65 @@ test('reconcileCommand: finds the reconcile stage by name, not by array index', 
   assert.equal(observedStages?.[0]?.name, 'reconcile');
 });
 
+test('reconcileCommand: opens a "reconcile" runs row and finishes it with runPipeline\'s own result', async () => {
+  const store = new Map<string, unknown>();
+  const { store: runStore, started, finished } = fakeRunStore();
+  const ctx = fakeCtx(store, runStore);
+  const now = new Date('2026-07-25T00:00:00Z');
+  let observedRunId: number | undefined;
+
+  const code = await reconcileCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
+      runPipeline: async (_stages, runCtx) => {
+        observedRunId = runCtx.runId;
+        return passedResult();
+      },
+      now: () => now,
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]?.kind, 'reconcile');
+  assert.equal(observedRunId, started.length); // the id startRun returned
+
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.runId, observedRunId);
+  assert.equal(finished[0]?.outcome, 'passed');
+  assert.deepEqual(finished[0]?.result, passedResult());
+});
+
+test("reconcileCommand: a failed runPipeline result finishes the row as failed (recordFailure is runPipeline's own job)", async () => {
+  const store = new Map<string, unknown>();
+  const { store: runStore, finished } = fakeRunStore();
+  const ctx = fakeCtx(store, runStore);
+  const failed = passedResult({
+    outcome: 'failed',
+    failedStage: 'reconcile',
+    stages: [],
+  });
+
+  const code = await reconcileCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
+      runPipeline: async () => failed,
+      now: () => new Date('2026-07-25T00:00:00Z'),
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.outcome, 'failed');
+  assert.deepEqual(finished[0]?.result, failed);
+});
+
 test('reconcileCommand: prints the rebuilt cache entry count and returns 0 on success', async () => {
   const store = new Map<string, unknown>([
     [
@@ -171,7 +288,7 @@ test('reconcileCommand: a failed outcome prints the failure and returns 1', asyn
   assert.ok(lines.some((l) => l.includes('failed')));
 });
 
-test('reconcileCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
+test('reconcileCommand: overrides ctx.logger with a RunStoreLogger before running the pipeline', async () => {
   const store = new Map<string, unknown>();
   const ctx = fakeCtx(store);
   let observedLoggerCtor: string | undefined;
@@ -191,7 +308,7 @@ test('reconcileCommand: overrides ctx.logger with a JsonlLogger before running t
   );
 
   assert.equal(code, 0);
-  assert.equal(observedLoggerCtor, 'JsonlLogger');
+  assert.equal(observedLoggerCtor, 'RunStoreLogger');
 });
 
 test('reconcileCommand: a profile with invalid settings.logging throws before any stage runs', async () => {

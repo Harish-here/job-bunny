@@ -98,6 +98,17 @@ test('boardCommand: prints one line per profile, local-db vs notion-only', async
   assert.ok(out.lines.includes('harish — notion-only'));
 });
 
+test('boardCommand: labels by connector, not hasDb — a notion profile with a jobbunny.db file (local-DB spec D5: unconditional run-history tracking) is still "notion-only"', async () => {
+  const out = collector();
+  const deps = baseDeps({
+    wireBoard: () => fakeSource([{ name: 'harish', connector: 'notion', hasDb: true }]),
+    write: out.write,
+  });
+  const code = await boardCommand({ port: 4646 }, deps);
+  assert.equal(code, 0);
+  assert.ok(out.lines.includes('harish — notion-only'));
+});
+
 test('boardCommand: resolves 0 only after waitForStop() resolves, and awaits server.close() after that', async () => {
   const calls: string[] = [];
   let resolveWait: () => void = () => {};

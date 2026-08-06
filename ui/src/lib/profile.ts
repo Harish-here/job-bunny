@@ -9,7 +9,7 @@ export function pickProfile(
 ): string | null {
   const names = profiles.map((p) => p.name);
   if (stored !== null && names.includes(stored)) return stored;
-  return profiles.find((p) => p.hasDb)?.name ?? names[0] ?? null;
+  return profiles.find((p) => p.connector === 'sqlite')?.name ?? names[0] ?? null;
 }
 
 let listeners: (() => void)[] = [];

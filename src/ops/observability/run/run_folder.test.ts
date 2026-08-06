@@ -54,67 +54,6 @@ test('readLatestCheckpoint picks the highest-index checkpoint', async () => {
   });
 });
 
-test('writeHeartbeat writes {stage, at}', async () => {
-  const folder = new RunFolder(join(root, 'p5'), '2026-07-21', '09-00');
-  await folder.writeHeartbeat('extract');
-  const raw = await readFile(
-    join(root, 'p5', 'runs', '2026-07-21', '09-00', 'heartbeat.json'),
-    'utf8',
-  );
-  const parsed = JSON.parse(raw);
-  assert.equal(parsed.stage, 'extract');
-  assert.equal(typeof parsed.at, 'string');
-});
-
-test('writeFailure writes the failure record', async () => {
-  const folder = new RunFolder(join(root, 'p6'), '2026-07-21', '09-00');
-  await folder.writeFailure({ stage: 'extract', error: 'boom', elapsedMs: 42 });
-  const raw = await readFile(
-    join(root, 'p6', 'runs', '2026-07-21', '09-00', 'failure.json'),
-    'utf8',
-  );
-  assert.deepEqual(JSON.parse(raw), { stage: 'extract', error: 'boom', elapsedMs: 42 });
-});
-
-test('writeResult writes the run result', async () => {
-  const folder = new RunFolder(join(root, 'p7'), '2026-07-21', '09-00');
-  const result = {
-    profile: 'rajni',
-    date: '2026-07-21',
-    time: '09-00',
-    outcome: 'passed' as const,
-    stages: [],
-  };
-  await folder.writeResult(result);
-  const raw = await readFile(
-    join(root, 'p7', 'runs', '2026-07-21', '09-00', 'result.json'),
-    'utf8',
-  );
-  assert.deepEqual(JSON.parse(raw), result);
-});
-
-test('clearFailure removes an existing failure.json', async () => {
-  const folder = new RunFolder(join(root, 'p9'), '2026-07-21', '09-00');
-  await folder.writeFailure({ stage: 'extract', error: 'boom', elapsedMs: 42 });
-  await folder.clearFailure();
-  await assert.rejects(() =>
-    readFile(join(root, 'p9', 'runs', '2026-07-21', '09-00', 'failure.json'), 'utf8'),
-  );
-});
-
-test('clearFailure is a no-op when failure.json does not exist', async () => {
-  const folder = new RunFolder(join(root, 'p10'), '2026-07-21', '09-00');
-  await assert.doesNotReject(() => folder.clearFailure());
-});
-
-test('logPath returns run.log under the run folder', () => {
-  const folder = new RunFolder(join(root, 'p8'), '2026-07-21', '09-00');
-  assert.equal(
-    folder.logPath(),
-    join(root, 'p8', 'runs', '2026-07-21', '09-00', 'run.log'),
-  );
-});
-
 test('formatRunTime: zero-pads HH-MM from the local clock', () => {
   assert.equal(formatRunTime(new Date(2026, 6, 21, 9, 5)), '09-05');
   assert.equal(formatRunTime(new Date(2026, 6, 21, 23, 59)), '23-59');

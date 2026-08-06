@@ -22,6 +22,14 @@ import type {
   TrackingPatch,
   TrackingRow,
 } from '../../../../ports/board.ts';
+import type {
+  RunDetail,
+  RunEventRow,
+  RunKind,
+  RunStatus,
+  RunSummary,
+} from '../../../../ports/run_store.ts';
+import { deriveStatus } from '../runs/index.ts';
 
 const JOIN = 'jobs LEFT JOIN tracking ON tracking.job_id = jobs.id';
 
@@ -92,6 +100,42 @@ interface RawRow {
   t_next_action: string | null;
   t_next_action_date: string | null;
   t_updated_at: string | null;
+}
+
+interface RawRunRow {
+  id: number;
+  run_date: string;
+  time_dir: string | null;
+  kind: RunKind;
+  resumed_from: number | null;
+  status: RunStatus;
+  started_at: string;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+  result_json: string | null;
+  failure_json: string | null;
+  sync_dryrun_json: string | null;
+}
+
+interface RawRunEventRow {
+  ts: string;
+  level: string;
+  msg: string;
+  data_json: string | null;
+}
+
+function toRunSummary(row: RawRunRow): RunSummary {
+  return {
+    id: row.id,
+    date: row.run_date,
+    timeDir: row.time_dir,
+    kind: row.kind,
+    resumedFrom: row.resumed_from,
+    status: deriveStatus(row.status, row.heartbeat_at, new Date()),
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    heartbeatAt: row.heartbeat_at,
+  };
 }
 
 interface RawTrackingRow {
@@ -286,6 +330,64 @@ export class SqliteBoardStore implements BoardStore {
     }
 
     return toTrackingRow(id, now, merged);
+  }
+
+  listRuns(query: { limit?: number; offset?: number }): {
+    rows: RunSummary[];
+    total: number;
+  } {
+    const limit = query.limit ?? 50;
+    const offset = query.offset ?? 0;
+    const rawRows = this.db
+      .prepare('SELECT * FROM runs ORDER BY id DESC LIMIT ? OFFSET ?')
+      .all(limit, offset) as unknown as RawRunRow[];
+    const { n: total } = this.db.prepare('SELECT COUNT(*) AS n FROM runs').get() as {
+      n: number;
+    };
+    return { rows: rawRows.map((row) => toRunSummary(row)), total };
+  }
+
+  getRun(id: number): RunDetail | null {
+    const row = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as
+      | RawRunRow
+      | undefined;
+    if (!row) return null;
+    return {
+      ...toRunSummary(row),
+      result: row.result_json === null ? null : (JSON.parse(row.result_json) as unknown),
+      failure:
+        row.failure_json === null ? null : (JSON.parse(row.failure_json) as unknown),
+      syncDryrun:
+        row.sync_dryrun_json === null
+          ? null
+          : (JSON.parse(row.sync_dryrun_json) as unknown),
+    };
+  }
+
+  listRunEvents(
+    id: number,
+    query: { limit?: number; offset?: number },
+  ): { rows: RunEventRow[]; total: number } {
+    const limit = query.limit ?? 500;
+    const offset = query.offset ?? 0;
+    const rawRows = this.db
+      .prepare(
+        `SELECT ts, level, msg, data_json FROM run_events
+         WHERE run_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`,
+      )
+      .all(id, limit, offset) as unknown as RawRunEventRow[];
+    const { n: total } = this.db
+      .prepare('SELECT COUNT(*) AS n FROM run_events WHERE run_id = ?')
+      .get(id) as { n: number };
+    const rows = rawRows.map((row) => ({
+      ts: row.ts,
+      level: row.level,
+      msg: row.msg,
+      ...(row.data_json !== null
+        ? { data: JSON.parse(row.data_json) as Record<string, unknown> }
+        : {}),
+    }));
+    return { rows, total };
   }
 
   close(): void {

@@ -1,8 +1,24 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
+import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
 
-/** One discovered profile, as the board sees it. Pure-Notion profiles are
- * listed with hasDb=false and are never an error (spec §5). */
+/** One discovered profile, as the board sees it. `hasDb` reflects ONLY
+ * whether a `jobbunny.db` FILE exists — every profile gets one
+ * unconditionally once it has run at least once (local-DB spec D5: run
+ * history is tracked regardless of `connector`), so a pure-Notion profile
+ * can legitimately show `hasDb: true` too, once it has run. It is never an
+ * error either way (spec §5).
+ *
+ * `hasDb` alone is NOT "this profile's jobs live locally" — `jobs` is only
+ * ever written by a `sqlite` connector's own sync stage, so a non-sqlite
+ * profile's `jobs` table, even inside a `jobbunny.db` file that exists for
+ * run-history reasons alone, is always empty. Jobs routes
+ * (`app/features/board/routes.ts`) gate on `connector === 'sqlite'`
+ * separately from `openStore`'s own `hasDb` gate, so they 404
+ * `no_local_db` for a non-sqlite profile even when a store could
+ * technically be opened; runs routes (`app/features/runs/routes.ts`) have
+ * no such gate — runs/`run_events` are unconditional, so they keep using
+ * `openStore`'s file check alone. */
 export interface BoardProfile {
   name: string;
   connector: string; // '' when profile.json is missing/malformed
@@ -61,6 +77,17 @@ export interface BoardStore {
   getJob(id: string): BoardJobDetail | null;
   /** Returns the merged row, or null when no such job id exists. */
   updateTracking(id: string, patch: TrackingPatch, now: string): TrackingRow | null;
+  /** Read-only runs observability (persist-to-db Phase 1) — the board
+   * never writes `runs`/`run_events`, it only surfaces them. */
+  listRuns(query: { limit?: number; offset?: number }): {
+    rows: RunSummary[];
+    total: number;
+  };
+  getRun(id: number): RunDetail | null;
+  listRunEvents(
+    id: number,
+    query: { limit?: number; offset?: number },
+  ): { rows: RunEventRow[]; total: number };
   close(): void;
 }
 

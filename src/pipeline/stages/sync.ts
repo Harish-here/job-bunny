@@ -1,5 +1,6 @@
 import type { DroppedRecord } from '../../core/jd/index.ts';
 import type { Connector } from '../../ports/index.ts';
+import type { PipelineCtx } from '../runner/context.ts';
 import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
 
 /**
@@ -31,19 +32,32 @@ import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
  * are already `SoftError`s handled inside the connector and don't need
  * stage-level retry at all.
  *
- * `opts.dryRunPath` (P8 Task 7) — when set, this stage NEVER calls
- * `connector.syncJobs`: it computes the would-write set straight off
- * `input.jobs` and writes it to `ctx.storage` at that path instead,
- * returning `input` completely unchanged (same `jobs`, same `dropped` — no
- * `sync.failed` drops, since nothing was actually attempted). The artifact
- * captures WHICH jobs would be written (id/company/title/url/city/score/
- * excitement, for diffing against v0's `cache.json` delta which keys on
- * title+company+city) — it is NOT the exact Notion property payload; that
- * mapping lives in `adapters/db/notion/sync.ts` and is deliberately not
- * duplicated here.
+ * `opts.dryRun` (P8 Task 7, DB-backed as of runs-observability Phase 1
+ * Task 6) — when set, this stage NEVER calls `connector.syncJobs`: it
+ * computes the would-write set straight off `input.jobs` and records it via
+ * `ctx.runStore.recordSyncDryrun(ctx.runId, report)` instead of writing a
+ * per-date `sync_dryrun.json` (that per-date-overwrite bug is what this
+ * change retires), returning `input` completely unchanged (same `jobs`,
+ * same `dropped` — no `sync.failed` drops, since nothing was actually
+ * attempted). The report captures WHICH jobs would be written
+ * (id/company/title/url/city/score/excitement, for diffing against v0's
+ * `cache.json` delta which keys on title+company+city) — it is NOT the
+ * exact Notion property payload; that mapping lives in
+ * `adapters/db/notion/sync.ts` and is deliberately not duplicated here.
+ *
+ * `runStore`/`runId` are read off `ctx` (cast to the superset `PipelineCtx`)
+ * rather than constructor-injected like `connector` — the one exception to
+ * this file's "a stage that needs a port takes it as a factory argument"
+ * convention (see `reconcile.ts`'s header): `runId` doesn't exist yet at
+ * `wire()` time, when this stage is constructed — the CLI driver
+ * (`cli/commands/run.ts`) opens the `runs` row and mutates `ctx.runId`
+ * afterward, on the SAME long-lived `ctx` object this stage later runs
+ * against. `ctx.runId === undefined` (e.g. a unit test wiring a bare
+ * `StageContext`) skips the write silently — observability must never red
+ * a run.
  */
 export interface SyncStageOpts {
-  dryRunPath?: string;
+  dryRun?: boolean;
 }
 
 export function makeSyncStage(
@@ -62,7 +76,7 @@ export function makeSyncStage(
     timeoutMs: 900_000,
     retries: 0,
     async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
-      if (opts.dryRunPath) {
+      if (opts.dryRun) {
         const jobs = input.jobs.map((jd) => ({
           id: jd.identity.id,
           company: jd.identity.company,
@@ -72,15 +86,19 @@ export function makeSyncStage(
           score: jd.evaluation?.score,
           verdict: jd.evaluation?.excitement,
         }));
-        await ctx.storage.writeJson(opts.dryRunPath, {
+        const report = {
           generatedAt: new Date().toISOString(),
           profile: ctx.profile,
           count: jobs.length,
           jobs,
-        });
+        };
+        const runCtx = ctx as PipelineCtx;
+        if (runCtx.runId !== undefined) {
+          runCtx.runStore.recordSyncDryrun(runCtx.runId, report);
+        }
         ctx.logger.info(
           `DRY RUN — sync stage would have written ${jobs.length} job(s) to Notion; ` +
-            `wrote the would-write set to ${opts.dryRunPath} instead (no Notion writes performed)`,
+            'recorded the would-write set to the runs store instead (no Notion writes performed)',
         );
         return input;
       }

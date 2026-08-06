@@ -9,6 +9,9 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore {
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
     updateTracking: () => null,
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
     close() {},
     ...overrides,
   };

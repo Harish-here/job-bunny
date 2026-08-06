@@ -42,12 +42,9 @@
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import {
-  openJobsDb,
-  SqliteBoardStore,
-  SqliteConnectorSettingsSchema,
-} from '../../adapters/db/sqlite/index.ts';
+import { openJobsDb, SqliteBoardStore } from '../../adapters/db/sqlite/index.ts';
 import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
+import { resolveSqlitePath } from './builders.ts';
 
 export interface BoardWireOverrides {
   /** repo root; default `process.cwd()` — same resolution as
@@ -59,10 +56,10 @@ interface ProfileInfo extends BoardProfile {
   dbPath: string;
 }
 
-/** Same resolution as `wireMigrate` (`builders.ts:353-356`): an explicit
- * `settings.sqlite.path` wins, else the profile-derived default. A slice
- * that fails `SqliteConnectorSettingsSchema` is treated as absent, never
- * thrown — the tolerant posture extends to the db-path derivation too. */
+/** Delegates to `builders.ts`'s `resolveSqlitePath` — THE single
+ * authoritative resolver, also used by `wire()`'s run store and
+ * `wireMigrate`, so all three agree on one path for a given profile
+ * regardless of `connector`. */
 function resolveDbPath(root: string, name: string, parsed: unknown): string {
   const settings =
     parsed && typeof parsed === 'object'
@@ -70,12 +67,11 @@ function resolveDbPath(root: string, name: string, parsed: unknown): string {
       : undefined;
   const sqliteSlice =
     settings && typeof settings === 'object'
-      ? ((settings as { sqlite?: unknown }).sqlite ?? {})
-      : {};
-  const safe = SqliteConnectorSettingsSchema.safeParse(sqliteSlice);
-  return (
-    (safe.success ? safe.data.path : undefined) ??
-    path.join(root, 'profiles', name, 'data', 'jobbunny.db')
+      ? (settings as { sqlite?: unknown }).sqlite
+      : undefined;
+  return resolveSqlitePath(
+    sqliteSlice,
+    path.join(root, 'profiles', name, 'data', 'jobbunny.db'),
   );
 }
 

@@ -91,7 +91,7 @@ describe('Shell', () => {
 
     expect(screen.getByAltText('Job Bunny')).toBeInTheDocument();
     expect(screen.getByText('v2.1.0')).toBeInTheDocument();
-    for (const label of ['Triage', 'Tracker', 'Analytics', 'Onboarding']) {
+    for (const label of ['Triage', 'Tracker', 'Runs', 'Analytics', 'Onboarding']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
 

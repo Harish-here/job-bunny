@@ -11,6 +11,7 @@ export {
   isLogLevel,
   JsonlLogger,
   LOG_LEVELS,
+  RunStoreLogger,
   shouldLog,
   withScope,
 } from './loggers.ts';

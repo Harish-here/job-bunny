@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import type { JD } from '../../../../core/jd/index.ts';
+import { SqliteRunStore } from '../runs/index.ts';
 import { openJobsDb, SqliteStore } from '../store/index.ts';
 import { SqliteBoardStore } from './board.ts';
 
@@ -46,6 +50,20 @@ function makeJd(
 function freshDbs(): { db: DatabaseSync; store: SqliteStore; board: SqliteBoardStore } {
   const db = openJobsDb(':memory:');
   return { db, store: new SqliteStore(db), board: new SqliteBoardStore(db) };
+}
+
+/** Runs observability lives in the same `runs`/`run_events` tables the
+ * `SqliteRunStore` writer owns — a real temp-file DB (not `:memory:`) so
+ * the writer (`runStore`) and the reader under test (`board`) are two
+ * independent `DatabaseSync` connections onto the same file, exactly the
+ * shape production uses (the runner's `SqliteRunStore` vs. the board
+ * server's `SqliteBoardStore`). */
+function freshRunsFixture(): { board: SqliteBoardStore; runStore: SqliteRunStore } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'jb-board-runs-'));
+  const dbPath = path.join(dir, 'jobbunny.db');
+  const runStore = new SqliteRunStore(dbPath);
+  const board = new SqliteBoardStore(openJobsDb(dbPath));
+  return { board, runStore };
 }
 
 test('listJobs on empty DB returns empty rows and total 0', () => {
@@ -308,4 +326,119 @@ test('updateTracking: an explicitly-undefined patch value keeps the existing fie
   const patched = board.updateTracking('u-1', { status: undefined, notes: 'x' }, t2);
   assert.equal(patched?.status, 'Applied');
   assert.equal(patched?.notes, 'x');
+});
+
+// --- runs observability (read-only, persist-to-db Phase 1) ---
+
+test('listRuns: empty table returns empty rows and total 0', () => {
+  const { board } = freshRunsFixture();
+  assert.deepEqual(board.listRuns({}), { rows: [], total: 0 });
+});
+
+test('listRuns: newest first, total reflects full count, crash derivation matches SqliteRunStore', () => {
+  const { board, runStore } = freshRunsFixture();
+  const staleId = runStore.startRun({
+    date: '2026-08-04',
+    timeDir: '09-00',
+    kind: 'run',
+    startedAt: '2026-08-04T09:00:00.000Z',
+  });
+  runStore.heartbeat(staleId, '2020-01-01T00:00:00.000Z'); // far in the past -> crashed
+  const freshId = runStore.startRun({
+    date: '2026-08-05',
+    timeDir: '10-00',
+    kind: 'stage',
+    resumedFrom: staleId,
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  runStore.heartbeat(freshId, new Date().toISOString()); // just now -> still running
+
+  const { rows, total } = board.listRuns({});
+  assert.equal(total, 2);
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    [freshId, staleId],
+  );
+  assert.equal(rows.find((r) => r.id === staleId)?.status, 'crashed');
+  const freshRow = rows.find((r) => r.id === freshId);
+  assert.equal(freshRow?.status, 'running');
+  assert.equal(freshRow?.resumedFrom, staleId);
+});
+
+test('listRuns: limit/offset paginate; total unaffected', () => {
+  const { board, runStore } = freshRunsFixture();
+  runStore.startRun({
+    date: '2026-08-01',
+    kind: 'run',
+    startedAt: '2026-08-01T09:00:00.000Z',
+  });
+  const newerId = runStore.startRun({
+    date: '2026-08-02',
+    kind: 'run',
+    startedAt: '2026-08-02T09:00:00.000Z',
+  });
+
+  const page = board.listRuns({ limit: 1, offset: 0 });
+  assert.equal(page.total, 2);
+  assert.deepEqual(
+    page.rows.map((r) => r.id),
+    [newerId],
+  );
+});
+
+test('getRun: returns full detail with parsed blobs; unknown id -> null', () => {
+  const { board, runStore } = freshRunsFixture();
+  const runId = runStore.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  runStore.recordFailure(runId, { stage: 'farm', error: 'boom', elapsedMs: 123 });
+  runStore.finishRun(
+    runId,
+    'failed',
+    { funnel: { in: 1, out: 0 } },
+    '2026-08-05T10:05:00.000Z',
+  );
+  runStore.recordSyncDryrun(runId, { wouldSync: 0 });
+
+  const detail = board.getRun(runId);
+  assert.ok(detail);
+  assert.equal(detail?.status, 'failed');
+  assert.deepEqual(detail?.result, { funnel: { in: 1, out: 0 } });
+  assert.deepEqual(detail?.failure, { stage: 'farm', error: 'boom', elapsedMs: 123 });
+  assert.deepEqual(detail?.syncDryrun, { wouldSync: 0 });
+
+  assert.equal(board.getRun(999999), null);
+});
+
+test('listRunEvents: ascending order, total count, limit/offset paginate; unknown run id -> empty', () => {
+  const { board, runStore } = freshRunsFixture();
+  const runId = runStore.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  runStore.appendEvents(runId, [
+    { ts: '2026-08-05T10:00:01.000Z', level: 'info', msg: 'first' },
+    { ts: '2026-08-05T10:00:02.000Z', level: 'warn', msg: 'second', data: { n: 1 } },
+    { ts: '2026-08-05T10:00:03.000Z', level: 'info', msg: 'third' },
+  ]);
+
+  const all = board.listRunEvents(runId, {});
+  assert.equal(all.total, 3);
+  assert.deepEqual(
+    all.rows.map((r) => r.msg),
+    ['first', 'second', 'third'],
+  );
+  assert.deepEqual(all.rows[1]?.data, { n: 1 });
+
+  const page = board.listRunEvents(runId, { limit: 1, offset: 1 });
+  assert.equal(page.total, 3);
+  assert.deepEqual(
+    page.rows.map((r) => r.msg),
+    ['second'],
+  );
+
+  assert.deepEqual(board.listRunEvents(999999, {}), { rows: [], total: 0 });
 });

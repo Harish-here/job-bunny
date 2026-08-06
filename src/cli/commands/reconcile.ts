@@ -88,26 +88,50 @@ export async function reconcileCommand(
   const existing = await latestTimeDir(dataDir, date);
   const time = existing ?? formatRunTime(now);
   const folder = new RunFolder(dataDir, date, time);
-  ctx.logger = createRunLogger(
-    folder.logPath(),
+
+  // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS
+  // invocation before `runPipeline` runs — `ctx.runId` is what
+  // `runPipeline` itself keys its heartbeat/failure recording off (same
+  // contract `runCommand`, Task 6, relies on), so this command's own job is
+  // only to open the row and close it with whatever `RunResult` comes
+  // back — `runPipeline` never throws (a stage failure is captured as a
+  // 'failed' RunResult), so there is no separate catch/rethrow here, unlike
+  // `stageCommand`'s direct `guardStage` call.
+  const runId = ctx.runStore.startRun({
+    date,
+    timeDir: time,
+    kind: 'reconcile',
+    startedAt: now.toISOString(),
+  });
+  ctx.runId = runId;
+  const runLogger = createRunLogger(
+    ctx.runStore,
+    runId,
     resolveLoggingSettings(
       ctx.config.settings?.logging,
       process.env.JOBBUNNY_TTY_LOG_LEVEL,
     ),
   );
+  ctx.logger = runLogger;
 
-  const result = await resolved.runPipeline([reconcileStage], ctx, folder, {
-    runCapMs: RUN_CAP_MS,
-    stallMs: STALL_MS,
-  });
+  try {
+    const result = await resolved.runPipeline([reconcileStage], ctx, folder, {
+      runCapMs: RUN_CAP_MS,
+      stallMs: STALL_MS,
+    });
 
-  if (result.outcome === 'failed') {
-    resolved.write(`reconcile: failed — ${result.failedStage ?? 'unknown stage'}`);
-    return 1;
+    ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
+
+    if (result.outcome === 'failed') {
+      resolved.write(`reconcile: failed — ${result.failedStage ?? 'unknown stage'}`);
+      return 1;
+    }
+
+    const cache = await ctx.storage.readJson(CACHE_PATH, z.array(CacheEntrySchema));
+    resolved.write(`reconcile: cache rebuilt (${cache?.length ?? 0} entries)`);
+
+    return 0;
+  } finally {
+    runLogger.flush();
   }
-
-  const cache = await ctx.storage.readJson(CACHE_PATH, z.array(CacheEntrySchema));
-  resolved.write(`reconcile: cache rebuilt (${cache?.length ?? 0} entries)`);
-
-  return 0;
 }
