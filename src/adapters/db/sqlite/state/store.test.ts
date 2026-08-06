@@ -135,6 +135,30 @@ test('malformed legacy file throws loud, naming the file path', async () => {
   );
 });
 
+test('schema-mismatched legacy file is a transient error, not permanently cemented into the DB', async () => {
+  const { dbPath, dataDir } = freshPaths();
+  const key = 'registry/companies.json';
+  const filePath = path.join(dataDir, key);
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  // Valid JSON, but the wrong shape for CompaniesSchema (array of strings).
+  writeFileSync(filePath, JSON.stringify({ notAnArray: 'oops' }));
+
+  const store = makeStore(dbPath, dataDir);
+  await assert.rejects(() => store.readDoc(key, CompaniesSchema));
+
+  // The rejected read must NOT have written a row — otherwise the bad
+  // shape wins forever and a corrected file is never looked at again.
+  const db = openJobsDb(dbPath);
+  const row = db.prepare('SELECT value_json FROM state_docs WHERE key = ?').get(key);
+  db.close();
+  assert.equal(row, undefined);
+
+  // Operator fixes the legacy file on disk; the next read must succeed.
+  writeFileSync(filePath, JSON.stringify(['fixed-co']));
+  const value = await store.readDoc(key, CompaniesSchema);
+  assert.deepEqual(value, ['fixed-co']);
+});
+
 test('schema mismatch on a real DB row throws', async () => {
   const { dbPath, dataDir } = freshPaths();
   const key = 'registry/companies.json';

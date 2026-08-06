@@ -11,7 +11,11 @@
  * at `join(dataDir, key)` (the pre-cutover `Storage.readJson` layout) into
  * `state_docs`, then returns the value from that lift. The legacy file is
  * never deleted or modified — once lifted, every subsequent read for that
- * key finds the DB row first and never looks at the file again.
+ * key finds the DB row first and never looks at the file again. The lift
+ * validates the parsed JSON against the caller's schema BEFORE writing it,
+ * so a legacy file that no longer matches the current schema stays a
+ * transient, fixable error instead of being cemented into `state_docs` by
+ * the very read that rejects it.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -67,11 +71,16 @@ export class SqliteStateStore implements StateStore {
       throw new Error(`Malformed legacy state file at ${filePath}: ${message}`);
     }
 
+    // Validate before writing: a legacy file that no longer matches the
+    // caller's schema must stay a transient, fixable error — never get
+    // cemented into state_docs by the very read that rejects it.
+    const value = schema.parse(parsed);
+
     db.prepare(
       'INSERT OR REPLACE INTO state_docs (key, value_json, updated_at) VALUES (?, ?, ?)',
     ).run(key, JSON.stringify(parsed), this.nowFn().toISOString());
 
-    return schema.parse(parsed);
+    return value;
   }
 
   async writeDoc(key: string, value: unknown): Promise<void> {
