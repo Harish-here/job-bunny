@@ -58,7 +58,12 @@ before(() => {
 });
 
 after(() => {
-  rmSync(root, { recursive: true, force: true });
+  // Windows enforces file locks that macOS/Linux don't: an open
+  // `node:sqlite` `DatabaseSync` handle in this directory makes `rmSync`
+  // fail EPERM instead of silently succeeding. Every handle opened by the
+  // test below is closed before this hook runs (belt: `maxRetries`/
+  // `retryDelay` also cover any lingering OS-level release delay).
+  rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
 test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path for a notion profile with settings.sqlite.path set (finding: they used to disagree)', async () => {
@@ -97,4 +102,9 @@ test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path 
   assert.ok(store, 'wireBoard must open the SAME file the run store wrote to');
   assert.equal(store?.listRuns({}).total, 1);
   board.close();
+  // `ctx.runStore` (the `SqliteRunStore` `wire()` built above) is a
+  // SEPARATE handle on the same file — `board.close()` only closes the
+  // board's own memoized stores. Must close before the `after` hook's
+  // `rmSync`, or Windows' file lock turns cleanup into an EPERM.
+  ctx.runStore.close();
 });
