@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 4;
+export const LATEST_SCHEMA_VERSION = 5;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -97,6 +97,14 @@ const MIGRATIONS: readonly string[] = [
   CREATE TABLE state_docs (
     key        TEXT PRIMARY KEY,
     value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
+  // v4 -> v5: config_docs (Phase 4 — see config_store port)
+  `
+  CREATE TABLE config_docs (
+    key        TEXT PRIMARY KEY,
+    value_text TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
   `,

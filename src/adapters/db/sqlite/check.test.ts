@@ -21,7 +21,7 @@ test('a migrated db is ok and reports its schema version', async () => {
   openJobsDb(dbPath).close();
   const finding = await sqliteDbCheck({ path: dbPath }).run();
   assert.equal(finding.status, 'ok');
-  assert.match(finding.detail, /schema v4/);
+  assert.match(finding.detail, /schema v5/);
 });
 
 test('a db stamped newer than this build is red', async () => {
