@@ -1,6 +1,7 @@
 export * from './board.ts';
 export * from './browser.ts';
 export * from './checkpoint_store.ts';
+export * from './config_store.ts';
 export * from './connector.ts';
 export * from './context.ts';
 export * from './doctor.ts';
