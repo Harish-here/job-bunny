@@ -57,12 +57,16 @@ module.exports = {
         "board.ts is the board server's own composition point; daemon.ts is " +
         "the scheduling daemon's own composition point (builds DaemonDeps." +
         'readRunHistory from a real SqliteRunStore per profile — ops/daemon ' +
-        'itself may not import adapters). ' +
+        'itself may not import adapters); migrate.ts (config→db Phase 4) is ' +
+        "`jobbunny migrate`'s own composition point (wireMigrate), split out " +
+        'of builders.ts purely to keep it under the file-size cap once that ' +
+        "file's other config→db Phase 4 additions pushed it over — not a " +
+        'behavioral change. ' +
         'The `app` addition to `from` is redundant-with-`app-only-ports-core` ' +
         'defense-in-depth (belt-and-braces).',
       from: {
         path: '^src/(pipeline|routines|ops|cli|app)',
-        pathNot: '^src/cli/wire/(compose|builders|registry|board|daemon)\\.ts$',
+        pathNot: '^src/cli/wire/(compose|builders|registry|board|daemon|migrate)\\.ts$',
       },
       to: { path: '^src/adapters' },
     },

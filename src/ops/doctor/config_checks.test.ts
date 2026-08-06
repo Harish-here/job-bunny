@@ -5,6 +5,7 @@ import {
   emptyLanesCheck,
   filterParsesCheck,
   profileParsesCheck,
+  sqlitePathRetiredCheck,
 } from './config_checks.ts';
 
 const VALID_PROFILE_JSON = JSON.stringify({
@@ -199,4 +200,69 @@ test('emptyLanesCheck: stays ok (silent) when profile.json fails schema validati
   });
   const finding = await check.run();
   assert.equal(finding.status, 'ok');
+});
+
+// --- sqlitePathRetiredCheck (config→db Phase 4) ---
+
+test('sqlitePathRetiredCheck: red when settings.sqlite.path is present, byte-exact message naming the profile', async () => {
+  const check = sqlitePathRetiredCheck({
+    profileName: 'rajni',
+    root: REPO_ROOT,
+    readFile: fakeReadFile({
+      [profilePath('rajni')]: JSON.stringify({
+        lanes: [],
+        connector: 'sqlite',
+        notifiers: [],
+        routines: [],
+        settings: { sqlite: { path: '/custom/mine.db' } },
+      }),
+    }),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'red');
+  assert.equal(
+    finding.detail,
+    'settings.sqlite.path is no longer supported — the database always lives at ' +
+      'profiles/rajni/data/jobbunny.db; move the file there and delete the setting',
+  );
+});
+
+test('sqlitePathRetiredCheck: red even when the path value is malformed — checks key presence, not validity', async () => {
+  const check = sqlitePathRetiredCheck({
+    profileName: 'rajni',
+    root: REPO_ROOT,
+    readFile: fakeReadFile({
+      [profilePath('rajni')]: JSON.stringify({
+        settings: { sqlite: { path: 123 } },
+      }),
+    }),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'red');
+});
+
+test('sqlitePathRetiredCheck: ok when settings.sqlite has no path key', async () => {
+  const check = sqlitePathRetiredCheck({
+    profileName: 'rajni',
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [profilePath('rajni')]: VALID_PROFILE_JSON }),
+  });
+  const finding = await check.run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('sqlitePathRetiredCheck: stays ok (silent) when profile.json is missing or not valid JSON — never throws', async () => {
+  const missing = sqlitePathRetiredCheck({
+    profileName: 'rajni',
+    root: REPO_ROOT,
+    readFile: fakeReadFile({}),
+  });
+  assert.equal((await missing.run()).status, 'ok');
+
+  const malformed = sqlitePathRetiredCheck({
+    profileName: 'rajni',
+    root: REPO_ROOT,
+    readFile: fakeReadFile({ [profilePath('rajni')]: '{ not json' }),
+  });
+  assert.equal((await malformed.run()).status, 'ok');
 });

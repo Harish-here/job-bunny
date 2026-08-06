@@ -38,10 +38,8 @@ import {
   NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
 import { SqliteCheckpointStore } from '../../adapters/db/sqlite/checkpoints/index.ts';
-import {
-  SqliteConnectorSettingsSchema,
-  sqliteDbCheck,
-} from '../../adapters/db/sqlite/index.ts';
+import { SqliteConfigStore } from '../../adapters/db/sqlite/config/index.ts';
+import { sqliteDbCheck } from '../../adapters/db/sqlite/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
 import { SqliteStateStore } from '../../adapters/db/sqlite/state/index.ts';
 import {
@@ -76,22 +74,24 @@ import {
   makeStructureStage,
   makeSyncStage,
 } from '../../pipeline/stages/index.ts';
+import type { ConfigStore } from '../../ports/config_store.ts';
 import type { DoctorCheck } from '../../ports/doctor.ts';
 import type { Routine } from '../../routines/types.ts';
 import {
+  assertSqlitePathRetired,
   buildConnector,
   buildLanes,
   buildMirroredConnector,
   buildNotifier,
   buildRoutine,
+  canonicalDbPath,
   isApiLane,
   isFarmingLane,
   mirrorDbId,
   mirrorReachableCheck,
   missingTokenNotionClient,
-  resolveSqlitePath,
 } from './builders.ts';
-import { isNotFound, loadFilterConfig, loadPipelineConfig } from './config.ts';
+import { loadFilterConfig, loadPipelineConfig } from './config.ts';
 import type { AdapterRegistry, RuntimeDeps } from './registry.ts';
 import { assembleAdapterChecks } from './registry.ts';
 import {
@@ -130,10 +130,9 @@ const realRegistry: AdapterRegistry = {
       if (!deps.notionApi) return [];
       return [dbReachableCheck({ api: deps.notionApi, dbId: parsed.dbId })];
     },
-    sqlite: (settings, deps) => {
-      const parsed = SqliteConnectorSettingsSchema.parse(settings ?? {});
-      return [sqliteDbCheck({ path: parsed.path ?? deps.sqliteDefaultPath })];
-    },
+    // `settings.sqlite.path` is retired (config→db Phase 4) — the db path
+    // is always `deps.sqliteDefaultPath`; no remaining field is relevant here.
+    sqlite: (_settings, deps) => [sqliteDbCheck({ path: deps.sqliteDefaultPath })],
   },
   notifiers: {
     telegram: (settings) => {
@@ -149,7 +148,15 @@ export interface WireOverrides {
   registry?: AdapterRegistry;
   deps?: Partial<RuntimeDeps>;
   root?: string;
+  /** `coreChecks`'s own direct-fs profile/filter reads only — unrelated to
+   * `configStore` below (`ops/doctor/config_checks.ts` stays direct-fs). */
   readFile?: (path: string) => Promise<string>;
+  /** Test-only seam (mirrors `deps`/`registry`) — real callers never set
+   * this; `wire()` builds a real `SqliteConfigStore` otherwise. */
+  configStore?: ConfigStore;
+  /** `'readonly'` for a caller (doctor) that must never create/migrate
+   * `jobbunny.db`. Default `'readwrite'`; ignored when `configStore` is set. */
+  configLiftMode?: 'readwrite' | 'readonly';
   /** Threaded into `makeSyncStage`'s `dryRun` opt: the sync stage records
    * the would-write set via `ctx.runStore.recordSyncDryrun` instead of
    * calling `connector.syncJobs`. `undefined` (default) is unchanged. */
@@ -176,21 +183,23 @@ export async function wire(
   const root = overrides.root ?? process.cwd();
   const readFile = overrides.readFile ?? ((p: string) => fsReadFile(p, 'utf8'));
 
-  const config = await loadPipelineConfig(profileName, { root, readFile });
+  const dbPath = canonicalDbPath(root, profileName);
+  const profileRoot = path.join(root, 'profiles', profileName);
+  const configStore =
+    overrides.configStore ??
+    new SqliteConfigStore(dbPath, profileRoot, { liftMode: overrides.configLiftMode });
+
+  const config = await loadPipelineConfig(profileName, { configStore });
+  assertSqlitePathRetired(config, profileName);
   const logging = resolveLoggingSettings(
     config.settings.logging,
     process.env.JOBBUNNY_TTY_LOG_LEVEL,
   );
-  const filterCfg = await loadFilterConfig(profileName, { root, readFile });
+  const filterCfg = await loadFilterConfig(profileName, { configStore });
 
-  const searchUrlsPath = path.join(root, 'profiles', profileName, 'search_urls.md');
-  let pages: string[] = [];
-  try {
-    const md = await readFile(searchUrlsPath);
-    pages = [...new Set(parseSearchUrls(md).map((group) => group.page))];
-  } catch (err) {
-    if (!isNotFound(err)) throw err;
-  }
+  const searchUrlsRaw = await configStore.readText('search_urls.md');
+  const urlGroups = searchUrlsRaw === undefined ? [] : parseSearchUrls(searchUrlsRaw);
+  const pages = [...new Set(urlGroups.map((g) => g.page))];
 
   // `notionApiForConnector` is ALWAYS a real `NotionApi` instance — either
   // the genuine one (token present) or one built over a throwing stub
@@ -223,20 +232,13 @@ export async function wire(
   // companies, so Greenhouse/Keka probed nothing and the run still passed.
   const storage = new FsStorage(root);
   const profileStorage = new FsStorage(path.join(root, 'profiles', profileName, 'data'));
-  const sqliteDefaultPath = path.join(
-    root,
-    'profiles',
-    profileName,
-    'data',
-    'jobbunny.db',
-  );
-  // `SqliteRunStore` opens lazily (ledger L13) — no file I/O here.
-  const sqlitePath = resolveSqlitePath(config.settings.sqlite, sqliteDefaultPath);
-  const runStore = new SqliteRunStore(sqlitePath);
-  // Shares `sqlitePath` with `runStore` — lazy-open, no file I/O here either.
-  const checkpointStore = new SqliteCheckpointStore(sqlitePath);
+  // `SqliteRunStore` opens lazily (ledger L13) — no file I/O here. `dbPath`
+  // is THE authoritative jobbunny.db location (canonicalDbPath, above).
+  const runStore = new SqliteRunStore(dbPath);
+  // Shares `dbPath` with `runStore` — lazy-open, no file I/O here either.
+  const checkpointStore = new SqliteCheckpointStore(dbPath);
   const stateStore = new SqliteStateStore(
-    sqlitePath,
+    dbPath,
     path.join(root, 'profiles', profileName, 'data'), // mirrors `profileStorage`'s root
   );
 
@@ -248,7 +250,7 @@ export async function wire(
     cdpPort: DEFAULT_CDP_PORT,
     filterCfg,
     pages,
-    sqliteDefaultPath,
+    sqliteDefaultPath: dbPath,
     ...overrides.deps,
   };
   const registry = overrides.registry ?? realRegistry;
@@ -267,7 +269,7 @@ export async function wire(
   // `sqlite` connectors already get `sqlite-db-openable` from
   // `assembleAdapterChecks` above — add it here only for every other
   // connector, so every profile gets it exactly once.
-  if (config.connector !== 'sqlite') checks.push(sqliteDbCheck({ path: sqlitePath }));
+  if (config.connector !== 'sqlite') checks.push(sqliteDbCheck({ path: dbPath }));
   // Opt-in sqlite→Notion mirror (local-DB spec PR 3): a mirrored profile
   // gets a `notion-db-reachable` check too, on top of whatever
   // `assembleAdapterChecks` already contributed for `sqlite` — but through
@@ -293,8 +295,7 @@ export async function wire(
 
   const lanes = await buildLanes(config, {
     profileName,
-    root,
-    readFile,
+    configStore,
     storage: deps.storage,
     stateStore,
     filterCfg,
@@ -305,7 +306,7 @@ export async function wire(
       config.connector,
       config.settings[config.connector],
       notionApiForConnector,
-      sqliteDefaultPath,
+      dbPath,
     ),
     config,
     notionApiForConnector,

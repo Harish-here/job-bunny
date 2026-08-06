@@ -8,14 +8,18 @@
  * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
 import type { DoctorFinding } from '../../ports/doctor.ts';
-import { wire as defaultWire, type WireResult } from '../wire/index.ts';
+import {
+  wire as defaultWire,
+  type WireOverrides,
+  type WireResult,
+} from '../wire/index.ts';
 
 export interface DoctorCommandOptions {
   profile: string;
 }
 
 export interface DoctorDeps {
-  wire: (profileName: string) => Promise<WireResult>;
+  wire: (profileName: string, overrides?: WireOverrides) => Promise<WireResult>;
   write: (line: string) => void;
 }
 
@@ -35,7 +39,9 @@ export async function doctorCommand(
   deps: Partial<DoctorDeps> = {},
 ): Promise<number> {
   const resolved: DoctorDeps = { ...defaultDeps(), ...deps };
-  const { checks } = await resolved.wire(opts.profile);
+  // `configLiftMode: 'readonly'` (config→db Phase 4): doctor must never
+  // create/migrate `jobbunny.db` as a side effect of reading config.
+  const { checks } = await resolved.wire(opts.profile, { configLiftMode: 'readonly' });
 
   const findings = await Promise.all(checks.map((c) => c.run()));
 

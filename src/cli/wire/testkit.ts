@@ -1,9 +1,11 @@
 /**
  * cli/wire/testkit.ts (P8, split from wire.test.ts) — shared fixtures for
  * `config.test.ts` and `compose.test.ts`: a POSIX-literal fake repo root,
- * a fake `readFile` keyed by exact path, and the profile/filter/data path
- * helpers that key it. Test-only — not part of the module's public surface
- * (`index.ts`).
+ * a fake `readFile` keyed by exact path, an in-memory `fakeConfigStore`
+ * (config→db Phase 4 — the `readFile`-fixture replacement every `wire()`/
+ * `loadPipelineConfig`/`loadFilterConfig` caller now feeds instead), and
+ * the profile/filter/data path helpers that key them. Test-only — not part
+ * of the module's public surface (`index.ts`).
  *
  * The rest of this file is free to pass `root: '/repo'` (a POSIX-literal
  * input string, never resolved by the OS) into `wire()`/loadPipelineConfig
@@ -12,6 +14,7 @@
  * or it silently misses on windows-latest (backslash-joined paths).
  */
 import { join } from 'node:path';
+import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
 
 export const REPO_ROOT = '/repo';
 
@@ -29,6 +32,24 @@ export function fakeReadFile(
   return async (path: string) => {
     if (Object.hasOwn(files, path)) return files[path] as string;
     throw enoent(path);
+  };
+}
+
+/** In-memory `ConfigStore` fake, pre-seeded with `docs`. No legacy-file
+ * lift, no db file, no `close()`-side-effect — purely a `Map` — this is
+ * the shared conversion target for every test that used to feed `wire()`/
+ * `loadPipelineConfig`/`loadFilterConfig` a `readFile` fixture keyed by
+ * `profile.json`/`filter.json`/`search_urls.md` content. */
+export function fakeConfigStore(
+  docs: Partial<Record<ConfigDocKey, string>>,
+): ConfigStore {
+  const map = new Map(Object.entries(docs));
+  return {
+    readText: async (key) => map.get(key),
+    writeText: async (key, text) => {
+      map.set(key, text);
+    },
+    close() {},
   };
 }
 

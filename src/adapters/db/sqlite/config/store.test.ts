@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { openJobsDb } from '../store/index.ts';
-import { SqliteConfigStore } from './store.ts';
+import { SqliteConfigStore, type SqliteConfigStoreDeps } from './store.ts';
 
 const stores: SqliteConfigStore[] = [];
 const dirs: string[] = [];
@@ -16,7 +17,7 @@ function freshPaths(): { dbPath: string; profileRoot: string } {
   return { dbPath: path.join(dir, 'jobbunny.db'), profileRoot: dir };
 }
 
-function makeStore(dbPath: string, profileRoot: string, deps?: { now?: () => Date }) {
+function makeStore(dbPath: string, profileRoot: string, deps?: SqliteConfigStoreDeps) {
   const store = new SqliteConfigStore(dbPath, profileRoot, deps);
   stores.push(store);
   return store;
@@ -206,4 +207,151 @@ test('lazy open: constructing the store performs no file I/O', () => {
   const { dbPath, profileRoot } = freshPaths();
   makeStore(dbPath, profileRoot);
   assert.equal(existsSync(dbPath), false);
+});
+
+// --- liftMode: 'readonly' (Task 4 Part A) ---
+
+test('readonly + no db file + legacy file present: lifts (returns the value) but creates no db and inserts no row', async () => {
+  const { dbPath, profileRoot } = freshPaths();
+  writeFileSync(path.join(profileRoot, 'resume.json'), '{"name":"a"}');
+
+  const store = makeStore(dbPath, profileRoot, { liftMode: 'readonly' });
+  const value = await store.readText('resume.json');
+  assert.equal(value, '{"name":"a"}');
+  assert.equal(existsSync(dbPath), false, 'readonly lift must never create the db file');
+
+  // A fresh readwrite store on the same path finds no row for the key —
+  // proves the readonly lift never inserted.
+  const rwStore = makeStore(dbPath, profileRoot);
+  const db = openJobsDb(dbPath);
+  const row = db
+    .prepare("SELECT COUNT(*) as n FROM config_docs WHERE key = 'resume.json'")
+    .get() as { n: number };
+  db.close();
+  assert.equal(row.n, 0);
+  void rwStore;
+});
+
+test('readonly + db file exists on schema v5 with a real row: reads it normally', async () => {
+  const { dbPath, profileRoot } = freshPaths();
+  const seedStore = makeStore(dbPath, profileRoot);
+  await seedStore.writeText('resume.json', '{"name":"seeded"}');
+
+  const readonlyStore = makeStore(dbPath, profileRoot, { liftMode: 'readonly' });
+  const value = await readonlyStore.readText('resume.json');
+  assert.equal(value, '{"name":"seeded"}');
+});
+
+test('readonly + db file exists but predates config_docs (v4): tolerates the missing table, falls back to the legacy file, never inserts', async () => {
+  const { dbPath, profileRoot } = freshPaths();
+  // Hand-build a v4 db: MIGRATIONS[0..3] (jobs/tracking/runs/run_events/
+  // checkpoints/state_docs), stamped user_version=4 — same DDL literal as
+  // migrations.test.ts's own "v4-stamped" test, minus config_docs (which
+  // arrives only in v5).
+  const v4 = new DatabaseSync(dbPath);
+  v4.exec(`
+    CREATE TABLE jobs (
+      id            TEXT PRIMARY KEY,
+      lane          TEXT NOT NULL,
+      title         TEXT NOT NULL,
+      company       TEXT NOT NULL,
+      url           TEXT NOT NULL,
+      seniority     TEXT,
+      location_city TEXT,
+      work_type     TEXT,
+      timezone      TEXT,
+      skills        TEXT,
+      excitement    TEXT,
+      score         REAL,
+      match_reasons TEXT,
+      date_found    TEXT NOT NULL,
+      jd_json       TEXT NOT NULL,
+      synced_at     TEXT NOT NULL,
+      archived      INTEGER NOT NULL DEFAULT 0,
+      archived_at   TEXT
+    );
+    CREATE TABLE tracking (
+      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
+      status           TEXT,
+      comp_range       TEXT,
+      notes            TEXT,
+      contact          TEXT,
+      date_applied     TEXT,
+      next_action      TEXT,
+      next_action_date TEXT,
+      updated_at       TEXT NOT NULL
+    );
+    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
+    CREATE TABLE runs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_date      TEXT NOT NULL,
+      time_dir      TEXT,
+      kind          TEXT NOT NULL,
+      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+      status        TEXT NOT NULL,
+      started_at    TEXT NOT NULL,
+      finished_at   TEXT,
+      heartbeat_at  TEXT,
+      result_json   TEXT,
+      failure_json  TEXT,
+      sync_dryrun_json TEXT
+    );
+    CREATE INDEX idx_runs_date ON runs(run_date);
+    CREATE TABLE run_events (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id    INTEGER NOT NULL REFERENCES runs(id),
+      ts        TEXT NOT NULL,
+      level     TEXT NOT NULL,
+      msg       TEXT NOT NULL,
+      data_json TEXT
+    );
+    CREATE INDEX idx_run_events_run ON run_events(run_id);
+    CREATE TABLE checkpoints (
+      run_date   TEXT    NOT NULL,
+      time_dir   TEXT    NOT NULL,
+      position   INTEGER NOT NULL,
+      stage      TEXT    NOT NULL,
+      payload_json TEXT  NOT NULL,
+      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+      created_at TEXT    NOT NULL,
+      PRIMARY KEY (run_date, time_dir, position)
+    );
+    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
+    CREATE TABLE state_docs (
+      key        TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  v4.exec('PRAGMA user_version = 4');
+  v4.close();
+
+  writeFileSync(path.join(profileRoot, 'resume.json'), '{"name":"legacy-v4"}');
+
+  const store = makeStore(dbPath, profileRoot, { liftMode: 'readonly' });
+  const value = await store.readText('resume.json');
+  assert.equal(value, '{"name":"legacy-v4"}');
+});
+
+test('readonly: writeText throws immediately naming the key, and never creates a db file', async () => {
+  const { dbPath, profileRoot } = freshPaths();
+  const store = makeStore(dbPath, profileRoot, { liftMode: 'readonly' });
+
+  await assert.rejects(
+    () => store.writeText('resume.json', '{"name":"a"}'),
+    /SqliteConfigStore: writeText is unsupported in readonly lift mode \(key: resume\.json\)/,
+  );
+  assert.equal(existsSync(dbPath), false);
+});
+
+test('readonly: a genuinely corrupt db file still throws loud (not tolerated, unlike the missing-table case)', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'jb-configstore-'));
+  dirs.push(dir);
+  const dbPath = path.join(dir, 'jobbunny.db');
+  // A blocker file where a real sqlite file is expected — DatabaseSync's
+  // readOnly open of a non-sqlite file throws (corrupt-file stand-in).
+  writeFileSync(dbPath, 'not a sqlite database');
+
+  const store = makeStore(dbPath, dir, { liftMode: 'readonly' });
+  await assert.rejects(() => store.readText('resume.json'));
 });

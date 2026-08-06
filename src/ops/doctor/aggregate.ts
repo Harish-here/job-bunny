@@ -19,6 +19,7 @@ import {
   isNotFound,
   profileParsesCheck,
   resolveRoot,
+  sqlitePathRetiredCheck,
 } from './config_checks.ts';
 
 const execFileAsync = promisify(execFile);
@@ -29,10 +30,11 @@ const execFileAsync = promisify(execFile);
  * pidfile) plus the generic `runChecks` aggregator that any set of
  * `DoctorCheck`s (core + adapter-contributed, wired in by the caller) is
  * run through. The profile/filter config checks (`profileParsesCheck`,
- * `filterParsesCheck`, `emptyLanesCheck`) and the resolver helpers they
- * share with this file live in `./config_checks.ts` (split out, task 5 of
- * the 2026-07-28 file-size split plan) — imported here for `coreChecks`'s
- * assembly and `daemonLivenessCheck`'s `resolveRoot` use.
+ * `filterParsesCheck`, `emptyLanesCheck`, `sqlitePathRetiredCheck` —
+ * config→db Phase 4) and the resolver helpers they share with this file
+ * live in `./config_checks.ts` (split out, task 5 of the 2026-07-28
+ * file-size split plan) — imported here for `coreChecks`'s assembly and
+ * `daemonLivenessCheck`'s `resolveRoot` use.
  *
  * `root`/`env`/`readFile` are injected (default to `process.cwd()`,
  * `process.env`, `node:fs/promises` `readFile` utf8) so tests hit no real
@@ -195,7 +197,7 @@ export function daemonLivenessCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
-/** coreChecks — the six profile/config/env/daemon/claude checks above,
+/** coreChecks — the seven profile/config/env/daemon/claude checks above,
  * in a fixed order. Callers append adapter-contributed checks (e.g.
  * Notion/Telegram reachability) themselves before calling `runChecks`. */
 export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {
@@ -203,6 +205,7 @@ export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {
     profileParsesCheck(opts),
     filterParsesCheck(opts),
     emptyLanesCheck(opts),
+    sqlitePathRetiredCheck(opts),
     envTokensCheck(opts),
     claudeOnPathCheck(opts),
     daemonLivenessCheck(opts),

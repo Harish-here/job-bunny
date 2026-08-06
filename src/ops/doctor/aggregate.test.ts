@@ -215,16 +215,16 @@ test('claudeOnPathCheck: present ⇒ ok, absent ⇒ red', async () => {
   assert.match(absent.detail, /not found on PATH/);
 });
 
-test('coreChecks: returns the six core checks', () => {
+test('coreChecks: returns the seven core checks (config→db Phase 4 adds sqlite-path-retired)', () => {
   const checks = coreChecks({
     profileName: 'rajni',
     root: REPO_ROOT,
     env: { NOTION_TOKEN: 't', TELEGRAM_BOT_TOKEN: 't' },
     readFile: fakeReadFile({}),
   });
-  assert.equal(checks.length, 6);
+  assert.equal(checks.length, 7);
   const names = checks.map((c) => c.name);
-  assert.equal(new Set(names).size, 6);
+  assert.equal(new Set(names).size, 7);
 });
 
 // --- runChecks ---

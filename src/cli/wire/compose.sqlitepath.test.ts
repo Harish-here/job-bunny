@@ -1,11 +1,11 @@
 /**
- * compose.sqlitepath.test.ts (fix-round, split alongside compose.test.ts /
- * compose.runstore.test.ts to stay under the 800-line test-file cap) —
- * `resolveSqlitePath` (builders.ts) is THE single authoritative
- * `jobbunny.db` path resolver: `wire()`'s run store, `wireMigrate`, and
- * `wireBoard` must all agree on the same path for a given profile,
- * regardless of `connector`. Real filesystem (a temp root), never the
- * `/repo`-literal fake `readFile` — `wireBoard` reads real files.
+ * compose.sqlitepath.test.ts (config→db Phase 4 Task 4 — rewritten; was
+ * `resolveSqlitePath`'s own test file, now retired) — `canonicalDbPath`
+ * (`builders.ts`) is THE single authoritative `jobbunny.db` path resolver:
+ * `wire()`'s run store, `wireMigrate`, and `wireBoard` must all agree on the
+ * same path for a given profile. Unlike the retired `resolveSqlitePath`, it
+ * takes no settings input at all — there is nothing left to disagree about,
+ * but the cross-component-agreement pin stays, now trivially true.
  */
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,32 +13,79 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { wireBoard } from './board.ts';
-import { resolveSqlitePath, wireMigrate } from './builders.ts';
+import { assertSqlitePathRetired, canonicalDbPath } from './builders.ts';
 import { wire } from './compose.ts';
+import { wireMigrate } from './migrate.ts';
 
-test('resolveSqlitePath: no settings.sqlite -> defaultPath', () => {
+test('canonicalDbPath: always profiles/<name>/data/jobbunny.db, no settings input at all', () => {
   assert.equal(
-    resolveSqlitePath(undefined, '/default/jobbunny.db'),
-    '/default/jobbunny.db',
+    canonicalDbPath('/repo', 'rajni'),
+    path.join('/repo', 'profiles', 'rajni', 'data', 'jobbunny.db'),
   );
-  assert.equal(resolveSqlitePath({}, '/default/jobbunny.db'), '/default/jobbunny.db');
-});
-
-test('resolveSqlitePath: honors settings.sqlite.path unconditionally — no connector param at all', () => {
   assert.equal(
-    resolveSqlitePath({ path: '/custom/mine.db' }, '/default/jobbunny.db'),
-    '/custom/mine.db',
+    canonicalDbPath('/elsewhere', 'other-profile'),
+    path.join('/elsewhere', 'profiles', 'other-profile', 'data', 'jobbunny.db'),
   );
 });
 
-test('resolveSqlitePath: a malformed slice degrades to defaultPath, never throws', () => {
-  assert.equal(
-    resolveSqlitePath({ path: 123 }, '/default/jobbunny.db'),
-    '/default/jobbunny.db',
+test('assertSqlitePathRetired: throws the byte-exact message, naming the real profile, when settings.sqlite.path is present', () => {
+  assert.throws(
+    () =>
+      assertSqlitePathRetired(
+        {
+          lanes: [],
+          connector: 'sqlite',
+          notifiers: [],
+          routines: [],
+          settings: { sqlite: { path: '/custom/mine.db' } },
+        },
+        'rajni',
+      ),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.equal(
+        err.message,
+        'settings.sqlite.path is no longer supported — the database always lives at ' +
+          'profiles/rajni/data/jobbunny.db; move the file there and delete the setting',
+      );
+      return true;
+    },
   );
-  assert.equal(
-    resolveSqlitePath('not an object', '/default/jobbunny.db'),
-    '/default/jobbunny.db',
+});
+
+test('assertSqlitePathRetired: checks KEY presence, not validity — a malformed path value is still a violation', () => {
+  assert.throws(() =>
+    assertSqlitePathRetired(
+      {
+        lanes: [],
+        connector: 'sqlite',
+        notifiers: [],
+        routines: [],
+        settings: { sqlite: { path: 123 } },
+      },
+      'rajni',
+    ),
+  );
+});
+
+test('assertSqlitePathRetired: no settings.sqlite, or a settings.sqlite with no path key, never throws', () => {
+  assert.doesNotThrow(() =>
+    assertSqlitePathRetired(
+      { lanes: [], connector: 'sqlite', notifiers: [], routines: [], settings: {} },
+      'rajni',
+    ),
+  );
+  assert.doesNotThrow(() =>
+    assertSqlitePathRetired(
+      {
+        lanes: [],
+        connector: 'sqlite',
+        notifiers: [],
+        routines: [],
+        settings: { sqlite: { dryRun: false } },
+      },
+      'rajni',
+    ),
   );
 });
 
@@ -66,15 +113,15 @@ after(() => {
   rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
-test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path for a notion profile with settings.sqlite.path set (finding: they used to disagree)', async () => {
-  const customDbPath = path.join(root, 'custom', 'mine.db');
+test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path for a notion profile (finding: they used to disagree when settings.sqlite.path existed)', async () => {
   writeProfile('nprof', {
     lanes: [],
     connector: 'notion',
     notifiers: [],
     routines: [],
-    settings: { notion: { dbId: 'db-1' }, sqlite: { path: customDbPath } },
+    settings: { notion: { dbId: 'db-1' } },
   });
+  const expectedDbPath = canonicalDbPath(root, 'nprof');
 
   const { ctx } = await wire('nprof', { root });
   const runId = ctx.runStore.startRun({
@@ -84,16 +131,10 @@ test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path 
     startedAt: '2026-08-06T10:00:00.000Z',
   });
   assert.ok(runId > 0);
-
-  // The run store wrote to the CUSTOM path, not the profile-derived default.
-  assert.ok(existsSync(customDbPath));
-  assert.ok(
-    !existsSync(path.join(profileDir('nprof'), 'data', 'jobbunny.db')),
-    'must not also create a second db at the default path',
-  );
+  assert.ok(existsSync(expectedDbPath));
 
   const migrateWire = await wireMigrate('nprof', { root });
-  assert.equal(migrateWire.dbPath, customDbPath);
+  assert.equal(migrateWire.dbPath, expectedDbPath);
 
   const board = wireBoard({ root });
   const profile = board.listProfiles().find((p) => p.name === 'nprof');

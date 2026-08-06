@@ -10,8 +10,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { MigratedRecord } from '../../core/tracking/index.ts';
+import type { ConfigStore } from '../../ports/config_store.ts';
 import type { MigrateWire } from '../wire/index.ts';
 import { migrateCommand } from './migrate.ts';
+
+/** Config→db Phase 4: `MigrateWire.configStore` field — unused by this
+ * command's own logic (Task 7's future job), so a plain no-op fake
+ * satisfies the type here. */
+const FAKE_CONFIG_STORE: ConfigStore = {
+  readText: async () => undefined,
+  writeText: async () => {},
+  close() {},
+};
 
 const FIXTURE_RECORDS: MigratedRecord[] = [
   {
@@ -92,6 +102,7 @@ function makeFakeWire(
     dbId: 'db-123',
     profileJsonPath,
     dbPath: '/x/jobbunny.db',
+    configStore: FAKE_CONFIG_STORE,
     exportRecords: async () => FIXTURE_RECORDS,
     importRecords: (recs, now) => {
       importCalls.push([recs, now]);
@@ -109,6 +120,7 @@ test('migrateCommand: dbId "" returns 1, prints the no-dbId message, never calls
     dbId: '',
     profileJsonPath: '/unused/profile.json',
     dbPath: '/unused/jobbunny.db',
+    configStore: FAKE_CONFIG_STORE,
     exportRecords: async () => {
       exportCalled = true;
       return [];
@@ -197,6 +209,7 @@ test('migrateCommand: exportRecords rejecting makes migrateCommand reject', asyn
     dbId: 'db-123',
     profileJsonPath: '/unused/profile.json',
     dbPath: '/unused/jobbunny.db',
+    configStore: FAKE_CONFIG_STORE,
     exportRecords: async () => {
       throw new Error('notion query failed');
     },

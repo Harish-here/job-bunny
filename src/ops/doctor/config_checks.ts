@@ -183,6 +183,66 @@ export function filterParsesCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
+/** sqlitePathRetiredCheck (config→db Phase 4) — `settings.sqlite.path` is
+ * retired (see `cli/wire/builders.ts`'s `assertSqlitePathRetired`, the LOUD
+ * wire-time enforcement this check mirrors for the tolerant doctor surface).
+ * Piggybacks on `profileParsesCheck`'s own file, same as `emptyLanesCheck`:
+ * a missing/malformed profile.json is already red from that check, so this
+ * one stays silent (`ok`) rather than double-reporting. NOTE (see this
+ * task's brief, "Known gap"): in the real `doctor` CLI path this red
+ * finding is only reachable when `wire()` itself does not already throw
+ * for the identical condition first — which, as of this task, it does. */
+export function sqlitePathRetiredCheck(opts: CoreCheckOpts): DoctorCheck {
+  const name = 'sqlite-path-retired';
+  const readFile = resolveReadFile(opts);
+  const filePath = path.join(
+    resolveRoot(opts),
+    'profiles',
+    opts.profileName,
+    'profile.json',
+  );
+  return {
+    name,
+    async run(): Promise<DoctorFinding> {
+      let raw: string;
+      try {
+        raw = await readFile(filePath);
+      } catch {
+        return { check: name, status: 'ok', detail: 'skipped — profile.json unreadable' };
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return {
+          check: name,
+          status: 'ok',
+          detail: 'skipped — profile.json not valid JSON',
+        };
+      }
+      const settings = (parsed as { settings?: unknown } | null)?.settings;
+      const sqliteSlice =
+        settings && typeof settings === 'object'
+          ? (settings as { sqlite?: unknown }).sqlite
+          : undefined;
+      const hasPath =
+        sqliteSlice !== null &&
+        typeof sqliteSlice === 'object' &&
+        'path' in (sqliteSlice as object);
+      if (hasPath) {
+        return {
+          check: name,
+          status: 'red',
+          detail:
+            `settings.sqlite.path is no longer supported — the database always lives at ` +
+            `profiles/${opts.profileName}/data/jobbunny.db; move the file there and delete the setting`,
+        };
+      }
+      return { check: name, status: 'ok', detail: 'settings.sqlite.path not set' };
+    },
+  };
+}
+
 /** emptyLanesCheck — §10 P9 closure register: a freshly-`profile build`-ed
  * profile seeds `lanes: []` (picking a default ATS board would mean
  * guessing user intent — see `commands/profile.ts`), which runs zero

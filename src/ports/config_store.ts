@@ -1,5 +1,3 @@
-import type { ZodType } from 'zod';
-
 export type ConfigDocKey =
   | 'profile.json'
   | 'filter.json'
