@@ -4,7 +4,7 @@ import { LinkedInLane } from '../lane.ts';
 import { RESUME_STATE_PATH } from '../resume_state.ts';
 import {
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeCtx,
   fixtureFilterConfig,
   newScript,
@@ -45,7 +45,7 @@ test('jitter: applied once before every JD open (card loop) and once per attempt
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -53,7 +53,7 @@ test('jitter: applied once before every JD open (card loop) and once per attempt
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined, // maxCardsPerUrl: default
     1_234, // jitterMinMs
     4_321, // jitterMaxMs
@@ -83,7 +83,7 @@ test('jitter: a zero-length range (jitterMinMs === jitterMaxMs === 0) is a no-op
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -91,7 +91,7 @@ test('jitter: a zero-length range (jitterMinMs === jitterMaxMs === 0) is a no-op
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -109,7 +109,7 @@ test('jitter: an already-aborted ctx.signal makes the (real, default) jitter rej
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   // No injected sleepFn here — deliberately exercising the REAL default
   // (core/async's abort-aware sleep) to prove an already-aborted signal
@@ -122,7 +122,7 @@ test('jitter: an already-aborted ctx.signal makes the (real, default) jitter rej
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     2_000,
     5_000,
@@ -153,7 +153,7 @@ test('inter-url pause: 3 attempted urls produce exactly 2 pauses, each the confi
   seedTrivialUrl(script, URL_2, '3002');
   seedTrivialUrl(script, URL_3, '3003');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -161,7 +161,7 @@ test('inter-url pause: 3 attempted urls produce exactly 2 pauses, each the confi
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2, URL_3] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined, // maxCardsPerUrl: default
     0, // jitterMinMs — jitter OFF, so every recorded sleep is an inter-url pause
     0, // jitterMaxMs
@@ -186,7 +186,7 @@ test('inter-url pause: a single url produces zero pauses', async () => {
   const script = newScript();
   seedTrivialUrl(script, URL_1, '3101');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -194,7 +194,7 @@ test('inter-url pause: a single url produces zero pauses', async () => {
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -215,7 +215,7 @@ test('inter-url pause: a zero-length range is a no-op — the sleepFn is never c
   seedTrivialUrl(script, URL_1, '3201');
   seedTrivialUrl(script, URL_2, '3202');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -223,7 +223,7 @@ test('inter-url pause: a zero-length range is a no-op — the sleepFn is never c
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -245,11 +245,11 @@ test('inter-url pause: a url skipped as already-done costs no pause — only att
   seedTrivialUrl(script, URL_2, '3302');
   seedTrivialUrl(script, URL_3, '3303');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const today = new Date().toISOString().slice(0, 10);
   // The MIDDLE url was already captured by an earlier fire today, so this
   // fire attempts URL_1 and URL_3 only — 2 attempts, 1 pause between them.
-  storage.set(RESUME_STATE_PATH, { date: today, done: { [URL_2]: 1 } });
+  stateStore.set(RESUME_STATE_PATH, { date: today, done: { [URL_2]: 1 } });
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -257,7 +257,7 @@ test('inter-url pause: a url skipped as already-done costs no pause — only att
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2, URL_3] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -278,7 +278,7 @@ test('inter-url pause: pauses between urls that live in DIFFERENT page groups to
   seedTrivialUrl(script, URL_1, '3401');
   seedTrivialUrl(script, URL_2, '3402');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
 
   const lane = new LinkedInLane(
@@ -290,7 +290,7 @@ test('inter-url pause: pauses between urls that live in DIFFERENT page groups to
       { page: inv.page, urls: [URL_2] },
     ],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,

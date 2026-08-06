@@ -6,7 +6,7 @@ import { RESUME_STATE_PATH } from './resume_state.ts';
 import {
   BREAKER_DIR,
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeBreakerFs,
   fakeCtx,
   fixtureFilterConfig,
@@ -28,7 +28,7 @@ test('open breaker: the lane returns skipped with a reopen time and NEVER launch
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_RECENTLY, NOW);
 
   const lane = new LinkedInLane(
@@ -36,7 +36,7 @@ test('open breaker: the lane returns skipped with a reopen time and NEVER launch
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -67,7 +67,7 @@ test('corrupt breaker state: the lane warns that the guard is disabled this fire
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(undefined, NOW);
   // A file that exists but holds garbage — the case that used to disable
   // the whole guard with nothing in the log to show for it.
@@ -91,7 +91,7 @@ test('corrupt breaker state: the lane warns that the guard is disabled this fire
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -120,7 +120,7 @@ test('half-open: a probe returning real text deletes the breaker file and the fi
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
 
   const lane = new LinkedInLane(
@@ -128,7 +128,7 @@ test('half-open: a probe returning real text deletes the breaker file and the fi
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -153,7 +153,7 @@ test('half-open: after a successful probe the first main-loop url is paced like 
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
   const sleepCalls: number[] = [];
 
@@ -162,7 +162,7 @@ test('half-open: after a successful probe the first main-loop url is paced like 
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0, // jitter off, so sleepCalls records inter-url pauses only
     0,
@@ -205,7 +205,7 @@ test('half-open: the probe paces its own walk past a barren url before finding i
   ]);
   seedTrivialUrl(script, URL_2, '8100');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
   const sleepCalls: number[] = [];
 
@@ -214,7 +214,7 @@ test('half-open: the probe paces its own walk past a barren url before finding i
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -260,7 +260,7 @@ test('half-open: a probe returning a shell re-opens the breaker and ends the fir
   script.jdShellUrls.add('https://www.linkedin.com/jobs/view/5001/');
   seedTrivialUrl(script, URL_2, '5002');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
 
   const lane = new LinkedInLane(
@@ -268,7 +268,7 @@ test('half-open: a probe returning a shell re-opens the breaker and ends the fir
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -304,7 +304,7 @@ test('half-open: a probe that THROWS leaves the breaker open with openedAt uncha
   script.gotoThrows.add(URL_1);
   seedTrivialUrl(script, URL_2, '5102');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
 
   const lane = new LinkedInLane(
@@ -312,7 +312,7 @@ test('half-open: a probe that THROWS leaves the breaker open with openedAt uncha
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -373,7 +373,7 @@ test('trip: 3 consecutive shells mid-fire open the breaker, stop the remaining u
   }
   seedTrivialUrl(script, URL_2, '6100');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   // No file on disk ⇒ phase closed ⇒ the fire starts normally.
   const fs = fakeBreakerFs(undefined, NOW);
 
@@ -382,7 +382,7 @@ test('trip: 3 consecutive shells mid-fire open the breaker, stop the remaining u
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -407,7 +407,7 @@ test('trip: 3 consecutive shells mid-fire open the breaker, stop the remaining u
   // URL_2 was never visited: only ONE page was ever opened.
   assert.equal(provider.handle?.pages.length, 1);
   // The interrupted url is NOT marked done — the next fire must retry it.
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.equal(Object.hasOwn(persisted.done, URL_1), false);
 });
 
@@ -441,7 +441,7 @@ test('trip: a fire that trips before capturing anything still writes the breaker
   }
   seedTrivialUrl(script, URL_2, '6800');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(undefined, NOW);
 
   const lane = new LinkedInLane(
@@ -449,7 +449,7 @@ test('trip: a fire that trips before capturing anything still writes the breaker
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -514,7 +514,7 @@ test('trip: an ok between shells resets the streak — a mostly-healthy fire nev
   script.jdShellUrls.add('https://www.linkedin.com/jobs/view/6204/');
   seedTrivialUrl(script, URL_2, '6300');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(undefined, NOW);
 
   const lane = new LinkedInLane(
@@ -522,7 +522,7 @@ test('trip: an ok between shells resets the streak — a mostly-healthy fire nev
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -569,7 +569,7 @@ test('no breaker configured: the lane never reads or writes breaker state (every
   }
   seedTrivialUrl(script, URL_2, '6500');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   // 13th argument omitted entirely — the pre-throttle-guard call shape.
   const lane = new LinkedInLane(
@@ -577,7 +577,7 @@ test('no breaker configured: the lane never reads or writes breaker state (every
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const result = await lane.source(fakeCtx());
@@ -611,7 +611,7 @@ test('all-urls-failed evidence: shell JD failures are reported as server-withhel
   script.jdShellUrls.add('https://www.linkedin.com/jobs/view/7001/');
   script.jdShellUrls.add('https://www.linkedin.com/jobs/view/7002/');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(undefined, NOW);
 
   const lane = new LinkedInLane(
@@ -619,7 +619,7 @@ test('all-urls-failed evidence: shell JD failures are reported as server-withhel
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -681,7 +681,7 @@ test('no trip: 3 consecutive JD-open failures whose jdRoot is present AND still 
   }
   seedTrivialUrl(script, URL_2, '7200');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(undefined, NOW);
 
   const lane = new LinkedInLane(
@@ -689,7 +689,7 @@ test('no trip: 3 consecutive JD-open failures whose jdRoot is present AND still 
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,

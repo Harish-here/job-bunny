@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import type { Storage } from '../../../ports/storage.ts';
+import type { StateStore } from '../../../ports/state_store.ts';
 
 /**
  * Per-URL same-day extract resumability (P4 Task 6). Persisted via the
- * Storage port at `lanes/linkedin/extract_resume.json` as `{ date, done }`
+ * StateStore port at `lanes/linkedin/extract_resume.json` as `{ date, done }`
  * where `done` maps url -> captured-JD count. A run that dies partway
  * through (or a later same-day fire) resumes without re-hitting URLs it
  * already finished today (v0 `data/extract_resume.json` crash-recovery
@@ -44,8 +44,8 @@ export class ResumeState {
   /** Reads the persisted state; a missing file OR a stale (non-today)
    * date returns a fresh empty state for `today` — this folds
    * "resetIfNewDay" into load itself rather than a separate step. */
-  static async load(storage: Storage, today: string): Promise<ResumeState> {
-    const raw = await storage.readJson(RESUME_STATE_PATH, ResumeStateSchema);
+  static async load(stateStore: StateStore, today: string): Promise<ResumeState> {
+    const raw = await stateStore.readDoc(RESUME_STATE_PATH, ResumeStateSchema);
     if (!raw || raw.date !== today) {
       return new ResumeState(today, {});
     }
@@ -72,8 +72,8 @@ export class ResumeState {
     this.done = {};
   }
 
-  async persist(storage: Storage): Promise<void> {
+  async persist(stateStore: StateStore): Promise<void> {
     const shape: ResumeStateShape = { date: this.date, done: { ...this.done } };
-    await storage.writeJson(RESUME_STATE_PATH, shape);
+    await stateStore.writeDoc(RESUME_STATE_PATH, shape);
   }
 }

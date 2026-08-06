@@ -2,7 +2,7 @@ import type { FilterConfig } from '../../../../core/filter/config.ts';
 import { type JD, JDSchema } from '../../../../core/jd/index.ts';
 import type { BrowserHandle, PageHandle } from '../../../../ports/browser.ts';
 import type { RunContext } from '../../../../ports/context.ts';
-import type { Storage } from '../../../../ports/storage.ts';
+import type { StateStore } from '../../../../ports/state_store.ts';
 import type { LinkedinBreakerConfig, LinkedinBreakerState } from '../breaker_store.ts';
 import { closeBreaker, openBreaker, recordProbe } from '../breaker_store.ts';
 import type { CaptureStore } from '../capture_store.ts';
@@ -211,7 +211,7 @@ export interface HalfOpenProbeResult {
  * fields). */
 export interface HalfOpenProbeIo {
   captureStore: CaptureStore;
-  storage: Storage;
+  stateStore: StateStore;
   processedIds: Set<string>;
   stats: UrlStat[];
 }
@@ -288,7 +288,7 @@ export async function runHalfOpenProbe(
   // compress `duplicate-id` drop and one wasted LLM row on every
   // single recovery.
   if (!io.captureStore.all().some((j) => j.identity.id === probe.cardId)) {
-    await io.captureStore.append(io.storage, probe.jd);
+    await io.captureStore.append(io.stateStore, probe.jd);
   }
   // Unconditional, unlike the append above: captured now or captured
   // earlier today, the main loop must not spend a second JD open on

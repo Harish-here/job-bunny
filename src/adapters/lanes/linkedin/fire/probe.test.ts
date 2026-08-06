@@ -7,7 +7,7 @@ import type { UrlStat } from '../evidence.ts';
 import {
   BREAKER_DIR,
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeBreakerFs,
   fakeCtx,
   fixtureFilterConfig,
@@ -44,10 +44,10 @@ test('probe finds its candidate on a later url when the first is barren — brea
   seedTrivialUrl(script, URL_2, '8002');
   const provider = new FakeBrowserProvider(script);
   const handle = await provider.launch();
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
   const breaker: LinkedinBreakerConfig = { userDataDir: BREAKER_DIR, deps: fs.deps };
-  const captureStore = await CaptureStore.load(storage);
+  const captureStore = await CaptureStore.load(stateStore);
   const processedIds = new Set<string>();
   const stats: UrlStat[] = [];
 
@@ -60,7 +60,7 @@ test('probe finds its candidate on a later url when the first is barren — brea
       filterCfg: fixtureFilterConfig(),
     },
     handle,
-    { captureStore, storage, processedIds, stats },
+    { captureStore, stateStore, processedIds, stats },
     fakeCtx(),
   );
 
@@ -137,10 +137,10 @@ test('no-candidate everywhere fails the breaker OPEN — closed (file unlinked),
   ]);
   const provider = new FakeBrowserProvider(script);
   const handle = await provider.launch();
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
   const breaker: LinkedinBreakerConfig = { userDataDir: BREAKER_DIR, deps: fs.deps };
-  const captureStore = await CaptureStore.load(storage);
+  const captureStore = await CaptureStore.load(stateStore);
   const processedIds = new Set<string>();
   const stats: UrlStat[] = [];
 
@@ -153,7 +153,7 @@ test('no-candidate everywhere fails the breaker OPEN — closed (file unlinked),
       filterCfg: fixtureFilterConfig(),
     },
     handle,
-    { captureStore, storage, processedIds, stats },
+    { captureStore, stateStore, processedIds, stats },
     fakeCtx(),
   );
 
@@ -177,10 +177,10 @@ test('a genuine probe error still holds the breaker open: no unlink, openedAt un
   seedTrivialUrl(script, URL_2, '5102');
   const provider = new FakeBrowserProvider(script);
   const handle = await provider.launch();
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
   const breaker: LinkedinBreakerConfig = { userDataDir: BREAKER_DIR, deps: fs.deps };
-  const captureStore = await CaptureStore.load(storage);
+  const captureStore = await CaptureStore.load(stateStore);
   const processedIds = new Set<string>();
   const stats: UrlStat[] = [];
 
@@ -193,7 +193,7 @@ test('a genuine probe error still holds the breaker open: no unlink, openedAt un
       filterCfg: fixtureFilterConfig(),
     },
     handle,
-    { captureStore, storage, processedIds, stats },
+    { captureStore, stateStore, processedIds, stats },
     fakeCtx(),
   );
 

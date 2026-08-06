@@ -296,7 +296,6 @@ export async function wire(
     root,
     readFile,
     storage: deps.storage,
-    profileStorage: deps.profileStorage,
     stateStore,
     filterCfg,
     browser,

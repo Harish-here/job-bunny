@@ -180,9 +180,7 @@ export interface LiveLaneDeps {
   readFile: (path: string) => Promise<string>;
   /** Repo-root — inventories only (see `RuntimeDeps.storage`). */
   storage: Storage;
-  /** `profiles/<name>/data` — superseded by `stateStore` at Task 6; kept until then. */
-  profileStorage: Storage;
-  /** Phase 3: the lane's resume/capture state target (Task 6 wires it in). */
+  /** Phase 3: the lane's resume/capture state target. */
   stateStore: StateStore;
   filterCfg: FilterConfig | undefined;
   browser: CdpChromeProvider;
@@ -263,7 +261,7 @@ async function buildLinkedInLane(
     inventories,
     urls,
     deps.filterCfg,
-    deps.profileStorage,
+    deps.stateStore,
     maxCardsPerUrl,
     jitterRange.minMs,
     jitterRange.maxMs,

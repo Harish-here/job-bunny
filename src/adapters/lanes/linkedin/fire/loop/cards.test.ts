@@ -19,7 +19,7 @@ function fakeDeps(overrides: Partial<UrlRunnerDeps> = {}): UrlRunnerDeps {
     browserHandle: {} as UrlRunnerDeps['browserHandle'],
     inventories: [],
     filterCfg: {} as UrlRunnerDeps['filterCfg'],
-    storage: {} as UrlRunnerDeps['storage'],
+    stateStore: {} as UrlRunnerDeps['stateStore'],
     maxCardsPerUrl: 10,
     jitter: async () => {},
     interUrlPause: async () => {},
