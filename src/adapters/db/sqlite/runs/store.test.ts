@@ -285,6 +285,52 @@ test('findRunId: matches run_date + time_dir, newest first', () => {
   assert.equal(store.findRunId('2026-08-05', '11-00'), null);
 });
 
+test('listRunTimeDirs: distinct time_dirs for the given date, across every kind', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  store.startRun({
+    date: '2026-08-05',
+    timeDir: '10-00',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  store.startRun({
+    date: '2026-08-05',
+    timeDir: '10-00',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:01.000Z',
+  }); // same time_dir as above — must appear only once (DISTINCT).
+  store.startRun({
+    date: '2026-08-05',
+    timeDir: '11-30',
+    kind: 'stage',
+    startedAt: '2026-08-05T11:30:00.000Z',
+  });
+  store.startRun({
+    date: '2026-08-04',
+    timeDir: '09-00',
+    kind: 'run',
+    startedAt: '2026-08-04T09:00:00.000Z',
+  }); // a different date — must not appear.
+
+  assert.deepEqual(store.listRunTimeDirs('2026-08-05').sort(), ['10-00', '11-30']);
+});
+
+test('listRunTimeDirs: a date with no rows yields []', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  assert.deepEqual(store.listRunTimeDirs('2026-08-05'), []);
+});
+
+test('listRunTimeDirs: fail-soft — a degraded store (bad db path) returns [] instead of throwing', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'jb-runstore-'));
+  const blockerFile = path.join(dir, 'blocker');
+  writeFileSync(blockerFile, 'not a directory');
+  const dbPath = path.join(blockerFile, 'sub', 'jobbunny.db');
+  const store = new SqliteRunStore(dbPath, { warn: () => {} });
+  assert.deepEqual(store.listRunTimeDirs('2026-08-05'), []);
+});
+
 test('pruneRunsOlderThan: deletes strictly-older runs + their events, never today, returns runs-deleted count', () => {
   const dbPath = freshDbPath();
   const store = new SqliteRunStore(dbPath);

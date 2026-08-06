@@ -70,6 +70,13 @@ export interface RunStoreReader {
   listEvents(runId: number, opts?: { limit?: number; offset?: number }): RunEventRow[];
   /** id of the run row recorded for runs/<date>/<timeDir>, or null. */
   findRunId(date: string, timeDir: string): number | null;
+  /** Every distinct non-null `time_dir` recorded for `date`, across every
+   * `kind` — the daemon's OWN durable owed-slot evidence (`ops/daemon`):
+   * a `runs` row is written the instant an invocation opens (`startRun`,
+   * before any checkpoint exists), so this survives a daemon restart in a
+   * way the pidfile's own attempts ledger never can. Fail-soft like every
+   * other reader here: an open/query failure returns `[]`, never throws. */
+  listRunTimeDirs(date: string): string[];
   /** Deletes runs (+ their events) with date strictly older than
    * today − ttlDays; never today's. Returns the number of runs deleted. */
   pruneRunsOlderThan(today: string, ttlDays: number): number;

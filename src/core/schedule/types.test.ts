@@ -1,26 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  formatLocalDate,
-  hhMmToMinutes,
-  localHhMm,
-  parseRunFolderName,
-} from './types.ts';
+import { formatLocalDate, hhMmToMinutes, localHhMm, parseTimeDirSlot } from './types.ts';
 
-test('parseRunFolderName: a plain HH-MM folder parses to HH:MM', () => {
-  assert.equal(parseRunFolderName('14-04'), '14:04');
+test('parseTimeDirSlot: a plain HH-MM time_dir parses to HH:MM', () => {
+  assert.equal(parseTimeDirSlot('14-04'), '14:04');
 });
 
-test('parseRunFolderName: a collision-suffixed HH-MM-N folder strips the suffix', () => {
-  assert.equal(parseRunFolderName('14-04-2'), '14:04');
+test('parseTimeDirSlot: a collision-suffixed HH-MM-N time_dir strips the suffix', () => {
+  assert.equal(parseTimeDirSlot('14-04-2'), '14:04');
 });
 
-test('parseRunFolderName: a non-run-folder name is undefined', () => {
-  assert.equal(parseRunFolderName('sync_dryrun.json'), undefined);
+test('parseTimeDirSlot: a non-time_dir-shaped string is undefined', () => {
+  assert.equal(parseTimeDirSlot('sync_dryrun.json'), undefined);
 });
 
-test('parseRunFolderName: an unpadded single-digit hour is undefined (run_folder.ts always zero-pads)', () => {
-  assert.equal(parseRunFolderName('9-00'), undefined);
+test('parseTimeDirSlot: an unpadded single-digit hour is undefined (formatRunTime always zero-pads)', () => {
+  assert.equal(parseTimeDirSlot('9-00'), undefined);
 });
 
 test('formatLocalDate: formats a fixed local Date as YYYY-MM-DD', () => {

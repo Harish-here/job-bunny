@@ -28,9 +28,6 @@ import {
   createRunLogger,
   formatDigest,
   formatRunTime,
-  latestTimeDir,
-  nextTimeDir,
-  RunFolder,
   type RunResult,
   type RunStoreLogger,
 } from '../../ops/observability/index.ts';
@@ -109,7 +106,7 @@ export interface RunDeps {
   runPipeline: (
     stages: Array<StageDef<StagePayload, StagePayload>>,
     ctx: PipelineCtx,
-    folder: RunFolder,
+    group: { date: string; timeDir: string },
     opts: RunnerOptions,
   ) => Promise<RunResult>;
   now: () => Date;
@@ -219,33 +216,40 @@ export async function runCommand(
       return 1;
     }
 
-    // This invocation always gets its OWN fresh time folder — checkpoints
-    // are per-run, never last-writer-wins per day (see `RunFolder`,
-    // `formatRunTime`, `nextTimeDir`). `time` is the LOCAL clock's HH-MM,
-    // matching `schedule.times`'s own local-clock convention.
-    const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
-    const time = await nextTimeDir(dataDir, date, formatRunTime(now));
-    const folder = new RunFolder(dataDir, date, time);
+    // This invocation always gets its OWN fresh time-dir group — checkpoints
+    // are per-run, never last-writer-wins per day (see
+    // `ctx.checkpointStore.nextTimeDir`, `formatRunTime`). `time` is the
+    // LOCAL clock's HH-MM, matching `schedule.times`'s own local-clock
+    // convention.
+    const time = ctx.checkpointStore.nextTimeDir(date, formatRunTime(now));
 
-    // `--resume`: seed from the latest EARLIER same-day folder's latest
-    // checkpoint (never this run's own — it doesn't exist on disk yet, so
-    // `latestTimeDir` naturally excludes it). Folder discovery lives here,
-    // not in `runPipeline`, which only ever sees the resolved seed. Looked
-    // up FIRST — before opening this invocation's own `runs` row — so
-    // `priorTime` is available to resolve `resumedFrom` below.
-    let priorTime: string | undefined;
+    // `--resume`: seed from the latest EARLIER same-day group's latest
+    // checkpoint (never this run's own — its group doesn't exist in the
+    // store yet, so `latestCheckpointTimeDir` naturally excludes it). Group
+    // discovery lives here, not in `runPipeline`, which only ever sees the
+    // resolved seed. `latestCheckpointTimeDir`, NOT `latestTimeDir`: a prior
+    // group that only ever opened a `runs` row (died before its first
+    // checkpoint) must never shadow an earlier group that actually has one.
     let resumeFrom: RunnerOptions['resumeFrom'];
+    let resumedFrom: number | undefined;
     if (opts.resume ?? false) {
-      priorTime = await latestTimeDir(dataDir, date);
+      const priorTime = ctx.checkpointStore.latestCheckpointTimeDir(date);
       if (priorTime !== undefined) {
-        const priorFolder = new RunFolder(dataDir, date, priorTime);
-        const latest = await priorFolder.readLatestCheckpoint();
+        const latest = ctx.checkpointStore.readLatest(date, priorTime);
         if (latest) {
           resumeFrom = {
-            startIndex: latest.index + 1,
+            startIndex: latest.ref.position + 1,
             payload: latest.payload as StagePayload,
-            checkpointPath: priorFolder.checkpointPath(latest.index, latest.stage),
+            checkpointPath: `${latest.ref.runDate}/${latest.ref.timeDir}#${latest.ref.position}-${latest.ref.stage}`,
           };
+          // L18c fix, now structurally guaranteed by `latestCheckpointTimeDir`
+          // itself (it only ever returns a `time_dir` with a real checkpoint
+          // row) — resolve resumedFrom ONLY when a checkpoint was actually
+          // found, so a prior group that is only a bare `runs` row (no
+          // checkpoints yet) can never report a bogus resumedFrom pointing
+          // at a run this invocation never actually continued from. The
+          // `if (latest)` guard above stays as defense-in-depth.
+          resumedFrom = ctx.runStore.findRunId(date, priorTime) ?? undefined;
         }
       }
     }
@@ -259,11 +263,18 @@ export async function runCommand(
       timeDir: time,
       kind: 'run',
       startedAt: now.toISOString(),
-      ...(priorTime !== undefined
-        ? { resumedFrom: ctx.runStore.findRunId(date, priorTime) ?? undefined }
-        : {}),
+      ...(resumedFrom !== undefined ? { resumedFrom } : {}),
     });
-    ctx.runId = runId;
+    // Never propagate the degraded run store's sentinel (`startRun` returns
+    // -1 when the store failed to open — ports/run_store.ts) into
+    // `ctx.runId`: `checkpoints.written_by` is a real FK against `runs(id)`,
+    // and no row with id -1 ever exists, so passing it through unguarded
+    // would make every checkpoint write throw and fail an otherwise-healthy
+    // run — inverting "observability must never red a run". `runId` (the
+    // local, unnormalized value) still goes to this driver's own
+    // heartbeat/finishRun/recordFailure calls below — those are no-ops on
+    // the degraded store, so -1 is harmless there.
+    ctx.runId = runId === -1 ? undefined : runId;
     runLogger = createRunLogger(
       ctx.runStore,
       runId,
@@ -276,11 +287,16 @@ export async function runCommand(
 
     await runRoutines(routines, 'pre-run', ctx);
 
-    const result = await resolved.runPipeline(stages, ctx, folder, {
-      runCapMs: opts.runCapMs ?? computeRunCapMs(stages),
-      stallMs: DEFAULT_STALL_MS,
-      ...(resumeFrom ? { resumeFrom } : {}),
-    });
+    const result = await resolved.runPipeline(
+      stages,
+      ctx,
+      { date, timeDir: time },
+      {
+        runCapMs: opts.runCapMs ?? computeRunCapMs(stages),
+        stallMs: DEFAULT_STALL_MS,
+        ...(resumeFrom ? { resumeFrom } : {}),
+      },
+    );
 
     ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
 

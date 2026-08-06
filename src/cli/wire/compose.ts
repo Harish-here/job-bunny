@@ -19,14 +19,9 @@
  * below, alongside the live adapter construction — the only two places
  * adapters are constructed) and returns `{ ctx, stages, routines, checks }`.
  *
- * There is deliberately no `wireScheduler()`/`Scheduler` port here anymore
- * (D14): `src/ports/scheduler.ts` and `src/adapters/scheduler/launchd/`
- * were deleted wholesale once the in-process daemon (`jobbunny serve
- * start|stop|status`, `src/ops/daemon/`, `src/cli/commands/serve/`)
- * replaced launchd triggering. The `Scheduler` interface's `install`/
- * `remove`/`list` semantics described registering jobs with an external OS
- * registry — a concept a live daemon doesn't have. No successor port
- * replaces it; the daemon is not a `Scheduler` implementation.
+ * No `wireScheduler()`/`Scheduler` port here (D14, see decision ledger) —
+ * the in-process daemon (`src/ops/daemon/`) replaced launchd triggering and
+ * is not a `Scheduler` implementation; no successor port exists.
  */
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -43,6 +38,7 @@ import {
   NotionApi,
   NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
+import { SqliteCheckpointStore } from '../../adapters/db/sqlite/checkpoints/index.ts';
 import {
   SqliteConnectorSettingsSchema,
   sqliteDbCheck,
@@ -241,6 +237,8 @@ export async function wire(
   // `SqliteRunStore` opens lazily (ledger L13) — no file I/O here.
   const sqlitePath = resolveSqlitePath(config.settings.sqlite, sqliteDefaultPath);
   const runStore = new SqliteRunStore(sqlitePath);
+  // Shares `sqlitePath` with `runStore` — lazy-open, no file I/O here either.
+  const checkpointStore = new SqliteCheckpointStore(sqlitePath);
 
   const deps: RuntimeDeps = {
     storage,
@@ -337,6 +335,7 @@ export async function wire(
     config,
     ports,
     runStore,
+    checkpointStore,
     // A notifier failure (e.g. Telegram's `send()` throwing on a missing
     // token or a hung request) must never change the run's outcome — `run.ts`
     // calls this AFTER `runPipeline` has already produced a PASSED/FAILED

@@ -6,8 +6,8 @@
  * TYPE-ONLY carve-out for `registry.ts` too — see its doc comment); every
  * other file under `src/cli` reaches adapters only through what `wire()`
  * hands back. Internals (`config.ts`, `registry.ts`, `settings.ts`,
- * `builders.ts`, `compose.ts`) are not imported directly from outside this
- * folder — go through this file.
+ * `builders.ts`, `compose.ts`, `daemon.ts`) are not imported directly from
+ * outside this folder — go through this file.
  */
 
 export type { BoardWireOverrides } from './board.ts';
@@ -18,6 +18,8 @@ export type { WireOverrides, WireResult } from './compose.ts';
 export { wire } from './compose.ts';
 export type { ConfigLoaderDeps } from './config.ts';
 export { loadFilterConfig, loadPipelineConfig } from './config.ts';
+export type { DaemonWireOverrides } from './daemon.ts';
+export { wireDaemonRunHistory } from './daemon.ts';
 export type { AdapterRegistry, CheckFactory, RuntimeDeps } from './registry.ts';
 export { assembleAdapterChecks } from './registry.ts';
 export type { LoggingConfig } from './settings.ts';

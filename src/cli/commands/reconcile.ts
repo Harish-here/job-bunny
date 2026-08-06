@@ -6,23 +6,21 @@
  * `cache.json` mirror holds.
  *
  * Reuses the same runner machinery `run` does (`runPipeline` against a
- * `RunFolder` for today's date) rather than inventing a parallel
- * single-stage path — the reconcile stage is simply handed a one-element
- * `stages` array. `runPipeline` itself never throws (a stage failure comes
- * back as a `RunResult` with `outcome: 'failed'`); this command turns that
- * into an exit code and message rather than propagating a throw.
+ * `{date, timeDir}` group for today's date) rather than inventing a
+ * parallel single-stage path — the reconcile stage is simply handed a
+ * one-element `stages` array. `runPipeline` itself never throws (a stage
+ * failure comes back as a `RunResult` with `outcome: 'failed'`); this
+ * command turns that into an exit code and message rather than propagating
+ * a throw.
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
  * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
-import { join } from 'node:path';
 import { z } from 'zod';
 import { CacheEntrySchema } from '../../core/jd/index.ts';
 import {
   createRunLogger,
   formatRunTime,
-  latestTimeDir,
-  RunFolder,
   type RunResult,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
@@ -48,11 +46,10 @@ export interface ReconcileDeps {
   runPipeline: (
     stages: Array<StageDef<StagePayload, StagePayload>>,
     ctx: PipelineCtx,
-    folder: RunFolder,
+    group: { date: string; timeDir: string },
     opts: RunnerOptions,
   ) => Promise<RunResult>;
   now: () => Date;
-  root: string;
   write: (line: string) => void;
 }
 
@@ -61,7 +58,6 @@ function defaultDeps(): ReconcileDeps {
     wire: defaultWire,
     runPipeline: defaultRunPipeline,
     now: () => new Date(),
-    root: process.cwd(),
     write: (line: string) => console.log(line),
   };
 }
@@ -80,14 +76,14 @@ export async function reconcileCommand(
 
   const now = resolved.now();
   const date = now.toISOString().slice(0, 10);
-  const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
-  // Same folder-selection semantics as `stageCommand`: continue in TODAY's
-  // latest existing time folder (this and `stage` are both ad-hoc
-  // single-stage entry points in the same verify chain), creating a fresh
-  // one only when today has none yet.
-  const existing = await latestTimeDir(dataDir, date);
+  // Same group-selection semantics as `stageCommand`: continue in TODAY's
+  // latest existing CHECKPOINTED group (`latestCheckpointTimeDir`, NOT
+  // `latestTimeDir` — a bare `runs` row from a run that died before its
+  // first checkpoint must never be treated as "today's existing group";
+  // this and `stage` are both ad-hoc single-stage entry points in the same
+  // verify chain), creating a fresh one only when today has none yet.
+  const existing = ctx.checkpointStore.latestCheckpointTimeDir(date);
   const time = existing ?? formatRunTime(now);
-  const folder = new RunFolder(dataDir, date, time);
 
   // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS
   // invocation before `runPipeline` runs — `ctx.runId` is what
@@ -103,7 +99,16 @@ export async function reconcileCommand(
     kind: 'reconcile',
     startedAt: now.toISOString(),
   });
-  ctx.runId = runId;
+  // Never propagate the degraded run store's sentinel (`startRun` returns
+  // -1 when the store failed to open — ports/run_store.ts) into
+  // `ctx.runId`: `checkpoints.written_by` is a real FK against `runs(id)`,
+  // and no row with id -1 ever exists, so passing it through unguarded
+  // would make `runPipeline`'s checkpoint write throw and fail an
+  // otherwise-healthy run — inverting "observability must never red a
+  // run". `runId` (the local, unnormalized value) still goes to this
+  // driver's own `finishRun` call below — that's a no-op on the degraded
+  // store, so -1 is harmless there.
+  ctx.runId = runId === -1 ? undefined : runId;
   const runLogger = createRunLogger(
     ctx.runStore,
     runId,
@@ -115,10 +120,15 @@ export async function reconcileCommand(
   ctx.logger = runLogger;
 
   try {
-    const result = await resolved.runPipeline([reconcileStage], ctx, folder, {
-      runCapMs: RUN_CAP_MS,
-      stallMs: STALL_MS,
-    });
+    const result = await resolved.runPipeline(
+      [reconcileStage],
+      ctx,
+      { date, timeDir: time },
+      {
+        runCapMs: RUN_CAP_MS,
+        stallMs: STALL_MS,
+      },
+    );
 
     ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
 

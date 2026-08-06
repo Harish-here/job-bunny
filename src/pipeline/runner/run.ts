@@ -1,9 +1,4 @@
-import {
-  buildFunnel,
-  type RunFolder,
-  type RunResult,
-  withScope,
-} from '../../ops/observability/index.ts';
+import { buildFunnel, type RunResult, withScope } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from './context.ts';
 import { guardStage } from './guard.ts';
 import type { StageDef, StagePayload } from './stage.ts';
@@ -12,11 +7,13 @@ export interface RunnerOptions {
   runCapMs: number; // global cap — third watchdog layer
   stallMs: number;
   /** Explicit resume seed, discovered by the CALLER (e.g. the `run` CLI
-   * command finding an earlier same-day run folder) — the runner itself
-   * never does folder discovery. Absent ⇒ start from stage 0 with the
-   * empty seed payload. `checkpointPath` (when known) is only used to
-   * populate the recorded failure's `lastCheckpoint` if the very first
-   * resumed stage fails before this run writes a checkpoint of its own. */
+   * command finding an earlier same-day group) — the runner itself never
+   * does group discovery. Absent ⇒ start from stage 0 with the empty seed
+   * payload. `checkpointPath` (when known) is a display-only descriptor
+   * (`<date>/<timeDir>#<position>-<stage>`) — only used to populate the
+   * recorded failure's `lastCheckpoint` if the very first resumed stage
+   * fails before this run writes a checkpoint of its own; never parsed
+   * back into its components. */
   resumeFrom?: {
     startIndex: number;
     payload: StagePayload;
@@ -28,18 +25,18 @@ const SEED_PAYLOAD: StagePayload = { jobs: [], dropped: [] };
 
 /**
  * Runs `stages` sequentially, checkpointing each successful output to
- * `folder`. Heartbeats and stage failures are recorded via `ctx.runStore`
- * when `ctx.runId` is set (runs-observability Phase 1) — result/failure
- * files are no longer written here; the driver persists the returned
- * `RunResult` itself. Never throws — a stage failure (including a
- * run-cap/run-level abort) is captured as a 'failed' RunResult and returned
- * so the caller decides the process exit code. Sends nothing to notifiers
- * (single-sender invariant lives in P8).
+ * `ctx.checkpointStore`. Heartbeats and stage failures are recorded via
+ * `ctx.runStore` when `ctx.runId` is set (runs-observability Phase 1) —
+ * result/failure files are no longer written here; the driver persists the
+ * returned `RunResult` itself. Never throws — a stage failure (including a
+ * run-cap/run-level abort, or a checkpoint write failure) is captured as a
+ * 'failed' RunResult and returned so the caller decides the process exit
+ * code. Sends nothing to notifiers (single-sender invariant lives in P8).
  */
 export async function runPipeline(
   stages: Array<StageDef<StagePayload, StagePayload>>,
   ctx: PipelineCtx,
-  folder: RunFolder,
+  group: { date: string; timeDir: string },
   opts: RunnerOptions,
 ): Promise<RunResult> {
   const runStarted = Date.now();
@@ -48,7 +45,7 @@ export async function runPipeline(
 
   let startIndex = 0;
   let input: StagePayload = SEED_PAYLOAD;
-  let lastCheckpointPath: string | undefined = opts.resumeFrom?.checkpointPath;
+  let lastCheckpointDescriptor: string | undefined = opts.resumeFrom?.checkpointPath;
 
   if (opts.resumeFrom) {
     startIndex = opts.resumeFrom.startIndex;
@@ -74,8 +71,17 @@ export async function runPipeline(
         stallMs: opts.stallMs,
       });
       const elapsedMs = Date.now() - stageStarted;
-      await folder.writeCheckpoint(index, stage.name, output);
-      lastCheckpointPath = folder.checkpointPath(index, stage.name);
+      ctx.checkpointStore.write(
+        {
+          runDate: group.date,
+          timeDir: group.timeDir,
+          position: index,
+          stage: stage.name,
+          ...(ctx.runId !== undefined ? { writtenBy: ctx.runId } : {}),
+        },
+        output,
+      );
+      lastCheckpointDescriptor = `${group.date}/${group.timeDir}#${index}-${stage.name}`;
       const funnel = buildFunnel(input, output);
       resultStages.push({
         name: stage.name,
@@ -94,15 +100,15 @@ export async function runPipeline(
           stage: stage.name,
           error,
           elapsedMs,
-          ...(lastCheckpointPath !== undefined
-            ? { lastCheckpoint: lastCheckpointPath }
+          ...(lastCheckpointDescriptor !== undefined
+            ? { lastCheckpoint: lastCheckpointDescriptor }
             : {}),
         });
       }
       const result: RunResult = {
         profile: ctx.profile,
-        date: folder.date,
-        time: folder.time,
+        date: group.date,
+        time: group.timeDir,
         outcome: 'failed',
         failedStage: stage.name,
         stages: resultStages,
@@ -113,8 +119,8 @@ export async function runPipeline(
 
   const result: RunResult = {
     profile: ctx.profile,
-    date: folder.date,
-    time: folder.time,
+    date: group.date,
+    time: group.timeDir,
     outcome: 'passed',
     stages: resultStages,
   };

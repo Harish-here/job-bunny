@@ -156,7 +156,7 @@ export function readDaemonPidfile(
 
 /** Every in-place update (heartbeat, inFlight, attempts) goes through
  * here: SYNCHRONOUS write-to-temp then rename-over-target. Synchronous,
- * not run_folder.ts's async writeAtomic, so the heartbeat write Task 7
+ * not an async temp-write-then-rename, so the heartbeat write Task 7
  * places outside the reentrancy guard can never interleave with this same
  * function's own guarded-body calls — Node's single-threaded event loop
  * runs a sync write-then-rename to completion without yielding.

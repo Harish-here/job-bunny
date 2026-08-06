@@ -1,31 +1,19 @@
 /**
  * reconcile.test.ts (P8) — TDD for `reconcileCommand`. Every dependency
- * (`wire`, `runPipeline`, `now`) is FAKE except a REAL `RunFolder` rooted
- * at a temp dir — mirrors run.test.ts's convention that the folder itself
- * is real (cheap, no adapter) while everything else is a stub.
+ * (`wire`, `runPipeline`, `now`, `runStore`, `checkpointStore`) is FAKE —
+ * nothing in this file touches the real filesystem; group discovery goes
+ * through `ctx.checkpointStore.latestCheckpointTimeDir`.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import type { RunResult } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
+import type { CheckpointStore } from '../../ports/checkpoint_store.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
 import type { RunStore } from '../../ports/run_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { reconcileCommand } from './reconcile.ts';
-
-let root: string;
-
-before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'jb-reconcile-cmd-'));
-});
-
-after(async () => {
-  await rm(root, { recursive: true, force: true });
-});
 
 function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   return {
@@ -108,6 +96,9 @@ function fakeRunStore(): {
     findRunId() {
       return null;
     },
+    listRunTimeDirs() {
+      return [];
+    },
     pruneRunsOlderThan() {
       return 0;
     },
@@ -116,9 +107,44 @@ function fakeRunStore(): {
   return { store, started, finished };
 }
 
+/** Minimal recording `CheckpointStore` fake — `reconcileCommand` only ever
+ * calls `latestCheckpointTimeDir` (never `write`/`readLatest`/
+ * `nextTimeDir`/`latestTimeDir`); default `undefined` ("no prior
+ * checkpointed group today"). */
+function fakeCheckpointStore(
+  latestCheckpointTimeDirResult: string | undefined = undefined,
+): {
+  store: CheckpointStore;
+  latestCheckpointTimeDirCalls: string[];
+} {
+  const latestCheckpointTimeDirCalls: string[] = [];
+  const store: CheckpointStore = {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined; // not exercised by reconcileCommand
+    },
+    latestCheckpointTimeDir(runDate) {
+      latestCheckpointTimeDirCalls.push(runDate);
+      return latestCheckpointTimeDirResult;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+  return { store, latestCheckpointTimeDirCalls };
+}
+
 function fakeCtx(
   store: Map<string, unknown>,
   runStore: RunStore = fakeRunStore().store,
+  checkpointStore: CheckpointStore = fakeCheckpointStore().store,
 ): PipelineCtx {
   return {
     profile: 'rajni',
@@ -129,6 +155,7 @@ function fakeCtx(
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,
+    checkpointStore,
     async notify(_event: NotifyEvent) {},
   };
 }
@@ -170,7 +197,6 @@ test('reconcileCommand: finds the reconcile stage by name, not by array index', 
         return passedResult();
       },
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -196,7 +222,6 @@ test('reconcileCommand: opens a "reconcile" runs row and finishes it with runPip
         return passedResult();
       },
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -228,7 +253,6 @@ test("reconcileCommand: a failed runPipeline result finishes the row as failed (
       wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
       runPipeline: async () => failed,
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -258,7 +282,6 @@ test('reconcileCommand: prints the rebuilt cache entry count and returns 0 on su
       wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
       runPipeline: async () => passedResult(),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -279,7 +302,6 @@ test('reconcileCommand: a failed outcome prints the failure and returns 1', asyn
       runPipeline: async () =>
         passedResult({ outcome: 'failed', failedStage: 'reconcile', stages: [] }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -302,7 +324,6 @@ test('reconcileCommand: overrides ctx.logger with a RunStoreLogger before runnin
         return passedResult();
       },
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -329,13 +350,38 @@ test('reconcileCommand: a profile with invalid settings.logging throws before an
           return passedResult();
         },
         now: () => new Date('2026-07-25T00:00:00Z'),
-        root,
         write: () => {},
       },
     ),
   );
 
   assert.equal(runPipelineCalled, false);
+});
+
+test('reconcileCommand: continues in an existing prior group discovered via ctx.checkpointStore.latestCheckpointTimeDir, rather than a freshly-formatted time', async () => {
+  const store = new Map<string, unknown>();
+  const { store: checkpointStore, latestCheckpointTimeDirCalls } =
+    fakeCheckpointStore('08-00');
+  const ctx = fakeCtx(store, fakeRunStore().store, checkpointStore);
+  const now = new Date('2026-07-25T09:00:00Z');
+  let observedGroup: { date: string; timeDir: string } | undefined;
+
+  const code = await reconcileCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
+      runPipeline: async (_stages, _ctx, group) => {
+        observedGroup = group;
+        return passedResult();
+      },
+      now: () => now,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual(latestCheckpointTimeDirCalls, ['2026-07-25']);
+  assert.deepEqual(observedGroup, { date: '2026-07-25', timeDir: '08-00' });
 });
 
 test('reconcileCommand: throws when wire() lacks a "reconcile" stage', async () => {
@@ -350,7 +396,6 @@ test('reconcileCommand: throws when wire() lacks a "reconcile" stage', async () 
           wire: async () => ({ ctx, stages: [otherStage], routines: [], checks: [] }),
           runPipeline: async () => passedResult(),
           now: () => new Date('2026-07-25T00:00:00Z'),
-          root,
           write: () => {},
         },
       ),

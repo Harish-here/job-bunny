@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { ScanDeps } from './scan.ts';
-import { defaultScanDeps, scanProfileSchedules, scanRunHistory } from './scan.ts';
+import { defaultScanDeps, scanProfileSchedules } from './scan.ts';
 
 const PROFILES_DIR = '/fake/profiles';
 
@@ -76,23 +76,6 @@ test('scanProfileSchedules: a profile with no schedule block is skipped', () => 
     { [PROFILES_DIR]: ['noschedule'] },
   );
   assert.deepEqual(scanProfileSchedules(PROFILES_DIR, deps), []);
-});
-
-test('scanRunHistory: parses run-folder names, including a collision-suffixed one', () => {
-  const runsDir = join(PROFILES_DIR, 'harish', 'data', 'runs', '2026-07-27');
-  const deps = fakeDeps(
-    {},
-    { [runsDir]: ['09-00', '14-04', '14-04-2', 'sync_dryrun.json'] },
-  );
-  const history = scanRunHistory(PROFILES_DIR, ['harish'], '2026-07-27', deps);
-  assert.deepEqual(history.map((r) => r.startedAt).sort(), ['09:00', '14:04', '14:04']);
-  assert.ok(history.every((r) => r.profile === 'harish' && r.date === '2026-07-27'));
-});
-
-test('scanRunHistory: a missing runs directory yields []', () => {
-  const deps = fakeDeps({}, {});
-  const history = scanRunHistory(PROFILES_DIR, ['harish'], '2026-07-27', deps);
-  assert.deepEqual(history, []);
 });
 
 test('defaultScanDeps: builds a working real-fs deps object shape', () => {

@@ -329,6 +329,22 @@ export class SqliteRunStore implements RunStore {
     }
   }
 
+  listRunTimeDirs(date: string): string[] {
+    const db = this.open();
+    if (!db) return [];
+    try {
+      const rows = db
+        .prepare(
+          'SELECT DISTINCT time_dir FROM runs WHERE run_date = ? AND time_dir IS NOT NULL',
+        )
+        .all(date) as unknown as Array<{ time_dir: string }>;
+      return rows.map((row) => row.time_dir);
+    } catch (err) {
+      this.warnOnce(`SqliteRunStore.listRunTimeDirs failed: ${String(err)}`);
+      return [];
+    }
+  }
+
   pruneRunsOlderThan(today: string, ttlDays: number): number {
     const db = this.open();
     if (!db) return 0;

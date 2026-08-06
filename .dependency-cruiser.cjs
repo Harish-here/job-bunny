@@ -54,12 +54,15 @@ module.exports = {
         "registry.ts's exception is TYPE-ONLY (RuntimeDeps's notionApi/" +
         'browserReachable fields are typed against adapter-owned structural ' +
         "interfaces predating this split — see registry.ts's doc comment); " +
-        "board.ts is the board server's own composition point. " +
+        "board.ts is the board server's own composition point; daemon.ts is " +
+        "the scheduling daemon's own composition point (builds DaemonDeps." +
+        'readRunHistory from a real SqliteRunStore per profile — ops/daemon ' +
+        'itself may not import adapters). ' +
         'The `app` addition to `from` is redundant-with-`app-only-ports-core` ' +
         'defense-in-depth (belt-and-braces).',
       from: {
         path: '^src/(pipeline|routines|ops|cli|app)',
-        pathNot: '^src/cli/wire/(compose|builders|registry|board)\\.ts$',
+        pathNot: '^src/cli/wire/(compose|builders|registry|board|daemon)\\.ts$',
       },
       to: { path: '^src/adapters' },
     },
