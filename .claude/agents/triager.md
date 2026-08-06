@@ -15,13 +15,19 @@ Input is a profile name, optionally narrowed to a date or a specific `HH-MM` run
 
 Follow this order; don't skip ahead to diagnosis before you've done it:
 
-1. **Locate the run.** Run observability lives in the profile's local sqlite DB now (`runs`/`run_events` tables, runs-observability Phase 1) — use `jobbunny runs --profile <name>` to list runs, `jobbunny runs --profile <name> show <id>` for one run's detail+events, or query the tables directly (`sqlite3 profiles/<name>/data/jobbunny.db`) or the board API (`GET /api/profiles/:name/runs[/:id[/events]]`) if a CLI isn't available in your environment. Per-stage numbered checkpoints (`NN-<stage>.json`) still live on disk under `profiles/<name>/data/runs/<date>/<HH-MM>/` (unaffected by this — they move to the DB in a later phase) — confirm that folder's layout matches what you expect before reading further. If either source doesn't match what you expect — different nesting, missing rows, an unfamiliar naming scheme — say exactly what you found and stop. Do not guess at a layout that isn't there.
+1. **Locate the run.** Run observability lives in the profile's local sqlite DB now (`runs`/`run_events` tables, runs-observability Phase 1) — use `jobbunny runs --profile <name>` to list runs, `jobbunny runs --profile <name> show <id>` for one run's detail+events, or query the tables directly (`sqlite3 profiles/<name>/data/jobbunny.db`) or the board API (`GET /api/profiles/:name/runs[/:id[/events]]`) if a CLI isn't available in your environment. Per-stage checkpoints are ALSO in this DB now (persist-to-db Phase 2, `checkpoints` table, PK `(run_date, time_dir, position)`) — no on-disk checkpoint files exist anymore. Query them directly, e.g.:
+   ```
+   sqlite3 profiles/<name>/data/jobbunny.db \
+     "SELECT position, stage, written_by, created_at FROM checkpoints \
+      WHERE run_date = '<YYYY-MM-DD>' AND time_dir = '<HH-MM>' ORDER BY position;"
+   ```
+   substituting the run's own `run_date`/`time_dir` (from its `runs` row). Confirm the rows you get back match what you expect before reading further. If either source doesn't match what you expect — missing rows, an unfamiliar `stage`/`position` sequence — say exactly what you found and stop. Do not guess at a layout that isn't there.
 2. **Read the run summary first.** `jobbunny runs show <id>` (or the DB row) carries the overall outcome and, on failure, which stage failed. Read it before opening any per-stage checkpoint — it tells you where to look next instead of scanning blind.
-3. **Walk stage checkpoints backward from the failure point.** Start at the failed (or last-completed) stage and work backward through earlier stages' on-disk checkpoint files only as far as needed to understand whether the failure was caused upstream (e.g. a starving stage that fed the failing one nothing) or was local to that stage.
+3. **Walk stage checkpoints backward from the failure point.** Start at the failed (or last-completed) stage and work backward through earlier stages' `checkpoints` rows (query by `position` descending, or add `AND stage = '<name>'`) only as far as needed to understand whether the failure was caused upstream (e.g. a starving stage that fed the failing one nothing) or was local to that stage. Each row's `payload_json` holds that stage's output snapshot.
 4. **Distinguish attempted-and-empty from skipped.** A stage or lane that tried to do work and came back with nothing is a real failure signal. A stage or lane that deliberately declined to run (already covered, paced out, breaker open, etc.) reports itself as skipped and is excluded from outage math elsewhere in the pipeline — don't count a skip as a failure. Read whatever status field or log line the stage/lane provides to tell these apart; don't infer skip vs. empty from job counts alone.
-5. **Use the run's events for detail.** When checkpoint JSON alone doesn't explain a zero, the run's `run_events` rows (via `jobbunny runs show <id>` or the DB directly) usually have the finer-grained events (per-URL, per-card) that produced it.
+5. **Use the run's events for detail.** When checkpoint payload alone doesn't explain a zero, the run's `run_events` rows (via `jobbunny runs show <id>` or the DB directly) usually have the finer-grained events (per-URL, per-card) that produced it.
 
-If the DB rows or checkpoint-file layout you find doesn't match what this procedure assumes, report the mismatch and stop rather than pattern-matching your way through it.
+If the DB rows you find don't match what this procedure assumes, report the mismatch and stop rather than pattern-matching your way through it.
 
 ## 3. Classification categories
 
@@ -43,7 +49,7 @@ Each category names its typical signature and a remedy as a process — never a 
 
 ## 5. Hard prohibitions
 
-- Never delete, move, or truncate a run folder, any file in it, or any row in the `runs`/`run_events` tables. Read-only queries against the DB only.
+- Never delete, move, or truncate any row in the `runs`/`run_events`/`checkpoints` tables. Read-only queries against the DB only.
 - Never reset, clear, or edit any lane, breaker, or session state — read it, never write it.
 - Never modify pipeline code, adapter code, or config files. You produce recommendations only; another agent or the user executes them.
 

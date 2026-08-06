@@ -29,19 +29,24 @@ node src/cli/main.ts stage dedup --profile rajni
 node src/cli/main.ts stage rank --profile rajni
 ```
 
-Every `stage <name>` run continues in TODAY's latest existing time folder (creating a fresh
-`profiles/rajni/data/runs/<date>/<HH-MM>/` only when today has none yet), resumes from the
-latest checkpoint in that folder (falling back to `{ jobs: [], dropped: [] }` if there is none
-yet), and writes a new checkpoint at that stage's own slot — `dedup` needs `reconcile` to have
-run first this same day (it reads `profiles/rajni/data/cache.json`, not a checkpoint). If a
-stage run ever leaves `profiles/rajni/`'s *committed* files dirty, restore them with:
+Every `stage <name>` run continues in TODAY's latest existing group (a `(run_date, time_dir)`
+pair in `profiles/rajni/data/jobbunny.db`'s `checkpoints`/`runs` tables — persist-to-db Phase 2;
+creating a fresh group only when today has none yet), resumes from the latest checkpoint row in
+that group (falling back to `{ jobs: [], dropped: [] }` if there is none yet), and writes a new
+checkpoint row at that stage's own slot — `dedup` needs `reconcile` to have run first this same
+day (it reads `profiles/rajni/data/cache.json`, not a checkpoint). No files are written under
+`profiles/rajni/data/runs/` anymore — that folder tree is retired. If a stage run ever leaves
+`profiles/rajni/`'s *committed* files dirty, restore them with:
 
 ```bash
 git checkout -- profiles/rajni/
 ```
 
-Per-run intermediates (`data/runs/`, `data/registry/`, `data/lanes/`, `data/cache.json`) are
-already gitignored, so a stray run there needs no cleanup.
+Per-run intermediates (`data/jobbunny.db*`, `data/registry/`, `data/lanes/`, `data/cache.json`)
+are already gitignored, so a stray run there needs no cleanup. To reset checkpoint/run history
+between fixture experiments (e.g. to force a fresh group instead of continuing today's chain),
+delete the db file itself: `rm -f profiles/rajni/data/jobbunny.db*` (the `-wal`/`-shm` sidecars
+included) — the next stage run recreates it fresh via the migrations.
 
 ### The LinkedIn lane's resume/state logic
 
@@ -63,7 +68,7 @@ the log for the resume decision, then discard:
 
 ```bash
 git checkout -- profiles/rajni/
-rm -rf profiles/rajni/data/lanes profiles/rajni/data/runs
+rm -rf profiles/rajni/data/lanes
 ```
 
 ## The farm stage and Chrome — the trap
