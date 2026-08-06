@@ -162,6 +162,13 @@ function fakeCtx(
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: fakeStorage(),
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: {
       lanes: [],
       connector: 'fake-connector',

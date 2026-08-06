@@ -81,6 +81,7 @@ function fakeCtx(controller: AbortController = new AbortController()): {
       beats.push(Date.now());
     },
     storage: fakeStorage(),
+    stateStore: {} as PipelineCtx['stateStore'],
     config: {
       lanes: [],
       connector: 'fake-connector',

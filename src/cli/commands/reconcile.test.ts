@@ -152,6 +152,7 @@ function fakeCtx(
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: fakeStorage(store),
+    stateStore: {} as PipelineCtx['stateStore'],
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,

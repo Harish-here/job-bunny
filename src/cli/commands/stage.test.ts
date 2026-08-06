@@ -158,6 +158,13 @@ function fakeCtx(
       },
       async removeTree() {},
     },
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,

@@ -179,6 +179,7 @@ function fakeCtx(opts?: {
     logger: opts?.logger ?? { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: opts?.storage ?? fakeRunsStorage(),
+    stateStore: {} as PipelineCtx['stateStore'],
     config: {
       lanes: [],
       connector: 'notion',
