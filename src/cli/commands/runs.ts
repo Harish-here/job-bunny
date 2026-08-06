@@ -151,7 +151,7 @@ export async function runsCommand(
   const resolved: RunsDeps = { ...defaultDeps(), ...deps };
   const source = resolved.wireBoard();
   try {
-    const store = source.openStore(opts.profile);
+    const store = await source.openStore(opts.profile);
     if (!store) {
       resolved.write(
         `unknown profile "${opts.profile}" or no local database — nothing to show`,

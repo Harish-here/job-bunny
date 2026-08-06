@@ -1,17 +1,28 @@
 /**
- * cli/wire/board.ts (local-DB spec PR 4, Task 7) — the board server's own
- * composition point: sibling to `compose.ts`/`builders.ts` in the
- * `only-wire-imports-adapters` carve-out (`.dependency-cruiser.cjs`), the
- * ONE place a `BoardSource` is assembled from real sqlite adapters.
- * `wireBoard` is built once, at CLI-command time (Task 8's `board`
- * command); `createBoardServer` (Task 6) is the only thing that calls
- * `listProfiles`/`openStore` afterward, once per request.
+ * cli/wire/board.ts (local-DB spec PR 4, Task 7; config→db Phase 4, Task 5)
+ * — the board server's own composition point: sibling to
+ * `compose.ts`/`builders.ts` in the `only-wire-imports-adapters` carve-out
+ * (`.dependency-cruiser.cjs`), the ONE place a `BoardSource` is assembled
+ * from real sqlite adapters. `wireBoard` is built once, at CLI-command time
+ * (Task 8's `board` command); `createBoardServer` (Task 6) is the only
+ * thing that calls `listProfiles`/`openStore` afterward, once per request.
  *
- * Tolerant posture: a broken `profile.json` (missing, unreadable,
- * malformed JSON, or a non-string `connector`) never kills discovery —
- * `listProfiles` degrades that profile to `{ name, connector: '', hasDb }`
- * rather than throwing, the same posture the pipeline's own doctor takes
- * on a bad profile.
+ * `listProfiles`/`openStore` are `async` (`ports/board.ts`'s own doc
+ * comment): probing a profile's `connector` field reads `profile.json`
+ * through a short-lived, READONLY `SqliteConfigStore` (`wireConfigStore`,
+ * `builders.ts`) rather than a raw `readFileSync` — `db path` is now the
+ * SAME canonical path `canonicalDbPath` produces everywhere else, no
+ * settings-based override exists to disagree about (`settings.sqlite.path`
+ * is retired).
+ *
+ * Tolerant posture: a broken profile probe (missing db AND missing legacy
+ * file, a corrupt db, a malformed JSON string, a `connector` field of the
+ * wrong type — ANY failure of the whole store-construction+read+parse
+ * probe) never kills discovery — `listProfiles` degrades that profile to
+ * `{ name, connector: '', hasDb }` rather than throwing, the same posture
+ * the pipeline's own doctor takes on a bad profile. The short-lived probe
+ * store is ALWAYS closed in a `finally`, never memoized, mirroring
+ * `wireDaemonRunHistory`'s (`daemon.ts`) own discipline.
  *
  * `openStore`'s three gates are SECURITY-ORDERED and must stay in this
  * order:
@@ -40,11 +51,11 @@
  * `close()`.
  */
 import type { Dirent } from 'node:fs';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { openJobsDb, SqliteBoardStore } from '../../adapters/db/sqlite/index.ts';
 import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
-import { resolveSqlitePath } from './builders.ts';
+import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
 export interface BoardWireOverrides {
   /** repo root; default `process.cwd()` — same resolution as
@@ -56,59 +67,58 @@ interface ProfileInfo extends BoardProfile {
   dbPath: string;
 }
 
-/** Delegates to `builders.ts`'s `resolveSqlitePath` — THE single
- * authoritative resolver, also used by `wire()`'s run store and
- * `wireMigrate`, so all three agree on one path for a given profile
- * regardless of `connector`. */
-function resolveDbPath(root: string, name: string, parsed: unknown): string {
-  const settings =
-    parsed && typeof parsed === 'object'
-      ? (parsed as { settings?: unknown }).settings
-      : undefined;
-  const sqliteSlice =
-    settings && typeof settings === 'object'
-      ? (settings as { sqlite?: unknown }).sqlite
-      : undefined;
-  return resolveSqlitePath(
-    sqliteSlice,
-    path.join(root, 'profiles', name, 'data', 'jobbunny.db'),
-  );
+/** The single authoritative db path for every profile, regardless of
+ * `connector` (config→db Phase 4 — `settings.sqlite.path` is retired). */
+function resolveDbPath(root: string, name: string): string {
+  return canonicalDbPath(root, name);
 }
 
-function readProfileInfo(root: string, name: string): ProfileInfo {
-  let parsed: unknown = null;
+/** Reads `profile.json`'s `connector` field through a short-lived,
+ * readonly `ConfigStore` (never creates or migrates `jobbunny.db` as a
+ * side effect of discovery). ANY failure of the whole probe — store
+ * construction, `readText`, `JSON.parse`, or a `connector` field of the
+ * wrong type — degrades to `''`, the same tolerant posture the old direct
+ * file read had. */
+async function readProfileInfo(root: string, name: string): Promise<ProfileInfo> {
+  const dbPath = resolveDbPath(root, name);
+  let connector = '';
+  const store = wireConfigStore(name, { root, liftMode: 'readonly' });
   try {
-    parsed = JSON.parse(
-      readFileSync(path.join(root, 'profiles', name, 'profile.json'), 'utf8'),
-    );
+    const raw = await store.readText('profile.json');
+    if (raw !== undefined) {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        typeof (parsed as { connector?: unknown }).connector === 'string'
+      ) {
+        connector = (parsed as { connector: string }).connector;
+      }
+    }
   } catch {
-    // missing, unreadable, or malformed profile.json — tolerant posture.
+    // missing DB + missing legacy file, a corrupt DB, malformed JSON, or a
+    // wrongly-typed `connector` field — tolerant posture, degrade to ''.
+  } finally {
+    store.close();
   }
-  const connector =
-    parsed &&
-    typeof parsed === 'object' &&
-    typeof (parsed as { connector?: unknown }).connector === 'string'
-      ? (parsed as { connector: string }).connector
-      : '';
-  const dbPath = resolveDbPath(root, name, parsed);
   return { name, connector, hasDb: existsSync(dbPath), dbPath };
 }
 
 /** `<root>/profiles`, directories only, sorted. A missing `profiles/`
  * directory itself yields `[]` rather than throwing — the same fail-soft
  * shape `scanProfileSchedules` (ops/daemon/scan) already uses. */
-function listProfileInfos(root: string): ProfileInfo[] {
+async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
   let entries: Dirent[];
   try {
     entries = readdirSync(path.join(root, 'profiles'), { withFileTypes: true });
   } catch {
     return [];
   }
-  return entries
+  const names = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .sort()
-    .map((name) => readProfileInfo(root, name));
+    .sort();
+  return Promise.all(names.map((name) => readProfileInfo(root, name)));
 }
 
 export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
@@ -116,18 +126,16 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
   const stores = new Map<string, BoardStore>();
 
   return {
-    listProfiles(): BoardProfile[] {
-      return listProfileInfos(root).map(({ name, connector, hasDb }) => ({
-        name,
-        connector,
-        hasDb,
-      }));
+    async listProfiles(): Promise<BoardProfile[]> {
+      const infos = await listProfileInfos(root);
+      return infos.map(({ name, connector, hasDb }) => ({ name, connector, hasDb }));
     },
 
-    openStore(name: string): BoardStore | null {
+    async openStore(name: string): Promise<BoardStore | null> {
       // Gate 1 — membership, not path math: `name` must be `===` one of
       // the CURRENT directory names, freshly read from disk.
-      const info = listProfileInfos(root).find((p) => p.name === name);
+      const infos = await listProfileInfos(root);
+      const info = infos.find((p) => p.name === name);
       if (!info) return null;
 
       // Gate 2 — never create a DB file for a profile that doesn't have one.

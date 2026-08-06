@@ -92,12 +92,20 @@ export interface BoardStore {
 }
 
 /** Cross-profile hub the CLI wires and the app consumes. openStore returns
- * null for unknown profiles and for profiles without a local DB. */
+ * null for unknown profiles and for profiles without a local DB.
+ *
+ * `listProfiles`/`openStore` are `async` (config→db Phase 4, Task 5):
+ * probing a profile's `connector` field now reads `profile.json` through
+ * the `ConfigStore` port, whose `readText` is `Promise`-wrapped (see
+ * `ports/config_store.ts`) even though the real adapter is synchronous
+ * under the hood. `BoardStore`'s own methods stay synchronous — untouched
+ * by this widening, "node:sqlite is sync" still holds for every query
+ * against an ALREADY-OPENED store. */
 export interface BoardSource {
-  listProfiles(): BoardProfile[];
+  listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
    * discovered profile whose DB file is corrupt or schema-newer — callers
    * surface that as a 500, never a crash. */
-  openStore(name: string): BoardStore | null;
+  openStore(name: string): Promise<BoardStore | null>;
   close(): void;
 }

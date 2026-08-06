@@ -56,7 +56,7 @@ export async function runServeStatus(deps: ServeDeps): Promise<number> {
       : '  in flight: none',
   );
 
-  const schedules = scanProfileSchedules(deps.profilesDir, deps.scan);
+  const schedules = await scanProfileSchedules(deps.profilesDir, deps.scan);
   const next = nextFireAt(now, schedules);
   deps.write(
     next

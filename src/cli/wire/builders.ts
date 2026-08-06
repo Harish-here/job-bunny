@@ -7,10 +7,8 @@
  * local-DB spec PR 3 — a malformed settings slice means 'no mirror', never
  * a throw; a broken mirror's doctor check warns, never reds), the
  * `canonicalDbPath`/`assertSqlitePathRetired` pair (config→db Phase 4 — the
- * new authoritative resolver + its wire-time enforcement) alongside the OLD
- * `resolveSqlitePath` (kept as a `@deprecated` settings-honoring shim —
- * see its own doc comment for why deleting it outright is a program-wide
- * runtime break, not a typecheck-only gap — pending Task 5 converting
+ * authoritative resolver + its wire-time enforcement; the old, settings-
+ * honoring `resolveSqlitePath` shim is retired now that Task 5 converted
  * `board.ts`/`daemon.ts` off it), and the standalone `wireConfigStore` seam.
  * `MigrateWire`/`wireMigrate` moved to its own file
  * (`./migrate.ts`, config→db Phase 4) once adding this file's other new
@@ -65,35 +63,12 @@ import {
 /** THE single authoritative jobbunny.db path — always
  * `profiles/<name>/data/jobbunny.db`. No settings-based override exists
  * (config→db Phase 4 retires `settings.sqlite.path` — see
- * `assertSqlitePathRetired`); this function takes no settings input at all,
- * unlike its retired predecessor `resolveSqlitePath`. */
+ * `assertSqlitePathRetired`); this function takes no settings input at all.
+ * `board.ts`/`daemon.ts` both resolve every profile's db path through this
+ * one function now (Task 5) — the old settings-honoring `resolveSqlitePath`
+ * shim they used to lean on is retired. */
 export function canonicalDbPath(root: string, profileName: string): string {
   return path.join(root, 'profiles', profileName, 'data', 'jobbunny.db');
-}
-
-/** @deprecated Superseded by `canonicalDbPath`. Kept ONLY as a thin,
- * settings-honoring shim so `board.ts`/`daemon.ts` (Task 5's scope, not
- * touched by this task) keep RUNNING unchanged pending their own
- * conversion — `cli/wire/index.ts`'s barrel re-exports both eagerly
- * (`export { wireBoard } from './board.ts'` etc.), so deleting this
- * outright, as originally planned, makes board.ts's now-dead import throw
- * a `SyntaxError` at ESM load time for EVERY consumer of the barrel — not a
- * typecheck-only gap confined to board.ts/daemon.ts, but a program-wide
- * runtime crash (every `jobbunny` command loads `cli/wire/index.ts`
- * transitively). Deliberately does NOT use `SqliteConnectorSettingsSchema`
- * (which just lost its own `path` field in this same task) — a local, loose
- * presence/type check preserves the exact prior behavior (a non-empty
- * string `path` wins; anything else degrades to `defaultPath`) without
- * resurrecting the retired schema field. New code must call
- * `canonicalDbPath` instead; `assertSqlitePathRetired` is the enforcement
- * point that makes `settings.sqlite.path` a loud error on every path that
- * still goes through `wire()`/`wireMigrate`. */
-export function resolveSqlitePath(sqliteSettings: unknown, defaultPath: string): string {
-  if (sqliteSettings && typeof sqliteSettings === 'object' && 'path' in sqliteSettings) {
-    const value = (sqliteSettings as { path?: unknown }).path;
-    if (typeof value === 'string' && value.length > 0) return value;
-  }
-  return defaultPath;
 }
 
 /** Throws when a config still sets `settings.sqlite.path` — the ONE

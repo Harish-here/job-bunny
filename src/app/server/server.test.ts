@@ -105,8 +105,8 @@ function fakeSource(
 ): BoardSource {
   const { store = null, closed } = opts;
   return {
-    listProfiles: () => PROFILES,
-    openStore: () => store,
+    listProfiles: async () => PROFILES,
+    openStore: async () => store,
     close() {
       if (closed) closed.value = true;
     },
@@ -245,8 +245,8 @@ test('a throwing store method is a 500 internal envelope whose message is NOT th
 
 test('a throwing source.openStore is also a 500 internal envelope (never a crash)', async () => {
   const source: BoardSource = {
-    listProfiles: () => PROFILES,
-    openStore: () => {
+    listProfiles: async () => PROFILES,
+    openStore: async () => {
       throw new Error('db schema is newer than this build supports');
     },
     close() {},
@@ -384,8 +384,8 @@ test('close() still calls source.close() when httpServer.close() rejects', async
   const closed = { value: false };
   let closeCallCount = 0;
   const source: BoardSource = {
-    listProfiles: () => PROFILES,
-    openStore: () => null,
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
     close() {
       closeCallCount += 1;
       closed.value = true;

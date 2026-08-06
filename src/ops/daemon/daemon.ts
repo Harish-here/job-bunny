@@ -102,7 +102,7 @@ export function createDaemon(deps: DaemonDeps): {
     const now = deps.now();
     const date = formatLocalDate(now);
 
-    const schedules: ProfileSchedule[] = scanProfileSchedules(
+    const schedules: ProfileSchedule[] = await scanProfileSchedules(
       deps.profilesDir,
       deps.scan,
     );

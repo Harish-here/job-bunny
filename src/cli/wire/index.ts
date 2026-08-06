@@ -19,7 +19,7 @@ export { wire } from './compose.ts';
 export type { ConfigLoaderDeps } from './config.ts';
 export { loadFilterConfig, loadPipelineConfig } from './config.ts';
 export type { DaemonWireOverrides } from './daemon.ts';
-export { wireDaemonRunHistory } from './daemon.ts';
+export { wireDaemonRunHistory, wireDaemonScheduleConfig } from './daemon.ts';
 export type { MigrateWire } from './migrate.ts';
 export { wireMigrate } from './migrate.ts';
 export type { AdapterRegistry, CheckFactory, RuntimeDeps } from './registry.ts';

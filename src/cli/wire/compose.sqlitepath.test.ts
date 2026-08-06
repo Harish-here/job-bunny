@@ -137,9 +137,10 @@ test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path 
   assert.equal(migrateWire.dbPath, expectedDbPath);
 
   const board = wireBoard({ root });
-  const profile = board.listProfiles().find((p) => p.name === 'nprof');
+  const profiles = await board.listProfiles();
+  const profile = profiles.find((p) => p.name === 'nprof');
   assert.equal(profile?.hasDb, true);
-  const store = board.openStore('nprof');
+  const store = await board.openStore('nprof');
   assert.ok(store, 'wireBoard must open the SAME file the run store wrote to');
   assert.equal(store?.listRuns({}).total, 1);
   board.close();

@@ -35,8 +35,8 @@ function fakeSource(store: BoardStore | null): BoardSource & { closed: boolean }
     get closed() {
       return state.closed;
     },
-    listProfiles: () => [],
-    openStore: () => store,
+    listProfiles: async () => [],
+    openStore: async () => store,
     close: () => {
       state.closed = true;
     },

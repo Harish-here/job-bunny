@@ -38,7 +38,7 @@ import {
   type LogDeps,
 } from '../../../ops/daemon/logs/index.ts';
 import { defaultScanDeps, type ScanDeps } from '../../../ops/daemon/scan/index.ts';
-import { wireDaemonRunHistory } from '../../wire/index.ts';
+import { wireDaemonRunHistory, wireDaemonScheduleConfig } from '../../wire/index.ts';
 import { runServeStop } from './lifecycle.ts';
 import { runServeStartChild, runServeStartParent } from './start.ts';
 import { runServeStatus } from './status.ts';
@@ -123,7 +123,10 @@ function defaultServeDeps(): ServeDeps {
     profilesDir: path.join(root, 'profiles'),
     pidfile: pidfileDeps,
     logs: defaultLogDeps(),
-    scan: defaultScanDeps(),
+    scan: {
+      ...defaultScanDeps(),
+      readProfileJson: wireDaemonScheduleConfig({ root }),
+    },
     readRunHistory: wireDaemonRunHistory({ root }),
     listLaunchAgentFiles: () => {
       try {
