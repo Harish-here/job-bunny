@@ -3,14 +3,29 @@
  * constant, not user config — setTimeout/setInterval use a monotonic
  * clock that doesn't advance across suspend, so a fixed short interval
  * makes normal fires, downtime catch-up, and post-sleep recovery the same
- * code path), scans profile schedules and run history off disk, merges in
- * the pidfile's attempts ledger, asks the pure isRunOwed which slots are
- * owed, and spawns each owed slot's child sequentially — one Chrome/CDP
- * session exists, so two children can never run concurrently (D6).
+ * code path), scans profile schedules plus each profile's own durable run
+ * history (`DaemonDeps.readRunHistory` — real implementation: `cli/wire/
+ * daemon.ts`'s `wireDaemonRunHistory`, over that profile's own `runs`
+ * table), merges in the pidfile's attempts ledger, asks the pure
+ * isRunOwed which slots are owed, and spawns each owed slot's child
+ * sequentially — one Chrome/CDP session exists, so two children can
+ * never run concurrently (D6).
  *
- * This module knows the clock, the run-folder ledger, and how to spawn
- * and await a child. It does NOT know about pipeline stages, adapters, or
- * the CLI — the real child spawn is injected as `SpawnRun`.
+ * `readRunHistory` is a plain injected FUNCTION, never an adapter import
+ * here (`only-wire-imports-adapters` — this module lives under `src/ops`,
+ * which may not import `src/adapters/**`): the real `SqliteRunStore` reads
+ * happen in `cli/wire/daemon.ts`, the one place allowed to construct one.
+ * This module knows the clock, the pidfile ledger, and how to spawn and
+ * await a child. It does NOT know about pipeline stages, adapters, or the
+ * CLI — the real child spawn is injected as `SpawnRun`.
+ *
+ * Historical note: this used to scan `<profile>/data/runs/<date>/` FOLDER
+ * names off disk (`scanRunHistory`, retired) for the same evidence. Those
+ * folders stopped being written once checkpoints moved into `jobbunny.db`
+ * (Phase 2) — a disk scan that always found nothing was silently
+ * dead-weight (worse: it made a daemon restart within `graceMinutes`
+ * re-spawn every slot the pidfile's own ledger had already forgotten, a
+ * genuine duplicate-run bug this `readRunHistory` injection closes).
  */
 
 import type { OwedRun, ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
@@ -18,7 +33,7 @@ import { formatLocalDate, hhMmToMinutes, isRunOwed } from '../../core/schedule/i
 import type { DaemonPidfileDeps } from './pidfile.ts';
 import { readDaemonPidfile, updateDaemonPidfile } from './pidfile.ts';
 import type { ScanDeps } from './scan/index.ts';
-import { scanProfileSchedules, scanRunHistory } from './scan/index.ts';
+import { scanProfileSchedules } from './scan/index.ts';
 
 export const TICK_MS = 30_000;
 
@@ -33,6 +48,14 @@ export interface DaemonDeps {
   scan: ScanDeps;
   pidfile: DaemonPidfileDeps;
   spawnRun: SpawnRun;
+  /** Each named profile's own durable run history for `date` — real
+   * evidence from that profile's `jobbunny.db` `runs` table
+   * (`RunStoreReader.listRunTimeDirs`, via `cli/wire/daemon.ts`'s
+   * `wireDaemonRunHistory`), NOT the pidfile ledger (`ledgerHistory`
+   * below is folded in separately) and NOT a filesystem scan (there is no
+   * on-disk run folder to scan post-Phase-2). Must never throw — a
+   * profile whose db can't be opened yields no records for it. */
+  readRunHistory: (profiles: readonly string[], date: string) => RunRecord[];
   log(
     event: string,
     data?: Record<string, unknown>,
@@ -85,17 +108,20 @@ export function createDaemon(deps: DaemonDeps): {
     );
     const profileNames = schedules.map((s) => s.profile);
 
-    const diskHistory = scanRunHistory(deps.profilesDir, profileNames, date, deps.scan);
+    // The daemon's DURABLE evidence — each named profile's own `runs` table,
+    // real rows that survive a daemon restart (unlike the pidfile ledger
+    // below, which resets every `serve stop`/`serve start`).
+    const dbHistory = deps.readRunHistory(profileNames, date);
     const pidfile = readDaemonPidfile(deps.root, deps.pidfile);
     // D19: fold today's ledger entries in as synthetic RunRecords — this
     // is what stops a slot that crashed before its first checkpoint (no
-    // run folder ever written) from respawning every tick for the rest
-    // of its grace window.
+    // `runs` row ever written) from respawning every tick for the rest
+    // of its grace window, WITHIN this daemon process's own lifetime.
     const ledgerHistory: RunRecord[] = (pidfile?.attempts ?? [])
       .filter((a) => a.date === date)
       .map((a) => ({ profile: a.profile, date: a.date, startedAt: a.slot }));
 
-    const history = [...diskHistory, ...ledgerHistory];
+    const history = [...dbHistory, ...ledgerHistory];
     const owedRuns = isRunOwed(now, schedules, history);
 
     // A13: sort explicitly by (slot, profileName) — nothing upstream

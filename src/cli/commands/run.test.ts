@@ -51,6 +51,9 @@ function fakeCheckpointStore(
       latestTimeDirCalls.push(runDate);
       return opts.latestTimeDirResult;
     },
+    latestCheckpointTimeDir() {
+      return undefined; // --resume discovery has its own dedicated tests in run.resume.test.ts
+    },
     nextTimeDir(runDate, time) {
       nextTimeDirCalls.push({ runDate, time });
       return time;
@@ -128,6 +131,9 @@ function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
     findRunId(date, timeDir) {
       findRunIdCalls.push({ date, timeDir });
       return opts.findRunIdResult ?? null;
+    },
+    listRunTimeDirs() {
+      return [];
     },
     pruneRunsOlderThan() {
       return 0;

@@ -1,16 +1,23 @@
 /**
- * ops/daemon/scan/scan.ts — filesystem -> ProfileSchedule[] / RunRecord[].
- * Injected fs deps (mirrors ops/scheduling/run_lock.ts's shape) so this is
- * fully unit-testable without a real filesystem. One bad profile.json
- * (missing, unreadable, malformed, or schema-invalid) is skipped, never
- * thrown — the daemon's schedule scan must survive a single broken
- * profile (spec §9.1's fail-soft row for the schedule scan).
+ * ops/daemon/scan/scan.ts — filesystem -> ProfileSchedule[]. Injected fs
+ * deps (mirrors ops/scheduling/run_lock.ts's shape) so this is fully
+ * unit-testable without a real filesystem. One bad profile.json (missing,
+ * unreadable, malformed, or schema-invalid) is skipped, never thrown — the
+ * daemon's schedule scan must survive a single broken profile (spec
+ * §9.1's fail-soft row for the schedule scan).
+ *
+ * RunRecord[] evidence (durable owed-slot history) no longer comes from
+ * this module — the on-disk `runs/<date>/` folders it used to scan
+ * (`scanRunHistory`, retired) stopped being written once checkpoints moved
+ * to `jobbunny.db` (Phase 2). The daemon now reads that evidence straight
+ * from each profile's own `RunStoreReader.listRunTimeDirs` (`cli/wire/
+ * daemon.ts`'s `wireDaemonRunHistory`, injected as `DaemonDeps.
+ * readRunHistory` — see `ops/daemon/daemon.ts`'s doc comment).
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PipelineConfigSchema } from '../../../core/config/index.ts';
-import type { ProfileSchedule, RunRecord } from '../../../core/schedule/index.ts';
-import { parseRunFolderName } from '../../../core/schedule/index.ts';
+import type { ProfileSchedule } from '../../../core/schedule/index.ts';
 
 export interface ScanDeps {
   existsSync(path: string): boolean;
@@ -68,37 +75,6 @@ export function scanProfileSchedules(
     });
   }
   return schedules;
-}
-
-/** RunRecord[] for the given profiles on `date`, built from
- * `<profilesDir>/<profile>/data/runs/<date>/`'s subdirectory names. A
- * missing runs/<date>/ directory yields no records for that profile — not
- * a throw. */
-export function scanRunHistory(
-  profilesDir: string,
-  profiles: readonly string[],
-  date: string,
-  deps: ScanDeps,
-): RunRecord[] {
-  const records: RunRecord[] = [];
-  for (const profile of profiles) {
-    const runsDir = join(profilesDir, profile, 'data', 'runs', date);
-    if (!deps.existsSync(runsDir)) continue;
-
-    let entries: string[];
-    try {
-      entries = deps.readdirSync(runsDir);
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const startedAt = parseRunFolderName(entry);
-      if (startedAt === undefined) continue;
-      records.push({ profile, date, startedAt });
-    }
-  }
-  return records;
 }
 
 /** Builds the real (non-test) ScanDeps. */

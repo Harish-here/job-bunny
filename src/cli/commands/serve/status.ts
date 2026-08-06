@@ -7,7 +7,7 @@
  */
 import { formatLocalDate, isRunOwed, nextFireAt } from '../../../core/schedule/index.ts';
 import { HEARTBEAT_STALE_MS, readDaemonPidfile } from '../../../ops/daemon/index.ts';
-import { scanProfileSchedules, scanRunHistory } from '../../../ops/daemon/scan/index.ts';
+import { scanProfileSchedules } from '../../../ops/daemon/scan/index.ts';
 import type { ServeDeps } from './index.ts';
 
 export function formatDuration(ms: number): string {
@@ -64,20 +64,18 @@ export async function runServeStatus(deps: ServeDeps): Promise<number> {
       : '  next fire: none scheduled',
   );
 
-  // D19: the same disk-history-plus-ledger merge daemon.ts's own tick
-  // uses — disk history alone would over-report a slot a synthetic
+  // D19: the same durable-db-history-plus-ledger merge daemon.ts's own tick
+  // uses — the db history alone would over-report a slot a synthetic
   // ledger entry already served.
   const date = formatLocalDate(now);
-  const diskHistory = scanRunHistory(
-    deps.profilesDir,
+  const dbHistory = deps.readRunHistory(
     schedules.map((s) => s.profile),
     date,
-    deps.scan,
   );
   const ledgerHistory = file.attempts
     .filter((a) => a.date === date)
     .map((a) => ({ profile: a.profile, date: a.date, startedAt: a.slot }));
-  const owed = isRunOwed(now, schedules, [...diskHistory, ...ledgerHistory]);
+  const owed = isRunOwed(now, schedules, [...dbHistory, ...ledgerHistory]);
   if (owed.length > 0) {
     deps.write(
       `  currently owed: ${owed.map((o) => `${o.profile}@${o.slot}`).join(', ')}`,

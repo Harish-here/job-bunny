@@ -225,13 +225,15 @@ export async function runCommand(
 
     // `--resume`: seed from the latest EARLIER same-day group's latest
     // checkpoint (never this run's own — its group doesn't exist in the
-    // store yet, so `latestTimeDir` naturally excludes it). Group discovery
-    // lives here, not in `runPipeline`, which only ever sees the resolved
-    // seed.
+    // store yet, so `latestCheckpointTimeDir` naturally excludes it). Group
+    // discovery lives here, not in `runPipeline`, which only ever sees the
+    // resolved seed. `latestCheckpointTimeDir`, NOT `latestTimeDir`: a prior
+    // group that only ever opened a `runs` row (died before its first
+    // checkpoint) must never shadow an earlier group that actually has one.
     let resumeFrom: RunnerOptions['resumeFrom'];
     let resumedFrom: number | undefined;
     if (opts.resume ?? false) {
-      const priorTime = ctx.checkpointStore.latestTimeDir(date);
+      const priorTime = ctx.checkpointStore.latestCheckpointTimeDir(date);
       if (priorTime !== undefined) {
         const latest = ctx.checkpointStore.readLatest(date, priorTime);
         if (latest) {
@@ -240,11 +242,13 @@ export async function runCommand(
             payload: latest.payload as StagePayload,
             checkpointPath: `${latest.ref.runDate}/${latest.ref.timeDir}#${latest.ref.position}-${latest.ref.stage}`,
           };
-          // L18c fix: resolve resumedFrom ONLY when a checkpoint was
-          // actually found — a prior group that is only a bare `runs` row
-          // (no checkpoints yet) must start this run fresh, not report a
-          // bogus resumedFrom pointing at a run this invocation never
-          // actually continued from.
+          // L18c fix, now structurally guaranteed by `latestCheckpointTimeDir`
+          // itself (it only ever returns a `time_dir` with a real checkpoint
+          // row) — resolve resumedFrom ONLY when a checkpoint was actually
+          // found, so a prior group that is only a bare `runs` row (no
+          // checkpoints yet) can never report a bogus resumedFrom pointing
+          // at a run this invocation never actually continued from. The
+          // `if (latest)` guard above stays as defense-in-depth.
           resumedFrom = ctx.runStore.findRunId(date, priorTime) ?? undefined;
         }
       }

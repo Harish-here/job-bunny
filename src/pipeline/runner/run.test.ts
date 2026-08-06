@@ -98,6 +98,9 @@ function fakeRunStore(): {
     findRunId() {
       return null;
     },
+    listRunTimeDirs() {
+      return [];
+    },
     pruneRunsOlderThan() {
       return 0;
     },
@@ -126,6 +129,9 @@ function fakeCheckpointStore(opts?: { throwOn?: number }): {
       return undefined;
     },
     latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
       return undefined;
     },
     nextTimeDir(_runDate, time) {

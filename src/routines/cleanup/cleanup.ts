@@ -159,13 +159,29 @@ export const cleanupRoutine: Routine = {
     // (persist-to-db Phase 2) get pruned the same way. The legacy
     // `runs/<date>/` folder prune above stays for pre-Phase-2 leftovers
     // still on disk after an upgrade — harmless once none remain.
-    const prunedCheckpoints = ctx.checkpointStore.pruneOlderThan(
-      today,
-      settings.runsOlderThanDays,
-    );
-    ctx.logger.info('cleanup: pruned checkpoint rows', {
-      prunedCheckpoints,
-      runsOlderThanDays: settings.runsOlderThanDays,
-    });
+    //
+    // `CheckpointStore.pruneOlderThan` is LOUD by its own port contract
+    // (recovery-path methods must never silently lose a checkpoint) — but
+    // this caller is TTL housekeeping running post-sync, after the run
+    // this routine belongs to has already passed. Letting a prune failure
+    // (e.g. SQLITE_BUSY from a second open connection on the same WAL file)
+    // propagate out of here would red an otherwise-passed run and swallow
+    // its own success digest — exactly the class of destabilization the
+    // stability principle rejects. Caught and warned, matching the
+    // `removeTree` per-folder handler above.
+    try {
+      const prunedCheckpoints = ctx.checkpointStore.pruneOlderThan(
+        today,
+        settings.runsOlderThanDays,
+      );
+      ctx.logger.info('cleanup: pruned checkpoint rows', {
+        prunedCheckpoints,
+        runsOlderThanDays: settings.runsOlderThanDays,
+      });
+    } catch (err) {
+      ctx.logger.warn('cleanup: checkpoint prune failed', {
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
   },
 };

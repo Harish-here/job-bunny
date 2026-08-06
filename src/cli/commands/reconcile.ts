@@ -79,10 +79,12 @@ export async function reconcileCommand(
   const now = resolved.now();
   const date = now.toISOString().slice(0, 10);
   // Same group-selection semantics as `stageCommand`: continue in TODAY's
-  // latest existing group (this and `stage` are both ad-hoc single-stage
-  // entry points in the same verify chain), creating a fresh one only when
-  // today has none yet.
-  const existing = ctx.checkpointStore.latestTimeDir(date);
+  // latest existing CHECKPOINTED group (`latestCheckpointTimeDir`, NOT
+  // `latestTimeDir` — a bare `runs` row from a run that died before its
+  // first checkpoint must never be treated as "today's existing group";
+  // this and `stage` are both ad-hoc single-stage entry points in the same
+  // verify chain), creating a fresh one only when today has none yet.
+  const existing = ctx.checkpointStore.latestCheckpointTimeDir(date);
   const time = existing ?? formatRunTime(now);
 
   // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS

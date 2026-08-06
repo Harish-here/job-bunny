@@ -127,6 +127,7 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     pidfile: fakePidfileDeps(),
     logs: fakeLogDeps(),
     scan: fakeScanDeps(),
+    readRunHistory: () => [],
     listLaunchAgentFiles: () => [],
     spawn,
     nodeBin: 'node',

@@ -24,7 +24,7 @@ const LIVE_PROFILE_JSON = JSON.stringify({
   settings: { notion: { dbId: 'db-1' }, telegram: { chatId: 7 } },
 });
 
-test('wire: ctx.checkpointStore duck-types as a CheckpointStore (has write/readLatest/latestTimeDir/nextTimeDir/pruneOlderThan/close)', async () => {
+test('wire: ctx.checkpointStore duck-types as a CheckpointStore (has write/readLatest/latestTimeDir/latestCheckpointTimeDir/nextTimeDir/pruneOlderThan/close)', async () => {
   const result = await wire('rajni', {
     root: '/repo',
     readFile: fakeReadFile({ [profilePath('rajni')]: LIVE_PROFILE_JSON }),
@@ -33,6 +33,7 @@ test('wire: ctx.checkpointStore duck-types as a CheckpointStore (has write/readL
   assert.equal(typeof result.ctx.checkpointStore.write, 'function');
   assert.equal(typeof result.ctx.checkpointStore.readLatest, 'function');
   assert.equal(typeof result.ctx.checkpointStore.latestTimeDir, 'function');
+  assert.equal(typeof result.ctx.checkpointStore.latestCheckpointTimeDir, 'function');
   assert.equal(typeof result.ctx.checkpointStore.nextTimeDir, 'function');
   assert.equal(typeof result.ctx.checkpointStore.pruneOlderThan, 'function');
   assert.equal(typeof result.ctx.checkpointStore.close, 'function');

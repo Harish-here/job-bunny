@@ -50,6 +50,16 @@ function fakeCheckpointStore(): CheckpointStore & {
         .map((r) => r.ref.timeDir);
       return dirs.length ? dirs.sort().at(-1) : undefined;
     },
+    // This fake collapses each group to only its latest checkpoint — every
+    // row in `rows` is by definition a real checkpoint, so there is no
+    // separate "bare runs row" case to distinguish; `latestCheckpointTimeDir`
+    // is identical to `latestTimeDir` here.
+    latestCheckpointTimeDir(runDate) {
+      const dirs = [...rows.values()]
+        .filter((r) => r.ref.runDate === runDate)
+        .map((r) => r.ref.timeDir);
+      return dirs.length ? dirs.sort().at(-1) : undefined;
+    },
     nextTimeDir(_runDate, time) {
       return time; // not exercised by stage.ts
     },
@@ -120,6 +130,9 @@ function fakeStore(): RunStore & {
     },
     findRunId() {
       return null;
+    },
+    listRunTimeDirs() {
+      return [];
     },
     pruneRunsOlderThan() {
       return 0;
@@ -302,7 +315,7 @@ test("stageCommand: continues in TODAY's existing group (not the current formatt
   );
   assert.equal(code1, 0);
 
-  const groupAfterFirst = checkpointStore.latestTimeDir('2026-07-25');
+  const groupAfterFirst = checkpointStore.latestCheckpointTimeDir('2026-07-25');
   assert.equal(groupAfterFirst, formatRunTime(now));
   const firstWrite = checkpointStore.readLatest('2026-07-25', groupAfterFirst as string);
   assert.deepEqual(firstWrite?.payload, { jobs: [{ id: 'r' }], dropped: [] });
@@ -336,7 +349,7 @@ test("stageCommand: continues in TODAY's existing group (not the current formatt
   assert.equal(code2, 0);
 
   // (a) same group.
-  assert.equal(checkpointStore.latestTimeDir('2026-07-25'), groupAfterFirst);
+  assert.equal(checkpointStore.latestCheckpointTimeDir('2026-07-25'), groupAfterFirst);
   // (b) second call's input equals what the first call wrote.
   assert.deepEqual(observedInput, { jobs: [{ id: 'r' }], dropped: [] });
   // (c) second call's write lands in that same group at position 1.

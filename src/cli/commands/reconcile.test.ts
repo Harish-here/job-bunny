@@ -3,7 +3,8 @@
  * (`wire`, `runPipeline`, `now`, `runStore`, `checkpointStore`) is FAKE — a
  * temp dir is still allocated for `root` (part of `ReconcileDeps`'s
  * surface), but nothing in this file touches the real filesystem for group
- * discovery anymore — that's `ctx.checkpointStore.latestTimeDir` now.
+ * discovery anymore — that's `ctx.checkpointStore.latestCheckpointTimeDir`
+ * now.
  */
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -110,6 +111,9 @@ function fakeRunStore(): {
     findRunId() {
       return null;
     },
+    listRunTimeDirs() {
+      return [];
+    },
     pruneRunsOlderThan() {
       return 0;
     },
@@ -119,21 +123,27 @@ function fakeRunStore(): {
 }
 
 /** Minimal recording `CheckpointStore` fake — `reconcileCommand` only ever
- * calls `latestTimeDir` (never `write`/`readLatest`/`nextTimeDir`); default
- * `undefined` ("no prior group today"). */
-function fakeCheckpointStore(latestTimeDirResult: string | undefined = undefined): {
+ * calls `latestCheckpointTimeDir` (never `write`/`readLatest`/
+ * `nextTimeDir`/`latestTimeDir`); default `undefined` ("no prior
+ * checkpointed group today"). */
+function fakeCheckpointStore(
+  latestCheckpointTimeDirResult: string | undefined = undefined,
+): {
   store: CheckpointStore;
-  latestTimeDirCalls: string[];
+  latestCheckpointTimeDirCalls: string[];
 } {
-  const latestTimeDirCalls: string[] = [];
+  const latestCheckpointTimeDirCalls: string[] = [];
   const store: CheckpointStore = {
     write() {},
     readLatest() {
       return undefined;
     },
-    latestTimeDir(runDate) {
-      latestTimeDirCalls.push(runDate);
-      return latestTimeDirResult;
+    latestTimeDir() {
+      return undefined; // not exercised by reconcileCommand
+    },
+    latestCheckpointTimeDir(runDate) {
+      latestCheckpointTimeDirCalls.push(runDate);
+      return latestCheckpointTimeDirResult;
     },
     nextTimeDir(_runDate, time) {
       return time;
@@ -143,7 +153,7 @@ function fakeCheckpointStore(latestTimeDirResult: string | undefined = undefined
     },
     close() {},
   };
-  return { store, latestTimeDirCalls };
+  return { store, latestCheckpointTimeDirCalls };
 }
 
 function fakeCtx(
@@ -370,9 +380,10 @@ test('reconcileCommand: a profile with invalid settings.logging throws before an
   assert.equal(runPipelineCalled, false);
 });
 
-test('reconcileCommand: continues in an existing prior group discovered via ctx.checkpointStore.latestTimeDir, rather than a freshly-formatted time', async () => {
+test('reconcileCommand: continues in an existing prior group discovered via ctx.checkpointStore.latestCheckpointTimeDir, rather than a freshly-formatted time', async () => {
   const store = new Map<string, unknown>();
-  const { store: checkpointStore, latestTimeDirCalls } = fakeCheckpointStore('08-00');
+  const { store: checkpointStore, latestCheckpointTimeDirCalls } =
+    fakeCheckpointStore('08-00');
   const ctx = fakeCtx(store, fakeRunStore().store, checkpointStore);
   const now = new Date('2026-07-25T09:00:00Z');
   let observedGroup: { date: string; timeDir: string } | undefined;
@@ -392,7 +403,7 @@ test('reconcileCommand: continues in an existing prior group discovered via ctx.
   );
 
   assert.equal(code, 0);
-  assert.deepEqual(latestTimeDirCalls, ['2026-07-25']);
+  assert.deepEqual(latestCheckpointTimeDirCalls, ['2026-07-25']);
   assert.deepEqual(observedGroup, { date: '2026-07-25', timeDir: '08-00' });
 });
 

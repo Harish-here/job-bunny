@@ -99,6 +99,40 @@ test('latestTimeDir/nextTimeDir: a runs-row-only group still occupies its slot',
   assert.equal(store.nextTimeDir('2026-08-05', '11-00'), '11-00-2');
 });
 
+test('latestCheckpointTimeDir: a bare runs-row group is skipped in favor of the last group with an actual checkpoint', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteCheckpointStore(dbPath);
+  store.write(
+    { runDate: '2026-08-05', timeDir: '07-00', position: 2, stage: 'rank' },
+    { n: 'checkpointed' },
+  );
+  const db = openJobsDb(dbPath);
+  db.prepare(
+    `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
+     VALUES (?, ?, 'run', 'running', ?)`,
+  ).run('2026-08-05', '08-00', '2026-08-05T08:00:00.000Z'); // opened, no checkpoint yet.
+  db.close();
+
+  // The union-based `latestTimeDir` (collision-avoidance only) is shadowed
+  // by the bare runs-row — this is exactly why resume/chain-continuation
+  // must never call it.
+  assert.equal(store.latestTimeDir('2026-08-05'), '08-00');
+  assert.equal(store.latestCheckpointTimeDir('2026-08-05'), '07-00');
+});
+
+test('latestCheckpointTimeDir: undefined when the date has no checkpoints at all, even with runs rows present', () => {
+  const dbPath = freshDbPath();
+  const db = openJobsDb(dbPath);
+  db.prepare(
+    `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
+     VALUES (?, ?, 'run', 'running', ?)`,
+  ).run('2026-08-05', '09-00', '2026-08-05T09:00:00.000Z');
+  db.close();
+
+  const store = new SqliteCheckpointStore(dbPath);
+  assert.equal(store.latestCheckpointTimeDir('2026-08-05'), undefined);
+});
+
 test('nextTimeDir: collision suffixes increment past multiple existing groups', () => {
   const dbPath = freshDbPath();
   const store = new SqliteCheckpointStore(dbPath);

@@ -120,6 +120,9 @@ function fakeRunStore(opts?: { prunedResult?: number }): {
     findRunId() {
       return null;
     },
+    listRunTimeDirs() {
+      return [];
+    },
     pruneRunsOlderThan(today, ttlDays) {
       prunedCalls.push({ today, ttlDays });
       return opts?.prunedResult ?? 0;
@@ -143,6 +146,9 @@ function fakeCheckpointStore(opts?: { prunedResult?: number }): {
       return undefined;
     },
     latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
       return undefined;
     },
     nextTimeDir(_runDate, time) {
@@ -390,6 +396,39 @@ test('run(): prunes checkpoint rows via ctx.checkpointStore, with the same TTL a
   assert.ok(infoCall, 'must log the number of pruned checkpoint rows');
   assert.equal(infoCall?.data?.prunedCheckpoints, 2);
   assert.equal(infoCall?.data?.runsOlderThanDays, 45);
+});
+
+test('run(): a throwing checkpointStore.pruneOlderThan is warned about but does not throw, letting the routine complete (LOUD-by-contract wrapped fail-soft by this caller)', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const checkpointStore: CheckpointStore = {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan() {
+      throw new Error('SQLITE_BUSY');
+    },
+    close() {},
+  };
+  const ctx = fakeCtx({ connector, logger, checkpointStore });
+
+  await assert.doesNotReject(() => cleanupRoutine.run(ctx));
+
+  const warnCall = logger.calls.find(
+    (c) => c.level === 'warn' && c.msg === 'cleanup: checkpoint prune failed',
+  );
+  assert.ok(warnCall, 'a throwing checkpoint prune must be warned, not thrown');
+  assert.match(String(warnCall?.data?.detail), /SQLITE_BUSY/);
 });
 
 test('run(): a removeTree failure for one run folder is warned about but does not throw, and other prunes still happen', async () => {

@@ -2,10 +2,14 @@
  * run.resume.test.ts (checkpoints-to-db Phase 2 Task 6, split out of
  * run.test.ts to stay under the 800-line test-file cap — mirrors
  * `cli/wire/compose.checkpointstore.test.ts`'s split precedent) — the
- * `--resume` group-discovery/resumedFrom tests, including the L18c fix
- * ("a prior group that is only a bare `runs` row with no checkpoints yet
- * must start this run fresh, not report a bogus resumedFrom"). Every
- * dependency is FAKE, same conventions as `run.test.ts`.
+ * `--resume` group-discovery/resumedFrom tests, including the L18d fix
+ * (`ctx.checkpointStore.latestCheckpointTimeDir`, NOT the union-based
+ * `latestTimeDir`: a prior group that is only a bare `runs` row with no
+ * checkpoints yet must never shadow an EARLIER group that actually has a
+ * checkpoint — resume/chain-continuation always finds the latter, never
+ * falls back to a fresh start just because the most recent group happened
+ * to die before checkpointing anything). Every dependency is FAKE, same
+ * conventions as `run.test.ts`.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -37,11 +41,12 @@ function passedResult(overrides: Partial<RunResult> = {}): RunResult {
 }
 
 /** Recording `CheckpointStore` fake — see `run.test.ts`'s twin for the full
- * doc comment; kept minimal here since only `latestTimeDir`/`readLatest`
- * are exercised by these tests. */
+ * doc comment; kept minimal here since only `latestCheckpointTimeDir`/
+ * `readLatest` are exercised by these tests (`run.ts`'s `--resume` discovery
+ * never calls the union-based `latestTimeDir`). */
 function fakeCheckpointStore(
   opts: {
-    latestTimeDirResult?: string;
+    latestCheckpointTimeDirResult?: string;
     readLatestResult?: { ref: CheckpointRef; payload: unknown };
   } = {},
 ): { store: CheckpointStore } {
@@ -51,7 +56,10 @@ function fakeCheckpointStore(
       return opts.readLatestResult;
     },
     latestTimeDir() {
-      return opts.latestTimeDirResult;
+      return undefined; // not exercised by run.ts's --resume discovery
+    },
+    latestCheckpointTimeDir() {
+      return opts.latestCheckpointTimeDirResult;
     },
     nextTimeDir(_runDate, time) {
       return time;
@@ -97,6 +105,9 @@ function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
       findRunIdCalls.push({ date, timeDir });
       return opts.findRunIdResult ?? null;
     },
+    listRunTimeDirs() {
+      return [];
+    },
     pruneRunsOlderThan() {
       return 0;
     },
@@ -134,7 +145,7 @@ test('runCommand: --resume, with a prior same-day checkpoint on disk, passes res
   const notified: NotifyEvent[] = [];
   const { store, started, findRunIdCalls } = fakeRunStore({ findRunIdResult: 42 });
   const { store: checkpointStore } = fakeCheckpointStore({
-    latestTimeDirResult: priorTime,
+    latestCheckpointTimeDirResult: priorTime,
     readLatestResult: {
       ref: { runDate: date, timeDir: priorTime, position: 0, stage: 'farm' },
       payload: { jobs: [], dropped: [] },
@@ -159,11 +170,11 @@ test('runCommand: --resume, with a prior same-day checkpoint on disk, passes res
   assert.equal(started[0]?.resumedFrom, 42);
 });
 
-test('runCommand: --resume with no prior same-day folder never calls findRunId and starts a fresh row with no resumedFrom', async () => {
+test('runCommand: --resume with no prior same-day checkpointed group never calls findRunId and starts a fresh row with no resumedFrom', async () => {
   const notified: NotifyEvent[] = [];
   const { store, started, findRunIdCalls } = fakeRunStore();
   const { store: checkpointStore } = fakeCheckpointStore({
-    latestTimeDirResult: undefined,
+    latestCheckpointTimeDirResult: undefined,
   });
   const ctx = fakeCtx(notified, store, checkpointStore);
 
@@ -184,13 +195,30 @@ test('runCommand: --resume with no prior same-day folder never calls findRunId a
   assert.equal(started[0]?.resumedFrom, undefined);
 });
 
-test('runCommand: --resume when the prior group is a runs-row with no checkpoints yet starts fresh with no resumedFrom', async () => {
-  const priorTime = '08-00';
+test('runCommand: --resume skips a same-day group that is only a bare runs-row (no checkpoints yet) and resumes the EARLIER checkpointed group instead', async () => {
+  // The scenario the L18d fix (`latestCheckpointTimeDir`) closes: 07-00
+  // checkpointed through 'rank' and then failed; a first `--resume` at
+  // 08-00 continued from it but failed again before writing any checkpoint
+  // of its own — 08-00 is now a bare `runs` row. This SECOND `--resume`
+  // must discover 07-00 (the last group with an actual payload), never
+  // 08-00 — `latestCheckpointTimeDir` itself guarantees this by construction
+  // (it only ever returns a time_dir with a real checkpoint row), so this
+  // fake never even offers 08-00 as a candidate.
+  const date = '2026-07-25';
+  const earlierCheckpointedTime = '07-00';
   const notified: NotifyEvent[] = [];
   const { store, started, findRunIdCalls } = fakeRunStore({ findRunIdResult: 42 });
   const { store: checkpointStore } = fakeCheckpointStore({
-    latestTimeDirResult: priorTime,
-    readLatestResult: undefined,
+    latestCheckpointTimeDirResult: earlierCheckpointedTime,
+    readLatestResult: {
+      ref: {
+        runDate: date,
+        timeDir: earlierCheckpointedTime,
+        position: 6,
+        stage: 'rank',
+      },
+      payload: { jobs: [{ id: 'a' }], dropped: [] },
+    },
   });
   const ctx = fakeCtx(notified, store, checkpointStore);
 
@@ -206,9 +234,9 @@ test('runCommand: --resume when the prior group is a runs-row with no checkpoint
   );
 
   assert.equal(code, 0);
-  // The exact behavior being fixed (L18c): a discovered prior time_dir with
-  // no checkpoint yet must never resolve to a bogus resumedFrom.
-  assert.deepEqual(findRunIdCalls, []);
+  // The earlier CHECKPOINTED group is resumed — real resumedFrom, not a
+  // fresh start.
+  assert.deepEqual(findRunIdCalls, [{ date, timeDir: earlierCheckpointedTime }]);
   assert.equal(started.length, 1);
-  assert.equal(started[0]?.resumedFrom, undefined);
+  assert.equal(started[0]?.resumedFrom, 42);
 });

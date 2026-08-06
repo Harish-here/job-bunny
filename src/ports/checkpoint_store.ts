@@ -35,14 +35,42 @@ export interface CheckpointStore {
    * `checkpoints` and `runs` — a group exists if EITHER table mentions
    * it, so an early-killed run (a `runs` row with no checkpoints yet)
    * still occupies its `HH-MM` slot. `undefined` when neither table has
-   * any row for that date. */
+   * any row for that date.
+   *
+   * COLLISION-AVOIDANCE ONLY (`nextTimeDir`'s own reason for existing) —
+   * do NOT use this for resume/chain-continuation group discovery. A
+   * caller that needs "the latest group with an actual payload to resume
+   * from" must use `latestCheckpointTimeDir` instead: a bare `runs` row
+   * (no checkpoint written yet — e.g. a run that opened, then died before
+   * its first stage completed) would otherwise SHADOW the last group that
+   * genuinely holds a payload, silently losing a resumable checkpoint. */
   latestTimeDir(runDate: string): string | undefined;
+  /** The greatest `time_dir` for `runDate` that has AT LEAST ONE row in
+   * `checkpoints` — never a bare `runs` row. `undefined` when this date
+   * has no checkpoints at all. THE resume/chain-continuation discovery
+   * method: `run.ts`'s `--resume`, `stage.ts`'s same-day chain, and
+   * `reconcile.ts`'s same-day chain all use this (never `latestTimeDir`)
+   * so a group that only ever opened a `runs` row — died before writing
+   * anything resumable — is skipped in favor of the last group that
+   * actually has a payload. */
+  latestCheckpointTimeDir(runDate: string): string | undefined;
   /** `time` itself, or `time`-2, `time`-3, … — the first candidate absent
    * from the same (`checkpoints` ∪ `runs`) time_dir set for `runDate`. */
   nextTimeDir(runDate: string, time: string): string;
   /** Deletes checkpoint ROWS (not groups) with `run_date` strictly older
    * than `todayDate` − `ttlDays`; never today's. Returns the number of
-   * rows deleted. */
+   * rows deleted.
+   *
+   * LOUD like `write`/`readLatest` above by the port's own contract — but
+   * unlike those two (which sit on the run's own recovery path, where
+   * silently losing a checkpoint would turn a resumable failure into a
+   * from-scratch rerun), this is TTL housekeeping run post-sync from
+   * `routines/cleanup/cleanup.ts`. That caller deliberately wraps this
+   * call in its own try/catch and warns rather than lets it propagate —
+   * a full run that already PASSED must never red out (and swallow its
+   * own success digest) over a background prune failing. The two postures
+   * (recovery-path LOUD vs. housekeeping-caller-catches-LOUD) are both
+   * deliberate; keep them that way rather than reconciling to one. */
   pruneOlderThan(todayDate: string, ttlDays: number): number;
   close(): void;
 }

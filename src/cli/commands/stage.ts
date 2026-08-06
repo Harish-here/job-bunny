@@ -7,7 +7,8 @@
  *
  * Checkpoints live in `ctx.checkpointStore` (a `SqliteCheckpointStore`
  * over the profile's `jobbunny.db`), not a per-run directory tree —
- * `latestTimeDir`/`readLatest` resolve TODAY's group and its latest
+ * `latestCheckpointTimeDir`/`readLatest` resolve TODAY's group (the last
+ * one with an ACTUAL checkpoint, never a bare `runs` row) and its latest
  * payload; `write` persists this stage's own output at its real position
  * in the full `stages` array (so a later full `run --resume` picks up
  * exactly where this ad-hoc stage run left off). Unlike `run.ts`'s resume
@@ -107,11 +108,16 @@ export async function stageCommand(
 
   const now = resolved.now();
   const date = now.toISOString().slice(0, 10);
-  // Continue in TODAY's latest existing group if one exists — this keeps a
-  // chain of sequential single-stage runs (e.g. the verify skill's
-  // `stage filter` → `stage dedup` → `stage rank`) sharing checkpoints.
-  // Only when today has no group yet does this create a fresh one.
-  const existing = ctx.checkpointStore.latestTimeDir(date);
+  // Continue in TODAY's latest existing CHECKPOINTED group if one exists —
+  // this keeps a chain of sequential single-stage runs (e.g. the verify
+  // skill's `stage filter` → `stage dedup` → `stage rank`) sharing
+  // checkpoints. `latestCheckpointTimeDir`, NOT `latestTimeDir`: a bare
+  // `runs` row from a run that died before its first checkpoint must never
+  // be treated as "today's existing group" — this stage would then read
+  // `undefined` and silently fall back to the empty seed payload instead of
+  // continuing the real prior chain. Only when today has no CHECKPOINTED
+  // group yet does this create a fresh one.
+  const existing = ctx.checkpointStore.latestCheckpointTimeDir(date);
   const time = existing ?? formatRunTime(now);
 
   // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS

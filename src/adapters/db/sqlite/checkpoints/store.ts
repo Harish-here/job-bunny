@@ -93,6 +93,16 @@ export class SqliteCheckpointStore implements CheckpointStore {
     return row?.time_dir;
   }
 
+  latestCheckpointTimeDir(runDate: string): string | undefined {
+    const db = this.open();
+    const row = db
+      .prepare(
+        'SELECT time_dir FROM checkpoints WHERE run_date = ? ORDER BY time_dir DESC LIMIT 1',
+      )
+      .get(runDate) as { time_dir: string } | undefined;
+    return row?.time_dir;
+  }
+
   nextTimeDir(runDate: string, time: string): string {
     const db = this.open();
     const exists = (candidate: string): boolean =>
