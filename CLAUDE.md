@@ -108,7 +108,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **`profile remove` is dry-run by default and refuses `rajni`** (the committed fixture); `--force` actually deletes `profiles/<name>/`. It never touches Notion.
 - **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
 - **The LinkedIn lane paces itself and trips a throttle breaker.** 5–12s jitter per navigation plus a 20–45s pause between saved-search URLs (`settings.linkedin.jitterMinMs/jitterMaxMs/interUrlDelayMinMs/interUrlDelayMaxMs`, defaults in `cli/wire/settings.ts`). Consecutive server-withheld JD shells (`jdRoot` present, text empty — a soft-block, never selector drift) open a time-boxed, session-scoped circuit breaker shared by every profile; thresholds, duration, and state location are lane constants — see `src/adapters/lanes/linkedin/`. An open breaker makes the lane return a **skipped** result without launching Chrome; `farm` excludes skipped lanes from its total-outage denominator, so the rest of the pipeline still runs.
-- **The board server binds `127.0.0.1` and writes only the `tracking` table.** `jobs` stays pipeline-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
+- **The board server binds `127.0.0.1` and writes only the `tracking` and config tables.** `jobs` and the runs tables stay pipeline/runner-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
 
 ## Conventions
 

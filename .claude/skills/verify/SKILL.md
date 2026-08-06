@@ -52,6 +52,29 @@ fixture experiments (e.g. to force a fresh group instead of continuing today's c
 force a fresh legacy-file lift), delete the db file itself: `rm -f profiles/rajni/data/jobbunny.db*`
 (the `-wal`/`-shm` sidecars included) — the next stage run recreates it fresh via the migrations.
 
+### Editing rajni's config for an experiment
+
+`profile.json`/`filter.json`/`resume.json`/`search_urls.md` are config→db Phase 4 config docs
+now, not plain files: `profiles/rajni/data/jobbunny.db`'s `config_docs` table wins once any stage
+run has lifted them (any prior stage/run invocation against rajni does this). Hand-editing the
+tracked file under `profiles/rajni/` after that point is a **silent no-op** — every reader hits
+the DB row, not the file, and nothing re-checks the file once its row exists. To actually change
+a doc for an experiment, either:
+
+```bash
+# Edit the doc, then write it back through the store (stdin pipe, TTY refused):
+node src/cli/main.ts config get filter.json --profile rajni > /tmp/rajni-filter.json
+# ...edit /tmp/rajni-filter.json...
+node src/cli/main.ts config set filter.json --profile rajni < /tmp/rajni-filter.json
+```
+
+or, to go back to the tracked fixture's pristine config rather than a hand-edited variant, force
+a fresh lift: `rm -f profiles/rajni/data/jobbunny.db*` re-lifts straight from the tracked files on
+the next read (the tracked files under `profiles/rajni/` remain the lift SOURCE — they are never
+themselves written by any of this). `git checkout -- profiles/rajni/` still restores those
+tracked files if a stage run or hand-edit left one of them dirty — separate from, and in addition
+to, the db-file reset above.
+
 ### The LinkedIn lane's resume/state logic
 
 The lane persists per-URL same-day completion via the `StateStore` port at the key
@@ -113,10 +136,11 @@ testing, give it ~0.3s to let the buffered `RunStoreLogger` flush land, then SIG
 
 For a genuinely novel one-off scenario Rajni's fixture doesn't model, create
 `profiles/_verify_test/` instead (`node src/cli/main.ts profile build --profile _verify_test`
-scaffolds a minimal `profile.json`/`filter.json`/`search_urls.md`/`avoid.md`), seed only the
-files the stage under test actually needs, and `node src/cli/main.ts profile remove --profile
-_verify_test --force` when done. Never run a test invocation against `profiles/harish/` or
-`profiles/uvashree/` directly.
+scaffolds a minimal `profile.json`/`filter.json`/`search_urls.md` config doc set — `avoid.md`
+is no longer seeded, config→db Phase 4 dropped that dead surface), seed only the config docs the
+stage under test actually needs (`node src/cli/main.ts config set <doc> --profile _verify_test`,
+piped), and `node src/cli/main.ts profile remove --profile _verify_test --force` when done. Never
+run a test invocation against `profiles/harish/` or `profiles/uvashree/` directly.
 
 ## A/B against unpatched code
 
