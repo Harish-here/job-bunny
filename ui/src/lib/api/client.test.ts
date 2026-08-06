@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, buildQuery, getJson, patchJson } from './client';
+import { ApiError, buildQuery, getJson, patchJson, postJson, putJson } from './client';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -96,6 +96,36 @@ describe('patchJson', () => {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ status: 'Applied' }),
+    });
+  });
+});
+
+describe('putJson', () => {
+  it('sends PUT with json content-type and body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { text: 'hi' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await putJson('/api/x', { text: 'hi' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/x', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hi' }),
+    });
+  });
+});
+
+describe('postJson', () => {
+  it('sends POST with json content-type and body', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(201, { profile: { name: 'x', connector: 'sqlite', hasDb: true } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    await postJson('/api/profiles', { name: 'x' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/profiles', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'x' }),
     });
   });
 });

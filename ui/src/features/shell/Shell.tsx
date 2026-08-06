@@ -6,6 +6,7 @@ import { AnalyticsPage } from '../analytics/AnalyticsPage';
 import { JobPage } from '../job/JobPage';
 import { OnboardingPage } from '../onboarding/OnboardingPage';
 import { RunsPage } from '../runs/RunsPage';
+import { SettingsPage } from '../settings/SettingsPage';
 import { TrackerPage } from '../tracker/TrackerPage';
 import { TriagePage } from '../triage/TriagePage';
 import { Sidebar } from './Sidebar';
@@ -27,6 +28,8 @@ function Page({ route, profile }: { route: Route; profile: string }) {
       return <AnalyticsPage />;
     case 'onboarding':
       return <OnboardingPage />;
+    case 'settings':
+      return <SettingsPage profile={profile} />;
     case 'job':
       return <JobPage profile={profile} id={route.id} />;
   }

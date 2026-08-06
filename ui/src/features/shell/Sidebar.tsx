@@ -11,6 +11,7 @@ const NAV_ITEMS: { name: RouteName; label: string }[] = [
   { name: 'runs', label: 'Runs' },
   { name: 'analytics', label: 'Analytics' },
   { name: 'onboarding', label: 'Onboarding' },
+  { name: 'settings', label: 'Settings' },
 ];
 
 export function Sidebar({
