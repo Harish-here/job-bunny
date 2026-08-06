@@ -1,27 +1,28 @@
 /**
- * migrate.test.ts (local-DB spec PR 2, Task 5) — TDD for `migrateCommand`.
- * The fake `MigrateWire` is a plain object literal — no `src/adapters/**`
- * import anywhere in this file (`only-wire-imports-adapters` has no
- * test-file exemption).
+ * migrate.test.ts (local-DB spec PR 2, Task 5; config→db Phase 4,
+ * Task 7) — TDD for `migrateCommand`. The fake `MigrateWire` is a plain
+ * object literal, and `MigrateWire.configStore` is a fake, in-memory
+ * `ConfigStore` (same Map-backed shape used throughout this program) —
+ * no `src/adapters/**` import anywhere in this file
+ * (`only-wire-imports-adapters` has no test-file exemption).
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { test } from 'node:test';
 import type { MigratedRecord } from '../../core/tracking/index.ts';
-import type { ConfigStore } from '../../ports/config_store.ts';
+import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
 import type { MigrateWire } from '../wire/index.ts';
 import { migrateCommand } from './migrate.ts';
 
-/** Config→db Phase 4: `MigrateWire.configStore` field — unused by this
- * command's own logic (Task 7's future job), so a plain no-op fake
- * satisfies the type here. */
-const FAKE_CONFIG_STORE: ConfigStore = {
-  readText: async () => undefined,
-  writeText: async () => {},
-  close() {},
-};
+function fakeConfigStore(docs: Partial<Record<ConfigDocKey, string>> = {}): ConfigStore {
+  const map = new Map(Object.entries(docs));
+  return {
+    readText: async (key) => map.get(key),
+    writeText: async (key, text) => {
+      map.set(key, text);
+    },
+    close() {},
+  };
+}
 
 const FIXTURE_RECORDS: MigratedRecord[] = [
   {
@@ -76,33 +77,16 @@ const PROFILE_JSON_FIXTURE = {
   },
 };
 
-async function withTmpProfileJson(
-  fn: (profileJsonPath: string) => Promise<void>,
-): Promise<void> {
-  const root = await mkdtemp(path.join(tmpdir(), 'jobbunny-migrate-'));
-  const profileJsonPath = path.join(root, 'profile.json');
-  await writeFile(
-    profileJsonPath,
-    `${JSON.stringify(PROFILE_JSON_FIXTURE, null, 2)}\n`,
-    'utf8',
-  );
-  try {
-    await fn(profileJsonPath);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-}
-
 function makeFakeWire(
-  profileJsonPath: string,
+  configStore: ConfigStore,
   overrides: Partial<MigrateWire> = {},
 ): { wire: MigrateWire; importCalls: Array<[MigratedRecord[], string]> } {
   const importCalls: Array<[MigratedRecord[], string]> = [];
   const wire: MigrateWire = {
     dbId: 'db-123',
-    profileJsonPath,
+    profileJsonPath: '/unused/profile.json',
     dbPath: '/x/jobbunny.db',
-    configStore: FAKE_CONFIG_STORE,
+    configStore,
     exportRecords: async () => FIXTURE_RECORDS,
     importRecords: (recs, now) => {
       importCalls.push([recs, now]);
@@ -120,7 +104,7 @@ test('migrateCommand: dbId "" returns 1, prints the no-dbId message, never calls
     dbId: '',
     profileJsonPath: '/unused/profile.json',
     dbPath: '/unused/jobbunny.db',
-    configStore: FAKE_CONFIG_STORE,
+    configStore: fakeConfigStore(),
     exportRecords: async () => {
       exportCalled = true;
       return [];
@@ -143,65 +127,68 @@ test('migrateCommand: dbId "" returns 1, prints the no-dbId message, never calls
 });
 
 test('migrateCommand: dry-run prints summary + nt- line, never calls importRecords, leaves profile.json byte-unchanged', async () => {
-  await withTmpProfileJson(async (profileJsonPath) => {
-    const before = await readFile(profileJsonPath, 'utf8');
-    const lines: string[] = [];
-    const { wire, importCalls } = makeFakeWire(profileJsonPath);
-
-    const code = await migrateCommand(
-      { profile: 'acme', apply: false },
-      { wireMigrate: async () => wire, write: (l) => lines.push(l) },
-    );
-
-    assert.equal(code, 0);
-    assert.equal(importCalls.length, 0);
-
-    assert.ok(lines.includes('total: 3, withTracking: 1, fallback: 1'));
-    assert.ok(lines.includes('nt-abcd1234 Mystery Role — Mystery Co'));
-    assert.ok(lines.includes('db: /x/jobbunny.db'));
-    assert.ok(
-      lines.includes(
-        'dry-run — nothing written (no DB file created). Re-run with --apply to import and flip the connector.',
-      ),
-    );
-
-    const after = await readFile(profileJsonPath, 'utf8');
-    assert.equal(after, before, 'profile.json must be byte-identical after a dry-run');
+  const store = fakeConfigStore({
+    'profile.json': `${JSON.stringify(PROFILE_JSON_FIXTURE, null, 2)}\n`,
   });
+  const before = await store.readText('profile.json');
+  const lines: string[] = [];
+  const { wire, importCalls } = makeFakeWire(store);
+
+  const code = await migrateCommand(
+    { profile: 'acme', apply: false },
+    { wireMigrate: async () => wire, write: (l) => lines.push(l) },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(importCalls.length, 0);
+
+  assert.ok(lines.includes('total: 3, withTracking: 1, fallback: 1'));
+  assert.ok(lines.includes('nt-abcd1234 Mystery Role — Mystery Co'));
+  assert.ok(lines.includes('db: /x/jobbunny.db'));
+  assert.ok(
+    lines.includes(
+      'dry-run — nothing written (no DB file created). Re-run with --apply to import and flip the connector.',
+    ),
+  );
+
+  const after = await store.readText('profile.json');
+  assert.equal(after, before, 'profile.json must be byte-identical after a dry-run');
 });
 
-test('migrateCommand: --apply calls importRecords once with (FIXTURE_RECORDS, isoNow) and flips profile.json, preserving unrelated keys', async () => {
-  await withTmpProfileJson(async (profileJsonPath) => {
-    const lines: string[] = [];
-    const { wire, importCalls } = makeFakeWire(profileJsonPath);
-
-    const code = await migrateCommand(
-      { profile: 'acme', apply: true },
-      { wireMigrate: async () => wire, write: (l) => lines.push(l) },
-    );
-
-    assert.equal(code, 0);
-    assert.equal(importCalls.length, 1);
-    const [recs, now] = importCalls[0] as [MigratedRecord[], string];
-    assert.deepEqual(recs, FIXTURE_RECORDS);
-    assert.match(now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-
-    assert.ok(
-      lines.includes(
-        'imported 2 jobs (1 already present, left untouched), 1 tracking rows; connector flipped to sqlite',
-      ),
-    );
-
-    const after = JSON.parse(await readFile(profileJsonPath, 'utf8'));
-    assert.equal(after.connector, 'sqlite');
-    assert.deepEqual(after.settings.sqlite, {});
-    // Everything else — including the notion slice and legacy top-level
-    // keys — survives the round-trip untouched.
-    assert.deepEqual(after.settings.notion, { dbId: 'db-123', dryRun: true });
-    assert.equal(after.notion_db_id, 'legacy-db-id');
-    assert.deepEqual(after.schedule, { enabled: false, time: '09:00', times: [] });
-    assert.deepEqual(after.notify, { telegram: { enabled: false, chat_id: '' } });
+test('migrateCommand: --apply calls importRecords once with (FIXTURE_RECORDS, isoNow) and flips profile.json via the store, preserving unrelated keys', async () => {
+  const store = fakeConfigStore({
+    'profile.json': `${JSON.stringify(PROFILE_JSON_FIXTURE, null, 2)}\n`,
   });
+  const lines: string[] = [];
+  const { wire, importCalls } = makeFakeWire(store);
+
+  const code = await migrateCommand(
+    { profile: 'acme', apply: true },
+    { wireMigrate: async () => wire, write: (l) => lines.push(l) },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(importCalls.length, 1);
+  const [recs, now] = importCalls[0] as [MigratedRecord[], string];
+  assert.deepEqual(recs, FIXTURE_RECORDS);
+  assert.match(now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+  assert.ok(
+    lines.includes(
+      'imported 2 jobs (1 already present, left untouched), 1 tracking rows; connector flipped to sqlite',
+    ),
+  );
+
+  const afterRaw = await store.readText('profile.json');
+  const after = JSON.parse(afterRaw ?? '{}');
+  assert.equal(after.connector, 'sqlite');
+  assert.deepEqual(after.settings.sqlite, {});
+  // Everything else — including the notion slice and legacy top-level
+  // keys — survives the round-trip untouched.
+  assert.deepEqual(after.settings.notion, { dbId: 'db-123', dryRun: true });
+  assert.equal(after.notion_db_id, 'legacy-db-id');
+  assert.deepEqual(after.schedule, { enabled: false, time: '09:00', times: [] });
+  assert.deepEqual(after.notify, { telegram: { enabled: false, chat_id: '' } });
 });
 
 test('migrateCommand: exportRecords rejecting makes migrateCommand reject', async () => {
@@ -209,7 +196,7 @@ test('migrateCommand: exportRecords rejecting makes migrateCommand reject', asyn
     dbId: 'db-123',
     profileJsonPath: '/unused/profile.json',
     dbPath: '/unused/jobbunny.db',
-    configStore: FAKE_CONFIG_STORE,
+    configStore: fakeConfigStore(),
     exportRecords: async () => {
       throw new Error('notion query failed');
     },
@@ -225,5 +212,19 @@ test('migrateCommand: exportRecords rejecting makes migrateCommand reject', asyn
         { wireMigrate: async () => wire },
       ),
     /notion query failed/,
+  );
+});
+
+test('migrateCommand: --apply with profile.json unexpectedly missing from the store throws loud', async () => {
+  const store = fakeConfigStore(); // no profile.json row at all
+  const { wire } = makeFakeWire(store);
+
+  await assert.rejects(
+    () =>
+      migrateCommand(
+        { profile: 'acme', apply: true },
+        { wireMigrate: async () => wire, write: () => {} },
+      ),
+    /profile\.json unexpectedly missing/,
   );
 });

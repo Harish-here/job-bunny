@@ -1,15 +1,31 @@
 /**
- * lane_add_url.test.ts (P8) — TDD for the pure URL helpers (ported
- * straight from v0 `scripts/setup/add_url.test.js`) and for
- * `laneAddUrlCommand`'s file-append behavior against a temp profile dir
- * (never the real `profiles/`).
+ * lane_add_url.test.ts (P8; config→db Phase 4, Task 7) — TDD for the pure
+ * URL helpers (ported straight from v0 `scripts/setup/add_url.test.js`)
+ * and for `laneAddUrlCommand`'s search_urls.md-append behavior against a
+ * fake, in-memory `ConfigStore` (never the real `profiles/`). The
+ * inventory-presence warning still exercises a real temp dir via the
+ * unrelated `exists`/`mkdir` deps.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
 import { laneAddUrlCommand, resolvePage, stripEphemerals } from './lane_add_url.ts';
+
+/** In-memory `ConfigStore` fake, same Map-backed shape used throughout
+ * this program (`cli/commands/config.test.ts`, `setup.test.ts`). */
+function fakeConfigStore(docs: Partial<Record<ConfigDocKey, string>> = {}): ConfigStore {
+  const map = new Map(Object.entries(docs));
+  return {
+    readText: async (key) => map.get(key),
+    writeText: async (key, text) => {
+      map.set(key, text);
+    },
+    close() {},
+  };
+}
 
 // ---------- stripEphemerals ----------
 
@@ -131,28 +147,26 @@ async function withTmpRoot(fn: (root: string) => Promise<void>) {
 test('laneAddUrlCommand creates search_urls.md with channel/page nodes and the URL line, warns on missing inventory', async () => {
   await withTmpRoot(async (root) => {
     const warnings: string[] = [];
+    const store = fakeConfigStore();
     const code = await laneAddUrlCommand(
       {
         profile: 'acme',
         url: 'https://www.linkedin.com/jobs/search/?keywords=engineer',
         label: 'eng',
       },
-      { root, write: () => {}, warn: (l) => warnings.push(l) },
+      { root, write: () => {}, warn: (l) => warnings.push(l), configStore: () => store },
     );
     assert.equal(code, 0);
 
-    const text = await readFile(
-      path.join(root, 'profiles', 'acme', 'search_urls.md'),
-      'utf8',
-    );
-    assert.match(text, /## linkedin/);
-    assert.match(text, /### linkedin__jobs-search/);
+    const text = await store.readText('search_urls.md');
+    assert.match(text ?? '', /## linkedin/);
+    assert.match(text ?? '', /### linkedin__jobs-search/);
     assert.match(
-      text,
+      text ?? '',
       /<!-- inventory: src\/adapters\/lanes\/linkedin\/page_inventory\/linkedin__jobs-search\.json -->/,
     );
     assert.match(
-      text,
+      text ?? '',
       /• eng - https:\/\/www\.linkedin\.com\/jobs\/search\/\?keywords=engineer/,
     );
     assert.equal(warnings.length, 1);
@@ -178,9 +192,10 @@ test('laneAddUrlCommand does not warn when the page inventory exists', async () 
     );
 
     const warnings: string[] = [];
+    const store = fakeConfigStore();
     const code = await laneAddUrlCommand(
       { profile: 'acme', url: 'https://www.linkedin.com/jobs/search/' },
-      { root, write: () => {}, warn: (l) => warnings.push(l) },
+      { root, write: () => {}, warn: (l) => warnings.push(l), configStore: () => store },
     );
     assert.equal(code, 0);
     assert.equal(warnings.length, 0);
@@ -189,27 +204,26 @@ test('laneAddUrlCommand does not warn when the page inventory exists', async () 
 
 test('laneAddUrlCommand defaults an unlabeled URL to "unlabeled"', async () => {
   await withTmpRoot(async (root) => {
+    const store = fakeConfigStore();
     await laneAddUrlCommand(
       { profile: 'acme', url: 'https://www.linkedin.com/jobs/search/?keywords=engineer' },
-      { root, write: () => {}, warn: () => {} },
+      { root, write: () => {}, warn: () => {}, configStore: () => store },
     );
-    const text = await readFile(
-      path.join(root, 'profiles', 'acme', 'search_urls.md'),
-      'utf8',
-    );
-    assert.match(text, /• unlabeled - /);
+    const text = await store.readText('search_urls.md');
+    assert.match(text ?? '', /• unlabeled - /);
   });
 });
 
 test('laneAddUrlCommand appends a second URL under the same page node without duplicating the heading', async () => {
   await withTmpRoot(async (root) => {
+    const store = fakeConfigStore();
     await laneAddUrlCommand(
       {
         profile: 'acme',
         url: 'https://www.linkedin.com/jobs/search/?keywords=engineer',
         label: 'one',
       },
-      { root, write: () => {}, warn: () => {} },
+      { root, write: () => {}, warn: () => {}, configStore: () => store },
     );
     await laneAddUrlCommand(
       {
@@ -217,12 +231,9 @@ test('laneAddUrlCommand appends a second URL under the same page node without du
         url: 'https://www.linkedin.com/jobs/search/?keywords=manager',
         label: 'two',
       },
-      { root, write: () => {}, warn: () => {} },
+      { root, write: () => {}, warn: () => {}, configStore: () => store },
     );
-    const text = await readFile(
-      path.join(root, 'profiles', 'acme', 'search_urls.md'),
-      'utf8',
-    );
+    const text = (await store.readText('search_urls.md')) ?? '';
     const headingCount = (text.match(/### linkedin__jobs-search$/gm) || []).length;
     assert.equal(headingCount, 1);
     assert.match(text, /• one - /);
@@ -232,13 +243,14 @@ test('laneAddUrlCommand appends a second URL under the same page node without du
 
 test('laneAddUrlCommand adds a distinct page node for a different page type without disturbing the first', async () => {
   await withTmpRoot(async (root) => {
+    const store = fakeConfigStore();
     await laneAddUrlCommand(
       {
         profile: 'acme',
         url: 'https://www.linkedin.com/jobs/search/?keywords=engineer',
         label: 'one',
       },
-      { root, write: () => {}, warn: () => {} },
+      { root, write: () => {}, warn: () => {}, configStore: () => store },
     );
     await laneAddUrlCommand(
       {
@@ -246,12 +258,9 @@ test('laneAddUrlCommand adds a distinct page node for a different page type with
         url: 'https://www.linkedin.com/jobs/search-results/?keywords=manager',
         label: 'two',
       },
-      { root, write: () => {}, warn: () => {} },
+      { root, write: () => {}, warn: () => {}, configStore: () => store },
     );
-    const text = await readFile(
-      path.join(root, 'profiles', 'acme', 'search_urls.md'),
-      'utf8',
-    );
+    const text = (await store.readText('search_urls.md')) ?? '';
     assert.match(text, /### linkedin__jobs-search$/m);
     assert.match(text, /### linkedin__jobs-search-results$/m);
     assert.match(text, /• one - /);
@@ -261,10 +270,11 @@ test('laneAddUrlCommand adds a distinct page node for a different page type with
 
 test('laneAddUrlCommand rejects a URL with no known page-type mapping', async () => {
   await withTmpRoot(async (root) => {
+    const store = fakeConfigStore();
     await assert.rejects(
       laneAddUrlCommand(
         { profile: 'acme', url: 'https://www.indeed.com/jobs' },
-        { root, write: () => {}, warn: () => {} },
+        { root, write: () => {}, warn: () => {}, configStore: () => store },
       ),
     );
   });

@@ -6,7 +6,7 @@
  * regardless of earlier results and self-reports
  * `done`/`skipped`/`needs-action`; the command exits 0 iff every step is
  * done-or-skipped, 1 if any needs action. The scaffold step is the only
- * thing here allowed to write — it delegates to `seedProfileFiles` (same
+ * thing here allowed to write — it delegates to `seedProfileDocs` (same
  * rules as `profile build`) so this command never mutates anything
  * outside `profiles/<p>/`.
  *
@@ -22,10 +22,13 @@
  * doc each (`profile.json`/`resume.json`/`search_urls.md`) through a
  * short-lived, READWRITE `ConfigStore` (`SetupDeps.configStore` — this is
  * a meaningful first-use context, same posture as `migrate`) rather than
- * `ProfileFsDeps.exists`/`readFile` directly. `stepScaffold`/`stepInventory`/
- * `stepUiBuilt`/`stepNotionToken`'s own `.env` read are UNCHANGED — they
- * stay on the plain fs deps (scaffold seeding and the linkedin inventory
- * check are Task 7's/unrelated scope respectively). This module sits
+ * `ProfileFsDeps.exists`/`readFile` directly. `stepScaffold` now ALSO goes
+ * through that same injected `configStore` (config→db Phase 4, Task 7 —
+ * it delegates to `seedProfileDocs`, `profile.ts`'s own config-doc
+ * writer), so every step in this command shares one config-doc seam.
+ * `stepInventory`/`stepUiBuilt`/`stepNotionToken`'s own `.env` read are
+ * UNCHANGED — they stay on the plain fs deps (the linkedin inventory
+ * check and `.env` are unrelated to Task 7's scope). This module sits
  * under `cli/commands/`, not the `only-wire-imports-adapters` carve-out,
  * so it reaches the store only through `wireConfigStore` (a plain
  * function import from `../wire/index.ts`, never `src/adapters/**`
@@ -38,7 +41,7 @@
 import path from 'node:path';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import { wireConfigStore } from '../wire/index.ts';
-import { defaultProfileFsDeps, type ProfileFsDeps, seedProfileFiles } from './profile.ts';
+import { defaultProfileFsDeps, type ProfileFsDeps, seedProfileDocs } from './profile.ts';
 
 export type StepStatus = 'done' | 'skipped' | 'needs-action';
 
@@ -65,9 +68,9 @@ function defaultDeps(): ProfileFsDeps {
   return defaultProfileFsDeps();
 }
 
-async function stepScaffold(profileDir: string, deps: SetupDeps): Promise<StepResult> {
-  const results = await seedProfileFiles(profileDir, deps);
-  const created = results.filter((r) => r.status === 'created').map((r) => r.file);
+async function stepScaffold(profileName: string, deps: SetupDeps): Promise<StepResult> {
+  const results = await seedProfileDocs(profileName, deps);
+  const created = results.filter((r) => r.status === 'created').map((r) => r.doc);
   if (created.length === 0) {
     return {
       step: 'profile scaffold',
@@ -308,7 +311,7 @@ export async function setupCommand(
   const profileDir = path.join(resolved.root, 'profiles', opts.profile);
 
   const steps: StepResult[] = [];
-  steps.push(await stepScaffold(profileDir, resolved));
+  steps.push(await stepScaffold(opts.profile, resolved));
   steps.push(await stepNotionToken(resolved.root, profileDir, resolved));
   steps.push(await stepResume(profileDir, resolved));
   const { result: searchUrlsResult, text } = await stepSearchUrls(profileDir, resolved);

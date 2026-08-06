@@ -1,24 +1,37 @@
 /**
- * commands/profile.ts (P8) — `profile build --profile <p>` and
- * `profile remove --profile <p>`: the onboarding scaffold and its
- * destructive undo. `build` is seed-never-clobber: it creates
- * `profiles/<p>/` and seeds any MISSING scaffold file, leaving an
- * existing file byte-for-byte untouched (`seedProfileFiles` is exported
- * so `setup.ts` reuses the identical rule set instead of duplicating
- * it). `remove` deletes the whole profile directory — destructive, so
- * it only prints what would be removed and exits non-zero unless
- * `--force` is passed (mirrors v0 `scripts/setup/remove_profile.js`'s
- * dry-run-by-default posture).
+ * commands/profile.ts (P8; config→db Phase 4, Task 7) — `profile build
+ * --profile <p>` and `profile remove --profile <p>`: the onboarding
+ * scaffold and its destructive undo. `build` is seed-never-clobber: it
+ * creates `profiles/<p>/` and seeds any MISSING scaffold doc, leaving an
+ * existing doc byte-for-byte untouched (`seedProfileDocs` is exported so
+ * `setup.ts` reuses the identical rule set instead of duplicating it).
+ * `remove` deletes the whole profile directory — destructive, so it only
+ * prints what would be removed and exits non-zero unless `--force` is
+ * passed (mirrors v0 `scripts/setup/remove_profile.js`'s dry-run-by-
+ * default posture); `remove` is unaffected by this task — it deletes the
+ * whole directory (config db included) and never reads/writes an
+ * individual doc, so it stays on plain `ProfileFsDeps`.
+ *
+ * `seedProfileDocs` writes through the injected `ConfigStore` seam
+ * (`ProfileDocsDeps.configStore`, default `wireConfigStore` — a plain
+ * function import from `../wire/index.ts`, never `src/adapters/**`
+ * directly) rather than raw `exists`/`readFile`/`writeFile`: "does this
+ * doc already exist" is answered by `store.readText(doc) !== undefined`,
+ * which already covers BOTH a real `config_docs` row and a legacy file
+ * with no row yet (`SqliteConfigStore`'s own lazy lift — see
+ * `ports/config_store.ts`).
  *
  * No `src/adapters/**` import — all filesystem access goes through
- * injected deps so tests use a temp dir and never touch the real
- * `profiles/`.
+ * injected deps so tests use a temp dir/fake store and never touch the
+ * real `profiles/`.
  */
 import { constants } from 'node:fs';
 import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PipelineConfigSchema } from '../../core/config/schema.ts';
 import { FilterConfigSchema } from '../../core/filter/config.ts';
+import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
+import { wireConfigStore } from '../wire/index.ts';
 
 export interface ProfileFsDeps {
   root: string;
@@ -44,7 +57,7 @@ export function defaultProfileFsDeps(): ProfileFsDeps {
 }
 
 export interface SeedResult {
-  file: string;
+  doc: ConfigDocKey;
   status: 'created' | 'kept';
 }
 
@@ -69,44 +82,87 @@ Hierarchical: Channel -> page -> labeled URLs. One page-type = one inventory in 
 Add URLs with \`lane add-url\` (strips ephemeral params). Format: \`  • <label> - <url>\`
 `;
 
-const AVOID_TEMPLATE = `# Avoid List
+// avoid.md is no longer seeded here (config→db Phase 4, Task 7): it was
+// never migrated into `config_docs` — it stays scaffolded-but-unmanaged,
+// exactly as CLAUDE.md already documents ("avoid.md is scaffolded but
+// read by no runtime code"). Existing avoid.md files on disk are
+// untouched by this — only the SEEDING of new ones stopped.
 
-Companies to drop in Stage A (extract, on card data — before opening JDs).
-Matching normalizes both sides: lowercase, strip legal suffixes (Pvt, Ltd, Inc, Technologies, Software, Labs), apply the alias map.
+export interface ProfileDocsDeps {
+  root: string;
+  /** Test seam — a factory so each call scopes and closes its OWN
+   * short-lived store, never a shared/memoized instance. Default binds
+   * `wireConfigStore` to the FINAL resolved `root`. */
+  configStore: (profileName: string) => ConfigStore;
+  mkdir: (path: string) => Promise<unknown>;
+  write: (line: string) => void;
+}
 
-## Alias map (variant -> canonical)
-`;
+/** Everything except `configStore`, whose default binds to the FINAL
+ * resolved `root` (computed by `profileBuildCommand` after merging
+ * overrides — same posture as `config.ts`/`setup.ts`). */
+function defaultProfileDocsFsDeps(): Omit<ProfileDocsDeps, 'configStore'> {
+  return {
+    root: process.cwd(),
+    mkdir: (p) => mkdir(p, { recursive: true }),
+    write: (line) => console.log(line),
+  };
+}
 
-/** Seeds any missing scaffold file under `profileDir`; leaves an existing
- * file byte-for-byte untouched. Every seeded JSON file is validated
- * against its real zod schema before being written. Shared by
- * `profile build` and `setup` so the two never disagree on what a fresh
- * profile looks like. */
-export async function seedProfileFiles(
-  profileDir: string,
-  deps: ProfileFsDeps,
+/** Seeds any missing scaffold doc for `profileName` — `profile.json`,
+ * `filter.json`, `search_urls.md`, in that order — leaving an existing
+ * doc byte-for-byte untouched. "Existing" means present as EITHER a real
+ * `config_docs` row or a legacy file with no row yet: `store.readText`
+ * already lifts-and-returns a legacy file in that second case (see
+ * `SqliteConfigStore`), so a single `readText(doc) !== undefined` check
+ * covers both — no separate file-existence check is needed or correct
+ * (it would race/duplicate what the adapter already guarantees).
+ * `resume.json` is deliberately NEVER seeded here — it's hand-maintained,
+ * and `setup`'s own `resume.json` step reports `needs-action` on absence
+ * to drive the `/setup` wizard; seeding `{}` would silence that signal.
+ * Every seeded JSON doc is validated against its real zod schema before
+ * being written. Shared by `profile build` and `setup` so the two never
+ * disagree on what a fresh profile looks like. */
+export async function seedProfileDocs(
+  profileName: string,
+  deps: ProfileDocsDeps,
 ): Promise<SeedResult[]> {
-  await deps.mkdir(profileDir);
+  await deps.mkdir(path.join(deps.root, 'profiles', profileName));
 
   const results: SeedResult[] = [];
+  const store = deps.configStore(profileName);
 
-  const seed = async (file: string, contents: string) => {
-    const p = path.join(profileDir, file);
-    if (await deps.exists(p)) {
-      results.push({ file, status: 'kept' });
-      return;
-    }
-    await deps.writeFile(p, contents);
-    results.push({ file, status: 'created' });
-  };
+  try {
+    const seed = async (doc: ConfigDocKey, template: string) => {
+      let existing: string | undefined;
+      try {
+        existing = await store.readText(doc);
+      } catch {
+        // A legacy file present but malformed enough to fail the store's
+        // own lift-time check still counts as "present" — never mask or
+        // overwrite an existing (if broken) user file; doctor/setup's
+        // other steps already surface the malformed-content problem
+        // loudly on their own.
+        results.push({ doc, status: 'kept' });
+        return;
+      }
+      if (existing !== undefined) {
+        results.push({ doc, status: 'kept' });
+        return;
+      }
+      await store.writeText(doc, template);
+      results.push({ doc, status: 'created' });
+    };
 
-  const pipelineJson = `${JSON.stringify(PipelineConfigSchema.parse(MINIMAL_PIPELINE_CONFIG), null, 2)}\n`;
-  const filterJson = `${JSON.stringify(FilterConfigSchema.parse(MINIMAL_FILTER_CONFIG), null, 2)}\n`;
+    const pipelineJson = `${JSON.stringify(PipelineConfigSchema.parse(MINIMAL_PIPELINE_CONFIG), null, 2)}\n`;
+    const filterJson = `${JSON.stringify(FilterConfigSchema.parse(MINIMAL_FILTER_CONFIG), null, 2)}\n`;
 
-  await seed('profile.json', pipelineJson);
-  await seed('filter.json', filterJson);
-  await seed('search_urls.md', SEARCH_URLS_TEMPLATE);
-  await seed('avoid.md', AVOID_TEMPLATE);
+    await seed('profile.json', pipelineJson);
+    await seed('filter.json', filterJson);
+    await seed('search_urls.md', SEARCH_URLS_TEMPLATE);
+  } finally {
+    store.close();
+  }
 
   return results;
 }
@@ -117,13 +173,20 @@ export interface ProfileBuildOptions {
 
 export async function profileBuildCommand(
   opts: ProfileBuildOptions,
-  deps: Partial<ProfileFsDeps> = {},
+  deps: Partial<ProfileDocsDeps> = {},
 ): Promise<number> {
-  const resolved: ProfileFsDeps = { ...defaultProfileFsDeps(), ...deps };
-  const profileDir = path.join(resolved.root, 'profiles', opts.profile);
-  const results = await seedProfileFiles(profileDir, resolved);
+  const fsDeps: Omit<ProfileDocsDeps, 'configStore'> = {
+    ...defaultProfileDocsFsDeps(),
+    ...deps,
+  };
+  const resolved: ProfileDocsDeps = {
+    ...fsDeps,
+    configStore:
+      deps.configStore ?? ((name) => wireConfigStore(name, { root: fsDeps.root })),
+  };
+  const results = await seedProfileDocs(opts.profile, resolved);
   for (const r of results) {
-    resolved.write(`[profile build] profiles/${opts.profile}/${r.file}: ${r.status}`);
+    resolved.write(`[profile build] profiles/${opts.profile}/${r.doc}: ${r.status}`);
   }
   return 0;
 }
