@@ -75,7 +75,6 @@ export interface StageCommandOptions {
 export interface StageDeps {
   wire: (profileName: string) => Promise<WireResult>;
   now: () => Date;
-  root: string;
   write: (line: string) => void;
 }
 
@@ -83,7 +82,6 @@ function defaultDeps(): StageDeps {
   return {
     wire: defaultWire,
     now: () => new Date(),
-    root: process.cwd(),
     write: (line: string) => console.log(line),
   };
 }
@@ -160,7 +158,13 @@ export async function stageCommand(
     const elapsedMs = Date.now() - stageStarted;
 
     ctx.checkpointStore.write(
-      { runDate: date, timeDir: time, position: index, stage: target.name },
+      {
+        runDate: date,
+        timeDir: time,
+        position: index,
+        stage: target.name,
+        writtenBy: runId,
+      },
       output,
     );
 

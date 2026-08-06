@@ -77,6 +77,7 @@ export async function runPipeline(
           timeDir: group.timeDir,
           position: index,
           stage: stage.name,
+          ...(ctx.runId !== undefined ? { writtenBy: ctx.runId } : {}),
         },
         output,
       );

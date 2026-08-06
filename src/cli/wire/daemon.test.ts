@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,11 +11,17 @@ import { wireDaemonRunHistory } from './daemon.ts';
 // exemption from `only-wire-imports-adapters` — only `daemon.ts` itself is
 // carved out, mirroring `board.test.ts`'s own posture). Seeding a real
 // `runs` row therefore goes through `node:sqlite` directly (a node
-// builtin, never `src/adapters`): `wireDaemonRunHistory`'s returned
-// function is called once first with no rows present, which — via the
-// REAL `SqliteRunStore.listRunTimeDirs`'s lazy `openJobsDb` — creates and
-// migrates the db file for us; a raw `INSERT INTO runs` afterward then
-// exercises the exact column shape `SqliteRunStore.startRun` itself writes.
+// builtin, never `src/adapters`): each seeding test first writes an EMPTY
+// placeholder file at the resolved db path (a zero-length file is a valid,
+// unmigrated empty sqlite database) so `wireDaemonRunHistory`'s own
+// existence check passes; `wireDaemonRunHistory`'s returned function is
+// then called once, which — via the REAL `SqliteRunStore.listRunTimeDirs`'s
+// lazy `openJobsDb` — migrates that already-existing file up to the latest
+// schema; a raw `INSERT INTO runs` afterward then exercises the exact
+// column shape `SqliteRunStore.startRun` itself writes. Nothing in this
+// file relies on `wireDaemonRunHistory` itself creating a db file — it
+// must never do that for a profile with no db yet (see the dedicated test
+// below).
 
 let root: string;
 
@@ -44,17 +51,18 @@ function insertRunRow(
   db.close();
 }
 
-test('wireDaemonRunHistory: a profile with no jobbunny.db yet yields no records', async () => {
-  await seedProfileDir('nodb');
+test('wireDaemonRunHistory: a profile with no jobbunny.db yet yields no records and creates no file', async () => {
+  const dbPath = await seedProfileDir('nodb');
   const readRunHistory = wireDaemonRunHistory({ root });
   assert.deepEqual(readRunHistory(['nodb'], '2026-08-05'), []);
+  assert.equal(existsSync(dbPath), false, 'a tick must never create the db file');
 });
 
 test("wireDaemonRunHistory: reads a real runs row from that profile's own jobbunny.db, converting time_dir -> startedAt", async () => {
   const dbPath = await seedProfileDir('harish');
+  await writeFile(dbPath, ''); // the profile has a db (empty/unmigrated) already.
   const readRunHistory = wireDaemonRunHistory({ root });
-  // First call creates + migrates the (until now nonexistent) db file, via
-  // the real SqliteRunStore's lazy open.
+  // First call migrates the existing (empty) file via the real store's lazy open.
   assert.deepEqual(readRunHistory(['harish'], '2026-08-05'), []);
 
   insertRunRow(dbPath, {
@@ -72,8 +80,10 @@ test("wireDaemonRunHistory: reads a real runs row from that profile's own jobbun
 test('wireDaemonRunHistory: batches multiple profiles, each read from its OWN db', async () => {
   const alphaDbPath = await seedProfileDir('alpha');
   const zetaDbPath = await seedProfileDir('zeta');
+  await writeFile(alphaDbPath, '');
+  await writeFile(zetaDbPath, '');
   const readRunHistory = wireDaemonRunHistory({ root });
-  readRunHistory(['alpha', 'zeta'], '2026-08-05'); // create + migrate both.
+  readRunHistory(['alpha', 'zeta'], '2026-08-05'); // migrate both.
 
   insertRunRow(alphaDbPath, {
     date: '2026-08-05',
@@ -105,9 +115,10 @@ test('wireDaemonRunHistory: honors settings.sqlite.path override in profile.json
     join(root, 'profiles', 'custom', 'profile.json'),
     JSON.stringify({ connector: 'sqlite', settings: { sqlite: { path: customDbPath } } }),
   );
+  await writeFile(customDbPath, '');
 
   const readRunHistory = wireDaemonRunHistory({ root });
-  readRunHistory(['custom'], '2026-08-05'); // create + migrate at the OVERRIDDEN path.
+  readRunHistory(['custom'], '2026-08-05'); // migrate at the OVERRIDDEN path.
 
   insertRunRow(customDbPath, {
     date: '2026-08-05',
@@ -127,4 +138,38 @@ test('wireDaemonRunHistory: a malformed profile.json falls back to the default d
   const readRunHistory = wireDaemonRunHistory({ root });
   assert.doesNotThrow(() => readRunHistory(['broken'], '2026-08-05'));
   assert.deepEqual(readRunHistory(['broken'], '2026-08-05'), []);
+});
+
+test('wireDaemonRunHistory: a store that fails once does not permanently blind a subsequent call (fresh store per call, never memoized)', async () => {
+  const dbPath = await seedProfileDir('flaky');
+  await writeFile(dbPath, ''); // exists, so the missing-file short-circuit above never fires here.
+
+  let calls = 0;
+  let closes = 0;
+  const readRunHistory = wireDaemonRunHistory({
+    root,
+    makeRunStore: () => {
+      calls += 1;
+      // Call 1 stands in for a store whose open() failed (the real
+      // `SqliteRunStore`'s own permanent-degrade posture): it reports no
+      // records. Call 2 stands in for the SAME profile's db opening fine
+      // on the very next tick. If `wireDaemonRunHistory` ever memoized one
+      // store per profile (the bug this pins), call 2 would reuse call 1's
+      // degraded instance and also report no records.
+      const rows = calls === 1 ? [] : ['09-00'];
+      return {
+        listRunTimeDirs: () => rows,
+        close: () => {
+          closes += 1;
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(readRunHistory(['flaky'], '2026-08-05'), []);
+  assert.deepEqual(readRunHistory(['flaky'], '2026-08-05'), [
+    { profile: 'flaky', date: '2026-08-05', startedAt: '09:00' },
+  ]);
+  assert.equal(calls, 2, 'expected a fresh store construction per call, never memoized');
+  assert.equal(closes, 2, 'expected every constructed store to be closed after its read');
 });

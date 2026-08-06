@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatRunTime } from './run_folder.ts';
+import { formatRunTime } from './time.ts';
 
 test('formatRunTime: zero-pads HH-MM from the local clock', () => {
   assert.equal(formatRunTime(new Date(2026, 6, 21, 9, 5)), '09-05');

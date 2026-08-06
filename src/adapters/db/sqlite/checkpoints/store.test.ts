@@ -11,6 +11,21 @@ function freshDbPath(): string {
   return path.join(dir, 'jobbunny.db');
 }
 
+/** Seeds a real `runs` row (via the same `openJobsDb` this adapter uses)
+ * and returns its id — `written_by` is a real FK against `runs(id)`, so
+ * any test exercising it needs an actual row to point at. */
+function seedRunRow(dbPath: string): number {
+  const db = openJobsDb(dbPath);
+  const result = db
+    .prepare(
+      `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
+       VALUES ('2026-08-05', '10-00', 'run', 'running', '2026-08-05T10:00:00.000Z')`,
+    )
+    .run();
+  db.close();
+  return Number(result.lastInsertRowid);
+}
+
 test('write + readLatest round-trip a single checkpoint', () => {
   const dbPath = freshDbPath();
   const store = new SqliteCheckpointStore(dbPath);
@@ -27,6 +42,35 @@ test('write + readLatest round-trip a single checkpoint', () => {
     stage: 'farm',
   });
   assert.deepEqual(latest.payload, { jobs: [1, 2], dropped: [] });
+});
+
+test('write + readLatest round-trip writtenBy (provenance/join key back to the writing runs row)', () => {
+  const dbPath = freshDbPath();
+  const runId = seedRunRow(dbPath);
+  const store = new SqliteCheckpointStore(dbPath);
+  store.write(
+    {
+      runDate: '2026-08-05',
+      timeDir: '10-00',
+      position: 0,
+      stage: 'farm',
+      writtenBy: runId,
+    },
+    { jobs: [] },
+  );
+  const latest = store.readLatest('2026-08-05', '10-00');
+  assert.equal(latest?.ref.writtenBy, runId);
+});
+
+test('write + readLatest: writtenBy absent on write round-trips as absent, not a sentinel like -1', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteCheckpointStore(dbPath);
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 0, stage: 'farm' },
+    { jobs: [] },
+  );
+  const latest = store.readLatest('2026-08-05', '10-00');
+  assert.equal(latest?.ref.writtenBy, undefined);
 });
 
 test('slot overwrite: writing the same (runDate, timeDir, position) twice keeps the second write', () => {

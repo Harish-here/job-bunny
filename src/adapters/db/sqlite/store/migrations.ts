@@ -89,7 +89,7 @@ const MIGRATIONS: readonly string[] = [
     written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
     created_at TEXT    NOT NULL,
     PRIMARY KEY (run_date, time_dir, position)
-  ) WITHOUT ROWID;
+  );
   CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
   `,
 ];

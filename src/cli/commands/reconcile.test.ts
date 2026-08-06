@@ -1,16 +1,11 @@
 /**
  * reconcile.test.ts (P8) — TDD for `reconcileCommand`. Every dependency
- * (`wire`, `runPipeline`, `now`, `runStore`, `checkpointStore`) is FAKE — a
- * temp dir is still allocated for `root` (part of `ReconcileDeps`'s
- * surface), but nothing in this file touches the real filesystem for group
- * discovery anymore — that's `ctx.checkpointStore.latestCheckpointTimeDir`
- * now.
+ * (`wire`, `runPipeline`, `now`, `runStore`, `checkpointStore`) is FAKE —
+ * nothing in this file touches the real filesystem; group discovery goes
+ * through `ctx.checkpointStore.latestCheckpointTimeDir`.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import type { RunResult } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
@@ -19,16 +14,6 @@ import type { NotifyEvent } from '../../ports/notifier.ts';
 import type { RunStore } from '../../ports/run_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { reconcileCommand } from './reconcile.ts';
-
-let root: string;
-
-before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'jb-reconcile-cmd-'));
-});
-
-after(async () => {
-  await rm(root, { recursive: true, force: true });
-});
 
 function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   return {
@@ -212,7 +197,6 @@ test('reconcileCommand: finds the reconcile stage by name, not by array index', 
         return passedResult();
       },
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -238,7 +222,6 @@ test('reconcileCommand: opens a "reconcile" runs row and finishes it with runPip
         return passedResult();
       },
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -270,7 +253,6 @@ test("reconcileCommand: a failed runPipeline result finishes the row as failed (
       wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
       runPipeline: async () => failed,
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -300,7 +282,6 @@ test('reconcileCommand: prints the rebuilt cache entry count and returns 0 on su
       wire: async () => ({ ctx, stages: [reconcileStage], routines: [], checks: [] }),
       runPipeline: async () => passedResult(),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -321,7 +302,6 @@ test('reconcileCommand: a failed outcome prints the failure and returns 1', asyn
       runPipeline: async () =>
         passedResult({ outcome: 'failed', failedStage: 'reconcile', stages: [] }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -344,7 +324,6 @@ test('reconcileCommand: overrides ctx.logger with a RunStoreLogger before runnin
         return passedResult();
       },
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -371,7 +350,6 @@ test('reconcileCommand: a profile with invalid settings.logging throws before an
           return passedResult();
         },
         now: () => new Date('2026-07-25T00:00:00Z'),
-        root,
         write: () => {},
       },
     ),
@@ -397,7 +375,6 @@ test('reconcileCommand: continues in an existing prior group discovered via ctx.
         return passedResult();
       },
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -419,7 +396,6 @@ test('reconcileCommand: throws when wire() lacks a "reconcile" stage', async () 
           wire: async () => ({ ctx, stages: [otherStage], routines: [], checks: [] }),
           runPipeline: async () => passedResult(),
           now: () => new Date('2026-07-25T00:00:00Z'),
-          root,
           write: () => {},
         },
       ),

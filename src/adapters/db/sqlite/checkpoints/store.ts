@@ -8,6 +8,10 @@
  * statement throwing, propagates straight out of the method call that
  * triggered it — checkpoints are recovery data, so silently losing one
  * would turn a resumable failure into a from-scratch rerun.
+ *
+ * `write` persists `ref.writtenBy` (the writing invocation's own `runs` row
+ * id) into the `written_by` column, `NULL` when absent; `readLatest` round-
+ * trips it back onto the returned `ref`.
  */
 import type { DatabaseSync } from 'node:sqlite';
 import type {
@@ -22,6 +26,7 @@ interface CheckpointRow {
   position: number;
   stage: string;
   payload_json: string;
+  written_by: number | null;
 }
 
 export class SqliteCheckpointStore implements CheckpointStore {
@@ -43,14 +48,15 @@ export class SqliteCheckpointStore implements CheckpointStore {
     const db = this.open();
     db.prepare(
       `INSERT OR REPLACE INTO checkpoints
-         (run_date, time_dir, position, stage, payload_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (run_date, time_dir, position, stage, payload_json, written_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       ref.runDate,
       ref.timeDir,
       ref.position,
       ref.stage,
       JSON.stringify(payload),
+      ref.writtenBy ?? null,
       this.nowFn().toISOString(),
     );
     // No try/catch here — let it throw straight through (loud).
@@ -74,6 +80,7 @@ export class SqliteCheckpointStore implements CheckpointStore {
         timeDir: row.time_dir,
         position: row.position,
         stage: row.stage,
+        ...(row.written_by !== null ? { writtenBy: row.written_by } : {}),
       },
       payload: JSON.parse(row.payload_json) as unknown,
     };

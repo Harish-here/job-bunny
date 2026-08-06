@@ -16,6 +16,12 @@ export interface CheckpointRef {
   timeDir: string;
   position: number;
   stage: string;
+  /** The `runs` row id of the invocation that WROTE this checkpoint —
+   * provenance, and a join key back to that row's own log/result/failure.
+   * Absent when the writer never opened a `runs` row (e.g. `ctx.runId` is
+   * unset); the adapter persists that absence as `NULL`, never a sentinel
+   * like `-1`. */
+  writtenBy?: number;
 }
 
 export interface CheckpointStore {

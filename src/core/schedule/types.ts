@@ -2,14 +2,12 @@
  * core/schedule/types.ts — the pure vocabulary the daemon's owed-slot
  * decision (owed.ts) is built from. Local wall-clock time throughout, never
  * UTC: `time_dir`-shaped strings (formatted by `formatRunTime` in
- * ops/observability/run/run_folder.ts, persisted as the `runs`/`checkpoints`
+ * ops/observability/run/time.ts, persisted as the `runs`/`checkpoints`
  * tables' `time_dir` column) are local, and using UTC here is a bug this
  * project already hit once — run.log timestamps are UTC while `time_dir`
  * strings are local, and conflating the two silently misaligns "is this slot
- * served" checks. (Historical note: pre-Phase-2 this parsed on-disk run
- * FOLDER names; the checkpoints-to-db migration retired the folders, but the
- * identical `HH-MM(-N)` shape lives on as the `time_dir` column's format, so
- * `parseTimeDirSlot` below still earns its keep against the DB.)
+ * served" checks. (Historical note: `parseTimeDirSlot` below originally
+ * parsed on-disk run FOLDER names, pre-checkpoints-to-db migration.)
  */
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -46,7 +44,7 @@ export interface OwedRun {
 }
 
 // Matches the same `^\d{2}-\d{2}(-\d+)?$` shape `formatRunTime` produces
-// (ops/observability/run/run_folder.ts) and that the `runs`/`checkpoints`
+// (ops/observability/run/time.ts) and that the `runs`/`checkpoints`
 // tables persist as `time_dir`: always zero-padded HH-MM, optionally
 // suffixed -N on a same-minute collision. A string that doesn't match
 // (e.g. "sync_dryrun.json") is not a time-dir-shaped slot at all and

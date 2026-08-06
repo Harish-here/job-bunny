@@ -19,8 +19,6 @@ import type { NotifyEvent } from '../../ports/notifier.ts';
 import type { RunEventRow, RunFailure, RunStore } from '../../ports/run_store.ts';
 import { stageCommand } from './stage.ts';
 
-const root = '/unused-root';
-
 /** In-memory `CheckpointStore` fake that ACTUALLY behaves like a tiny
  * store — this is what makes the chain-semantics test below meaningful.
  * Deliberate simplification vs. the real `SqliteCheckpointStore` adapter:
@@ -187,7 +185,6 @@ test('stageCommand: unknown stage name prints valid names and returns 1 (no thro
     {
       wire: async () => ({ ctx: fakeCtx(), stages, routines: [], checks: [] }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -222,7 +219,6 @@ test('stageCommand: runs from the empty seed payload when no checkpoint exists, 
         checks: [],
       }),
       now: () => now,
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -231,22 +227,23 @@ test('stageCommand: runs from the empty seed payload when no checkpoint exists, 
   assert.deepEqual(observedInput, { jobs: [], dropped: [] });
 
   // No group existed today (empty store) — a fresh one is created at the
-  // current local HH-MM, per `formatRunTime`.
+  // current local HH-MM, per `formatRunTime`. (Also covers: "a fresh day
+  // creates a group at the current formatted time" — the sole assertion
+  // that case needs is `written.ref.timeDir === time` below.)
   const time = formatRunTime(now);
   const written = checkpointStore.rows.get(`2026-07-25|${time}`);
   assert.deepEqual(written, {
-    ref: { runDate: '2026-07-25', timeDir: time, position: 1, stage: 'compress' },
+    ref: {
+      runDate: '2026-07-25',
+      timeDir: time,
+      position: 1,
+      stage: 'compress',
+      writtenBy: 1,
+    },
     payload: { jobs: [{ id: 'a' }], dropped: [] },
   });
 
   assert.ok(lines.some((l) => l.startsWith('compress: 0 -> 1')));
-});
-
-test('stageCommand: a fresh day (empty store) creates a group at the current formatted time — covered above', () => {
-  // The 'runs from the empty seed payload...' test above already asserts
-  // this exact case (empty fake store -> `time === formatRunTime(now)`);
-  // no separate test needed. See its assertion on `written.ref.timeDir`.
-  assert.ok(true);
 });
 
 test('stageCommand: resumes from the latest checkpoint rather than the empty seed', async () => {
@@ -276,7 +273,6 @@ test('stageCommand: resumes from the latest checkpoint rather than the empty see
         checks: [],
       }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -309,7 +305,6 @@ test("stageCommand: continues in TODAY's existing group (not the current formatt
         checks: [],
       }),
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -342,7 +337,6 @@ test("stageCommand: continues in TODAY's existing group (not the current formatt
         checks: [],
       }),
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -360,6 +354,7 @@ test("stageCommand: continues in TODAY's existing group (not the current formatt
       timeDir: groupAfterFirst as string,
       position: 1,
       stage: 'compress',
+      writtenBy: 1,
     },
     payload: { jobs: [{ id: 'r' }, { id: 'c' }], dropped: [] },
   });
@@ -375,7 +370,6 @@ test('stageCommand: overrides ctx.logger with a RunStoreLogger before running th
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -401,7 +395,6 @@ test('stageCommand: hands guardStage a logger scoped to the target stage name', 
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -431,7 +424,6 @@ test('stageCommand: opens a "stage" runs row and finishes it as passed with the 
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -467,7 +459,6 @@ test('stageCommand: heartbeats promptly after startRun, so a long-running stage 
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
       now: () => now,
-      root,
       write: () => {},
     },
   );
@@ -500,7 +491,6 @@ test('stageCommand: a stage that throws records the failure, finishes the row as
       {
         wire: async () => ({ ctx, stages, routines: [], checks: [] }),
         now: () => new Date('2026-07-25T00:00:00Z'),
-        root,
         write: () => {},
       },
     ),
@@ -539,7 +529,6 @@ test('stageCommand: a profile with invalid settings.logging throws before the st
       {
         wire: async () => ({ ctx, stages, routines: [], checks: [] }),
         now: () => new Date('2026-07-25T00:00:00Z'),
-        root,
         write: () => {},
       },
     ),

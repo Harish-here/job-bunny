@@ -253,14 +253,17 @@ test('happy path: 3 stages checkpoint, funnel populates, result passes', async (
   assert.equal(writes.length, 3);
   assert.equal(writes[0]?.ref.position, 0);
   assert.equal(writes[0]?.ref.stage, 'farm');
+  assert.equal(writes[0]?.ref.writtenBy, 1, 'expected ctx.runId to flow into writtenBy');
   const payload0 = writes[0]?.payload as StagePayload;
   assert.equal(payload0.jobs.length, 1);
   assert.equal(writes[1]?.ref.position, 1);
   assert.equal(writes[1]?.ref.stage, 'filter');
+  assert.equal(writes[1]?.ref.writtenBy, 1);
   const payload1 = writes[1]?.payload as StagePayload;
   assert.equal(payload1.dropped.length, 1);
   assert.equal(writes[2]?.ref.position, 2);
   assert.equal(writes[2]?.ref.stage, 'assemble');
+  assert.equal(writes[2]?.ref.writtenBy, 1);
   const payload2 = writes[2]?.payload as StagePayload;
   assert.equal(payload2.jobs.length, 2);
 
@@ -424,6 +427,9 @@ test('resume: seeded from an earlier group, fast-forwards past its latest checkp
   for (const write of writes) {
     assert.equal(write.ref.runDate, '2026-07-21');
     assert.equal(write.ref.timeDir, '09-00');
+    // ctx.runId is unset in this ctx (no `runId` override passed to
+    // fakeCtx) — writtenBy must be omitted entirely, never a sentinel.
+    assert.equal(write.ref.writtenBy, undefined);
   }
   assert.equal(writes[0]?.ref.stage, 'stage1');
   const resumedPayload = writes[0]?.payload as StagePayload;

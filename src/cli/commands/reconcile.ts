@@ -50,7 +50,6 @@ export interface ReconcileDeps {
     opts: RunnerOptions,
   ) => Promise<RunResult>;
   now: () => Date;
-  root: string;
   write: (line: string) => void;
 }
 
@@ -59,7 +58,6 @@ function defaultDeps(): ReconcileDeps {
     wire: defaultWire,
     runPipeline: defaultRunPipeline,
     now: () => new Date(),
-    root: process.cwd(),
     write: (line: string) => console.log(line),
   };
 }
