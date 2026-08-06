@@ -33,6 +33,9 @@ export interface StateCommandOptions {
 
 export interface StateDeps {
   wire: (profileName: string) => Promise<WireResult>;
+  /** Injected so `state write`'s TTY guard stays testable without a real
+   * terminal — defaults to the real `process.stdin.isTTY` check. */
+  isStdinTty: () => boolean;
   readStdin: () => Promise<string>;
   /** Raw doc channel — NO injected newline (unlike every other command's
    * `write: (line: string) => void` / `console.log`). `state read` prints
@@ -49,6 +52,7 @@ export interface StateDeps {
 function defaultDeps(): StateDeps {
   return {
     wire: defaultWire,
+    isStdinTty: () => process.stdin.isTTY === true,
     readStdin: async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) {
@@ -101,6 +105,11 @@ export async function stateCommand(
     }
     resolved.writeRaw(doc);
     return 0;
+  }
+
+  if (resolved.isStdinTty()) {
+    resolved.stderr('state write: expects the document on stdin (pipe it in)');
+    return 1;
   }
 
   const content = await resolved.readStdin();

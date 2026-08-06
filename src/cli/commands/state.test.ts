@@ -172,6 +172,30 @@ test('state write decisions-partial: writes at the DECISIONS_PARTIAL_PATH key', 
   assert.equal(store.get(DECISIONS_PARTIAL_PATH), '| verdict |\n');
 });
 
+test('state write: TTY stdin exits 1 with a stderr message and never calls readStdin', async () => {
+  const store = new Map<string, unknown>();
+  const ctx = fakeCtx(store);
+  const errors: string[] = [];
+  let readStdinCalled = false;
+
+  const code = await stateCommand(
+    { profile: 'rajni', action: 'write', key: 'decisions' },
+    {
+      wire: async () => ({ ctx, stages: [], routines: [], checks: [] }),
+      isStdinTty: () => true,
+      readStdin: async () => {
+        readStdinCalled = true;
+        return 'unreachable';
+      },
+      stderr: (line) => errors.push(line),
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.equal(readStdinCalled, false);
+  assert.ok(errors.some((l) => l.includes('expects the document on stdin')));
+});
+
 test('state write table: rejected before wire() is ever called', async () => {
   let wireCalled = false;
   const errors: string[] = [];

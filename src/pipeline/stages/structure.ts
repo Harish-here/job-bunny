@@ -11,8 +11,8 @@ import { TABLE_PATH } from './compress.ts';
  * StructuredSchema's titleParts/locations/workType/timezone/skills/salary)
  * for the assemble stage (Task 4) to zod-parse per row.
  *
- * Run-scoped side files, JSON-wrapped strings (the Storage port is
- * JSON-only — see compress.ts's header note; there is no separate .md
+ * Run-scoped state_docs rows, JSON-wrapped strings (the StateStore port is
+ * JSON-value-only — see compress.ts's header note; there is no separate .md
  * write mechanism, so "structure_decisions.partial.md" in the plan names
  * the CONTENT, not a literal file).
  */

@@ -9,10 +9,10 @@ import { CACHE_PATH } from './reconcile.ts';
  * `core/dedup`'s `dedupe(jobs, cache)`. The cache it dedupes against is not
  * carried on the `StagePayload` (spec keeps `StagePayload` frozen to
  * `{ jobs, dropped }`) — it is the `CacheEntry[]` the `reconcile` pre-stage
- * wrote to `ctx.storage` this same run (`reconcile.ts`'s `CACHE_PATH`),
- * read back here and zod-validated on ingress (`assemble.ts`'s idiom for
- * trusting nothing that crossed a storage boundary, even one this run
- * itself wrote earlier).
+ * wrote to `ctx.stateStore` this same run (`reconcile.ts`'s `CACHE_PATH`
+ * key), read back here and zod-validated on ingress (`assemble.ts`'s idiom
+ * for trusting nothing that crossed a state-document boundary, even one
+ * this run itself wrote earlier).
  *
  * A missing cache file is a pipeline-ordering bug (dedup run without a
  * preceding reconcile in the same run), not "no known jobs yet" — silently
@@ -25,8 +25,8 @@ import { CACHE_PATH } from './reconcile.ts';
  *
  * No injected dependency here (unlike filter/rank's `FilterConfig`/
  * `RankConfig`, or reconcile/sync's `Connector`) — `dedupe` is pure and
- * needs nothing but the payload and the storage-carried cache — so this is
- * a plain exported `StageDef`, matching `assemble.ts`'s (also
+ * needs nothing but the payload and the stateStore-carried cache — so this
+ * is a plain exported `StageDef`, matching `assemble.ts`'s (also
  * dependency-free) plain-const pattern rather than a `make*Stage` factory.
  */
 const CacheSchema = z.array(CacheEntrySchema);

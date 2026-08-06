@@ -5,10 +5,11 @@ import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
  * Reconcile stage (P7 Task 5 — added deliberately alongside the plan's
  * listed tail stages: dedup needs a cache, and nothing else produces one).
  * Read-only on Notion: rebuilds the local mirror from the live DB via
- * `Connector.rebuildCache` and persists it to a run-scoped storage file for
- * the `dedup` stage (later in the same run) to read back — mirrors
- * compress.ts's exported-path-constant idiom for handing a value to a later
- * stage through `ctx.storage` rather than the `StagePayload`.
+ * `Connector.rebuildCache` and persists it to a run-scoped `ctx.stateStore`
+ * document (state_docs row) for the `dedup` stage (later in the same run) to
+ * read back — mirrors compress.ts's exported-path-constant idiom for handing
+ * a value to a later stage through `ctx.stateStore` rather than the
+ * `StagePayload`.
  *
  * The payload itself passes through unchanged — reconcile produces a cache,
  * not jobs.
