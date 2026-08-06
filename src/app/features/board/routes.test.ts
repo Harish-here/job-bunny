@@ -209,6 +209,28 @@ test('list: an OPENABLE store on a notion-connector profile is still a 404 no_lo
   assert.equal(store.listCalls.length, 0);
 });
 
+test('list: an UNKNOWN connector ("") falls through to the openStore/hasDb gate — an openable store is a 200, not a 404 (a corrupt profile.json must not hide an intact jobbunny.db)', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store, ''), 'GET', '/api/profiles/:name/jobs');
+  const res = await route.handler(req({ params: { name: 'rajni' } }));
+  assert.equal(res.status, 200);
+  assert.equal(store.listCalls.length, 1);
+});
+
+test('list: an UNKNOWN connector ("") with no openable store still 404s no_local_db', () => {
+  const source: BoardSource = {
+    listProfiles: () => [{ name: 'rajni', connector: '', hasDb: false }],
+    openStore: () => null,
+    close() {},
+  };
+  const route = findRoute(source, 'GET', '/api/profiles/:name/jobs');
+  assertHttpError(
+    () => route.handler(req({ params: { name: 'rajni' } })),
+    404,
+    'no_local_db',
+  );
+});
+
 // --- GET /api/profiles/:name/jobs/:id ---
 
 test('get: 200 for a known id', async () => {

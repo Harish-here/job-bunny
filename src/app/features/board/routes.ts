@@ -80,7 +80,7 @@ function noLocalDb(): never {
 /** Shared by the three store-backed routes (list/get/patch): resolves
  * `:name` to a store or throws the fixed no_local_db 404.
  *
- * Gated on `connector === 'sqlite'` FIRST, before ever calling
+ * Gated on a KNOWN non-sqlite connector FIRST, before ever calling
  * `openStore` — `hasDb` (a `jobbunny.db` file exists) is now unconditional
  * for every profile once it has run once (local-DB spec D5's run-history
  * tracking), so a non-sqlite profile can have a real, openable store whose
@@ -89,11 +89,20 @@ function noLocalDb(): never {
  * run would silently show an empty job list instead of the explanatory
  * "read via Notion" state (`ports/board.ts`'s `BoardProfile` doc). Runs
  * routes (`features/runs/routes.ts`) have no such gate — deliberately —
- * since runs/`run_events` ARE unconditional. */
+ * since runs/`run_events` ARE unconditional.
+ *
+ * `connector === ''` (profile.json missing/unreadable — `wireBoard`'s
+ * documented tolerant posture, `ports/board.ts`) is UNKNOWN, not
+ * known-non-sqlite: it falls through to `openStore`'s own `hasDb` gate so a
+ * sqlite profile with a corrupted `profile.json` still serves its intact
+ * `jobbunny.db` instead of 404ing with a message claiming it's
+ * pure-Notion. */
 function openStoreOrThrow(source: BoardSource, req: BoardRequest) {
   const name = param(req, 'name');
   const profile = source.listProfiles().find((p) => p.name === name);
-  if (profile?.connector !== 'sqlite') noLocalDb();
+  if (profile && profile.connector !== '' && profile.connector !== 'sqlite') {
+    noLocalDb();
+  }
   const store = source.openStore(name);
   if (!store) noLocalDb();
   return store;
