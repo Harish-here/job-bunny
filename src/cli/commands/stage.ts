@@ -1,30 +1,41 @@
 /**
- * commands/stage.ts (P8) — the `stage <name>` CLI command: runs a SINGLE
- * named stage from a profile's `wire()`-produced `stages` array, resuming
- * from the latest checkpoint in today's `RunFolder` (falling back to the
- * empty seed payload `{ jobs: [], dropped: [] }` when there is none yet).
+ * commands/stage.ts (P8 / DB Phase 2 Task 7) — the `stage <name>` CLI
+ * command: runs a SINGLE named stage from a profile's `wire()`-produced
+ * `stages` array, resuming from the latest checkpoint in TODAY's group
+ * (falling back to the empty seed payload `{ jobs: [], dropped: [] }` when
+ * there is none yet).
  *
- * Reuses the runner's own checkpoint/resume machinery rather than
- * inventing a parallel one: `RunFolder.readLatestCheckpoint` for the
- * input, `guardStage` (pipeline/runner/guard.ts — the same per-attempt
- * timeout/stall/retry wrapper `runPipeline` uses internally) to execute
- * the stage, and `RunFolder.writeCheckpoint` at the stage's own position
+ * Checkpoints live in `ctx.checkpointStore` (a `SqliteCheckpointStore`
+ * over the profile's `jobbunny.db`), not a per-run directory tree —
+ * `latestTimeDir`/`readLatest` resolve TODAY's group and its latest
+ * payload; `write` persists this stage's own output at its real position
  * in the full `stages` array (so a later full `run --resume` picks up
- * exactly where this ad-hoc stage run left off).
+ * exactly where this ad-hoc stage run left off). Unlike `run.ts`'s resume
+ * logic (which reads a PRIOR, earlier group before starting a NEW one),
+ * `stageCommand` always reads and writes within ONE group — today's
+ * latest-existing-or-fresh — which is exactly the chain-continuation
+ * semantic a sequence of single-stage runs (e.g. the verify skill's
+ * `stage filter` → `stage dedup` → `stage rank`) relies on.
+ *
+ * `guardStage` (pipeline/runner/guard.ts — the same per-attempt
+ * timeout/stall/retry wrapper `runPipeline` uses internally) executes the
+ * stage itself.
  *
  * An unknown stage name is a USER error, not a crash: it prints the valid
  * names and returns exit code 1 rather than throwing into `main`'s catch.
  *
+ * Checkpoint writes are LOUD (`CheckpointStore.write` throws on failure):
+ * that throw lands in the same try/catch as a `guardStage` failure, so it
+ * is recorded via `recordFailure`/`finishRun('failed', ...)` and rethrown
+ * exactly like any other stage failure — no separate error handling needed.
+ *
  * No `src/adapters/**` import here — `wire` is injected (real default:
  * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
-import { join } from 'node:path';
 import {
   buildFunnel,
   createRunLogger,
   formatRunTime,
-  latestTimeDir,
-  RunFolder,
   type RunResult,
   withScope,
 } from '../../ops/observability/index.ts';
@@ -96,14 +107,12 @@ export async function stageCommand(
 
   const now = resolved.now();
   const date = now.toISOString().slice(0, 10);
-  const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
-  // Continue in TODAY's latest existing time folder if one exists — this
-  // keeps a chain of sequential single-stage runs (e.g. the verify skill's
+  // Continue in TODAY's latest existing group if one exists — this keeps a
+  // chain of sequential single-stage runs (e.g. the verify skill's
   // `stage filter` → `stage dedup` → `stage rank`) sharing checkpoints.
-  // Only when today has no folder yet does this create a fresh one.
-  const existing = await latestTimeDir(dataDir, date);
+  // Only when today has no group yet does this create a fresh one.
+  const existing = ctx.checkpointStore.latestTimeDir(date);
   const time = existing ?? formatRunTime(now);
-  const folder = new RunFolder(dataDir, date, time);
 
   // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS
   // single-stage invocation — mirrors `runCommand` (Task 6) so the
@@ -132,7 +141,7 @@ export async function stageCommand(
   );
   ctx.logger = runLogger;
 
-  const latest = await folder.readLatestCheckpoint();
+  const latest = ctx.checkpointStore.readLatest(date, time);
   const input: StagePayload =
     (latest?.payload as StagePayload | undefined) ?? SEED_PAYLOAD;
 
@@ -144,7 +153,10 @@ export async function stageCommand(
     });
     const elapsedMs = Date.now() - stageStarted;
 
-    await folder.writeCheckpoint(index, target.name, output);
+    ctx.checkpointStore.write(
+      { runDate: date, timeDir: time, position: index, stage: target.name },
+      output,
+    );
 
     const funnel = buildFunnel(input, output);
     const result: RunResult = {
