@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { LlmProvider, LogData, Logger, Storage } from '../../ports/index.ts';
+import type { LlmProvider, LogData, Logger, StateStore } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { TABLE_PATH } from './compress.ts';
 import {
@@ -10,21 +10,18 @@ import {
   makeStructureStage,
 } from './structure.ts';
 
-function fakeStorage(): Storage & { store: Map<string, unknown> } {
+function fakeStateStore(): StateStore & { store: Map<string, unknown> } {
   const store = new Map<string, unknown>();
   return {
     store,
-    async readJson<T>(relPath: string, schema: { parse(v: unknown): T }) {
-      if (!store.has(relPath)) return undefined;
-      return schema.parse(store.get(relPath));
+    async readDoc<T>(key: string, schema: { parse(v: unknown): T }) {
+      if (!store.has(key)) return undefined;
+      return schema.parse(store.get(key));
     },
-    async writeJson(relPath: string, value: unknown) {
-      store.set(relPath, value);
+    async writeDoc(key: string, value: unknown) {
+      store.set(key, value);
     },
-    async listSubdirs() {
-      return [];
-    },
-    async removeTree() {},
+    close() {},
   };
 }
 
@@ -57,7 +54,7 @@ function fakeLogger(): Logger & { calls: LogCall[] } {
 }
 
 function fakeCtx(
-  storage: ReturnType<typeof fakeStorage>,
+  stateStore: ReturnType<typeof fakeStateStore>,
   overrides?: { signal?: AbortSignal; beat?: () => void; logger?: Logger },
 ): StageContext {
   return {
@@ -70,7 +67,8 @@ function fakeCtx(
       error() {},
     },
     beat: overrides?.beat ?? (() => {}),
-    storage,
+    storage: {} as StageContext['storage'],
+    stateStore,
   };
 }
 
@@ -127,12 +125,12 @@ test('StageDef declares heartbeat: true and retries: 1', () => {
 
 test('batches 60 input rows into exactly 3 LLM calls of 25/25/10', async () => {
   const ids = Array.from({ length: 60 }, (_, i) => `li-${i + 1}`);
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const llm = makeFakeLlm();
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
 
   await stage.run(emptyPayload(), ctx);
 
@@ -153,8 +151,8 @@ test('batches 60 input rows into exactly 3 LLM calls of 25/25/10', async () => {
 
 test('checkpoint is written after each batch (partial grows monotonically)', async () => {
   const ids = Array.from({ length: 60 }, (_, i) => `li-${i + 1}`);
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const partialSnapshotsAfterEachCall: number[] = [];
   const llm = makeFakeLlm({
@@ -162,14 +160,14 @@ test('checkpoint is written after each batch (partial grows monotonically)', asy
       // Snapshot the partial checkpoint's row count as of just before this
       // call resolves and the stage writes the next checkpoint — i.e. this
       // captures state left by the PREVIOUS batch's write.
-      const partial = storage.store.get(DECISIONS_PARTIAL_PATH) as string | undefined;
+      const partial = stateStore.store.get(DECISIONS_PARTIAL_PATH) as string | undefined;
       const rowCount = partial ? partial.split('\n').length - 2 : 0;
       partialSnapshotsAfterEachCall.push(Math.max(rowCount, 0));
     },
   });
 
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
   await stage.run(emptyPayload(), ctx);
 
   // Before call 1: nothing checkpointed yet (0 rows).
@@ -180,28 +178,28 @@ test('checkpoint is written after each batch (partial grows monotonically)', asy
   // After the run completes successfully, the partial is cleared back to
   // header+separator only (0 data rows) — see structure.ts's post-success
   // reset — while decisions.json holds the full 60-row table.
-  const finalPartial = storage.store.get(DECISIONS_PARTIAL_PATH) as string;
+  const finalPartial = stateStore.store.get(DECISIONS_PARTIAL_PATH) as string;
   assert.equal(finalPartial.split('\n').length, 2);
 
-  const final = storage.store.get(DECISIONS_PATH) as string;
+  const final = stateStore.store.get(DECISIONS_PATH) as string;
   assert.equal(final.split('\n').length - 2, 60);
 });
 
 test('resume: pre-seeded partial with some done ids skips those rows, only remaining sent', async () => {
   const ids = Array.from({ length: 10 }, (_, i) => `li-${i + 1}`);
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const doneIds = ['li-1', 'li-2', 'li-3'];
   const doneRows = doneIds.map((id) => decisionRow(id)).join('\n');
-  storage.store.set(
+  stateStore.store.set(
     DECISIONS_PARTIAL_PATH,
     `| id | domain | seniority | func | city | country | workType | timezone | skills | salary |\n|---|---|---|---|---|---|---|---|---|---|\n${doneRows}`,
   );
 
   const llm = makeFakeLlm();
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
 
   await stage.run(emptyPayload(), ctx);
 
@@ -219,7 +217,7 @@ test('resume: pre-seeded partial with some done ids skips those rows, only remai
     'li-10',
   ]);
 
-  const final = storage.store.get(DECISIONS_PATH) as string;
+  const final = stateStore.store.get(DECISIONS_PATH) as string;
   for (const id of ids) {
     assert.ok(final.includes(id), `expected final decisions to include ${id}`);
   }
@@ -227,59 +225,59 @@ test('resume: pre-seeded partial with some done ids skips those rows, only remai
 
 test('resume: all input ids already done in the partial -> zero LLM calls', async () => {
   const ids = ['li-1', 'li-2'];
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const doneRows = ids.map((id) => decisionRow(id)).join('\n');
-  storage.store.set(
+  stateStore.store.set(
     DECISIONS_PARTIAL_PATH,
     `| id | domain | seniority | func | city | country | workType | timezone | skills | salary |\n|---|---|---|---|---|---|---|---|---|---|\n${doneRows}`,
   );
 
   const llm = makeFakeLlm();
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
 
   const out = await stage.run(emptyPayload(), ctx);
 
   assert.equal(llm.prompts.length, 0);
   assert.deepEqual(out, emptyPayload());
 
-  const final = storage.store.get(DECISIONS_PATH) as string;
+  const final = stateStore.store.get(DECISIONS_PATH) as string;
   assert.ok(final.includes('li-1'));
   assert.ok(final.includes('li-2'));
 });
 
 test('a provider throw is loud: run() rejects and does not mask the failure as partial success', async () => {
   const ids = Array.from({ length: 30 }, (_, i) => `li-${i + 1}`);
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const llm = makeFakeLlm({ throwOn: 2 }); // second batch (li-26..li-30) throws
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
 
   await assert.rejects(() => stage.run(emptyPayload(), ctx), /fake llm boom on call 2/);
 
   // First batch's checkpoint survived (loud failure ≠ silent data loss);
   // decisions.json (the "done" signal for assemble) was never written.
-  const partial = storage.store.get(DECISIONS_PARTIAL_PATH) as string;
+  const partial = stateStore.store.get(DECISIONS_PARTIAL_PATH) as string;
   assert.equal(partial.split('\n').length - 2, 25);
-  assert.equal(storage.store.has(DECISIONS_PATH), false);
+  assert.equal(stateStore.store.has(DECISIONS_PATH), false);
 });
 
 test('a retried run (simulating the runner re-invoking run() per guardStage retries:1) resumes from the surviving checkpoint and only re-sends the failed batch', async () => {
   const ids = Array.from({ length: 30 }, (_, i) => `li-${i + 1}`);
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const failingLlm = makeFakeLlm({ throwOn: 2 });
   const failingStage = makeStructureStage(failingLlm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
   await assert.rejects(() => failingStage.run(emptyPayload(), ctx));
 
   // Simulate the runner's retry: a fresh stage instance (fresh provider),
-  // same storage/ctx, run() invoked again.
+  // same stateStore/ctx, run() invoked again.
   const retryLlm = makeFakeLlm();
   const retryStage = makeStructureStage(retryLlm);
   await retryStage.run(emptyPayload(), ctx);
@@ -290,7 +288,7 @@ test('a retried run (simulating the runner re-invoking run() per guardStage retr
   ].map((m) => m[1]);
   assert.deepEqual(idsInPrompt, ids.slice(25, 30));
 
-  const final = storage.store.get(DECISIONS_PATH) as string;
+  const final = stateStore.store.get(DECISIONS_PATH) as string;
   for (const id of ids) {
     assert.ok(final.includes(id));
   }
@@ -298,37 +296,37 @@ test('a retried run (simulating the runner re-invoking run() per guardStage retr
 
 test('final decisions persisted to DECISIONS_PATH on success, payload threaded through unchanged', async () => {
   const ids = ['li-1', 'li-2'];
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   const stage = makeStructureStage(makeFakeLlm());
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
   const input = emptyPayload();
 
   const out = await stage.run(input, ctx);
 
   assert.equal(out, input);
-  const final = storage.store.get(DECISIONS_PATH) as string;
+  const final = stateStore.store.get(DECISIONS_PATH) as string;
   assert.ok(final.startsWith('| id | domain | seniority | func |'));
   assert.ok(final.includes('li-1'));
   assert.ok(final.includes('li-2'));
 });
 
 test('run() fails loud when the input table is missing (structure run before compress)', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const stage = makeStructureStage(makeFakeLlm());
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
 
   await assert.rejects(() => stage.run(emptyPayload(), ctx), /no input table/);
 });
 
 test('prompt instructs the LLM to prefer the input location column for city/country, inferring country from city, falling back to rawText only when location is empty', async () => {
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(['li-1']));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(['li-1']));
 
   const llm = makeFakeLlm();
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage);
+  const ctx = fakeCtx(stateStore);
   await stage.run(emptyPayload(), ctx);
 
   const prompt = llm.prompts[0] as string;
@@ -342,8 +340,8 @@ test('prompt instructs the LLM to prefer the input location column for city/coun
 });
 
 test('signal is passed through to llm.complete', async () => {
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(['li-1']));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(['li-1']));
 
   let capturedSignal: AbortSignal | undefined;
   const llm: LlmProvider = {
@@ -356,7 +354,7 @@ test('signal is passed through to llm.complete', async () => {
 
   const stage = makeStructureStage(llm);
   const controller = new AbortController();
-  const ctx = fakeCtx(storage, { signal: controller.signal });
+  const ctx = fakeCtx(stateStore, { signal: controller.signal });
   await stage.run(emptyPayload(), ctx);
 
   assert.equal(capturedSignal, controller.signal);
@@ -364,12 +362,12 @@ test('signal is passed through to llm.complete', async () => {
 
 test('heartbeat: ctx.beat() is called after each batch', async () => {
   const ids = Array.from({ length: 30 }, (_, i) => `li-${i + 1}`);
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   let beats = 0;
   const stage = makeStructureStage(makeFakeLlm());
-  const ctx = fakeCtx(storage, { beat: () => (beats += 1) });
+  const ctx = fakeCtx(stateStore, { beat: () => (beats += 1) });
   await stage.run(emptyPayload(), ctx);
 
   assert.equal(beats, 2); // 2 batches (25 + 5)
@@ -377,8 +375,8 @@ test('heartbeat: ctx.beat() is called after each batch', async () => {
 
 test('an LLM response that omits an id it was sent is logged as a warn naming that id (not silently dropped)', async () => {
   const ids = ['li-1', 'li-2', 'li-3'];
-  const storage = fakeStorage();
-  storage.store.set(TABLE_PATH, inputTableFor(ids));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(TABLE_PATH, inputTableFor(ids));
 
   // A provider that behaves like makeFakeLlm's canned response, except it
   // drops 'li-2' from the returned table — simulating an LLM that silently
@@ -397,7 +395,7 @@ test('an LLM response that omits an id it was sent is logged as a warn naming th
 
   const logger = fakeLogger();
   const stage = makeStructureStage(llm);
-  const ctx = fakeCtx(storage, { logger });
+  const ctx = fakeCtx(stateStore, { logger });
 
   await stage.run(emptyPayload(), ctx);
 
@@ -415,7 +413,7 @@ test('an LLM response that omits an id it was sent is logged as a warn naming th
   // Within-stage behavior is unchanged: li-2 is genuinely absent from
   // decisions.json (assemble is the net that catches this downstream) — the
   // fix here is the warn, not recovering the row.
-  const final = storage.store.get(DECISIONS_PATH) as string;
+  const final = stateStore.store.get(DECISIONS_PATH) as string;
   assert.ok(!final.includes('li-2'));
   assert.ok(final.includes('li-1'));
   assert.ok(final.includes('li-3'));

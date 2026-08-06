@@ -12,6 +12,7 @@ import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import type { CheckpointStore } from '../../ports/checkpoint_store.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
 import type { RunStore } from '../../ports/run_store.ts';
+import type { StateStore } from '../../ports/state_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { reconcileCommand } from './reconcile.ts';
 
@@ -48,6 +49,19 @@ function fakeStorage(store: Map<string, unknown>): Storage {
       return [];
     },
     async removeTree() {},
+  };
+}
+
+function fakeStateStore(store: Map<string, unknown>): StateStore {
+  return {
+    async readDoc<T>(key: string, schema: { parse(v: unknown): T }) {
+      if (!store.has(key)) return undefined;
+      return schema.parse(store.get(key));
+    },
+    async writeDoc(key: string, value: unknown) {
+      store.set(key, value);
+    },
+    close() {},
   };
 }
 
@@ -152,7 +166,7 @@ function fakeCtx(
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: fakeStorage(store),
-    stateStore: {} as PipelineCtx['stateStore'],
+    stateStore: fakeStateStore(store),
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,

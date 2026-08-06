@@ -31,6 +31,7 @@ function fakeCtx(
       },
       async removeTree() {},
     },
+    stateStore: {} as StageContext['stateStore'],
     ...(overrides.runId !== undefined ? { runId: overrides.runId } : {}),
     // A real `ctx.runStore` is always present once `ctx.runId` is set (the
     // driver sets both together) — so the fake mirrors that pairing rather

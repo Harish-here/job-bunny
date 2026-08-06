@@ -36,7 +36,7 @@ export const dedupStage: StageDef<StagePayload, StagePayload> = {
   timeoutMs: 30_000,
   retries: 0,
   async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
-    const cache = await ctx.storage.readJson(CACHE_PATH, CacheSchema);
+    const cache = await ctx.stateStore.readDoc(CACHE_PATH, CacheSchema);
     if (cache === undefined) {
       throw new Error(
         `dedup: no cache found at ${CACHE_PATH} — dedup must run after reconcile`,

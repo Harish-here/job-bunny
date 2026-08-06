@@ -130,8 +130,8 @@ export const compressStage: StageDef<StagePayload, StagePayload> = {
     // hands compress a payload out of pipeline order.
     const { table, passthrough, dropped } = toTable(input.jobs as SourcedJD[]);
 
-    await ctx.storage.writeJson(TABLE_PATH, table);
-    await ctx.storage.writeJson(PASSTHROUGH_PATH, passthrough);
+    await ctx.stateStore.writeDoc(TABLE_PATH, table);
+    await ctx.stateStore.writeDoc(PASSTHROUGH_PATH, passthrough);
 
     return { jobs: input.jobs, dropped: [...input.dropped, ...dropped] };
   },

@@ -8,7 +8,12 @@ import type { FilterConfig } from '../../core/filter/index.ts';
 import type { CacheEntry, JD, StructuredJD, SyncedJD } from '../../core/jd/index.ts';
 import { CacheEntrySchema } from '../../core/jd/index.ts';
 import { RankConfigSchema } from '../../core/rank/index.ts';
-import type { ArchivePolicy, Connector, RunContext } from '../../ports/index.ts';
+import type {
+  ArchivePolicy,
+  Connector,
+  RunContext,
+  StateStore,
+} from '../../ports/index.ts';
 import { FsStorage } from '../runner/fs_storage.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { dedupStage } from './dedup.ts';
@@ -19,8 +24,10 @@ import { makeSyncStage } from './sync.ts';
 
 /**
  * Contract: pins the whole tail-of-pipeline funnel in one place —
- * fixture StructuredJDs -> reconcile (stubbed Connector, real FsStorage
- * for the reconcile->dedup cache handoff) -> filter -> dedup -> rank ->
+ * fixture StructuredJDs -> reconcile (stubbed Connector, an in-memory
+ * StateStore fake for the reconcile->dedup cache handoff — pipeline
+ * state now flows through ctx.stateStore, not ctx.storage; see P3
+ * pipeline-state-to-sqlite Task 5) -> filter -> dedup -> rank ->
  * sync (stubbed Connector). Four fixture jobs go in; each tail stage is
  * built to visibly drop or penalize exactly one of them:
  *   - `li-2` is dropped by `filter` (hard company-avoid fail).
@@ -144,6 +151,25 @@ function stubConnector(cache: CacheEntry[]): Connector & { syncCalls: JD[][] } {
   };
 }
 
+/** In-memory StateStore fake — same `readDoc`/`writeDoc`/`close` shape every
+ * other stage test uses; this file only needs the reconcile->dedup cache
+ * handoff to survive a real read-after-write, which a Map already gives
+ * us (the real sqlite-backed StateStore is an adapter, off-limits to
+ * import here — only cli/wire/compose.ts may reach adapters/**). */
+function fakeStateStore(): StateStore {
+  const store = new Map<string, unknown>();
+  return {
+    async readDoc<T>(key: string, schema: { parse(v: unknown): T }) {
+      if (!store.has(key)) return undefined;
+      return schema.parse(store.get(key));
+    },
+    async writeDoc(key: string, value: unknown) {
+      store.set(key, value);
+    },
+    close() {},
+  };
+}
+
 let tmpDir: string;
 
 before(async () => {
@@ -156,12 +182,14 @@ after(async () => {
 
 test('tail funnel: 4 in -> 1 dropped at filter, 1 dropped at dedup, soft-fail penalized at rank -> 2 to sync', async () => {
   const storage = new FsStorage(tmpDir);
+  const stateStore = fakeStateStore();
   const ctx: StageContext = {
     profile: 'rajni',
     signal: AbortSignal.timeout(30_000),
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage,
+    stateStore,
   };
   const connector = stubConnector(seededCache);
 
@@ -172,14 +200,14 @@ test('tail funnel: 4 in -> 1 dropped at filter, 1 dropped at dedup, soft-fail pe
   assert.equal(initial.jobs.length, 4, 'funnel: 4 jobs in');
 
   // --- reconcile: rebuilds the cache via the stubbed connector and writes
-  // it to the REAL FsStorage temp dir, unchanged payload passthrough.
+  // it to ctx.stateStore, unchanged payload passthrough.
   const afterReconcile = await makeReconcileStage(connector).run(initial, ctx);
   assert.equal(afterReconcile, initial);
-  const cacheOnDisk = await storage.readJson(CACHE_PATH, z.array(CacheEntrySchema));
+  const cacheHandoff = await stateStore.readDoc(CACHE_PATH, z.array(CacheEntrySchema));
   assert.deepEqual(
-    cacheOnDisk,
+    cacheHandoff,
     seededCache,
-    'cache handoff went through the real filesystem',
+    'cache handoff went through ctx.stateStore, read back by the next stage',
   );
 
   // --- filter: drops jobAvoidCompany (hard company.avoid fail), keeps the

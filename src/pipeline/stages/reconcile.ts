@@ -43,7 +43,7 @@ export function makeReconcileStage(
     retries: 0,
     async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
       const cache = await connector.rebuildCache(ctx);
-      await ctx.storage.writeJson(CACHE_PATH, cache);
+      await ctx.stateStore.writeDoc(CACHE_PATH, cache);
       ctx.logger.info('reconcile: cache rebuilt', { entries: cache.length });
       return input;
     },

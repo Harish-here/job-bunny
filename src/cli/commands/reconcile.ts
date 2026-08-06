@@ -137,7 +137,7 @@ export async function reconcileCommand(
       return 1;
     }
 
-    const cache = await ctx.storage.readJson(CACHE_PATH, z.array(CacheEntrySchema));
+    const cache = await ctx.stateStore.readDoc(CACHE_PATH, z.array(CacheEntrySchema));
     resolved.write(`reconcile: cache rebuilt (${cache?.length ?? 0} entries)`);
 
     return 0;

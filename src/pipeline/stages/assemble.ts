@@ -141,14 +141,14 @@ export const assembleStage: StageDef<StagePayload, StagePayload> = {
   timeoutMs: 30_000,
   retries: 0,
   async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
-    const passthrough = await ctx.storage.readJson(PASSTHROUGH_PATH, PassthroughSchema);
+    const passthrough = await ctx.stateStore.readDoc(PASSTHROUGH_PATH, PassthroughSchema);
     if (passthrough === undefined) {
       throw new Error(
         `assemble: no passthrough found at ${PASSTHROUGH_PATH} — assemble must run after compress`,
       );
     }
 
-    const decisionsMd = await ctx.storage.readJson(DECISIONS_PATH, z.string());
+    const decisionsMd = await ctx.stateStore.readDoc(DECISIONS_PATH, z.string());
     if (decisionsMd === undefined) {
       throw new Error(
         `assemble: no decisions found at ${DECISIONS_PATH} — assemble must run after structure`,
