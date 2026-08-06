@@ -115,6 +115,12 @@ export async function stageCommand(
     kind: 'stage',
     startedAt: now.toISOString(),
   });
+  // Heartbeat promptly — unlike a full `run`, this command drives `guardStage`
+  // directly rather than `runPipeline` (run.ts:64), so nothing else would
+  // ever touch heartbeat_at for the row. Without this, a long single stage
+  // (e.g. `stage farm`) leaves heartbeat_at NULL for its whole duration,
+  // which the null-or-stale derivation reports as "crashed" while it's alive.
+  ctx.runStore.heartbeat(runId, resolved.now().toISOString());
   ctx.runId = runId;
   const runLogger = createRunLogger(
     ctx.runStore,

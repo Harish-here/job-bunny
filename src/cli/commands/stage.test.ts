@@ -38,6 +38,7 @@ function fakeStore(): RunStore & {
   started: Array<Parameters<RunStore['startRun']>[0]>;
   events: Array<{ runId: number; events: RunEventRow[] }>;
   failures: Array<{ runId: number; failure: RunFailure }>;
+  heartbeats: Array<{ runId: number; at: string }>;
   finished: Array<{
     runId: number;
     outcome: 'passed' | 'failed';
@@ -48,6 +49,7 @@ function fakeStore(): RunStore & {
   const started: Array<Parameters<RunStore['startRun']>[0]> = [];
   const events: Array<{ runId: number; events: RunEventRow[] }> = [];
   const failures: Array<{ runId: number; failure: RunFailure }> = [];
+  const heartbeats: Array<{ runId: number; at: string }> = [];
   const finished: Array<{
     runId: number;
     outcome: 'passed' | 'failed';
@@ -59,6 +61,7 @@ function fakeStore(): RunStore & {
     started,
     events,
     failures,
+    heartbeats,
     finished,
     startRun(meta) {
       started.push(meta);
@@ -67,7 +70,9 @@ function fakeStore(): RunStore & {
     appendEvents(runId, evts) {
       events.push({ runId, events: evts });
     },
-    heartbeat() {},
+    heartbeat(runId, at) {
+      heartbeats.push({ runId, at });
+    },
     recordFailure(runId, failure) {
       failures.push({ runId, failure });
     },
@@ -338,6 +343,34 @@ test('stageCommand: opens a "stage" runs row and finishes it as passed with the 
   assert.equal(result.stages[0]?.name, 'compress');
   assert.equal(result.stages[0]?.jobsIn, 0);
   assert.equal(result.stages[0]?.jobsOut, 1);
+});
+
+test('stageCommand: heartbeats promptly after startRun, so a long-running stage never shows a NULL heartbeat_at', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
+  const stages = [
+    makeStage('compress', async () => ({ jobs: [{ id: 'a' }] as never, dropped: [] })),
+  ];
+  const now = new Date('2026-07-25T00:00:00Z');
+
+  const code = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+      now: () => now,
+      root,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(store.started.length, 1);
+  const startedRunId = store.started.length; // the id startRun returned
+  assert.ok(
+    store.heartbeats.some((h) => h.runId === startedRunId),
+    'expected at least one heartbeat for the started run id',
+  );
 });
 
 test('stageCommand: a stage that throws records the failure, finishes the row as failed, and rethrows', async () => {
