@@ -179,6 +179,31 @@ test('seedProfileDocs treats a malformed-legacy-file throw from readText as "pre
   });
 });
 
+test('seedProfileDocs treats a readText throw named MalformedLegacyConfigFileError as "present" (kept) even with an unrelated message (error-contract, fix round 2)', async () => {
+  await withTmpRoot(async (root) => {
+    const store: ConfigStore = {
+      readText: async (key) => {
+        if (key === 'profile.json') {
+          const err = new Error('anything at all');
+          err.name = 'MalformedLegacyConfigFileError';
+          throw err;
+        }
+        return undefined;
+      },
+      writeText: async () => {},
+      close() {},
+    };
+    const results = await seedProfileDocs('acme', {
+      root,
+      configStore: () => store,
+      mkdir: async () => {},
+      write: () => {},
+    });
+    const profileResult = results.find((r) => r.doc === 'profile.json');
+    assert.equal(profileResult?.status, 'kept');
+  });
+});
+
 test('seedProfileDocs: a readText throw NOT shaped like the malformed-legacy-file error (e.g. a db-open failure) propagates loud, never reported "kept"', async () => {
   await withTmpRoot(async (root) => {
     const store: ConfigStore = {

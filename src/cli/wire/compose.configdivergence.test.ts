@@ -92,7 +92,7 @@ test('real repro: a hand-edit to filter.json after the one-time lift is silently
   assert.match(finding.detail, /filter\.json/);
   assert.match(
     finding.detail,
-    new RegExp(`jobbunny config import --dir profiles/${name}`),
+    new RegExp(`jobbunny config import --profile ${name} --dir profiles/${name}`),
   );
 });
 

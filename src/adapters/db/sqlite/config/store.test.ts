@@ -75,6 +75,21 @@ test('lift validates before insert: malformed legacy file throws naming it, no r
   assert.equal(row.n, 0);
 });
 
+test('malformed legacy file throw carries a pinned err.name (error-contract, fix round 2)', async () => {
+  const { dbPath, profileRoot } = freshPaths();
+  writeFileSync(path.join(profileRoot, 'filter.json'), '{not valid');
+
+  const store = makeStore(dbPath, profileRoot);
+  await assert.rejects(
+    () => store.readText('filter.json'),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.equal(err.name, 'MalformedLegacyConfigFileError');
+      return true;
+    },
+  );
+});
+
 test('v0-keys profile.json lifts fine (JSON-validity only, never the strict schema)', async () => {
   const { dbPath, profileRoot } = freshPaths();
   const filePath = path.join(profileRoot, 'profile.json');

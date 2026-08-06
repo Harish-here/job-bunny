@@ -53,8 +53,23 @@ test('doctorCommand: no checks at all returns 0', async () => {
   assert.equal(code, 0);
 });
 
-test('doctorCommand: a throwing wire() (e.g. a retired settings.sqlite.path, or a missing profile.json) degrades to ONE red finding instead of aborting the whole diagnostic', async () => {
+test('doctorCommand: a throwing wire() (e.g. a retired settings.sqlite.path, or a missing profile.json) degrades to a synthesized red "wire" finding PLUS the other config checks — never aborts the whole diagnostic', async () => {
   const lines: string[] = [];
+  const degraded: DoctorFinding[] = [
+    { check: 'profile-parses', status: 'ok', detail: 'profile.json parses' },
+    {
+      check: 'filter-parses',
+      status: 'warn',
+      detail: 'filter.json not found (optional)',
+    },
+    { check: 'empty-lanes', status: 'ok', detail: '2 lane(s) configured' },
+    {
+      check: 'sqlite-path-retired',
+      status: 'red',
+      detail: 'settings.sqlite.path is set',
+    },
+    { check: 'config-legacy-divergence', status: 'ok', detail: 'no divergence' },
+  ];
   const code = await doctorCommand(
     { profile: 'broken' },
     {
@@ -65,13 +80,50 @@ test('doctorCommand: a throwing wire() (e.g. a retired settings.sqlite.path, or 
         );
       },
       write: (line: string) => lines.push(line),
+      runDegradedConfigChecks: async (profileName) => {
+        assert.equal(profileName, 'broken');
+        return degraded;
+      },
     },
   );
   assert.equal(code, 1);
-  assert.equal(lines.length, 1);
+  assert.equal(lines.length, 1 + degraded.length);
   assert.match(lines[0] as string, /wire/);
   assert.match(lines[0] as string, /red/);
   assert.match(lines[0] as string, /settings\.sqlite\.path is no longer supported/);
+  // Every degraded config check's finding is printed too, not swallowed.
+  assert.ok(lines.some((l) => l.includes('profile-parses') && l.includes('ok')));
+  assert.ok(lines.some((l) => l.includes('filter-parses') && l.includes('warn')));
+  assert.ok(lines.some((l) => l.includes('empty-lanes') && l.includes('ok')));
+  assert.ok(lines.some((l) => l.includes('sqlite-path-retired') && l.includes('red')));
+  assert.ok(
+    lines.some((l) => l.includes('config-legacy-divergence') && l.includes('ok')),
+  );
+});
+
+test('doctorCommand: the default runDegradedConfigChecks opens a real readonly ConfigStore for the named profile and returns findings for all five config checks', async () => {
+  const lines: string[] = [];
+  const code = await doctorCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => {
+        throw new Error('boom');
+      },
+      write: (line: string) => lines.push(line),
+    },
+  );
+  assert.equal(code, 1);
+  // wire finding + the five config checks, no fake injected this time.
+  assert.equal(lines.length, 6);
+  const checks = lines.map((l) => (l.split(' | ')[0] as string).trim());
+  assert.deepEqual(checks, [
+    'wire',
+    'profile-parses',
+    'filter-parses',
+    'empty-lanes',
+    'sqlite-path-retired',
+    'config-legacy-divergence',
+  ]);
 });
 
 test('doctorCommand: writes a plain-text table of check | status | detail to the injected sink', async () => {

@@ -220,7 +220,10 @@ test('configLegacyDivergenceCheck: warn when the legacy file has drifted from th
   }).run();
   assert.equal(finding.status, 'warn');
   assert.match(finding.detail, /filter\.json/);
-  assert.match(finding.detail, /jobbunny config import --dir profiles\/rajni/);
+  assert.match(
+    finding.detail,
+    /jobbunny config import --profile rajni --dir profiles\/rajni/,
+  );
 });
 
 test('configLegacyDivergenceCheck: names every diverged doc, not just the first', async () => {

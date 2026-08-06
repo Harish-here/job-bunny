@@ -287,9 +287,10 @@ export function configLegacyDivergenceCheck(opts: CoreCheckOpts): DoctorCheck {
         detail:
           `${diverged.join(', ')} ${verb} changed on disk since being lifted into ` +
           `config_docs — the stored row still wins and the disk edit is silently ` +
-          `ignored. Run 'jobbunny config import --dir profiles/${opts.profileName}' ` +
-          `to re-sync (note: 'config import' uses the strict validator, so a ` +
-          `drifted-but-lifted profile.json may be rejected on re-import).`,
+          `ignored. Run 'jobbunny config import --profile ${opts.profileName} ` +
+          `--dir profiles/${opts.profileName}' to re-sync (note: 'config import' ` +
+          `uses the strict validator, so a drifted-but-lifted profile.json may be ` +
+          `rejected on re-import).`,
       };
     },
   };

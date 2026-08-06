@@ -109,6 +109,29 @@ function defaultProfileDocsFsDeps(): Omit<ProfileDocsDeps, 'configStore'> {
   };
 }
 
+/** Distinguishes the ONE failure shape `readText` may throw that
+ * `seedProfileDocs` (below) is entitled to treat as "present" (fix round,
+ * critical finding) — `SqliteConfigStore`'s own lift-time check, which
+ * always throws a message starting with this exact prefix (both the real
+ * adapter's "Malformed legacy config file at ..." and any test fake's
+ * shorter "Malformed legacy config file: ..." match). Anything else —
+ * store construction, db-open (corrupt/newer-schema/permission-denied)
+ * failures — must NOT be silently reported "kept"; the old code's bare
+ * `catch { ... }` swallowed both alike, turning a broken db into a false
+ * all-clear (`profile build`/`profile.json: kept` while nothing was
+ * actually read or written).
+ *
+ * Belt-and-braces error-contract check (fix round 2): the canonical signal
+ * is `err.name === 'MalformedLegacyConfigFileError'`
+ * (`adapters/db/sqlite/config/store.ts` sets it explicitly on this throw);
+ * the message-prefix match here is a fallback for anything that doesn't
+ * carry that name (e.g. a test fake using a bare `Error`). */
+function isMalformedLegacyFileError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === 'MalformedLegacyConfigFileError') return true;
+  return err.message.startsWith('Malformed legacy config file');
+}
+
 /** Seeds any missing scaffold doc for `profileName` — `profile.json`,
  * `filter.json`, `search_urls.md`, in that order — leaving an existing
  * doc byte-for-byte untouched. "Existing" means present as EITHER a real
@@ -123,21 +146,6 @@ function defaultProfileDocsFsDeps(): Omit<ProfileDocsDeps, 'configStore'> {
  * Every seeded JSON doc is validated against its real zod schema before
  * being written. Shared by `profile build` and `setup` so the two never
  * disagree on what a fresh profile looks like. */
-/** Distinguishes the ONE failure shape `readText` may throw that this
- * function is entitled to treat as "present" (fix round, critical
- * finding) — `SqliteConfigStore`'s own lift-time check, which always
- * throws a message starting with this exact prefix (both the real
- * adapter's "Malformed legacy config file at ..." and any test fake's
- * shorter "Malformed legacy config file: ..." match). Anything else —
- * store construction, db-open (corrupt/newer-schema/permission-denied)
- * failures — must NOT be silently reported "kept"; the old code's bare
- * `catch { ... }` swallowed both alike, turning a broken db into a false
- * all-clear (`profile build`/`profile.json: kept` while nothing was
- * actually read or written). */
-function isMalformedLegacyFileError(err: unknown): boolean {
-  return err instanceof Error && err.message.startsWith('Malformed legacy config file');
-}
-
 export async function seedProfileDocs(
   profileName: string,
   deps: ProfileDocsDeps,

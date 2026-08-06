@@ -179,7 +179,9 @@ export class SqliteConfigStore implements ConfigStore {
   private checkLiftable(key: ConfigDocKey, filePath: string, raw: string): void {
     if (key === 'search_urls.md') {
       if (raw.trim().length === 0) {
-        throw new Error(`Malformed legacy config file at ${filePath}: file is empty`);
+        throw malformedLegacyConfigFileError(
+          `Malformed legacy config file at ${filePath}: file is empty`,
+        );
       }
       return;
     }
@@ -187,7 +189,20 @@ export class SqliteConfigStore implements ConfigStore {
       JSON.parse(raw);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`Malformed legacy config file at ${filePath}: ${message}`);
+      throw malformedLegacyConfigFileError(
+        `Malformed legacy config file at ${filePath}: ${message}`,
+      );
     }
   }
+}
+
+/** Builds the ONE throw shape `checkLiftable` uses for an unreadable legacy
+ * config file, with `name` set to a fixed contract string (fix round 2) —
+ * so callers (e.g. `cli/commands/profile.ts`'s `isMalformedLegacyFileError`)
+ * can detect it by `err.name` rather than string-matching the message
+ * (message text is free to change; `name` is the pinned contract). */
+function malformedLegacyConfigFileError(message: string): Error {
+  const err = new Error(message);
+  err.name = 'MalformedLegacyConfigFileError';
+  return err;
 }

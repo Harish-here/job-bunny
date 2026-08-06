@@ -198,7 +198,15 @@ test('settings page: edit filter.json, save, reload, still there', async ({ page
   // FilterConfigSchema) rather than a hand-typed guess — a re-run of this
   // suite against an already-mutated `config_docs` row (writeText never
   // touches the tracked legacy file, only the gitignored sqlite db) must
-  // not grow the array unboundedly.
+  // not grow the array unboundedly. Belt-and-braces: `seed.ts`'s
+  // `globalSetup` now also `DELETE FROM config_docs` on every e2e
+  // invocation (fix round 2), so the row this test writes never survives
+  // past the current run anyway — the NEXT invocation's first read
+  // re-lifts the pristine tracked `filter.json` fresh (`SqliteConfigStore`
+  // falls back to the legacy file whenever no row exists); no separate
+  // "restore the original doc" teardown is needed here, only this
+  // within-run idempotency guard for repeat runs of this spec file alone
+  // (e.g. `playwright test smoke.spec.ts` without a fresh global seed).
   const current = await filterField.inputValue();
   const parsed: { companies?: { avoid?: string[] } } = JSON.parse(current);
   parsed.companies ??= { avoid: [] };
