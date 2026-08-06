@@ -134,6 +134,7 @@ function fakeCtx(opts?: {
   logger?: Logger;
   storage?: Storage;
   runStore?: RunStore;
+  checkpointStore?: PipelineCtx['checkpointStore'];
 }): PipelineCtx {
   const connector = opts?.connector ?? fakeConnector();
   const ports: WiredPorts = { lanes: [], connector, notifiers: [] };
@@ -152,6 +153,7 @@ function fakeCtx(opts?: {
     },
     ports,
     runStore: opts?.runStore ?? fakeRunStore().store,
+    checkpointStore: opts?.checkpointStore ?? ({} as PipelineCtx['checkpointStore']),
     async notify() {},
   };
 }

@@ -95,6 +95,7 @@ function fakeCtx(connector: Connector): PipelineCtx {
     },
     ports,
     runStore: fakeRunStore(),
+    checkpointStore: {} as PipelineCtx['checkpointStore'],
     async notify(_event: NotifyEvent) {},
   };
 }

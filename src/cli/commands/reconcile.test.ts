@@ -129,6 +129,7 @@ function fakeCtx(
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,
+    checkpointStore: {} as PipelineCtx['checkpointStore'],
     async notify(_event: NotifyEvent) {},
   };
 }

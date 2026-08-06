@@ -64,6 +64,7 @@ function fakeCtx(controller: AbortController = new AbortController()): {
     },
     ports: fakePorts(),
     runStore: {} as PipelineCtx['runStore'],
+    checkpointStore: {} as PipelineCtx['checkpointStore'],
     async notify() {},
   };
   return { ctx, controller, beats };

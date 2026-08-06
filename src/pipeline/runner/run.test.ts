@@ -135,6 +135,7 @@ function fakeCtx(
     },
     ports: fakePorts(),
     runStore: overrides.runStore ?? ({} as PipelineCtx['runStore']),
+    checkpointStore: {} as PipelineCtx['checkpointStore'],
     ...(overrides.runId !== undefined ? { runId: overrides.runId } : {}),
     async notify() {},
   };
