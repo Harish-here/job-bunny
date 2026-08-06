@@ -65,3 +65,36 @@ test('runs: unknown sub-action errors', () => {
     error: 'runs takes no sub-action, or "show <id>"',
   });
 });
+
+test('state: bare invocation with no sub-action errors', () => {
+  const result = buildOptions('state', [], { profile: 'rajni' });
+  assert.deepEqual(result, { error: 'state takes "read" or "write"' });
+});
+
+test('state read: unknown key errors, naming the valid keys', () => {
+  const result = buildOptions('state', ['read', 'badkey'], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    error:
+      'state read: key must be one of table, decisions, decisions-partial ' +
+      '(this is not a general DB tool)',
+  });
+});
+
+test('state write table: rejected at the buildOptions layer, before state.ts is reached', () => {
+  const result = buildOptions('state', ['write', 'table'], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    error:
+      'state write: key must be one of decisions, decisions-partial ' +
+      '(this is not a general DB tool)',
+  });
+});
+
+test('state read table --profile p: parses to { profile, action, key }', () => {
+  const result = buildOptions('state', ['read', 'table'], { profile: 'p' });
+  assert.deepEqual(result, { profile: 'p', action: 'read', key: 'table' });
+});
+
+test('state: missing --profile errors even with a valid read key', () => {
+  const result = buildOptions('state', ['read', 'table'], {});
+  assert.deepEqual(result, { error: 'missing required --profile' });
+});
