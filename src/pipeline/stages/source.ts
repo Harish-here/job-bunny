@@ -144,10 +144,10 @@ export function makeSourceStage(
     async run(input, ctx: StageContext) {
       const now = new Date().toISOString();
       let reg: CompanyRecord[] =
-        (await ctx.storage.readJson(REGISTRY_PATH, RegistrySchema)) ?? [];
+        (await ctx.stateStore.readDoc(REGISTRY_PATH, RegistrySchema)) ?? [];
 
       const seen =
-        (await ctx.storage.readJson(COMPANIES_SEEN_PATH, CompaniesSeenSchema)) ?? {};
+        (await ctx.stateStore.readDoc(COMPANIES_SEEN_PATH, CompaniesSeenSchema)) ?? {};
       for (const [farmLane, names] of Object.entries(seen)) {
         reg = upsertSeen(reg, names, farmLane, now);
       }
@@ -159,7 +159,7 @@ export function makeSourceStage(
       // stage's contract is fail-soft on breadth — a missing cache must not
       // kill a run. So an absent cache just disables the gate (empty set)
       // plus one warn, rather than throwing.
-      const cache = await ctx.storage.readJson(CACHE_PATH, CacheSchema);
+      const cache = await ctx.stateStore.readDoc(CACHE_PATH, CacheSchema);
       if (cache === undefined) {
         ctx.logger.warn(
           'source: no Notion cache found — cache gate disabled, known jobs may reach the LLM stage',
@@ -169,7 +169,7 @@ export function makeSourceStage(
       const cacheIds = new Set<string>((cache ?? []).map((c) => c.id).filter(Boolean));
 
       const apiSeen: Record<string, string> =
-        (await ctx.storage.readJson(API_SEEN_PATH, ApiSeenSchema)) ?? {};
+        (await ctx.stateStore.readDoc(API_SEEN_PATH, ApiSeenSchema)) ?? {};
 
       const filterCfg = opts.filterCfg ?? FilterConfigSchema.parse({});
       const maxNewPerLane = opts.maxNewPerLane ?? DEFAULT_MAX_NEW_PER_LANE;
@@ -353,8 +353,8 @@ export function makeSourceStage(
         );
       }
 
-      await ctx.storage.writeJson(REGISTRY_PATH, reg);
-      await ctx.storage.writeJson(API_SEEN_PATH, apiSeen);
+      await ctx.stateStore.writeDoc(REGISTRY_PATH, reg);
+      await ctx.stateStore.writeDoc(API_SEEN_PATH, apiSeen);
 
       ctx.logger.info('source: gate summary', {
         fetched: fetchedJobs.length,

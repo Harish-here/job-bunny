@@ -8,4 +8,5 @@ export * from './lane.ts';
 export * from './llm.ts';
 export * from './notifier.ts';
 export * from './run_store.ts';
+export * from './state_store.ts';
 export * from './storage.ts';

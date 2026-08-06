@@ -3,6 +3,7 @@ export {
   FakeBrowserHandle,
   FakeBrowserProvider,
   FakePage,
+  FakeStateStore,
   FakeStorage,
   newScript,
 } from './browser_fakes.ts';

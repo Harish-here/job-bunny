@@ -135,7 +135,7 @@ export function makeFarmStage(
         );
       }
 
-      await ctx.storage.writeJson(COMPANIES_SEEN_PATH, CompaniesSeenSchema.parse(seen));
+      await ctx.stateStore.writeDoc(COMPANIES_SEEN_PATH, CompaniesSeenSchema.parse(seen));
 
       return {
         jobs: [...input.jobs, ...farmedJobs],

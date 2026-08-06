@@ -5,14 +5,15 @@ import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
  * Pre-LLM compression stage (P6 spec §6, task 2): reads sourced JDs off the
  * payload, builds the compact markdown table + id-keyed passthrough map
  * (v0's compress.js shape, ported — token efficiency is a design constraint
- * per CLAUDE.md), and persists both to ctx.storage for the structure stage
- * (table) and the assemble stage (passthrough) to read back. The payload
- * itself is threaded through unchanged — `structured` is not added until
- * assemble parses the LLM's decisions.
+ * per CLAUDE.md), and persists both to ctx.stateStore for the structure
+ * stage (table) and the assemble stage (passthrough) to read back. The
+ * payload itself is threaded through unchanged — `structured` is not added
+ * until assemble parses the LLM's decisions.
  *
- * Run-scoped side files (overwritten every run, not accumulated across
- * runs like the company registry): the Storage port is JSON-only, so the
- * markdown table is stored as a JSON string rather than a raw .md file.
+ * Run-scoped state_docs rows (overwritten every run, not accumulated across
+ * runs like the company registry): the StateStore port is JSON-value-only,
+ * so the markdown table is stored as a JSON string rather than a raw .md
+ * file.
  */
 export const TABLE_PATH = 'structure/table.json';
 export const PASSTHROUGH_PATH = 'structure/passthrough.json';
@@ -130,8 +131,8 @@ export const compressStage: StageDef<StagePayload, StagePayload> = {
     // hands compress a payload out of pipeline order.
     const { table, passthrough, dropped } = toTable(input.jobs as SourcedJD[]);
 
-    await ctx.storage.writeJson(TABLE_PATH, table);
-    await ctx.storage.writeJson(PASSTHROUGH_PATH, passthrough);
+    await ctx.stateStore.writeDoc(TABLE_PATH, table);
+    await ctx.stateStore.writeDoc(PASSTHROUGH_PATH, passthrough);
 
     return { jobs: input.jobs, dropped: [...input.dropped, ...dropped] };
   },

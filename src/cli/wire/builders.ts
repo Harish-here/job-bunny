@@ -1,17 +1,15 @@
 /**
  * cli/wire/builders.ts (P8, split from wire.ts) — live adapter construction
  * for connectors/notifiers/routines/lanes: `buildConnector`, `buildNotifier`,
- * `buildRoutine`, `isFarmingLane`, `isApiLane`, `buildLanes`,
- * `buildLinkedInLane`, `missingTokenNotionClient`, `mirrorDbId`/
- * `buildMirroredConnector`/`mirrorReachableCheck` (the opt-in sqlite→Notion
- * mirror decision, local-DB spec PR 3 — `NotionConnectorSettingsSchema` is
- * the single authority on whether the mirror applies; a malformed slice
- * always means 'no mirror', never a throw, and a broken mirror's doctor
- * check warns, never reds), the `resolveSqlitePath` path resolver `board.ts`
- * and `compose.ts` both share, and the `MigrateWire`/`wireMigrate`
- * composition seam for `jobbunny migrate`. Sibling to `compose.ts` in the
- * `only-wire-imports-adapters` carve-out (`.dependency-cruiser.cjs`) — split
- * out purely to keep `compose.ts` under the 400-line cap, not behavioral.
+ * `buildRoutine`, `isFarmingLane`/`isApiLane`/`buildLanes`/
+ * `buildLinkedInLane`, `missingTokenNotionClient`, the opt-in sqlite→Notion
+ * mirror (`mirrorDbId`/`buildMirroredConnector`/`mirrorReachableCheck`,
+ * local-DB spec PR 3 — a malformed settings slice means 'no mirror', never
+ * a throw; a broken mirror's doctor check warns, never reds), the shared
+ * `resolveSqlitePath` resolver (`board.ts`/`compose.ts`), and the
+ * `MigrateWire`/`wireMigrate` seam for `jobbunny migrate`. Sibling to
+ * `compose.ts` in the `only-wire-imports-adapters` carve-out — split out
+ * purely to keep `compose.ts` under its line cap, not behavioral.
  */
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -52,6 +50,7 @@ import type { Connector } from '../../ports/connector.ts';
 import type { RunContext } from '../../ports/context.ts';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
 import type { ApiLane, FarmingLane, Lane } from '../../ports/lane.ts';
+import type { StateStore } from '../../ports/state_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
@@ -93,14 +92,11 @@ export function buildConnector(
  * run). Returns the parsed settings (never the raw slice) so callers hand
  * `NotionConnector` input its own parse can never reject.
  *
- * The `mirror === true` structural check runs BEFORE the schema parse, for
- * two reasons: (a) it's a cheap short-circuit for the common case (no
- * notion slice / mirror not opted into) so a plain sqlite profile never
- * pays for a parse, and (b) the schema's `mirror` field defaults to
- * `false` — parsing a slice that never set `mirror` at all would still
- * yield a valid settings object, and gating on the PARSED value alone
- * would silently mirror a profile that never opted in. Checking the raw
- * slice first closes that gap. */
+ * The `mirror === true` structural check runs BEFORE the schema parse: it's
+ * a cheap short-circuit for the common case (no notion slice / not opted
+ * in), and the schema's `mirror` field defaults to `false` — parsing a
+ * slice that never set `mirror` would still validate, so gating on the
+ * parsed value alone would silently mirror a profile that never opted in. */
 function mirrorSettings(config: PipelineConfig): NotionConnectorSettings | null {
   if (config.connector !== 'sqlite') return null;
   const notionSlice = config.settings.notion;
@@ -184,8 +180,8 @@ export interface LiveLaneDeps {
   readFile: (path: string) => Promise<string>;
   /** Repo-root — inventories only (see `RuntimeDeps.storage`). */
   storage: Storage;
-  /** `profiles/<name>/data` — the lane's own resume/capture state. */
-  profileStorage: Storage;
+  /** Phase 3: the lane's resume/capture state target. */
+  stateStore: StateStore;
   filterCfg: FilterConfig | undefined;
   browser: CdpChromeProvider;
 }
@@ -265,7 +261,7 @@ async function buildLinkedInLane(
     inventories,
     urls,
     deps.filterCfg,
-    deps.profileStorage,
+    deps.stateStore,
     maxCardsPerUrl,
     jitterRange.minMs,
     jitterRange.maxMs,

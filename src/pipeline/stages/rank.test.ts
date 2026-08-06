@@ -21,6 +21,7 @@ function fakeCtx(): StageContext {
       },
       async removeTree() {},
     },
+    stateStore: {} as StageContext['stateStore'],
   };
 }
 

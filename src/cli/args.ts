@@ -41,6 +41,8 @@ export interface CommandOptions {
   port?: number;
   /** `runs show <id>` — present ⇒ show, absent ⇒ list. */
   runId?: number;
+  /** `state read|write <key>` — the structure hand-off document key. */
+  key?: string;
 }
 
 export type CommandName =
@@ -57,7 +59,8 @@ export type CommandName =
   | 'release'
   | 'migrate'
   | 'board'
-  | 'runs';
+  | 'runs'
+  | 'state';
 
 export const COMMAND_NAMES = new Set<string>([
   'run',
@@ -74,6 +77,7 @@ export const COMMAND_NAMES = new Set<string>([
   'migrate',
   'board',
   'runs',
+  'state',
 ]);
 
 export const USAGE = [
@@ -95,6 +99,8 @@ export const USAGE = [
   '  board     [--port <n>]                    (job board server on 127.0.0.1; profile-less)',
   '  runs      --profile <name>                (run history from the DB)',
   '  runs show <id> --profile <name>',
+  '  state read  <table|decisions|decisions-partial> --profile <name>   (structure hand-off only — not a general DB tool)',
+  '  state write <decisions|decisions-partial>       --profile <name>   (reads stdin)',
 ].join('\n');
 
 /** The one `parseArgs` options literal every command's flags are drawn
@@ -243,6 +249,23 @@ export function buildOptions(
         };
       }
       return needsProfile() ?? { profile, runId };
+    }
+    case 'state': {
+      const action = rest[0];
+      if (action !== 'read' && action !== 'write') {
+        return { error: 'state takes "read" or "write"' };
+      }
+      const key = rest[1];
+      const validKeys =
+        action === 'read'
+          ? ['table', 'decisions', 'decisions-partial']
+          : ['decisions', 'decisions-partial'];
+      if (!key || !validKeys.includes(key)) {
+        return {
+          error: `state ${action}: key must be one of ${validKeys.join(', ')} (this is not a general DB tool)`,
+        };
+      }
+      return needsProfile() ?? { profile, action, key };
     }
   }
 }

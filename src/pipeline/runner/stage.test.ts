@@ -28,6 +28,7 @@ function fakeCtx(): StageContext {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: fakeStorage(),
+    stateStore: {} as StageContext['stateStore'],
   };
 }
 

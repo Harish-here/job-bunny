@@ -5,7 +5,7 @@ import { LinkedInLane } from './lane.ts';
 import { RESUME_STATE_PATH } from './resume_state.ts';
 import {
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeCapturedJD,
   fakeCtx,
   fixtureFilterConfig,
@@ -22,7 +22,7 @@ test('happy path: 2 urls, some cards gated out, surviving JDs opened, companiesS
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   let beats = 0;
   const ctx = fakeCtx({
     beat() {
@@ -35,7 +35,7 @@ test('happy path: 2 urls, some cards gated out, surviving JDs opened, companiesS
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped, companiesSeen } = await lane.source(ctx);
@@ -70,7 +70,7 @@ test("one url's goto/harvest throws: logged and skipped, the other url is still 
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -86,7 +86,7 @@ test("one url's goto/harvest throws: logged and skipped, the other url is still 
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -101,7 +101,7 @@ test("one url's goto/harvest throws: logged and skipped, the other url is still 
 
   // markDone must NOT have been called for the failed url — only url2 is
   // in the persisted done-map (finding 2b).
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.equal(Object.hasOwn(persisted.done, URL_1), false);
   assert.equal(Object.hasOwn(persisted.done, URL_2), true);
 });
@@ -112,7 +112,7 @@ test("one card's openJd throws (empty text): that card is skipped, other cards i
   seedHappyPathScript(script);
   script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/'); // Acme in url1 fails to open
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -120,7 +120,7 @@ test("one card's openJd throws (empty text): that card is skipped, other cards i
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped, companiesSeen } = await lane.source(ctx);
@@ -133,7 +133,7 @@ test("one card's openJd throws (empty text): that card is skipped, other cards i
 
   // The url itself succeeded (only one card within it failed) — it must
   // still be marked done, unlike a whole-url failure.
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.ok(Object.hasOwn(persisted.done, URL_1));
 
   // The failed card's JD-open still shows up as a DroppedRecord, not just
@@ -156,7 +156,7 @@ test('every card JD-open failing for a url leaves it un-marked-done (resumable) 
   script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/');
   script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1003/');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -172,7 +172,7 @@ test('every card JD-open failing for a url leaves it un-marked-done (resumable) 
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(ctx);
@@ -191,7 +191,7 @@ test('every card JD-open failing for a url leaves it un-marked-done (resumable) 
 
   // url1 must NOT be marked done — a run where every JD-open failed for a
   // url must be retried next fire, not skipped as if it were healthy.
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.equal(Object.hasOwn(persisted.done, URL_1), false);
   assert.ok(Object.hasOwn(persisted.done, URL_2));
 
@@ -223,7 +223,7 @@ test('lane-wide "no JD ever opened" guard: url A attempts 2 cards and fails both
     },
   ]);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -231,7 +231,7 @@ test('lane-wide "no JD ever opened" guard: url A attempts 2 cards and fails both
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   await assert.rejects(
@@ -265,8 +265,8 @@ test('lane-wide "no JD ever opened" guard preserves prior same-day captures inst
     },
   ]);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
-  storage.set(CAPTURE_PATH, [fakeCapturedJD('li-9001', 'EarlierCo')]);
+  const stateStore = new FakeStateStore();
+  stateStore.set(CAPTURE_PATH, [fakeCapturedJD('li-9001', 'EarlierCo')]);
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -282,7 +282,7 @@ test('lane-wide "no JD ever opened" guard preserves prior same-day captures inst
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -319,7 +319,7 @@ test('lane-wide "no JD ever opened" guard does not fire when nothing survives ti
     },
   ]);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -327,7 +327,7 @@ test('lane-wide "no JD ever opened" guard does not fire when nothing survives ti
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(ctx);
@@ -343,7 +343,7 @@ test('lane-wide "no JD ever opened" guard does not fire when at least one JD-ope
   script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1001/');
   script.jdTextByUrl.delete('https://www.linkedin.com/jobs/view/1003/');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -351,7 +351,7 @@ test('lane-wide "no JD ever opened" guard does not fire when at least one JD-ope
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -365,7 +365,7 @@ test('anchor-fallback extractions are counted and surfaced as one lane-level war
   seedHappyPathScript(script);
   for (const url of script.jdTextByUrl.keys()) script.anchorOnlyUrls.add(url);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -381,7 +381,7 @@ test('anchor-fallback extractions are counted and surfaced as one lane-level war
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -398,9 +398,9 @@ test('resume: a url already marked done in ResumeState is skipped entirely — i
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const today = new Date().toISOString().slice(0, 10);
-  storage.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 2 } });
+  stateStore.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 2 } });
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -408,7 +408,7 @@ test('resume: a url already marked done in ResumeState is skipped entirely — i
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -423,11 +423,11 @@ test('resume: captures already flushed by an earlier fire today are reloaded, so
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const today = new Date().toISOString().slice(0, 10);
-  storage.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 2 } });
+  stateStore.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 2 } });
   // url1's jobs from the earlier fire, already durably flushed.
-  storage.set(CAPTURE_PATH, [
+  stateStore.set(CAPTURE_PATH, [
     fakeCapturedJD('li-1001', 'Acme'),
     fakeCapturedJD('li-1003', 'Globex'),
   ]);
@@ -438,7 +438,7 @@ test('resume: captures already flushed by an earlier fire today are reloaded, so
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -455,13 +455,13 @@ test('same-day second fire: when ResumeState already has ALL urls marked done, s
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const today = new Date().toISOString().slice(0, 10);
-  storage.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 3, [URL_2]: 2 } });
+  stateStore.set(RESUME_STATE_PATH, { date: today, done: { [URL_1]: 3, [URL_2]: 2 } });
   // A stale ghost from the earlier fire(s) today, no longer part of any
   // card this run harvests — rescanReset's capture-file clear must drop
   // it, or it would linger forever.
-  storage.set(CAPTURE_PATH, [fakeCapturedJD('li-9999', 'GhostCo')]);
+  stateStore.set(CAPTURE_PATH, [fakeCapturedJD('li-9999', 'GhostCo')]);
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -469,7 +469,7 @@ test('same-day second fire: when ResumeState already has ALL urls marked done, s
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -485,7 +485,7 @@ test('browser.launch throwing is a loud lane failure: source() rejects', async (
   const inv = await singlePageInventory();
   const script = newScript();
   const provider = new FakeBrowserProvider(script, true);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -493,7 +493,7 @@ test('browser.launch throwing is a loud lane failure: source() rejects', async (
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   await assert.rejects(() => lane.source(ctx), /Chrome would not launch/);
@@ -506,7 +506,7 @@ test('every attempted url failing is a loud aggregate failure (finding 3) — go
   script.gotoThrows.add(URL_1);
   script.gotoThrows.add(URL_2);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -514,7 +514,7 @@ test('every attempted url failing is a loud aggregate failure (finding 3) — go
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   // The guard must still throw loud (do NOT weaken it) — but a plain goto
@@ -543,7 +543,7 @@ test('every attempted url failing with zero cards harvested reports a DOM/authwa
   script.harvestByUrl.set(URL_1, []);
   script.harvestByUrl.set(URL_2, []);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -551,7 +551,7 @@ test('every attempted url failing with zero cards harvested reports a DOM/authwa
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   let message = '';
@@ -589,7 +589,7 @@ test('every attempted url failing with cards found but empty title/company repor
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9001/', 'JD text — 9001');
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9002/', 'JD text — 9002');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -597,7 +597,7 @@ test('every attempted url failing with cards found but empty title/company repor
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   let message = '';
@@ -630,10 +630,10 @@ test('zero attempted urls (empty url list) does not trip the aggregate-failure c
   const inv = await singlePageInventory();
   const script = newScript();
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
-  const lane = new LinkedInLane(provider, [inv], [], fixtureFilterConfig(), storage);
+  const lane = new LinkedInLane(provider, [inv], [], fixtureFilterConfig(), stateStore);
 
   const { jobs } = await lane.source(ctx);
   assert.deepEqual(jobs, []);
@@ -645,7 +645,7 @@ test("newPage() throwing (dead CDP context) is this url's SoftError alone, not a
   seedHappyPathScript(script);
   // url1 is the first newPage() call (index 0); url2 is the second (index 1).
   const provider = new FakeBrowserProvider(script, false, new Set([0]));
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -661,7 +661,7 @@ test("newPage() throwing (dead CDP context) is this url's SoftError alone, not a
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -681,7 +681,7 @@ test('resumeState.persist is called after EVERY url (success or failure), not on
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -689,12 +689,12 @@ test('resumeState.persist is called after EVERY url (success or failure), not on
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   await lane.source(ctx);
 
-  const resumeWrites = storage.writes.filter((path) => path === RESUME_STATE_PATH);
+  const resumeWrites = stateStore.writes.filter((path) => path === RESUME_STATE_PATH);
   // One persist after url1 (failed) and one after url2 (succeeded) — not
   // a single write at the very end, which would lose url1's outcome (and
   // url2's, if the crash happened before that single end-of-run write).
@@ -706,7 +706,7 @@ test('captured JDs are flushed incrementally (per-JD), not batched at end-of-run
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -714,14 +714,14 @@ test('captured JDs are flushed incrementally (per-JD), not batched at end-of-run
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   await lane.source(ctx);
 
   // 4 jobs are captured across both urls in the happy-path script — each
   // must have triggered its own persist to CAPTURE_PATH.
-  const captureWrites = storage.writes.filter((path) => path === CAPTURE_PATH);
+  const captureWrites = stateStore.writes.filter((path) => path === CAPTURE_PATH);
   assert.equal(captureWrites.length, 4);
 });
 
@@ -731,7 +731,7 @@ test('handle.close() is always called, including when a url fails, and every ope
   seedHappyPathScript(script);
   script.gotoThrows.add(URL_1);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const ctx = fakeCtx();
 
   const lane = new LinkedInLane(
@@ -739,7 +739,7 @@ test('handle.close() is always called, including when a url fails, and every ope
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   await lane.source(ctx);
@@ -755,7 +755,7 @@ test('a url group with no matching inventory is logged and skipped, not thrown',
   const inv = await singlePageInventory();
   const script = newScript();
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: unknown[] = [];
   const ctx = fakeCtx({
     logger: {
@@ -771,7 +771,7 @@ test('a url group with no matching inventory is logged and skipped, not thrown',
     [inv], // only has 'linkedin__jobs-search' — 'unknown-page' has none
     [{ page: 'unknown-page', urls: ['https://www.linkedin.com/jobs/search/?x=1'] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);

@@ -12,10 +12,9 @@ import { dataPath, fakeReadFile, profilePath } from './testkit.ts';
 /**
  * compose.test.ts (P8, split from wire.test.ts) — exercises `wire()`'s live
  * ctx/stages/routines composition end to end. Adapter identity is asserted
- * via each port's `.name`/`.kind`, never `instanceof` — this test file,
- * like every file under `src/cli` except `cli/wire/compose.ts` itself (and
- * `registry.ts`'s type-only exception), may not import `src/adapters/**`
- * (depcruise's `only-wire-imports-adapters`).
+ * via `.name`/`.kind`, never `instanceof` — like every file under `src/cli`
+ * except `compose.ts` itself (and `registry.ts`'s type-only exception), this
+ * file may not import `src/adapters/**` (depcruise's `only-wire-imports-adapters`).
  */
 
 // --- wire() ---
@@ -303,6 +302,7 @@ test('wire: filter defaults to parsed-{} FilterConfig when filter.json is absent
       logger: { debug() {}, info() {}, warn() {}, error() {} },
       beat() {},
       storage: result.ctx.storage,
+      stateStore: result.ctx.stateStore,
     },
   );
 

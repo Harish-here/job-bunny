@@ -115,6 +115,13 @@ function fakeCtx(connector: Connector): PipelineCtx {
       },
       async removeTree() {},
     },
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: {
       lanes: [],
       connector: 'notion',

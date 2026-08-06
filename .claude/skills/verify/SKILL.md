@@ -34,7 +34,8 @@ pair in `profiles/rajni/data/jobbunny.db`'s `checkpoints`/`runs` tables — pers
 creating a fresh group only when today has none yet), resumes from the latest checkpoint row in
 that group (falling back to `{ jobs: [], dropped: [] }` if there is none yet), and writes a new
 checkpoint row at that stage's own slot — `dedup` needs `reconcile` to have run first this same
-day (it reads `profiles/rajni/data/cache.json`, not a checkpoint). No files are written under
+day (it reads the `cache/entries.json` key via `ctx.stateStore`, a `state_docs` row now — persist-to-db
+Phase 3 — not a checkpoint, and not a file either). No files are written under
 `profiles/rajni/data/runs/` anymore — that folder tree is retired. If a stage run ever leaves
 `profiles/rajni/`'s *committed* files dirty, restore them with:
 
@@ -42,32 +43,48 @@ day (it reads `profiles/rajni/data/cache.json`, not a checkpoint). No files are 
 git checkout -- profiles/rajni/
 ```
 
-Per-run intermediates (`data/jobbunny.db*`, `data/registry/`, `data/lanes/`, `data/cache.json`)
-are already gitignored, so a stray run there needs no cleanup. To reset checkpoint/run history
-between fixture experiments (e.g. to force a fresh group instead of continuing today's chain),
-delete the db file itself: `rm -f profiles/rajni/data/jobbunny.db*` (the `-wal`/`-shm` sidecars
-included) — the next stage run recreates it fresh via the migrations.
+Per-run intermediates now live entirely inside `data/jobbunny.db*` (already gitignored) — the
+`checkpoints`/`runs`/`run_events`/`state_docs` tables replace what used to be
+`data/registry/`, `data/lanes/`, and `data/cache.json` on disk (persist-to-db Phase 3; those
+directories/files are legacy-lift sources only, read once if present, never written again). A
+stray run leaves no other files to clean up. To reset checkpoint/run/state history between
+fixture experiments (e.g. to force a fresh group instead of continuing today's chain, or to
+force a fresh legacy-file lift), delete the db file itself: `rm -f profiles/rajni/data/jobbunny.db*`
+(the `-wal`/`-shm` sidecars included) — the next stage run recreates it fresh via the migrations.
 
 ### The LinkedIn lane's resume/state logic
 
-The lane persists per-URL same-day completion at
-`profiles/rajni/data/lanes/linkedin/extract_resume.json` — shape `{ date, done: { <url>:
-<count> } }` (`src/adapters/lanes/linkedin/resume_state.ts`). A stale (non-today) `date` or a
-missing file starts fresh, so this fixture is never committed. Generate it on the fly to
-exercise the crash-resume/already-complete paths, then discard:
+The lane persists per-URL same-day completion via the `StateStore` port at the key
+`lanes/linkedin/extract_resume.json` — shape `{ date, done: { <url>: <count> } }`
+(`src/adapters/lanes/linkedin/resume_state.ts`). Since persist-to-db Phase 3 this is a row in
+`profiles/rajni/data/jobbunny.db`'s `state_docs` table (`key`/`value_json`/`updated_at`), not a
+file — `SqliteStateStore.readDoc` only ever lifts the legacy file (if one exists) into that row
+ONCE, on the first read after a fresh DB; every later read hits the DB row directly and never
+looks at the file again, so re-heredocing the old file is a silent no-op against an
+already-lifted DB. Seed the row directly instead — a stale (non-today) `date` or a missing row
+starts fresh, so this seed is never committed:
 
 ```bash
 TODAY=$(date +%Y-%m-%d)
-cat > profiles/rajni/data/lanes/linkedin/extract_resume.json <<EOF
-{ "date": "$TODAY", "done": { "https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&f_TPR=r86400&sortBy=R": 3 } }
-EOF
+sqlite3 profiles/rajni/data/jobbunny.db \
+  "INSERT OR REPLACE INTO state_docs (key, value_json, updated_at) VALUES (
+     'lanes/linkedin/extract_resume.json',
+     '{\"date\":\"$TODAY\",\"done\":{\"https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&f_TPR=r86400&sortBy=R\":3}}',
+     datetime('now')
+   );"
 ```
+
+(If you'd rather exercise the legacy-file lift path itself: `rm -f profiles/rajni/data/jobbunny.db*`
+first to force a fresh DB, THEN heredoc the file at `profiles/rajni/data/lanes/linkedin/extract_resume.json`
+in the old `{ date, done }` shape — the first read after that lifts it into `state_docs` once.
+Note this also wipes checkpoint/run history for the fixture, since it's the same db file.)
 
 Run `/farm` against it (see "the trap" below for interrupting before Chrome launches), watch
 the log for the resume decision, then discard:
 
 ```bash
 git checkout -- profiles/rajni/
+rm -f profiles/rajni/data/jobbunny.db*
 rm -rf profiles/rajni/data/lanes
 ```
 

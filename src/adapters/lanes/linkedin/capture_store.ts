@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { type JD, JDSchema } from '../../../core/jd/index.ts';
-import type { Storage } from '../../../ports/storage.ts';
+import type { StateStore } from '../../../ports/state_store.ts';
 
 /**
  * Durable incremental flush of captured JDs — crash-recovery companion to
  * ResumeState (P4 fix, verified code review finding). Persisted via the
- * Storage port at `lanes/linkedin/captures.json` as a plain JD[]. The lane
+ * StateStore port at `lanes/linkedin/captures.json` as a plain JD[]. The lane
  * appends to this file after EVERY successfully captured JD (not batched
  * at end-of-run) so a mid-run crash never loses an already-scraped JD —
  * only the in-flight card is at risk. A same-day resumed fire loads this
@@ -34,8 +34,8 @@ export class CaptureStore {
   }
 
   /** Reads the persisted captures; a missing file starts empty. */
-  static async load(storage: Storage): Promise<CaptureStore> {
-    const raw = await storage.readJson(CAPTURE_PATH, CapturesSchema);
+  static async load(stateStore: StateStore): Promise<CaptureStore> {
+    const raw = await stateStore.readDoc(CAPTURE_PATH, CapturesSchema);
     return new CaptureStore(raw ? [...raw] : []);
   }
 
@@ -47,15 +47,15 @@ export class CaptureStore {
 
   /** Appends one newly captured JD and immediately persists — called
    * after every successful JD open, never batched. */
-  async append(storage: Storage, jd: JD): Promise<void> {
+  async append(stateStore: StateStore, jd: JD): Promise<void> {
     this.jobs.push(jd);
-    await storage.writeJson(CAPTURE_PATH, this.jobs);
+    await stateStore.writeDoc(CAPTURE_PATH, this.jobs);
   }
 
   /** Clears the file for a rescan (multi-fire schedules) — always call
    * this alongside ResumeState.rescanReset(); see header. */
-  async reset(storage: Storage): Promise<void> {
+  async reset(stateStore: StateStore): Promise<void> {
     this.jobs = [];
-    await storage.writeJson(CAPTURE_PATH, this.jobs);
+    await stateStore.writeDoc(CAPTURE_PATH, this.jobs);
   }
 }

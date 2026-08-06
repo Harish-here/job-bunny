@@ -19,9 +19,8 @@
  * below, alongside the live adapter construction — the only two places
  * adapters are constructed) and returns `{ ctx, stages, routines, checks }`.
  *
- * No `wireScheduler()`/`Scheduler` port here (D14, see decision ledger) —
- * the in-process daemon (`src/ops/daemon/`) replaced launchd triggering and
- * is not a `Scheduler` implementation; no successor port exists.
+ * No `wireScheduler()`/`Scheduler` port (D14): the in-process daemon
+ * (`src/ops/daemon/`) replaced launchd triggering; no successor port exists.
  */
 import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -44,6 +43,7 @@ import {
   sqliteDbCheck,
 } from '../../adapters/db/sqlite/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
+import { SqliteStateStore } from '../../adapters/db/sqlite/state/index.ts';
 import {
   inventoryFreshnessCheck,
   parseSearchUrls,
@@ -214,17 +214,13 @@ export async function wire(
     notionApiForConnector = new NotionApi({ client: missingTokenNotionClient() });
   }
 
-  // TWO storage handles, deliberately.
-  // `src/adapters/lanes/linkedin/page_inventory/<page>.json` is
-  // machine-shared (repo-root-relative) and is not per-profile, while every
-  // stage artifact (`cache/`, `registry/`, `structure/`, the LinkedIn lane's
-  // resume/capture state) IS. Rooting a single handle at the repo root — as
-  // this did until 2026-07-25 — put all of them in the repo root and made
-  // two profiles share one cache and one company registry. That is not
-  // cosmetic: the first real run read a 0-entry repo-root
-  // `registry/companies.json` it had just created instead of the profile's
-  // 27 curated companies, so the Greenhouse and Keka lanes probed nothing
-  // and the run still reported `passed`.
+  // TWO storage handles, deliberately: `page_inventory/<page>.json` is
+  // machine-shared (repo-root), while every stage artifact (`cache/`,
+  // `registry/`, `structure/`, the LinkedIn lane's resume/capture state) is
+  // per-profile. A single repo-root handle (pre-2026-07-25) made two
+  // profiles share one cache/registry — the first real run read a 0-entry
+  // repo-root `registry/companies.json` instead of the profile's 27 curated
+  // companies, so Greenhouse/Keka probed nothing and the run still passed.
   const storage = new FsStorage(root);
   const profileStorage = new FsStorage(path.join(root, 'profiles', profileName, 'data'));
   const sqliteDefaultPath = path.join(
@@ -239,6 +235,10 @@ export async function wire(
   const runStore = new SqliteRunStore(sqlitePath);
   // Shares `sqlitePath` with `runStore` — lazy-open, no file I/O here either.
   const checkpointStore = new SqliteCheckpointStore(sqlitePath);
+  const stateStore = new SqliteStateStore(
+    sqlitePath,
+    path.join(root, 'profiles', profileName, 'data'), // mirrors `profileStorage`'s root
+  );
 
   const deps: RuntimeDeps = {
     storage,
@@ -296,7 +296,7 @@ export async function wire(
     root,
     readFile,
     storage: deps.storage,
-    profileStorage: deps.profileStorage,
+    stateStore,
     filterCfg,
     browser,
   });
@@ -336,6 +336,7 @@ export async function wire(
     ports,
     runStore,
     checkpointStore,
+    stateStore,
     // A notifier failure (e.g. Telegram's `send()` throwing on a missing
     // token or a hung request) must never change the run's outcome — `run.ts`
     // calls this AFTER `runPipeline` has already produced a PASSED/FAILED

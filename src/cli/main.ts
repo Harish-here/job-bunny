@@ -58,6 +58,7 @@ import { runsCommand } from './commands/runs.ts';
 import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
+import { type StateCommandOptions, stateCommand } from './commands/state.ts';
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
 
@@ -152,6 +153,12 @@ function defaultCommands(): CommandRegistry {
       runsCommand({
         profile: opts.profile ?? '',
         ...(opts.runId === undefined ? {} : { runId: opts.runId }),
+      })) as CommandFn,
+    state: (async (opts: CommandOptions) =>
+      stateCommand({
+        profile: opts.profile ?? '',
+        action: (opts.action ?? 'read') as 'read' | 'write',
+        key: (opts.key ?? '') as StateCommandOptions['key'],
       })) as CommandFn,
   };
 }

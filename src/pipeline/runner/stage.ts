@@ -1,5 +1,5 @@
 import type { DroppedRecord, JD } from '../../core/jd/index.ts';
-import type { RunContext, Storage } from '../../ports/index.ts';
+import type { RunContext, StateStore, Storage } from '../../ports/index.ts';
 
 /** Re-exported for existing callers (runner/index.ts, run.test.ts) — the
  * canonical definition now lives in core/jd, next to Verdict, so every
@@ -16,6 +16,7 @@ export interface StagePayload {
 
 export interface StageContext extends RunContext {
   storage: Storage;
+  stateStore: StateStore;
 }
 
 export interface StageDef<In, Out> {

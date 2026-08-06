@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 3;
+export const LATEST_SCHEMA_VERSION = 4;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -91,6 +91,14 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (run_date, time_dir, position)
   );
   CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
+  `,
+  // v3 -> v4: state_docs (Phase 3 — see state_store port)
+  `
+  CREATE TABLE state_docs (
+    key        TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
   `,
 ];
 

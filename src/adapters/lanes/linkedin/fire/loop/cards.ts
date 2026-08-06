@@ -102,7 +102,7 @@ export async function processCard(
       },
       content: { rawText },
     });
-    await state.captureStore.append(deps.storage, jd);
+    await state.captureStore.append(deps.stateStore, jd);
     stat.captured += 1;
     state.throttle?.record('ok');
   } catch (err) {
