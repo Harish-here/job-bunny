@@ -98,3 +98,78 @@ test('state: missing --profile errors even with a valid read key', () => {
   const result = buildOptions('state', ['read', 'table'], {});
   assert.deepEqual(result, { error: 'missing required --profile' });
 });
+
+test('config: bare invocation with no sub-action errors', () => {
+  const result = buildOptions('config', [], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    error: 'config takes "get", "set", "export", or "import"',
+  });
+});
+
+test('config: unknown action errors', () => {
+  const result = buildOptions('config', ['bogus'], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    error: 'config takes "get", "set", "export", or "import"',
+  });
+});
+
+test('config get: bad doc name errors, naming the valid docs', () => {
+  const result = buildOptions('config', ['get', 'bogus.json'], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    error:
+      'config get: doc must be one of profile.json, filter.json, resume.json, search_urls.md',
+  });
+});
+
+test('config set: bad doc name errors, naming the valid docs', () => {
+  const result = buildOptions('config', ['set', 'bogus.json'], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    error:
+      'config set: doc must be one of profile.json, filter.json, resume.json, search_urls.md',
+  });
+});
+
+test('config get: missing --profile errors even with a valid doc', () => {
+  const result = buildOptions('config', ['get', 'filter.json'], {});
+  assert.deepEqual(result, { error: 'missing required --profile' });
+});
+
+test('config set: missing --profile errors even with a valid doc', () => {
+  const result = buildOptions('config', ['set', 'filter.json'], {});
+  assert.deepEqual(result, { error: 'missing required --profile' });
+});
+
+test('config get filter.json --profile p: parses to { profile, action, doc }', () => {
+  const result = buildOptions('config', ['get', 'filter.json'], { profile: 'p' });
+  assert.deepEqual(result, { profile: 'p', action: 'get', doc: 'filter.json' });
+});
+
+test('config export --profile p: no --dir parses to { profile, action } (no dir key)', () => {
+  const result = buildOptions('config', ['export'], { profile: 'p' });
+  assert.deepEqual(result, { profile: 'p', action: 'export' });
+});
+
+test('config export --profile p --dir d: --dir is passed through', () => {
+  const result = buildOptions('config', ['export'], { profile: 'p', dir: '/tmp/out' });
+  assert.deepEqual(result, { profile: 'p', action: 'export', dir: '/tmp/out' });
+});
+
+test('config import --profile p: no --dir parses to { profile, action } (no dir key)', () => {
+  const result = buildOptions('config', ['import'], { profile: 'p' });
+  assert.deepEqual(result, { profile: 'p', action: 'import' });
+});
+
+test('config import --profile p --dir d: --dir is passed through', () => {
+  const result = buildOptions('config', ['import'], { profile: 'p', dir: '/tmp/in' });
+  assert.deepEqual(result, { profile: 'p', action: 'import', dir: '/tmp/in' });
+});
+
+test('config export: missing --profile errors', () => {
+  const result = buildOptions('config', ['export'], {});
+  assert.deepEqual(result, { error: 'missing required --profile' });
+});
+
+test('config: registered in COMMAND_NAMES and mentioned in USAGE', () => {
+  assert.ok(COMMAND_NAMES.has('config'));
+  assert.ok(USAGE.includes('config get'));
+});
