@@ -265,7 +265,16 @@ export async function runCommand(
       startedAt: now.toISOString(),
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
     });
-    ctx.runId = runId;
+    // Never propagate the degraded run store's sentinel (`startRun` returns
+    // -1 when the store failed to open — ports/run_store.ts) into
+    // `ctx.runId`: `checkpoints.written_by` is a real FK against `runs(id)`,
+    // and no row with id -1 ever exists, so passing it through unguarded
+    // would make every checkpoint write throw and fail an otherwise-healthy
+    // run — inverting "observability must never red a run". `runId` (the
+    // local, unnormalized value) still goes to this driver's own
+    // heartbeat/finishRun/recordFailure calls below — those are no-ops on
+    // the degraded store, so -1 is harmless there.
+    ctx.runId = runId === -1 ? undefined : runId;
     runLogger = createRunLogger(
       ctx.runStore,
       runId,

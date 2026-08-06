@@ -134,7 +134,17 @@ export async function stageCommand(
   // (e.g. `stage farm`) leaves heartbeat_at NULL for its whole duration,
   // which the null-or-stale derivation reports as "crashed" while it's alive.
   ctx.runStore.heartbeat(runId, resolved.now().toISOString());
-  ctx.runId = runId;
+  // Never propagate the degraded run store's sentinel (`startRun` returns
+  // -1 when the store failed to open — ports/run_store.ts) into `ctx.runId`
+  // or the checkpoint write's `writtenBy` below: `checkpoints.written_by`
+  // is a real FK against `runs(id)`, and no row with id -1 ever exists, so
+  // passing it through unguarded would make the checkpoint write throw and
+  // fail an otherwise-healthy run — inverting "observability must never red
+  // a run". `runId` (the local, unnormalized value) still goes to this
+  // driver's own heartbeat/finishRun/recordFailure calls — those are
+  // no-ops on the degraded store, so -1 is harmless there.
+  const writtenBy = runId === -1 ? undefined : runId;
+  ctx.runId = writtenBy;
   const runLogger = createRunLogger(
     ctx.runStore,
     runId,
@@ -163,7 +173,7 @@ export async function stageCommand(
         timeDir: time,
         position: index,
         stage: target.name,
-        writtenBy: runId,
+        ...(writtenBy !== undefined ? { writtenBy } : {}),
       },
       output,
     );
