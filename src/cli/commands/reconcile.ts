@@ -6,23 +6,21 @@
  * `cache.json` mirror holds.
  *
  * Reuses the same runner machinery `run` does (`runPipeline` against a
- * `RunFolder` for today's date) rather than inventing a parallel
- * single-stage path — the reconcile stage is simply handed a one-element
- * `stages` array. `runPipeline` itself never throws (a stage failure comes
- * back as a `RunResult` with `outcome: 'failed'`); this command turns that
- * into an exit code and message rather than propagating a throw.
+ * `{date, timeDir}` group for today's date) rather than inventing a
+ * parallel single-stage path — the reconcile stage is simply handed a
+ * one-element `stages` array. `runPipeline` itself never throws (a stage
+ * failure comes back as a `RunResult` with `outcome: 'failed'`); this
+ * command turns that into an exit code and message rather than propagating
+ * a throw.
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
  * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
  */
-import { join } from 'node:path';
 import { z } from 'zod';
 import { CacheEntrySchema } from '../../core/jd/index.ts';
 import {
   createRunLogger,
   formatRunTime,
-  latestTimeDir,
-  RunFolder,
   type RunResult,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
@@ -48,7 +46,7 @@ export interface ReconcileDeps {
   runPipeline: (
     stages: Array<StageDef<StagePayload, StagePayload>>,
     ctx: PipelineCtx,
-    folder: RunFolder,
+    group: { date: string; timeDir: string },
     opts: RunnerOptions,
   ) => Promise<RunResult>;
   now: () => Date;
@@ -80,14 +78,12 @@ export async function reconcileCommand(
 
   const now = resolved.now();
   const date = now.toISOString().slice(0, 10);
-  const dataDir = join(resolved.root, 'profiles', opts.profile, 'data');
-  // Same folder-selection semantics as `stageCommand`: continue in TODAY's
-  // latest existing time folder (this and `stage` are both ad-hoc
-  // single-stage entry points in the same verify chain), creating a fresh
-  // one only when today has none yet.
-  const existing = await latestTimeDir(dataDir, date);
+  // Same group-selection semantics as `stageCommand`: continue in TODAY's
+  // latest existing group (this and `stage` are both ad-hoc single-stage
+  // entry points in the same verify chain), creating a fresh one only when
+  // today has none yet.
+  const existing = ctx.checkpointStore.latestTimeDir(date);
   const time = existing ?? formatRunTime(now);
-  const folder = new RunFolder(dataDir, date, time);
 
   // Runs-observability Phase 1 (Task 7): open a `runs` row for THIS
   // invocation before `runPipeline` runs — `ctx.runId` is what
@@ -115,10 +111,15 @@ export async function reconcileCommand(
   ctx.logger = runLogger;
 
   try {
-    const result = await resolved.runPipeline([reconcileStage], ctx, folder, {
-      runCapMs: RUN_CAP_MS,
-      stallMs: STALL_MS,
-    });
+    const result = await resolved.runPipeline(
+      [reconcileStage],
+      ctx,
+      { date, timeDir: time },
+      {
+        runCapMs: RUN_CAP_MS,
+        stallMs: STALL_MS,
+      },
+    );
 
     ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
 
