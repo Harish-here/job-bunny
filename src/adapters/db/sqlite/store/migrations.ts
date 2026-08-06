@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 2;
+export const LATEST_SCHEMA_VERSION = 3;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -77,6 +77,20 @@ const MIGRATIONS: readonly string[] = [
     data_json TEXT
   );
   CREATE INDEX idx_run_events_run ON run_events(run_id);
+  `,
+  // v2 -> v3: checkpoints (Phase 2 — see checkpoint_store port)
+  `
+  CREATE TABLE checkpoints (
+    run_date   TEXT    NOT NULL,
+    time_dir   TEXT    NOT NULL,
+    position   INTEGER NOT NULL,
+    stage      TEXT    NOT NULL,
+    payload_json TEXT  NOT NULL,
+    written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    created_at TEXT    NOT NULL,
+    PRIMARY KEY (run_date, time_dir, position)
+  ) WITHOUT ROWID;
+  CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
   `,
 ];
 
