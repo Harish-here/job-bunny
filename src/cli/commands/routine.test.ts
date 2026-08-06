@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/context.ts';
 import type {
   ArchivePolicy,
+  CheckpointStore,
   Connector,
   RunContext,
   RunStore,
@@ -69,6 +70,28 @@ function fakeRunStore(): RunStore {
   };
 }
 
+/** Stub `CheckpointStore` — this file's real-`cleanupRoutine` test needs
+ * `pruneOlderThan` to exist (called unconditionally); no test here asserts
+ * on its call args, so every other method is a no-op stub. */
+function fakeCheckpointStore(): CheckpointStore {
+  return {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+}
+
 function fakeCtx(connector: Connector): PipelineCtx {
   const ports: WiredPorts = { lanes: [], connector, notifiers: [] };
   return {
@@ -95,7 +118,7 @@ function fakeCtx(connector: Connector): PipelineCtx {
     },
     ports,
     runStore: fakeRunStore(),
-    checkpointStore: {} as PipelineCtx['checkpointStore'],
+    checkpointStore: fakeCheckpointStore(),
     async notify(_event: NotifyEvent) {},
   };
 }

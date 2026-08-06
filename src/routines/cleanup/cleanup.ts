@@ -38,7 +38,8 @@ export const CleanupSettingsSchema = z.object({
   /** v0 `cleanup.js` `LEAD_DAYS_OLD` default. */
   untouchedOlderThanDays: z.number().int().min(0).default(30),
   /** No v0 precedent (v0 never wrote checkpoints); TTL for local
-   * `runs/<date>/` folders under `ctx.storage`. */
+   * `runs/<date>/` folders under `ctx.storage` (legacy, pre-Phase-2) and
+   * for `checkpoints`/`runs` table rows (persist-to-db). */
   runsOlderThanDays: z.number().int().min(0).default(30),
 });
 
@@ -109,10 +110,13 @@ export const cleanupRoutine: Routine = {
       });
     }
 
-    // This routine runs post-sync DURING a run whose own `runs/<today>/`
-    // checkpoint folder is actively being written — `selectPrunableRunDirs`'s
-    // never-today guard plus its strict-older-than-cutoff comparison make
-    // pruning alongside that live folder safe.
+    // LEGACY (pre-Phase-2 leftover `runs/<date>/` folders): harmless once
+    // none remain on disk after an upgrade, and independent of the
+    // checkpoints-table prune below. This routine runs post-sync DURING a
+    // run whose own `runs/<today>/` checkpoint folder is actively being
+    // written — `selectPrunableRunDirs`'s never-today guard plus its
+    // strict-older-than-cutoff comparison make pruning alongside that live
+    // folder safe.
     const today = new Date().toISOString().slice(0, 10);
     const runDirs = await ctx.storage.listSubdirs('runs');
     const prunable = selectPrunableRunDirs(runDirs, today, settings.runsOlderThanDays);
@@ -148,6 +152,19 @@ export const cleanupRoutine: Routine = {
     );
     ctx.logger.info('cleanup: pruned run rows', {
       prunedDbRuns,
+      runsOlderThanDays: settings.runsOlderThanDays,
+    });
+
+    // Same TTL, same `today` as the runs-row prune above — checkpoint rows
+    // (persist-to-db Phase 2) get pruned the same way. The legacy
+    // `runs/<date>/` folder prune above stays for pre-Phase-2 leftovers
+    // still on disk after an upgrade — harmless once none remain.
+    const prunedCheckpoints = ctx.checkpointStore.pruneOlderThan(
+      today,
+      settings.runsOlderThanDays,
+    );
+    ctx.logger.info('cleanup: pruned checkpoint rows', {
+      prunedCheckpoints,
       runsOlderThanDays: settings.runsOlderThanDays,
     });
   },

@@ -1,10 +1,14 @@
 /**
  * core/schedule/types.ts — the pure vocabulary the daemon's owed-slot
  * decision (owed.ts) is built from. Local wall-clock time throughout, never
- * UTC: run-folder names (ops/observability/run/run_folder.ts's formatRunTime)
- * are local, and using UTC here is a bug this project already hit once —
- * run.log timestamps are UTC while folder names are local, and conflating
- * the two silently misaligns "is this slot served" checks.
+ * UTC: run-folder-shaped names (formatted by `formatRunTime` in
+ * ops/observability/run/run_folder.ts) are local, and using UTC here is a
+ * bug this project already hit once — run.log timestamps are UTC while
+ * folder-shaped names are local, and conflating the two silently misaligns
+ * "is this slot served" checks. (Historical note: this checked actual
+ * on-disk run folders pre-Phase-2; the checkpoints-to-db migration retired
+ * the folders themselves, but the `HH-MM(-N)` format they used lives on in
+ * `formatRunTime` and in this file's own `RUN_FOLDER_RE`.)
  */
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -38,10 +42,11 @@ export interface OwedRun {
   slot: string; // "HH:MM" local
 }
 
-// Matches ops/observability/run/run_folder.ts's TIME_DIR_RE (`^\d{2}-\d{2}(-\d+)?$`)
-// exactly: always zero-padded HH-MM, optionally suffixed -N on a same-minute
-// collision. A folder that doesn't match (e.g. "sync_dryrun.json") is not a
-// run folder at all and yields undefined.
+// Matches the same `^\d{2}-\d{2}(-\d+)?$` shape `formatRunTime` produces
+// (ops/observability/run/run_folder.ts): always zero-padded HH-MM,
+// optionally suffixed -N on a same-minute collision. A name that doesn't
+// match (e.g. "sync_dryrun.json") is not a run-folder-shaped name at all
+// and yields undefined.
 const RUN_FOLDER_RE = /^(\d{2})-(\d{2})(?:-\d+)?$/;
 
 /**

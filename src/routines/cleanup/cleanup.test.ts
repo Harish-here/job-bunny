@@ -4,6 +4,7 @@ import type { CacheEntry, DroppedRecord, JD, SyncedJD } from '../../core/jd/inde
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/index.ts';
 import type {
   ArchivePolicy,
+  CheckpointStore,
   Connector,
   LogData,
   Logger,
@@ -128,6 +129,34 @@ function fakeRunStore(opts?: { prunedResult?: number }): {
   return { store, prunedCalls };
 }
 
+/** Recording `CheckpointStore` fake — `pruneOlderThan` records its call
+ * args and returns `opts.prunedResult` (default 0); every other method is
+ * a stub, since this routine never calls them. */
+function fakeCheckpointStore(opts?: { prunedResult?: number }): {
+  store: CheckpointStore;
+  prunedCalls: Array<{ today: string; ttlDays: number }>;
+} {
+  const prunedCalls: Array<{ today: string; ttlDays: number }> = [];
+  const store: CheckpointStore = {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan(today, ttlDays) {
+      prunedCalls.push({ today, ttlDays });
+      return opts?.prunedResult ?? 0;
+    },
+    close() {},
+  };
+  return { store, prunedCalls };
+}
+
 function fakeCtx(opts?: {
   settings?: Record<string, unknown>;
   connector?: Connector;
@@ -153,7 +182,7 @@ function fakeCtx(opts?: {
     },
     ports,
     runStore: opts?.runStore ?? fakeRunStore().store,
-    checkpointStore: opts?.checkpointStore ?? ({} as PipelineCtx['checkpointStore']),
+    checkpointStore: opts?.checkpointStore ?? fakeCheckpointStore().store,
     async notify() {},
   };
 }
@@ -331,6 +360,35 @@ test('run(): prunes runs/run_events rows via ctx.runStore, with the same TTL and
   const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned run rows');
   assert.ok(infoCall, 'must log the number of pruned run rows');
   assert.equal(infoCall?.data?.prunedDbRuns, 4);
+  assert.equal(infoCall?.data?.runsOlderThanDays, 45);
+});
+
+test('run(): prunes checkpoint rows via ctx.checkpointStore, with the same TTL and today used for the runs-row prune', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const { store: runStore, prunedCalls: runPrunedCalls } = fakeRunStore({
+    prunedResult: 4,
+  });
+  const { store: checkpointStore, prunedCalls: checkpointPrunedCalls } =
+    fakeCheckpointStore({ prunedResult: 2 });
+  const ctx = fakeCtx({
+    connector,
+    logger,
+    runStore,
+    checkpointStore,
+    settings: { cleanup: { runsOlderThanDays: 45 } },
+  });
+
+  await cleanupRoutine.run(ctx);
+
+  assert.equal(checkpointPrunedCalls.length, 1);
+  assert.equal(checkpointPrunedCalls[0]?.ttlDays, 45);
+  assert.equal(checkpointPrunedCalls[0]?.today, runPrunedCalls[0]?.today);
+  assert.equal(checkpointPrunedCalls[0]?.ttlDays, runPrunedCalls[0]?.ttlDays);
+
+  const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned checkpoint rows');
+  assert.ok(infoCall, 'must log the number of pruned checkpoint rows');
+  assert.equal(infoCall?.data?.prunedCheckpoints, 2);
   assert.equal(infoCall?.data?.runsOlderThanDays, 45);
 });
 
