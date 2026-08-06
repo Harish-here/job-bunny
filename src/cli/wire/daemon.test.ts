@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { wireDaemonRunHistory } from './daemon.ts';
+import { wireDaemonRunHistory, wireDaemonScheduleConfig } from './daemon.ts';
 
 // This test file may not import `src/adapters/**` directly (no test-file
 // exemption from `only-wire-imports-adapters` — only `daemon.ts` itself is
@@ -181,4 +181,28 @@ test('wireDaemonRunHistory: a store that fails once does not permanently blind a
   ]);
   assert.equal(calls, 2, 'expected a fresh store construction per call, never memoized');
   assert.equal(closes, 2, 'expected every constructed store to be closed after its read');
+});
+
+test('wireDaemonScheduleConfig: a profile with a malformed profile.json and NO jobbunny.db yet resolves undefined, never rejects (real SqliteConfigStore readonly-lift path — reproduces the daemon-tick-wide outage this guards against)', async () => {
+  await mkdir(join(root, 'profiles', 'scancfg-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'scancfg-broken', 'profile.json'),
+    'not valid json {{{',
+  );
+  const readProfileJson = wireDaemonScheduleConfig({ root });
+  await assert.doesNotReject(() =>
+    readProfileJson(join(root, 'profiles'), 'scancfg-broken'),
+  );
+  assert.equal(
+    await readProfileJson(join(root, 'profiles'), 'scancfg-broken'),
+    undefined,
+  );
+});
+
+test('wireDaemonScheduleConfig: a profile with a valid profile.json and no db still resolves its raw text (lift-without-insert, readonly mode)', async () => {
+  await mkdir(join(root, 'profiles', 'scancfg-ok'), { recursive: true });
+  const raw = JSON.stringify({ connector: 'sqlite' });
+  await writeFile(join(root, 'profiles', 'scancfg-ok', 'profile.json'), raw);
+  const readProfileJson = wireDaemonScheduleConfig({ root });
+  assert.equal(await readProfileJson(join(root, 'profiles'), 'scancfg-ok'), raw);
 });

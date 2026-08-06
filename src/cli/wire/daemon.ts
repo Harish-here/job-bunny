@@ -98,7 +98,21 @@ export function wireDaemonRunHistory(
  * fields even though `wireConfigStore` derives its own path from
  * `root`+`name` — `scanProfileSchedules` is always called with
  * `profilesDir = path.join(root, 'profiles')` at its one call site
- * (`ops/daemon/daemon.ts`), so the two never diverge in practice. */
+ * (`ops/daemon/daemon.ts`), so the two never diverge in practice.
+ *
+ * The WHOLE probe (store construction + `readText`) is wrapped in a
+ * try/catch that degrades ANY failure to `undefined` — mirroring
+ * `board.ts`'s `readProfileInfo` posture exactly, for the identical reason:
+ * `SqliteConfigStore`'s readonly-lift path THROWS (not resolves-undefined)
+ * on a malformed legacy `profile.json` when no db file exists yet (a
+ * routine, realistic state — e.g. right after scaffolding, before first
+ * run). Left uncaught, that throw would propagate through
+ * `scanProfileSchedules`'s `await deps.readProfileJson(...)` and reject the
+ * WHOLE scan — not just skip the one bad profile — silently blinding every
+ * OTHER profile's schedule for every tick until the one broken
+ * `profile.json` is fixed. `ops/daemon/daemon.ts`'s `tick()` catching it at
+ * the top level only keeps the daemon PROCESS alive; it does not restore
+ * per-profile fail-soft behavior for that tick. */
 export function wireDaemonScheduleConfig(
   overrides: DaemonWireOverrides = {},
 ): (profilesDir: string, name: string) => Promise<string | undefined> {
@@ -107,6 +121,11 @@ export function wireDaemonScheduleConfig(
     const store = wireConfigStore(name, { root, liftMode: 'readonly' });
     try {
       return await store.readText('profile.json');
+    } catch {
+      // Any failure of the whole probe (missing db + missing legacy file,
+      // a corrupt db, malformed JSON) is skip-worthy, never fatal — see
+      // this function's own doc comment.
+      return undefined;
     } finally {
       store.close();
     }
