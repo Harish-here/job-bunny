@@ -170,3 +170,95 @@ describe('wireBoard — openStore', () => {
     source.close();
   });
 });
+
+describe('wireBoard — readConfigDoc/writeConfigDoc', () => {
+  test('readConfigDoc lifts a legacy profile.json for a real profile', async () => {
+    const source = wireBoard({ root });
+    const text = await source.readConfigDoc('a', 'profile.json');
+    assert.equal(text, JSON.stringify({ connector: 'sqlite' }));
+    source.close();
+  });
+
+  test('readConfigDoc returns undefined for a doc never written/lifted', async () => {
+    const source = wireBoard({ root });
+    const text = await source.readConfigDoc('a', 'resume.json');
+    assert.equal(text, undefined);
+    source.close();
+  });
+
+  test('readConfigDoc returns undefined for an unknown profile name', async () => {
+    const source = wireBoard({ root });
+    assert.equal(await source.readConfigDoc('does-not-exist', 'profile.json'), undefined);
+    source.close();
+  });
+
+  test('readConfigDoc returns undefined for a traversal probe on name', async () => {
+    const source = wireBoard({ root });
+    assert.equal(await source.readConfigDoc('../a', 'profile.json'), undefined);
+    source.close();
+  });
+
+  test('writeConfigDoc round-trips through readConfigDoc for a real profile', async () => {
+    const source = wireBoard({ root });
+    const filterJson = JSON.stringify({ locations: [] });
+    await source.writeConfigDoc('a', 'filter.json', filterJson);
+    assert.equal(await source.readConfigDoc('a', 'filter.json'), filterJson);
+    source.close();
+  });
+
+  test('writeConfigDoc surfaces the real validator message unmodified on an invalid doc', async () => {
+    const source = wireBoard({ root });
+    await assert.rejects(
+      () => source.writeConfigDoc('a', 'filter.json', '{ not json'),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /^filter\.json is invalid:/);
+        return true;
+      },
+    );
+    source.close();
+  });
+
+  test('writeConfigDoc throws "unknown profile" for an unknown name', async () => {
+    const source = wireBoard({ root });
+    await assert.rejects(
+      () => source.writeConfigDoc('does-not-exist', 'filter.json', '{}'),
+      /unknown profile: does-not-exist/,
+    );
+    source.close();
+  });
+});
+
+describe('wireBoard — createProfile', () => {
+  test('happy path: all four docs readable afterward, db file exists', async () => {
+    const source = wireBoard({ root });
+    await source.createProfile('freshling');
+    const profileJson = await source.readConfigDoc('freshling', 'profile.json');
+    const filterJson = await source.readConfigDoc('freshling', 'filter.json');
+    const searchUrls = await source.readConfigDoc('freshling', 'search_urls.md');
+    assert.ok(profileJson);
+    assert.ok(filterJson);
+    assert.ok(searchUrls);
+    // resume.json is deliberately never seeded (hand-maintained).
+    assert.equal(await source.readConfigDoc('freshling', 'resume.json'), undefined);
+    const dbPath = path.join(profileDir('freshling'), 'data', 'jobbunny.db');
+    assert.equal(existsSync(dbPath), true);
+    source.close();
+  });
+
+  test('duplicate name throws "profile already exists"', async () => {
+    const source = wireBoard({ root });
+    await assert.rejects(() => source.createProfile('a'), /profile already exists: a/);
+    source.close();
+  });
+
+  test('bad name throws WITHOUT touching the filesystem', async () => {
+    const source = wireBoard({ root });
+    await assert.rejects(
+      () => source.createProfile('Bad Name!'),
+      /invalid profile name: Bad Name!/,
+    );
+    assert.equal(existsSync(profileDir('Bad Name!')), false);
+    source.close();
+  });
+});

@@ -15,6 +15,9 @@ function fakeSource(profiles: BoardProfile[] = []): BoardSource {
   return {
     listProfiles: async () => profiles,
     openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close: () => {},
   };
 }

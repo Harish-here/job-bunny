@@ -49,13 +49,32 @@
  * from disk, so a profile created while the server is running appears on
  * the next call. The store memo is unaffected by that — it survives until
  * `close()`.
+ *
+ * `readConfigDoc`/`writeConfigDoc`/`createProfile` (config→db Phase 4,
+ * Task 9 — the hard-rule amendment, ledger L7, `ports/board.ts`'s own doc
+ * comment carries the pinned wording) each construct their OWN short-lived
+ * `ConfigStore` via `wireConfigStore` and always `close()` it in a
+ * `finally` — none of the three ever touches the `stores` memo above.
+ * `readConfigDoc` re-derives membership and is readonly (never creates a
+ * db as a side effect of a GET); `writeConfigDoc` re-derives membership
+ * and is readwrite (writing is the meaningful first use allowed to create
+ * one); `createProfile` checks the name FORMAT before ever re-deriving
+ * membership or touching the filesystem, then delegates entirely to
+ * `seedProfileDocs` (`../commands/profile.ts` — a cli-to-cli import, not a
+ * boundary violation; only `app`↔`cli` and non-wire-cli↔`adapters` are
+ * restricted, never cli-internal imports).
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { openJobsDb, SqliteBoardStore } from '../../adapters/db/sqlite/index.ts';
 import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
+import type { ConfigDocKey } from '../../ports/config_store.ts';
+import { seedProfileDocs } from '../commands/profile.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
+
+const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
 
 export interface BoardWireOverrides {
   /** repo root; default `process.cwd()` — same resolution as
@@ -148,6 +167,61 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       const store = new SqliteBoardStore(openJobsDb(info.dbPath));
       stores.set(name, store);
       return store;
+    },
+
+    async readConfigDoc(name: string, doc: ConfigDocKey): Promise<string | undefined> {
+      const infos = await listProfileInfos(root);
+      if (!infos.some((p) => p.name === name)) return undefined;
+
+      const store = wireConfigStore(name, { root, liftMode: 'readonly' });
+      try {
+        return await store.readText(doc);
+      } finally {
+        store.close();
+      }
+    },
+
+    async writeConfigDoc(
+      name: string,
+      doc: ConfigDocKey,
+      rawText: string,
+    ): Promise<void> {
+      const infos = await listProfileInfos(root);
+      if (!infos.some((p) => p.name === name)) {
+        throw new Error(`unknown profile: ${name}`);
+      }
+
+      const store = wireConfigStore(name, { root, liftMode: 'readwrite' });
+      try {
+        await store.writeText(doc, rawText);
+      } finally {
+        store.close();
+      }
+    },
+
+    async createProfile(name: string): Promise<void> {
+      // Regex check FIRST — before any fs touch, per the port's own
+      // traversal discipline (name never flows into a path until proven
+      // safe).
+      if (!PROFILE_NAME_RE.test(name)) {
+        throw new Error(`invalid profile name: ${name}`);
+      }
+
+      const infos = await listProfileInfos(root);
+      if (infos.some((p) => p.name === name)) {
+        throw new Error(`profile already exists: ${name}`);
+      }
+
+      // seedProfileDocs itself mkdirs `profiles/<name>`, and each config
+      // doc write opens a fresh short-lived `ConfigStore` whose own
+      // `openJobsDb` mkdirs `profiles/<name>/data` on first write — no
+      // separate mkdir call is needed here.
+      await seedProfileDocs(name, {
+        root,
+        configStore: (n) => wireConfigStore(n, { root, liftMode: 'readwrite' }),
+        mkdir: (p) => mkdir(p, { recursive: true }),
+        write: () => {}, // silent — the route reports the outcome, not this seam
+      });
     },
 
     close(): void {

@@ -12,6 +12,9 @@ function fakeSource(): BoardSource {
   return {
     listProfiles: async () => PROFILES,
     openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
 }

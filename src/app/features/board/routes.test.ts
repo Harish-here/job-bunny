@@ -125,6 +125,9 @@ function fakeSource(store: BoardStore | null, connector = 'sqlite'): BoardSource
   return {
     listProfiles: async () => (store ? [{ name: 'rajni', connector, hasDb: true }] : []),
     openStore: async () => store,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
 }
@@ -227,6 +230,9 @@ test('list: an UNKNOWN connector ("") with no openable store still 404s no_local
   const source: BoardSource = {
     listProfiles: async () => [{ name: 'rajni', connector: '', hasDb: false }],
     openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/jobs');
@@ -357,6 +363,9 @@ test('meta: lists both vocabularies without ever touching the store', async () =
     openStore: async () => {
       throw new Error('meta must not open a store');
     },
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/meta');
@@ -373,6 +382,9 @@ test('meta: returns 200 even for an unknown profile name (vocab is profile-indep
     openStore: async () => {
       throw new Error('meta must not open a store');
     },
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/meta');
