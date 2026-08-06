@@ -260,12 +260,14 @@ test('create profile: name it, see it in the switcher, land on its settings', as
   // profile (profile.ts, config→db Phase 4): profile.json's minimal
   // pipeline config, filter.json's `{}`, and search_urls.md's template
   // header. `resume.json` is deliberately NEVER seeded (hand-maintained,
-  // profile.ts's own doc comment) — its editor surfaces the real 404
-  // ("no config doc stored yet") as a load error instead of an empty doc.
+  // profile.ts's own doc comment) — its GET now returns 200 with an empty
+  // draft rather than a 404 (fix round), so its editor renders an empty,
+  // still-editable textarea instead of a permanent load error.
   await expect(page.getByLabel('profile.json')).toHaveValue(/"connector":\s*"sqlite"/);
   await expect(page.getByLabel('filter.json')).toHaveValue(/^\{\}\s*$/);
   await expect(page.getByLabel('search_urls.md')).toHaveValue(/# Search URLs/);
-  await expect(page.getByText(/Couldn't load resume\.json/)).toBeVisible();
+  await expect(page.getByLabel('resume.json')).toHaveValue('');
+  await expect(page.getByText(/Couldn't load resume\.json/)).toHaveCount(0);
 
   // The new profile now resolves as the active one (OnboardingPage's own
   // `choose()` + navigate) and shows up in the switcher, both as the

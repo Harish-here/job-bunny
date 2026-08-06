@@ -128,14 +128,12 @@ test('get: traversal probe on :name ("a/../a") is a 404 no_such_profile', async 
   );
 });
 
-test('get: doc not present for a real profile is a 404 not_found', async () => {
+test('get: doc not present for a real profile returns 200 with an empty draft, not a 404 (fix round — resume.json in particular must stay editable even though it is never seeded)', async () => {
   const source = fakeSource({ docs: {} });
   const route = findRoute(source, 'GET', '/api/profiles/:name/config/:doc');
-  await assertHttpError(
-    () => route.handler(req({ params: { name: 'rajni', doc: 'resume.json' } })),
-    404,
-    'not_found',
-  );
+  const res = await route.handler(req({ params: { name: 'rajni', doc: 'resume.json' } }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { text: '' });
 });
 
 // --- PUT /api/profiles/:name/config/:doc ---

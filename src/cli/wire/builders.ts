@@ -43,6 +43,7 @@ import {
 } from '../../adapters/lanes/linkedin/index.ts';
 import { TelegramNotifier } from '../../adapters/notify/telegram/index.ts';
 import type { PipelineConfig } from '../../core/config/schema.ts';
+import { sqlitePathRetiredMessage } from '../../core/config/validators.ts';
 import type { FilterConfig } from '../../core/filter/config.ts';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import type { Connector } from '../../ports/connector.ts';
@@ -87,10 +88,10 @@ export function assertSqlitePathRetired(
     typeof sqliteSlice === 'object' &&
     'path' in (sqliteSlice as object);
   if (hasPath) {
-    throw new Error(
-      `settings.sqlite.path is no longer supported — the database always lives at ` +
-        `profiles/${profileName}/data/jobbunny.db; move the file there and delete the setting`,
-    );
+    // Shares the exact wording with `core/config/validators.ts`'s
+    // `validateConfigDoc` write-boundary check (fix round) — one canonical
+    // string, not two independently-worded copies.
+    throw new Error(sqlitePathRetiredMessage(profileName));
   }
 }
 

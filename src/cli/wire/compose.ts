@@ -22,7 +22,6 @@
  * No `wireScheduler()`/`Scheduler` port (D14): the in-process daemon
  * (`src/ops/daemon/`) replaced launchd triggering; no successor port exists.
  */
-import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CdpChromeProviderDeps } from '../../adapters/browser/cdp-chrome/index.ts';
 import {
@@ -148,9 +147,6 @@ export interface WireOverrides {
   registry?: AdapterRegistry;
   deps?: Partial<RuntimeDeps>;
   root?: string;
-  /** `coreChecks`'s own direct-fs profile/filter reads only — unrelated to
-   * `configStore` below (`ops/doctor/config_checks.ts` stays direct-fs). */
-  readFile?: (path: string) => Promise<string>;
   /** Test-only seam (mirrors `deps`/`registry`) — real callers never set
    * this; `wire()` builds a real `SqliteConfigStore` otherwise. */
   configStore?: ConfigStore;
@@ -181,7 +177,6 @@ export async function wire(
   overrides: WireOverrides = {},
 ): Promise<WireResult> {
   const root = overrides.root ?? process.cwd();
-  const readFile = overrides.readFile ?? ((p: string) => fsReadFile(p, 'utf8'));
 
   const dbPath = canonicalDbPath(root, profileName);
   const profileRoot = path.join(root, 'profiles', profileName);
@@ -260,7 +255,11 @@ export async function wire(
     ...coreChecks({
       profileName,
       root,
-      readFile,
+      // The four profile/filter config checks read through the SAME
+      // `ConfigStore` this call already built — a config-docs-only
+      // profile is never falsely reported "not found" (fix round;
+      // direct-fs `readFile` reads are retired).
+      readDoc: (key) => configStore.readText(key),
       connector: config.connector,
       notionMirror: mirrorTarget !== '',
     }),

@@ -138,6 +138,26 @@ test('writeText rejects invalid profile.json (bad connector type), no row writte
   assert.equal(row.n, 0);
 });
 
+test('writeText rejects a profile.json carrying settings.sqlite.path (fix round write-boundary gap — closes the path that let the board persist a config that bricks doctor/wire), no row written', async () => {
+  const { dbPath, profileRoot } = freshPaths();
+  const store = makeStore(dbPath, profileRoot);
+  await assert.rejects(
+    () =>
+      store.writeText(
+        'profile.json',
+        JSON.stringify({ connector: 'sqlite', settings: { sqlite: { path: '/x.db' } } }),
+      ),
+    /settings\.sqlite\.path is no longer supported/,
+  );
+
+  const db = openJobsDb(dbPath);
+  const row = db
+    .prepare("SELECT COUNT(*) as n FROM config_docs WHERE key = 'profile.json'")
+    .get() as { n: number };
+  db.close();
+  assert.equal(row.n, 0);
+});
+
 test('writeText rejects invalid filter.json (blank skill string), no row written', async () => {
   const { dbPath, profileRoot } = freshPaths();
   const store = makeStore(dbPath, profileRoot);

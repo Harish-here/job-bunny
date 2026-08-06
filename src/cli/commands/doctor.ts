@@ -39,9 +39,28 @@ export async function doctorCommand(
   deps: Partial<DoctorDeps> = {},
 ): Promise<number> {
   const resolved: DoctorDeps = { ...defaultDeps(), ...deps };
-  // `configLiftMode: 'readonly'` (config→db Phase 4): doctor must never
-  // create/migrate `jobbunny.db` as a side effect of reading config.
-  const { checks } = await resolved.wire(opts.profile, { configLiftMode: 'readonly' });
+
+  let checks: WireResult['checks'];
+  try {
+    // `configLiftMode: 'readonly'` (config→db Phase 4): doctor must never
+    // create/migrate `jobbunny.db` as a side effect of reading config.
+    ({ checks } = await resolved.wire(opts.profile, { configLiftMode: 'readonly' }));
+  } catch (err) {
+    // A broken config (e.g. a retired `settings.sqlite.path`, a missing
+    // profile.json) must degrade the diagnostic ONE step, never abort it —
+    // `main.ts`'s outer catch would otherwise turn this into a single bare
+    // stderr line, and every other check (env tokens, claude-on-path,
+    // daemon liveness, adapter reachability...) would silently never run
+    // at all, even though none of them need a successfully wired profile.
+    const message = err instanceof Error ? err.message : String(err);
+    const finding: DoctorFinding = {
+      check: 'wire',
+      status: 'red',
+      detail: `could not wire profile '${opts.profile}': ${message}`,
+    };
+    resolved.write(formatTable([finding])[0] as string);
+    return 1;
+  }
 
   const findings = await Promise.all(checks.map((c) => c.run()));
 

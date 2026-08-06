@@ -123,7 +123,11 @@ export class SqliteConfigStore implements ConfigStore {
         `SqliteConfigStore: writeText is unsupported in readonly lift mode (key: ${key})`,
       );
     }
-    validateConfigDoc(key, rawText);
+    // Passing the profile name closes the write-boundary gap (fix round):
+    // `validateConfigDoc` also rejects a retired `settings.sqlite.path`
+    // for `profile.json` when a profile name is supplied — this is the
+    // ONE production `writeText` call site, so it always is.
+    validateConfigDoc(key, rawText, path.basename(this.profileRoot));
     const db = this.open();
     db.prepare(
       'INSERT OR REPLACE INTO config_docs (key, value_text, updated_at) VALUES (?, ?, ?)',

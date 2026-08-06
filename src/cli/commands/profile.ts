@@ -123,6 +123,21 @@ function defaultProfileDocsFsDeps(): Omit<ProfileDocsDeps, 'configStore'> {
  * Every seeded JSON doc is validated against its real zod schema before
  * being written. Shared by `profile build` and `setup` so the two never
  * disagree on what a fresh profile looks like. */
+/** Distinguishes the ONE failure shape `readText` may throw that this
+ * function is entitled to treat as "present" (fix round, critical
+ * finding) — `SqliteConfigStore`'s own lift-time check, which always
+ * throws a message starting with this exact prefix (both the real
+ * adapter's "Malformed legacy config file at ..." and any test fake's
+ * shorter "Malformed legacy config file: ..." match). Anything else —
+ * store construction, db-open (corrupt/newer-schema/permission-denied)
+ * failures — must NOT be silently reported "kept"; the old code's bare
+ * `catch { ... }` swallowed both alike, turning a broken db into a false
+ * all-clear (`profile build`/`profile.json: kept` while nothing was
+ * actually read or written). */
+function isMalformedLegacyFileError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('Malformed legacy config file');
+}
+
 export async function seedProfileDocs(
   profileName: string,
   deps: ProfileDocsDeps,
@@ -137,7 +152,8 @@ export async function seedProfileDocs(
       let existing: string | undefined;
       try {
         existing = await store.readText(doc);
-      } catch {
+      } catch (err) {
+        if (!isMalformedLegacyFileError(err)) throw err;
         // A legacy file present but malformed enough to fail the store's
         // own lift-time check still counts as "present" — never mask or
         // overwrite an existing (if broken) user file; doctor/setup's

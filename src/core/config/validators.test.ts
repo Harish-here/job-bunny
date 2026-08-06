@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { validateConfigDoc } from './validators.ts';
+import { sqlitePathRetiredMessage, validateConfigDoc } from './validators.ts';
 
 const rajniProfileJson = readFileSync(
   fileURLToPath(new URL('../../../profiles/rajni/profile.json', import.meta.url)),
@@ -29,6 +29,32 @@ describe('validateConfigDoc', () => {
 
   it('accepts rajni real profile.json with legacy v0 extra keys', () => {
     assert.doesNotThrow(() => validateConfigDoc('profile.json', rajniProfileJson));
+  });
+
+  it('accepts a profile.json with settings.sqlite.path when no profileName is supplied (unchanged, no regression)', () => {
+    assert.doesNotThrow(() =>
+      validateConfigDoc(
+        'profile.json',
+        JSON.stringify({ connector: 'sqlite', settings: { sqlite: { path: '/x.db' } } }),
+      ),
+    );
+  });
+
+  it('rejects a profile.json with settings.sqlite.path when a profileName IS supplied (fix round write-boundary gap)', () => {
+    assert.throws(
+      () =>
+        validateConfigDoc(
+          'profile.json',
+          JSON.stringify({
+            connector: 'sqlite',
+            settings: { sqlite: { path: '/x.db' } },
+          }),
+          'rajni',
+        ),
+      new RegExp(
+        sqlitePathRetiredMessage('rajni').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      ),
+    );
   });
 
   it('accepts an empty filter.json (every field optional)', () => {

@@ -53,6 +53,27 @@ test('doctorCommand: no checks at all returns 0', async () => {
   assert.equal(code, 0);
 });
 
+test('doctorCommand: a throwing wire() (e.g. a retired settings.sqlite.path, or a missing profile.json) degrades to ONE red finding instead of aborting the whole diagnostic', async () => {
+  const lines: string[] = [];
+  const code = await doctorCommand(
+    { profile: 'broken' },
+    {
+      wire: async () => {
+        throw new Error(
+          'settings.sqlite.path is no longer supported — the database always lives at ' +
+            'profiles/broken/data/jobbunny.db; move the file there and delete the setting',
+        );
+      },
+      write: (line: string) => lines.push(line),
+    },
+  );
+  assert.equal(code, 1);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] as string, /wire/);
+  assert.match(lines[0] as string, /red/);
+  assert.match(lines[0] as string, /settings\.sqlite\.path is no longer supported/);
+});
+
 test('doctorCommand: writes a plain-text table of check | status | detail to the injected sink', async () => {
   const checks = [
     fakeCheck('notion.reachable', {

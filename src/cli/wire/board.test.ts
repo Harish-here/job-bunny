@@ -219,6 +219,29 @@ describe('wireBoard — readConfigDoc/writeConfigDoc', () => {
     source.close();
   });
 
+  test('writeConfigDoc rejects a profile.json carrying settings.sqlite.path — the board can no longer persist a config that bricks doctor/wire for this profile (fix round)', async () => {
+    const source = wireBoard({ root });
+    await assert.rejects(
+      () =>
+        source.writeConfigDoc(
+          'a',
+          'profile.json',
+          JSON.stringify({
+            connector: 'sqlite',
+            settings: { sqlite: { path: '/x.db' } },
+          }),
+        ),
+      /settings\.sqlite\.path is no longer supported/,
+    );
+    // Never partially applied: the pre-existing lifted profile.json must
+    // survive unchanged.
+    assert.equal(
+      await source.readConfigDoc('a', 'profile.json'),
+      JSON.stringify({ connector: 'sqlite' }),
+    );
+    source.close();
+  });
+
   test('writeConfigDoc throws "unknown profile" for an unknown name', async () => {
     const source = wireBoard({ root });
     await assert.rejects(

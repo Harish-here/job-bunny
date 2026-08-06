@@ -89,10 +89,14 @@ function getHandler(source: BoardSource) {
     const name = param(req, 'name');
     await assertProfileExists(source, name);
     const text = await source.readConfigDoc(name, doc);
-    if (text === undefined) {
-      throw new HttpError(404, 'not_found', `no config doc stored yet: ${doc}`);
-    }
-    const body: ConfigGetResponse = { text };
+    // Absent (no config_docs row, no legacy file) is a valid, EDITABLE
+    // empty draft — not an error (fix round). `resume.json` in particular
+    // is deliberately never seeded (`profile.ts`'s own doc comment) and
+    // must still be fillable from the board's Settings page; a 404 here
+    // made that permanently impossible through the UI. Saving an empty
+    // draft for a doc where empty is invalid is still rejected — by
+    // `writeConfigDoc`'s own `validateConfigDoc` call, at PUT time.
+    const body: ConfigGetResponse = { text: text ?? '' };
     return { status: 200, body };
   };
 }

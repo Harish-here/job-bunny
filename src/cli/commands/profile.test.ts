@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import { PipelineConfigSchema } from '../../core/config/schema.ts';
 import { FilterConfigSchema } from '../../core/filter/config.ts';
 import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
+import { wireConfigStore } from '../wire/index.ts';
 import { profileBuildCommand, profileRemoveCommand, seedProfileDocs } from './profile.ts';
 
 /** In-memory `ConfigStore` fake, same Map-backed shape used throughout
@@ -175,6 +176,55 @@ test('seedProfileDocs treats a malformed-legacy-file throw from readText as "pre
     const profileResult = results.find((r) => r.doc === 'profile.json');
     assert.equal(profileResult?.status, 'kept');
     assert.ok(!store.writes.includes('profile.json'));
+  });
+});
+
+test('seedProfileDocs: a readText throw NOT shaped like the malformed-legacy-file error (e.g. a db-open failure) propagates loud, never reported "kept"', async () => {
+  await withTmpRoot(async (root) => {
+    const store: ConfigStore = {
+      readText: async () => {
+        throw new Error('file is not a database');
+      },
+      writeText: async () => {},
+      close() {},
+    };
+    await assert.rejects(
+      () =>
+        seedProfileDocs('acme', {
+          root,
+          configStore: () => store,
+          mkdir: async () => {},
+          write: () => {},
+        }),
+      /file is not a database/,
+    );
+  });
+});
+
+test('profileBuildCommand: a REAL garbage (non-sqlite) jobbunny.db is a loud non-zero failure, never a false "kept" all-clear', async () => {
+  await withTmpRoot(async (root) => {
+    const name = 'broken';
+    const dataDir = path.join(root, 'profiles', name, 'data');
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(path.join(dataDir, 'jobbunny.db'), 'not a real sqlite file at all');
+
+    const lines: string[] = [];
+    await assert.rejects(
+      () =>
+        profileBuildCommand(
+          { profile: name },
+          {
+            root,
+            configStore: (profileName) => wireConfigStore(profileName, { root }),
+            write: (line) => lines.push(line),
+          },
+        ),
+      /file is not a database/,
+    );
+    // The old bug: every doc printed "kept" and the command returned 0
+    // despite nothing having been read or written. Confirm no such
+    // misleading "kept" lines were ever printed before the throw.
+    assert.ok(!lines.some((l) => l.includes(': kept')));
   });
 });
 

@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
+import { readFile as fsReadFile } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
+import type { ConfigDocKey } from '../../ports/config_store.ts';
 import type {
   DoctorCheck,
   DoctorFinding,
@@ -18,6 +21,7 @@ import {
   filterParsesCheck,
   isNotFound,
   profileParsesCheck,
+  resolveReadDoc,
   resolveRoot,
   sqlitePathRetiredCheck,
 } from './config_checks.ts';
@@ -34,7 +38,12 @@ const execFileAsync = promisify(execFile);
  * config→db Phase 4) and the resolver helpers they share with this file
  * live in `./config_checks.ts` (split out, task 5 of the 2026-07-28
  * file-size split plan) — imported here for `coreChecks`'s assembly and
- * `daemonLivenessCheck`'s `resolveRoot` use.
+ * `daemonLivenessCheck`'s `resolveRoot` use. `configLegacyDivergenceCheck`
+ * (below) is itself a config check by subject matter, but lives HERE
+ * rather than in `config_checks.ts` purely to stay under that file's
+ * line-size cap (fix round, config→db Phase 4 follow-up) — not a boundary
+ * or ownership distinction; `CoreCheckOpts.readLegacyFile` is still
+ * declared in `config_checks.ts`, this file only consumes it.
  *
  * `root`/`env`/`readFile` are injected (default to `process.cwd()`,
  * `process.env`, `node:fs/promises` `readFile` utf8) so tests hit no real
@@ -197,7 +206,96 @@ export function daemonLivenessCheck(opts: CoreCheckOpts): DoctorCheck {
   };
 }
 
-/** coreChecks — the seven profile/config/env/daemon/claude checks above,
+const CONFIG_DOC_KEYS: readonly ConfigDocKey[] = [
+  'profile.json',
+  'filter.json',
+  'resume.json',
+  'search_urls.md',
+];
+
+function resolveReadLegacyFile(
+  opts: CoreCheckOpts,
+): (key: ConfigDocKey) => Promise<string | undefined> {
+  return (
+    opts.readLegacyFile ??
+    (async (key: ConfigDocKey) => {
+      const filePath = path.join(resolveRoot(opts), 'profiles', opts.profileName, key);
+      try {
+        return await fsReadFile(filePath, 'utf8');
+      } catch (err) {
+        if (isNotFound(err)) return undefined;
+        throw err;
+      }
+    })
+  );
+}
+
+/** configLegacyDivergenceCheck (fix round, config→db Phase 4) —
+ * `SqliteConfigStore` lifts each legacy file into `config_docs` exactly
+ * ONCE; from then on the db row wins forever, silently — a later hand-edit
+ * to the legacy file (`profile.json`/`filter.json`/`resume.json`/
+ * `search_urls.md`) is never read again by anything (`readText` never
+ * re-checks the file once a row exists). There is no other signal anywhere
+ * in the pipeline that this happened. This check compares each doc's
+ * CURRENT on-disk legacy content (`readLegacyFile`) against what the store
+ * actually returns (`readDoc`, which prefers the db row once lifted) and
+ * warns, naming the re-sync path, when they've drifted apart. A doc with no
+ * legacy file at all (config-docs-only profile) has nothing to diverge
+ * from and is silently skipped; a doc whose legacy file or store read fails
+ * its own check is also skipped here — that failure is somebody else's (or
+ * nobody's, for `readLegacyFile`) job to report, not this check's. Never
+ * red: a drifted file is a real but recoverable inconvenience, not a
+ * broken profile. */
+export function configLegacyDivergenceCheck(opts: CoreCheckOpts): DoctorCheck {
+  const name = 'config-legacy-divergence';
+  const readDoc = resolveReadDoc(opts);
+  const readLegacyFile = resolveReadLegacyFile(opts);
+  return {
+    name,
+    async run(): Promise<DoctorFinding> {
+      const diverged: ConfigDocKey[] = [];
+      for (const key of CONFIG_DOC_KEYS) {
+        let fileText: string | undefined;
+        try {
+          fileText = await readLegacyFile(key);
+        } catch {
+          continue;
+        }
+        if (fileText === undefined) continue;
+
+        let storeText: string | undefined;
+        try {
+          storeText = await readDoc(key);
+        } catch {
+          continue;
+        }
+        if (storeText !== undefined && storeText !== fileText) {
+          diverged.push(key);
+        }
+      }
+      if (diverged.length === 0) {
+        return {
+          check: name,
+          status: 'ok',
+          detail: 'no divergence between legacy config files and their config_docs rows',
+        };
+      }
+      const verb = diverged.length === 1 ? 'has' : 'have';
+      return {
+        check: name,
+        status: 'warn',
+        detail:
+          `${diverged.join(', ')} ${verb} changed on disk since being lifted into ` +
+          `config_docs — the stored row still wins and the disk edit is silently ` +
+          `ignored. Run 'jobbunny config import --dir profiles/${opts.profileName}' ` +
+          `to re-sync (note: 'config import' uses the strict validator, so a ` +
+          `drifted-but-lifted profile.json may be rejected on re-import).`,
+      };
+    },
+  };
+}
+
+/** coreChecks — the eight profile/config/env/daemon/claude checks above,
  * in a fixed order. Callers append adapter-contributed checks (e.g.
  * Notion/Telegram reachability) themselves before calling `runChecks`. */
 export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {
@@ -206,6 +304,7 @@ export function coreChecks(opts: CoreCheckOpts): DoctorCheck[] {
     filterParsesCheck(opts),
     emptyLanesCheck(opts),
     sqlitePathRetiredCheck(opts),
+    configLegacyDivergenceCheck(opts),
     envTokensCheck(opts),
     claudeOnPathCheck(opts),
     daemonLivenessCheck(opts),

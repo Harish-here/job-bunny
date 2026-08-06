@@ -5,6 +5,7 @@ import type { DaemonPidfileDeps } from '../daemon/index.ts';
 import { acquireDaemonPidfile } from '../daemon/index.ts';
 import {
   claudeOnPathCheck,
+  configLegacyDivergenceCheck,
   coreChecks,
   daemonLivenessCheck,
   envTokensCheck,
@@ -67,21 +68,6 @@ test('daemonLivenessCheck: a six-minute-old heartbeat on a live pid warns "wedge
   assert.equal(finding.status, 'warn');
   assert.match(finding.detail, /wedged/);
 });
-
-function enoent(path: string): NodeJS.ErrnoException {
-  const err = new Error(
-    `ENOENT: no such file or directory, open '${path}'`,
-  ) as NodeJS.ErrnoException;
-  err.code = 'ENOENT';
-  return err;
-}
-
-function fakeReadFile(files: Record<string, string>): (path: string) => Promise<string> {
-  return async (path: string) => {
-    if (Object.hasOwn(files, path)) return files[path] as string;
-    throw enoent(path);
-  };
-}
 
 // aggregate.ts composes each check's file path with `path.join(root, ...)`,
 // so a POSIX-literal fixture key misses on windows-latest (backslash-joined
@@ -215,16 +201,63 @@ test('claudeOnPathCheck: present ⇒ ok, absent ⇒ red', async () => {
   assert.match(absent.detail, /not found on PATH/);
 });
 
-test('coreChecks: returns the seven core checks (config→db Phase 4 adds sqlite-path-retired)', () => {
+// --- configLegacyDivergenceCheck (fix round, config→db Phase 4) ---
+
+test('configLegacyDivergenceCheck: ok when the legacy file matches the store (or there is no legacy file)', async () => {
+  const finding = await configLegacyDivergenceCheck({
+    profileName: 'rajni',
+    readDoc: async (key) => (key === 'filter.json' ? '{"a":1}' : undefined),
+    readLegacyFile: async (key) => (key === 'filter.json' ? '{"a":1}' : undefined),
+  }).run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('configLegacyDivergenceCheck: warn when the legacy file has drifted from the lifted row, naming the re-sync command', async () => {
+  const finding = await configLegacyDivergenceCheck({
+    profileName: 'rajni',
+    readDoc: async (key) => (key === 'filter.json' ? '{"a":1}' : undefined),
+    readLegacyFile: async (key) => (key === 'filter.json' ? '{"a":2}' : undefined),
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /filter\.json/);
+  assert.match(finding.detail, /jobbunny config import --dir profiles\/rajni/);
+});
+
+test('configLegacyDivergenceCheck: names every diverged doc, not just the first', async () => {
+  const finding = await configLegacyDivergenceCheck({
+    profileName: 'rajni',
+    readDoc: async (key) => `${key}-db`,
+    readLegacyFile: async (key) => `${key}-file`,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /profile\.json/);
+  assert.match(finding.detail, /filter\.json/);
+  assert.match(finding.detail, /resume\.json/);
+  assert.match(finding.detail, /search_urls\.md/);
+});
+
+test('configLegacyDivergenceCheck: never throws — a readLegacyFile or readDoc throw for one key is skipped, not fatal', async () => {
+  const finding = await configLegacyDivergenceCheck({
+    profileName: 'rajni',
+    readDoc: async (key) => {
+      if (key === 'filter.json') throw new Error('malformed row');
+      return undefined;
+    },
+    readLegacyFile: async (key) => (key === 'filter.json' ? '{"a":1}' : undefined),
+  }).run();
+  assert.equal(finding.status, 'ok');
+});
+
+test('coreChecks: returns the eight core checks (fix round adds config-legacy-divergence)', () => {
   const checks = coreChecks({
     profileName: 'rajni',
     root: REPO_ROOT,
     env: { NOTION_TOKEN: 't', TELEGRAM_BOT_TOKEN: 't' },
-    readFile: fakeReadFile({}),
+    readDoc: async () => undefined,
   });
-  assert.equal(checks.length, 7);
+  assert.equal(checks.length, 8);
   const names = checks.map((c) => c.name);
-  assert.equal(new Set(names).size, 7);
+  assert.equal(new Set(names).size, 8);
 });
 
 // --- runChecks ---
