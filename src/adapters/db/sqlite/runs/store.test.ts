@@ -322,6 +322,32 @@ test('pruneRunsOlderThan: never prunes today even at ttlDays 0', () => {
   assert.ok(store.getRun(todayId));
 });
 
+test('pruneRunsOlderThan: an old parent with a RETAINED child (split resumedFrom chain) still prunes the parent — resumed_from -> NULL via ON DELETE SET NULL, never an all-or-nothing FK failure', () => {
+  const dbPath = freshDbPath();
+  const { warn, calls } = warnCollector();
+  const store = new SqliteRunStore(dbPath, { warn });
+  const parentId = store.startRun({
+    date: '2026-07-01',
+    kind: 'run',
+    startedAt: '2026-07-01T10:00:00.000Z',
+  });
+  const childId = store.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    resumedFrom: parentId,
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+
+  const deleted = store.pruneRunsOlderThan('2026-08-05', 30);
+
+  assert.equal(deleted, 1);
+  assert.deepEqual(calls, []);
+  assert.equal(store.getRun(parentId), null);
+  const child = store.getRun(childId);
+  assert.ok(child);
+  assert.equal(child?.resumedFrom, null);
+});
+
 test('full happy path: startRun -> appendEvents x2 -> recordFailure -> finishRun(failed) -> round-trip every field', () => {
   const dbPath = freshDbPath();
   const store = new SqliteRunStore(dbPath);

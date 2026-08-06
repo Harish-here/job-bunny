@@ -239,7 +239,7 @@ export async function wire(
     'jobbunny.db',
   );
   // `SqliteRunStore` opens lazily (ledger L13) — no file I/O here.
-  const sqlitePath = resolveSqlitePath(config, sqliteDefaultPath);
+  const sqlitePath = resolveSqlitePath(config.settings.sqlite, sqliteDefaultPath);
   const runStore = new SqliteRunStore(sqlitePath);
 
   const deps: RuntimeDeps = {

@@ -110,9 +110,14 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   };
 }
 
-function fakeSource(store: BoardStore | null): BoardSource {
+/** `listProfiles()` always names its one profile 'rajni' with a `sqlite`
+ * connector when `store` is non-null — every non-null-store test below
+ * requests `name: 'rajni'`, matching `openStoreOrThrow`'s new
+ * connector-gate lookup. `store === null` (the "no profile"/"unknown
+ * profile" cases) keeps `listProfiles()` empty, same as before. */
+function fakeSource(store: BoardStore | null, connector = 'sqlite'): BoardSource {
   return {
-    listProfiles: () => [],
+    listProfiles: () => (store ? [{ name: 'rajni', connector, hasDb: true }] : []),
     openStore: () => store,
     close() {},
   };
@@ -190,6 +195,18 @@ test('list: null store (no local db) is a 404 no_local_db', () => {
     'no_local_db',
     'profile has no local database (pure-Notion profiles are read via Notion)',
   );
+});
+
+test('list: an OPENABLE store on a notion-connector profile is still a 404 no_local_db, never an empty 200 (local-DB spec D5: hasDb no longer implies connector === sqlite)', () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store, 'notion'), 'GET', '/api/profiles/:name/jobs');
+  assertHttpError(
+    () => route.handler(req({ params: { name: 'rajni' } })),
+    404,
+    'no_local_db',
+    'profile has no local database (pure-Notion profiles are read via Notion)',
+  );
+  assert.equal(store.listCalls.length, 0);
 });
 
 // --- GET /api/profiles/:name/jobs/:id ---

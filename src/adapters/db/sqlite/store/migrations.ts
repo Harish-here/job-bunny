@@ -58,7 +58,7 @@ const MIGRATIONS: readonly string[] = [
     run_date      TEXT NOT NULL,
     time_dir      TEXT,
     kind          TEXT NOT NULL,
-    resumed_from  INTEGER REFERENCES runs(id),
+    resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
     status        TEXT NOT NULL,
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
