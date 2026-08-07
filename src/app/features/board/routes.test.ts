@@ -12,12 +12,22 @@ import type {
   BoardQuery,
   BoardSource,
   BoardStore,
+  DaemonStatus,
   TrackingPatch,
   TrackingRow,
 } from '../../../ports/board.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
 import { makeBoardRoutes } from './routes.ts';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
@@ -132,6 +142,7 @@ function fakeSource(store: BoardStore | null, connector = 'sqlite'): BoardSource
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
 }
@@ -241,6 +252,7 @@ test('list: an UNKNOWN connector ("") with no openable store still 404s no_local
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/jobs');
@@ -378,6 +390,7 @@ test('meta: lists both vocabularies without ever touching the store', async () =
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/meta');
@@ -401,6 +414,7 @@ test('meta: returns 200 even for an unknown profile name (vocab is profile-indep
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/meta');

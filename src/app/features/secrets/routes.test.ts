@@ -6,10 +6,24 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource, SecretKey, SecretPresence } from '../../../ports/board.ts';
+import type {
+  BoardSource,
+  DaemonStatus,
+  SecretKey,
+  SecretPresence,
+} from '../../../ports/board.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
 import { makeSecretsRoutes } from './routes.ts';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
@@ -50,6 +64,7 @@ function fakeSource(presence: SecretPresence): BoardSource & {
       writeCalls.push({ key, value });
     },
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
 }

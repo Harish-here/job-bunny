@@ -21,6 +21,7 @@ import type { Logger } from '../../ports/context.ts';
 import { makeAppInfoRoutes } from '../features/appinfo/index.ts';
 import { makeBoardRoutes } from '../features/board/index.ts';
 import { makeConfigRoutes } from '../features/config/index.ts';
+import { makeDaemonRoutes } from '../features/daemon/index.ts';
 import { makeDoctorRoutes } from '../features/doctor/index.ts';
 import { makeIntentRoutes } from '../features/intents/index.ts';
 import { makePersonasRoutes } from '../features/personas/index.ts';
@@ -60,6 +61,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
     ...makeRunsRoutes(source),
     ...makeIntentRoutes(source),
     ...makeSecretsRoutes(source),
+    ...makeDaemonRoutes(source),
     ...makeConfigRoutes(source),
     ...makeDoctorRoutes(source),
     ...makeAppInfoRoutes(version),

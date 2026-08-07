@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource } from '../../../ports/board.ts';
+import type { BoardSource, DaemonStatus } from '../../../ports/board.ts';
 import type { DoctorReport } from '../../../ports/doctor.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
@@ -34,6 +34,15 @@ async function assertHttpError(
   );
 }
 
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
+
 function fakeSource(runDoctor: BoardSource['runDoctor']): BoardSource {
   return {
     listProfiles: async () => [],
@@ -42,6 +51,7 @@ function fakeSource(runDoctor: BoardSource['runDoctor']): BoardSource {
     writeConfigDoc: async () => {},
     createProfile: async () => {},
     runDoctor,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},

@@ -227,6 +227,14 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => ({
+      state: 'stopped',
+      pid: null,
+      startedAt: null,
+      lastTickAt: null,
+      inFlight: null,
+      profiles: [],
+    }),
     close() {},
   };
   const profiles = await source.listProfiles();

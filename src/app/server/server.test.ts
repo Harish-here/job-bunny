@@ -14,6 +14,7 @@ import type {
   BoardProfile,
   BoardSource,
   BoardStore,
+  DaemonStatus,
   TrackingPatch,
 } from '../../ports/board.ts';
 import type { LogData, Logger } from '../../ports/context.ts';
@@ -45,6 +46,15 @@ function sendRawRequest(port: number, raw: string): Promise<string> {
 
 const PROFILES: BoardProfile[] = [{ name: 'p1', connector: 'sqlite', hasDb: true }];
 const TEST_VERSION = '0.0.0-test';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 const silentLogger: Logger = {
   debug() {},
@@ -135,9 +145,16 @@ function fakeSource(
     closed?: { value: boolean };
     intents?: RunIntentStore | null;
     runDoctor?: BoardSource['runDoctor'];
+    readDaemonStatus?: BoardSource['readDaemonStatus'];
   } = {},
 ): BoardSource {
-  const { store = null, closed, intents = null, runDoctor = async () => null } = opts;
+  const {
+    store = null,
+    closed,
+    intents = null,
+    runDoctor = async () => null,
+    readDaemonStatus = async () => FAKE_DAEMON_STATUS,
+  } = opts;
   return {
     listProfiles: async () => PROFILES,
     openStore: async () => store,
@@ -148,6 +165,7 @@ function fakeSource(
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor,
+    readDaemonStatus,
     close() {
       if (closed) closed.value = true;
     },
@@ -331,6 +349,7 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -370,6 +389,7 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -438,6 +458,7 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -586,6 +607,7 @@ test('PUT then GET /api/secrets round-trips presence without echoing the value',
       written.set(key, value);
     },
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -625,6 +647,7 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {
       closeCallCount += 1;
       closed.value = true;
@@ -666,5 +689,29 @@ test('GET /api/personas serves the catalog over HTTP', async () => {
     const body = (await res.json()) as typeof PERSONA_CATALOG;
     assert.equal(body.personas.length, 11);
     assert.equal(body.personas[body.personas.length - 1]?.id, 'scratch');
+  });
+});
+
+test('GET /api/daemon reports the daemon state', async () => {
+  const status: DaemonStatus = {
+    state: 'running',
+    pid: 4242,
+    startedAt: '2026-08-07T00:00:00.000Z',
+    lastTickAt: '2026-08-07T09:59:30.000Z',
+    inFlight: null,
+    profiles: [
+      { profile: 'rajni', enabled: true, nextRunAt: '2026-08-08T03:30:00.000Z' },
+    ],
+  };
+  const server = createBoardServer({
+    source: fakeSource({ readDaemonStatus: async () => status }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/daemon`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as DaemonStatus;
+    assert.equal(body.state, 'running');
   });
 });

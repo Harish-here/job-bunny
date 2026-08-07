@@ -45,6 +45,24 @@ export interface BoardQuery {
   offset?: number; // >= 0
 }
 
+export type DaemonState = 'running' | 'stopped' | 'stale';
+
+export interface DaemonProfileSchedule {
+  profile: string;
+  enabled: boolean;
+  /** ISO 8601 UTC, or `null` when the profile has no enabled schedule. */
+  nextRunAt: string | null;
+}
+
+export interface DaemonStatus {
+  state: DaemonState;
+  pid: number | null;
+  startedAt: string | null;
+  lastTickAt: string | null;
+  inFlight: { profile: string; pid: number; startedAt: string } | null;
+  profiles: DaemonProfileSchedule[];
+}
+
 export interface TrackingRow extends TrackingFields {
   jobId: string;
   updatedAt: string;
@@ -133,7 +151,11 @@ export interface BoardStore {
  * `openIntents`'s returned store (insert a `pending` run intent, cancel
  * one's own `pending` intent) + `writeSecret` (write-only, allowlisted
  * `SECRET_KEYS`, appends/replaces one line of the data home's `.env` —
- * never reads a value back) — nothing else, ever. */
+ * never reads a value back) — nothing else, ever. `runDoctor` (Task 5) and
+ * `readDaemonStatus` (Task 7) are READ-ONLY additions to this surface —
+ * they compose existing checks / read the daemon's own pidfile and each
+ * profile's schedule, never write a row, a file, or a doc, and never
+ * start, stop, or signal anything. */
 export interface BoardSource {
   listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
@@ -170,6 +192,10 @@ export interface BoardSource {
    * `null` for a profile name that is not a current directory under
    * `<root>/profiles`. Read-only: it never writes a row, a file, or a doc. */
   runDoctor(name: string): Promise<DoctorReport | null>;
+  /** Read-only view of the daemon's pidfile plus each profile's next
+   * scheduled slot. Never starts, stops, or signals the daemon, and never
+   * opens a profile database. */
+  readDaemonStatus(): Promise<DaemonStatus>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this
    * OPENS-OR-CREATES the profile's db: an intent is durable state a

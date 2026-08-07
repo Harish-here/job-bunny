@@ -79,6 +79,7 @@ import {
   type BoardProfile,
   type BoardSource,
   type BoardStore,
+  type DaemonStatus,
   SECRET_KEYS,
   type SecretKey,
   type SecretPresence,
@@ -92,6 +93,7 @@ import {
 } from '../commands/doctor.ts';
 import { seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
+import { readBoardDaemonStatus } from './board_daemon.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 import { wire } from './compose.ts';
 
@@ -275,6 +277,10 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
         const degraded = await defaultRunDegradedConfigChecks(name, root);
         return { findings: [wireFailureFinding(name, err), ...degraded], status: 'red' };
       }
+    },
+
+    readDaemonStatus(): Promise<DaemonStatus> {
+      return readBoardDaemonStatus({ root });
     },
 
     async openIntents(name: string): Promise<RunIntentStore | null> {

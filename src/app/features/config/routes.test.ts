@@ -5,11 +5,20 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardProfile, BoardSource } from '../../../ports/board.ts';
+import type { BoardProfile, BoardSource, DaemonStatus } from '../../../ports/board.ts';
 import type { ConfigDocKey } from '../../../ports/config_store.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
 import { makeConfigRoutes } from './routes.ts';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
@@ -68,6 +77,7 @@ function fakeSource(opts: FakeSourceOptions = {}): BoardSource & {
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
 }

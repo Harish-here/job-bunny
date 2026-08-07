@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource, BoardStore } from '../../../ports/board.ts';
+import type { BoardSource, BoardStore, DaemonStatus } from '../../../ports/board.ts';
 import type {
   CancelIntentResult,
   RunIntent,
@@ -20,6 +20,15 @@ import { makeIntentRoutes } from './routes.ts';
 
 const FIXED_NOW = new Date('2026-08-07T09:00:00.000Z');
 const fixedClock = () => FIXED_NOW;
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
@@ -118,6 +127,7 @@ function fakeSource(opts: {
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
 }
