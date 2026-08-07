@@ -1,6 +1,8 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
 import type { ConfigDocKey } from './config_store.ts';
+import type { DoctorReport } from './doctor.ts';
+import type { RunIntentStore } from './run_intents.ts';
 import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
 
 /** One discovered profile, as the board sees it. `hasDb` reflects ONLY
@@ -26,6 +28,21 @@ export interface BoardProfile {
   hasDb: boolean; // a jobbunny.db file exists for this profile
 }
 
+export const SECRET_KEYS = ['NOTION_TOKEN', 'TELEGRAM_BOT_TOKEN'] as const;
+export type SecretKey = (typeof SECRET_KEYS)[number];
+export type SecretPresence = Record<SecretKey, 'present' | 'absent'>;
+
+/** The outcome of a guarded `removeProfile` call — see `BoardSource`'s own
+ * doc comment for the guard order. `run_in_progress`/`intent_pending`
+ * carry the blocking id so the UI can offer "view the run"/"cancel the
+ * queued run" instead of a dead end. */
+export type RemoveProfileOutcome =
+  | { outcome: 'removed' }
+  | { outcome: 'not_found' }
+  | { outcome: 'protected' }
+  | { outcome: 'run_in_progress'; runId: number }
+  | { outcome: 'intent_pending'; intentId: number };
+
 export interface BoardQuery {
   status?: string;
   excitement?: string;
@@ -37,6 +54,24 @@ export interface BoardQuery {
   order?: 'asc' | 'desc';
   limit?: number; // caller pre-validated: 1..200
   offset?: number; // >= 0
+}
+
+export type DaemonState = 'running' | 'stopped' | 'stale';
+
+export interface DaemonProfileSchedule {
+  profile: string;
+  enabled: boolean;
+  /** ISO 8601 UTC, or `null` when the profile has no enabled schedule. */
+  nextRunAt: string | null;
+}
+
+export interface DaemonStatus {
+  state: DaemonState;
+  pid: number | null;
+  startedAt: string | null;
+  lastTickAt: string | null;
+  inFlight: { profile: string; pid: number; startedAt: string } | null;
+  profiles: DaemonProfileSchedule[];
 }
 
 export interface TrackingRow extends TrackingFields {
@@ -71,15 +106,20 @@ export interface BoardJobDetail extends BoardJobRow {
   jd: JD; // parsed jd_json — the detail pane payload
 }
 
-/** The board server binds `127.0.0.1` and writes only the `tracking` and
- * config tables (hard-rule amendment, config→db Phase 4 ledger L7 —
- * superseding the previous "writes only `tracking`" wording). `jobs` and
- * the runs tables stay pipeline/runner-only — the split is structural,
- * enforced here: `BoardStore` reads `jobs`/`runs`/`run_events` and writes
- * ONLY `tracking` (`updateTracking`); config-doc writes and profile
- * creation are `BoardSource`-level operations below (`readConfigDoc`/
- * `writeConfigDoc`/`createProfile`), never `BoardStore` methods, since a
- * config doc is per-profile-discovery, not per-opened-job-store.
+/** The board server binds `127.0.0.1` and writes only the `tracking`,
+ * config, run-intent, and secrets (the data home's `.env`) surfaces
+ * (hard-rule amendment, config→db Phase 4 ledger L7, widened by UI phase
+ * 1 Task 2 to add run intents and Task 4 to add write-only allowlisted
+ * secrets — superseding the previous "writes only `tracking`" wording).
+ * `jobs` and the runs tables stay pipeline/runner-only — the split is
+ * structural, enforced here: `BoardStore` reads `jobs`/`runs`/`run_events`
+ * and writes ONLY `tracking` (`updateTracking`); config-doc writes,
+ * profile creation, run-intent inserts/cancels, and secret writes are
+ * `BoardSource`-level operations below
+ * (`readConfigDoc`/`writeConfigDoc`/`createProfile`/`openIntents`/
+ * `writeSecret`), never `BoardStore` methods, since a config doc or a run
+ * intent is per-profile-discovery, and a secret lives in the data home's
+ * single `.env` (cross-profile, not per-opened-job-store at all).
  * Synchronous by design: node:sqlite is sync. */
 export interface BoardStore {
   listJobs(query: BoardQuery): { rows: BoardJobRow[]; total: number };
@@ -113,12 +153,21 @@ export interface BoardStore {
  *
  * Write-surface invariant (hard-rule amendment, ledger L7 — the code-level
  * home for it, `CLAUDE.md` carries the prose): **the board server binds
- * `127.0.0.1` and writes only the `tracking` and config tables**. `jobs`
- * and the runs tables stay pipeline/runner-only. As of config→db Phase 4
- * Task 9 the board's full write surface is exactly `BoardStore.
- * updateTracking` (tracking) + `writeConfigDoc` (config tables, below) +
- * `createProfile` (which itself only ever calls `writeConfigDoc` under the
- * hood, via `seedProfileDocs`) — nothing else, ever. */
+ * `127.0.0.1` and writes only the `tracking`, config, run-intent, and
+ * secrets surfaces**. `jobs` and the runs tables stay pipeline/runner-only.
+ * As of UI phase 1 Task 8 the board's full write surface is exactly
+ * `BoardStore.updateTracking` (tracking) + `writeConfigDoc` (config
+ * tables, below) + `createProfile` (which itself only ever calls
+ * `writeConfigDoc` under the hood, via `seedProfileDocs`) +
+ * `openIntents`'s returned store (insert a `pending` run intent, cancel
+ * one's own `pending` intent) + `writeSecret` (write-only, allowlisted
+ * `SECRET_KEYS`, appends/replaces one line of the data home's `.env` —
+ * never reads a value back) + `removeProfile` (guarded, irreversible
+ * deletion of `<root>/profiles/<name>/` — Task 8) — nothing else, ever.
+ * `runDoctor` (Task 5) and `readDaemonStatus` (Task 7) are READ-ONLY
+ * additions to this surface — they compose existing checks / read the
+ * daemon's own pidfile and each profile's schedule, never write a row, a
+ * file, or a doc, and never start, stop, or signal anything. */
 export interface BoardSource {
   listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
@@ -151,5 +200,36 @@ export interface BoardSource {
    * unsanitized name, same discipline as every other traversal-sensitive
    * function in this file). */
   createProfile(name: string): Promise<void>;
+  /** Runs the composed doctor checks for one profile and returns the report.
+   * `null` for a profile name that is not a current directory under
+   * `<root>/profiles`. Read-only: it never writes a row, a file, or a doc. */
+  runDoctor(name: string): Promise<DoctorReport | null>;
+  /** Read-only view of the daemon's pidfile plus each profile's next
+   * scheduled slot. Never starts, stops, or signals the daemon, and never
+   * opens a profile database. */
+  readDaemonStatus(): Promise<DaemonStatus>;
+  /** One profile's run-intent store. `null` for a name that is not a
+   * current directory under `<root>/profiles`. Unlike `openStore`, this
+   * OPENS-OR-CREATES the profile's db: an intent is durable state a
+   * never-run profile must still be able to record. Memoized per name for
+   * the life of this `BoardSource` and closed by `close()` — callers must
+   * never call `close()` on the returned store. */
+  openIntents(name: string): Promise<RunIntentStore | null>;
+  /** Presence only — never a value, never a prefix, never a length. */
+  listSecrets(): Promise<SecretPresence>;
+  /** Write-only. Appends or replaces `key`'s line in `<root>/.env`.
+   * Never reads a value back out and never returns one. Process-visible:
+   * a `wireBoard` implementation must also update the running process's
+   * own `process.env[key]`, not just the file — `.env` is loaded once at
+   * CLI startup, and the board process outlives that load, so a doctor
+   * check reading `process.env` right after a write must see the new
+   * value without a restart. */
+  writeSecret(key: SecretKey, value: string): Promise<void>;
+  /** Deletes `<root>/profiles/<name>/` and everything under it, after the
+   * guards in `RemoveProfileOutcome`. Mirrors the CLI's semantics: it
+   * refuses the protected fixture profile and never touches Notion.
+   * Irreversible — there is no dry-run mode on this method, because the
+   * UI's type-the-name confirmation dialog is the dry run. */
+  removeProfile(name: string): Promise<RemoveProfileOutcome>;
   close(): void;
 }

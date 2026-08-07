@@ -9,20 +9,26 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import { test } from 'node:test';
 import { z } from 'zod';
+import type { PERSONA_CATALOG } from '../../core/personas/index.ts';
 import type {
   BoardProfile,
   BoardSource,
   BoardStore,
+  DaemonStatus,
   TrackingPatch,
 } from '../../ports/board.ts';
 import type { LogData, Logger } from '../../ports/context.ts';
+import type { RunIntent, RunIntentStore } from '../../ports/run_intents.ts';
 import { createBoardServer } from './server.ts';
 
 /** Sends a raw request line/headers over a plain TCP socket and resolves
- * with everything read back before the connection closes. Used only for
- * the malformed-request-target test below, which needs a request-target
- * that `fetch()` can never be made to send (fetch always sends
- * origin-form targets). */
+ * with everything read back before the connection closes. Used for the
+ * malformed-request-target test below (which needs a request-target
+ * `fetch()` can never be made to send — fetch always sends origin-form
+ * targets), and for the forged-`Host`/foreign-`Origin` tests (which need
+ * a `Host` header `fetch()` can never be made to lie about — `fetch()`
+ * always derives `Host` from the URL it's given, even when a `Host`
+ * header is explicitly passed in `headers`). */
 function sendRawRequest(port: number, raw: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, '127.0.0.1', () => {
@@ -43,6 +49,15 @@ function sendRawRequest(port: number, raw: string): Promise<string> {
 
 const PROFILES: BoardProfile[] = [{ name: 'p1', connector: 'sqlite', hasDb: true }];
 const TEST_VERSION = '0.0.0-test';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 const silentLogger: Logger = {
   debug() {},
@@ -100,16 +115,63 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   };
 }
 
+const SAMPLE_INTENT: RunIntent = {
+  id: 7,
+  requestedAt: '2026-08-07T09:00:00.000Z',
+  status: 'pending',
+  claimedRunId: null,
+};
+
+/** Records `cancel`'s numeric id argument so a socket test can prove
+ * end-to-end DELETE param binding, not just that SOME 200 came back. */
+function fakeIntentStore(): RunIntentStore & { cancelCalls: number[] } {
+  const cancelCalls: number[] = [];
+  return {
+    cancelCalls,
+    request: () => ({ intent: SAMPLE_INTENT, deduped: false }),
+    cancel(id) {
+      cancelCalls.push(id);
+      return { outcome: 'cancelled', intent: { ...SAMPLE_INTENT, status: 'cancelled' } };
+    },
+    latest: () => SAMPLE_INTENT,
+    list: () => [SAMPLE_INTENT],
+    listClaimable: () => [],
+    claim: () => true,
+    attachRun: () => {},
+    close() {},
+  };
+}
+
 function fakeSource(
-  opts: { store?: BoardStore | null; closed?: { value: boolean } } = {},
+  opts: {
+    store?: BoardStore | null;
+    closed?: { value: boolean };
+    intents?: RunIntentStore | null;
+    runDoctor?: BoardSource['runDoctor'];
+    readDaemonStatus?: BoardSource['readDaemonStatus'];
+    removeProfile?: BoardSource['removeProfile'];
+  } = {},
 ): BoardSource {
-  const { store = null, closed } = opts;
+  const {
+    store = null,
+    closed,
+    intents = null,
+    runDoctor = async () => null,
+    readDaemonStatus = async () => FAKE_DAEMON_STATUS,
+    removeProfile = async () => ({ outcome: 'removed' }),
+  } = opts;
   return {
     listProfiles: async () => PROFILES,
     openStore: async () => store,
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => intents,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile,
+    runDoctor,
+    readDaemonStatus,
     close() {
       if (closed) closed.value = true;
     },
@@ -141,6 +203,21 @@ test('GET /api/profiles returns the source data', async () => {
       profiles: [{ name: 'p1', connector: 'sqlite', hasDb: true }],
     });
     assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  });
+});
+
+test('DELETE /api/profiles/:name removes the profile', async () => {
+  const server = createBoardServer({
+    source: fakeSource({ removeProfile: async () => ({ outcome: 'removed' }) }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { removed: true, name: 'p1' });
   });
 });
 
@@ -176,6 +253,70 @@ test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mount
     const body = (await res.json()) as { rows: unknown[]; total: number };
     assert.equal(body.total, 1);
     assert.equal(body.rows.length, 1);
+  });
+});
+
+test('GET /api/profiles/:name/doctor returns the report', async () => {
+  const report = {
+    findings: [{ check: 'home', status: 'ok' as const, detail: '/tmp/home' }],
+    status: 'ok' as const,
+  };
+  const server = createBoardServer({
+    source: fakeSource({ runDoctor: async () => report }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/doctor`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { status: 'ok', findings: report.findings });
+  });
+});
+
+test('POST /api/profiles/:name/run-intents queues one intent', async () => {
+  const intents = fakeIntentStore();
+  const server = createBoardServer({
+    source: fakeSource({ intents }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/run-intents`, {
+      method: 'POST',
+    });
+    assert.equal(res.status, 201);
+    assert.deepEqual(await res.json(), { intent: SAMPLE_INTENT, deduped: false });
+  });
+});
+
+test('DELETE /api/profiles/:name/run-intents/:id cancels it', async () => {
+  const intents = fakeIntentStore();
+  const server = createBoardServer({
+    source: fakeSource({ intents }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/run-intents/7`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(intents.cancelCalls, [7]);
+  });
+});
+
+test('GET /api/profiles/:name/run-intents lists queued intents', async () => {
+  const intents = fakeIntentStore();
+  const server = createBoardServer({
+    source: fakeSource({ intents }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/run-intents`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: RunIntent[] };
+    assert.deepEqual(body.rows, [SAMPLE_INTENT]);
   });
 });
 
@@ -225,6 +366,12 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
       writeCalls.push({ name, doc, rawText });
     },
     createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -260,6 +407,12 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
     createProfile: async (name) => {
       createCalls.push(name);
     },
+    openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -324,6 +477,12 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
   const server = createBoardServer({
@@ -417,6 +576,58 @@ test('a malformed absolute-form request target is a 400 bad_request envelope, no
   });
 });
 
+// --- fix round: DNS-rebinding / cross-origin request forgery ---
+// fix round 2: loopback-scoped but PORT-agnostic, so it survives `npm run
+// ui:dev`'s Vite proxy (rewrites `Host` to the API's port, forwards the
+// browser's real `Origin`, e.g. `http://localhost:5173`) while still
+// rejecting any non-loopback host name (DNS rebinding / cross-site).
+
+test('Host/Origin trust: loopback any-port allowed, non-loopback rejected', async () => {
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  // [name, host, origin, forbidden] — origin `undefined` means the header
+  // is omitted entirely (CLI/curl/same-origin navigation never send one).
+  type Case = [
+    name: string,
+    host: string,
+    origin: string | undefined,
+    forbidden: boolean,
+  ];
+  await withServer(server, async (port) => {
+    const loopback = `127.0.0.1:${port}`;
+    const cases: Case[] = [
+      // DNS-rebinding case: the browser believes it's same-origin, so it
+      // sends no `Origin` — only `Host` betrays the attack.
+      ['forged Host', `evil.example.com:${port}`, undefined, true],
+      ['Host with no port', 'evil.com', undefined, true],
+      // Correct `Host` (sent to the real target); only `Origin` betrays a
+      // cross-site page.
+      ['foreign Origin', loopback, 'http://evil.example.com', true],
+      ['https Origin, unrelated domain', loopback, 'https://evil.com', true],
+      // Vite dev-proxy origin (`npm run ui:dev`): a different port, but
+      // still loopback — must pass.
+      ['Vite dev-proxy Origin', loopback, 'http://localhost:5173', false],
+      ['loopback Origin, unrelated port', loopback, 'http://127.0.0.1:1994', false],
+      ['no Origin header', loopback, undefined, false],
+    ];
+    for (const [name, host, origin, forbidden] of cases) {
+      const originLine = origin ? `Origin: ${origin}\r\n` : '';
+      const raw = `GET /api/profiles HTTP/1.1\r\nHost: ${host}\r\n${originLine}Connection: close\r\n\r\n`;
+      const response = await sendRawRequest(port, raw);
+      const expected = forbidden ? 403 : 200;
+      assert.match(
+        response,
+        new RegExp(`^HTTP/1\\.1 ${expected}`),
+        `[${name}] expected ${expected}, got: ${response}`,
+      );
+      if (forbidden) assert.match(response, /"code":"forbidden"/, `[${name}]`);
+    }
+  });
+});
+
 test('a real ZodError leaking from a route handler is converted to 400 validation (belt-and-braces)', async () => {
   // `routes.ts`'s own `parseOrThrow` never lets a ZodError escape (it
   // uses `safeParse` and converts to `HttpError` itself); this simulates
@@ -455,6 +666,51 @@ test('a real ZodError leaking from a route handler is converted to 400 validatio
   });
 });
 
+test('PUT then GET /api/secrets round-trips presence without echoing the value', async () => {
+  const written = new Map<string, string>();
+  const source: BoardSource = {
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({
+      NOTION_TOKEN: written.has('NOTION_TOKEN') ? 'present' : 'absent',
+      TELEGRAM_BOT_TOKEN: written.has('TELEGRAM_BOT_TOKEN') ? 'present' : 'absent',
+    }),
+    writeSecret: async (key, value) => {
+      written.set(key, value);
+    },
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
+    close() {},
+  };
+  const server = createBoardServer({
+    source,
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const putRes = await fetch(`http://127.0.0.1:${port}/api/secrets/NOTION_TOKEN`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'tok-123-secret' }),
+    });
+    assert.equal(putRes.status, 200);
+    const putText = await putRes.text();
+    assert.ok(!putText.includes('tok-123-secret'));
+    assert.deepEqual(JSON.parse(putText), { key: 'NOTION_TOKEN', status: 'present' });
+
+    const getRes = await fetch(`http://127.0.0.1:${port}/api/secrets`);
+    assert.equal(getRes.status, 200);
+    const body = (await getRes.json()) as Record<string, string>;
+    assert.equal(body.NOTION_TOKEN, 'present');
+    assert.equal(body.TELEGRAM_BOT_TOKEN, 'absent');
+  });
+});
+
 test('close() still calls source.close() when httpServer.close() rejects', async () => {
   const closed = { value: false };
   let closeCallCount = 0;
@@ -464,6 +720,12 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {
       closeCallCount += 1;
       closed.value = true;
@@ -490,4 +752,44 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     2,
     'source.close() must run even when httpServer.close() rejects',
   );
+});
+
+test('GET /api/personas serves the catalog over HTTP', async () => {
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/personas`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+    const body = (await res.json()) as typeof PERSONA_CATALOG;
+    assert.equal(body.personas.length, 11);
+    assert.equal(body.personas[body.personas.length - 1]?.id, 'scratch');
+  });
+});
+
+test('GET /api/daemon reports the daemon state', async () => {
+  const status: DaemonStatus = {
+    state: 'running',
+    pid: 4242,
+    startedAt: '2026-08-07T00:00:00.000Z',
+    lastTickAt: '2026-08-07T09:59:30.000Z',
+    inFlight: null,
+    profiles: [
+      { profile: 'rajni', enabled: true, nextRunAt: '2026-08-08T03:30:00.000Z' },
+    ],
+  };
+  const server = createBoardServer({
+    source: fakeSource({ readDaemonStatus: async () => status }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/daemon`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as DaemonStatus;
+    assert.equal(body.state, 'running');
+  });
 });

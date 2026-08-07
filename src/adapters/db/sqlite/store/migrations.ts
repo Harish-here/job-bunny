@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 5;
+export const LATEST_SCHEMA_VERSION = 6;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -107,6 +107,17 @@ const MIGRATIONS: readonly string[] = [
     value_text TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  `,
+  // v5 -> v6: run_intents (UI phase 1 — see ports/run_intents.ts)
+  `
+  CREATE TABLE run_intents (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    requested_at   TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    claimed_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL
+  );
+  CREATE UNIQUE INDEX idx_run_intents_one_pending
+    ON run_intents(status) WHERE status = 'pending';
   `,
 ];
 

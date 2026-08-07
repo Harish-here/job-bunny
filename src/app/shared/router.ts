@@ -20,7 +20,7 @@ export function param(req: BoardRequest, key: string): string {
 export type RouteHandler = (req: BoardRequest) => BoardResponse | Promise<BoardResponse>;
 
 export interface RouteDef {
-  method: 'GET' | 'PATCH' | 'PUT' | 'POST';
+  method: 'GET' | 'PATCH' | 'PUT' | 'POST' | 'DELETE';
   path: string;
   handler: RouteHandler;
 }

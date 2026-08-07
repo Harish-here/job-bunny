@@ -38,8 +38,13 @@ import {
   type LogDeps,
 } from '../../../ops/daemon/logs/index.ts';
 import { defaultScanDeps, type ScanDeps } from '../../../ops/daemon/scan/index.ts';
+import type { PendingIntent } from '../../../ports/run_intents.ts';
 import { resolveHome } from '../../home/index.ts';
-import { wireDaemonRunHistory, wireDaemonScheduleConfig } from '../../wire/index.ts';
+import {
+  wireDaemonIntents,
+  wireDaemonRunHistory,
+  wireDaemonScheduleConfig,
+} from '../../wire/index.ts';
 import { runServeStop } from './lifecycle.ts';
 import { runServeStartChild, runServeStartParent } from './start.ts';
 import { runServeStatus } from './status.ts';
@@ -85,6 +90,13 @@ export interface ServeDeps {
    * (`status.ts`'s "currently owed" line), so both agree on the same
    * durable evidence the tick loop itself uses. */
   readRunHistory: (profiles: readonly string[], date: string) => RunRecord[];
+  /** Board-queued run intents, real implementation: `cli/wire/daemon.ts`'s
+   * `wireDaemonIntents`. Shared by the daemon child (`start.ts`'s
+   * `DaemonDeps.readIntents`/`claimIntent`/`attachIntentRun`) so both agree
+   * on the same store-construction discipline the tick loop itself uses. */
+  readIntents: (now: Date) => PendingIntent[];
+  claimIntent: (profile: string, intentId: number) => boolean;
+  attachIntentRun: (profile: string, intentId: number, since: string) => void;
   listLaunchAgentFiles(): string[];
   spawn: SpawnFn;
   nodeBin: string;
@@ -129,6 +141,7 @@ function defaultServeDeps(): ServeDeps {
       readProfileJson: wireDaemonScheduleConfig({ root }),
     },
     readRunHistory: wireDaemonRunHistory({ root }),
+    ...wireDaemonIntents({ root }),
     listLaunchAgentFiles: () => {
       try {
         return fsReaddirSync(path.join(home, 'Library', 'LaunchAgents'));

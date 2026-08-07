@@ -33,6 +33,19 @@ test('matchRoute returns null on method mismatch', () => {
   assert.equal(result, null);
 });
 
+test('matchRoute matches a DELETE route and binds both params', () => {
+  const deleteRoutes: RouteDef[] = [
+    {
+      method: 'DELETE',
+      path: '/api/profiles/:name/run-intents/:id',
+      handler: noop,
+    },
+  ];
+  const result = matchRoute(deleteRoutes, 'DELETE', '/api/profiles/rajni/run-intents/7');
+  assert.ok(result);
+  assert.deepEqual(result.params, { name: 'rajni', id: '7' });
+});
+
 test('matchRoute returns null on a trailing slash', () => {
   const result = matchRoute(routes, 'GET', '/api/profiles/');
   assert.equal(result, null);

@@ -109,6 +109,9 @@ function baseDeps(overrides: Partial<DaemonDeps> = {}): {
     pidfile,
     spawnRun: (async () => 0) as SpawnRun,
     readRunHistory: () => [],
+    readIntents: () => [],
+    claimIntent: () => true,
+    attachIntentRun: () => {},
     log: (event, data, level) => {
       events.push({ event, data, level });
     },
@@ -598,4 +601,175 @@ test('a rejecting spawn does not escape the tick, and the next tick still runs',
   await assert.doesNotReject(() => daemon.tick());
   assert.equal(profileScans, 2); // the guard was released by the finally.
   assert.deepEqual(spawnCalls, ['harish']); // ledgered pre-spawn — not retried.
+});
+
+test('tick: claims a pending intent and spawns a run for it', async () => {
+  const spawnCalls: Array<{ profile: string; date: string; slot: string }> = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed);
+    return 0;
+  };
+  const readIntents = () => [
+    { profile: 'harish', intentId: 7, requestedAt: '2026-07-27T14:00:00.000Z' },
+  ];
+  const claimIntent = () => true;
+  const { deps } = baseDeps({ spawnRun, readIntents, claimIntent });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(spawnCalls, [
+    { profile: 'harish', date: '2026-07-27', slot: 'intent' },
+  ]);
+});
+
+test('tick: an intent that is no longer pending is skipped without spawning', async () => {
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+  const readIntents = () => [
+    { profile: 'harish', intentId: 3, requestedAt: '2026-07-27T14:00:00.000Z' },
+  ];
+  const claimIntent = () => false;
+  const { deps, events } = baseDeps({ spawnRun, readIntents, claimIntent });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(spawnCalls, []);
+  assert.ok(
+    events.some((e) => e.event === 'intent-vanished' && e.data?.profile === 'harish'),
+  );
+});
+
+test('tick: intents are processed before scheduled slots', async () => {
+  const order: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    order.push(
+      owed.slot === 'intent' ? `intent:${owed.profile}` : `slot:${owed.profile}`,
+    );
+    return 0;
+  };
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const readIntents = () => [
+    { profile: 'zeta', intentId: 1, requestedAt: '2026-07-27T14:00:00.000Z' },
+  ];
+  const claimIntent = () => true;
+  const { deps } = baseDeps({ scan, spawnRun, readIntents, claimIntent });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(order, ['intent:zeta', 'slot:harish']);
+});
+
+test('tick: an intent run is never written to the attempts ledger', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const spawnRun: SpawnRun = async () => 0;
+  const readIntents = () => [
+    { profile: 'zeta', intentId: 1, requestedAt: '2026-07-27T14:00:00.000Z' },
+  ];
+  const claimIntent = () => true;
+  const { deps } = baseDeps({ scan, spawnRun, readIntents, claimIntent });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(
+    readDaemonPidfile(deps.root, deps.pidfile)?.attempts.map((a) => a.profile),
+    ['harish'], // only the scheduled slot was ledgered — never the intent.
+  );
+});
+
+test('tick: the claimed run is attached after the child exits', async () => {
+  const callOrder: string[] = [];
+  const spawnRun: SpawnRun = async () => {
+    callOrder.push('spawn');
+    return 0;
+  };
+  const attachCalls: Array<{ profile: string; intentId: number; since: string }> = [];
+  const attachIntentRun = (profile: string, intentId: number, since: string) => {
+    callOrder.push('attach');
+    attachCalls.push({ profile, intentId, since });
+  };
+  const readIntents = () => [
+    { profile: 'harish', intentId: 5, requestedAt: '2026-07-27T14:00:00.000Z' },
+  ];
+  const claimIntent = () => true;
+  const { deps } = baseDeps({ spawnRun, readIntents, claimIntent, attachIntentRun });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(callOrder, ['spawn', 'attach']); // attach happens AFTER the child exits.
+  assert.equal(attachCalls.length, 1);
+  assert.equal(attachCalls[0]?.profile, 'harish');
+  assert.equal(attachCalls[0]?.intentId, 5);
+  const since = attachCalls[0]?.since ?? '';
+  assert.ok(!Number.isNaN(Date.parse(since)), 'since must be a parseable ISO string');
+  assert.ok(
+    Date.parse(since) <= deps.now().getTime(),
+    'since must not be later than the spawn',
+  );
+});
+
+test('tick: an attach failure does not abandon the rest of the batch', async () => {
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+  const readIntents = () => [
+    { profile: 'alpha', intentId: 1, requestedAt: '2026-07-27T14:00:00.000Z' },
+    { profile: 'beta', intentId: 2, requestedAt: '2026-07-27T14:00:01.000Z' },
+  ];
+  const claimIntent = () => true;
+  let attachCalls = 0;
+  const attachIntentRun = () => {
+    attachCalls += 1;
+    if (attachCalls === 1) throw new Error('boom');
+  };
+  const { deps, events } = baseDeps({
+    spawnRun,
+    readIntents,
+    claimIntent,
+    attachIntentRun,
+  });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(spawnCalls, ['alpha', 'beta']); // beta still spawned despite alpha's throw.
+  assert.ok(
+    events.some((e) => e.event === 'intent-attach-failed' && e.data?.profile === 'alpha'),
+  );
+  assert.equal(events.find((e) => e.event === 'intent-attach-failed')?.level, 'warn');
+});
+
+test('tick: stop() halts the intent pass between entries', async () => {
+  const spawnCalls: string[] = [];
+  let daemon: ReturnType<typeof createDaemon>;
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    if (spawnCalls.length === 1) daemon.stop();
+    return 0;
+  };
+  const readIntents = () => [
+    { profile: 'alpha', intentId: 1, requestedAt: '2026-07-27T14:00:00.000Z' },
+    { profile: 'beta', intentId: 2, requestedAt: '2026-07-27T14:00:01.000Z' },
+  ];
+  const claimIntent = () => true;
+  const { deps, events } = baseDeps({ spawnRun, readIntents, claimIntent });
+  daemon = createDaemon(deps);
+
+  await daemon.tick();
+
+  assert.deepEqual(spawnCalls, ['alpha']); // beta was never spawned.
+  assert.ok(
+    events.some(
+      (e) => e.event === 'stop-requested-batch-halted' && e.data?.profile === 'beta',
+    ),
+  );
 });

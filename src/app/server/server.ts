@@ -21,8 +21,13 @@ import type { Logger } from '../../ports/context.ts';
 import { makeAppInfoRoutes } from '../features/appinfo/index.ts';
 import { makeBoardRoutes } from '../features/board/index.ts';
 import { makeConfigRoutes } from '../features/config/index.ts';
+import { makeDaemonRoutes } from '../features/daemon/index.ts';
+import { makeDoctorRoutes } from '../features/doctor/index.ts';
+import { makeIntentRoutes } from '../features/intents/index.ts';
+import { makePersonasRoutes } from '../features/personas/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
 import { makeRunsRoutes } from '../features/runs/index.ts';
+import { makeSecretsRoutes } from '../features/secrets/index.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../shared/index.ts';
 import { HttpError, jsonError, matchRoute, readJsonBody } from '../shared/index.ts';
 import { serveStatic } from './static.ts';
@@ -54,8 +59,13 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
     ...makeProfilesRoutes(source),
     ...makeBoardRoutes(source),
     ...makeRunsRoutes(source),
+    ...makeIntentRoutes(source),
+    ...makeSecretsRoutes(source),
+    ...makeDaemonRoutes(source),
     ...makeConfigRoutes(source),
+    ...makeDoctorRoutes(source),
     ...makeAppInfoRoutes(version),
+    ...makePersonasRoutes(),
   ];
 
   const httpServer = createServer((req, res) => {
@@ -111,6 +121,52 @@ function safeParseUrl(rawTarget: string): URL {
   }
 }
 
+/** Defeats DNS rebinding and simple cross-origin requests against a board
+ * that now has real side effects (queue a run, run doctor's CDP/Notion
+ * probes, overwrite a secret, delete a profile): a `Host` header whose
+ * host part isn't a loopback name (`127.0.0.1`, `localhost`, or the IPv6
+ * loopback `[::1]`) is rejected outright — this is what DNS rebinding
+ * attacks, so checking `Origin` alone is not enough. The PORT is
+ * deliberately unchecked: `npm run ui:dev`'s Vite proxy forwards requests
+ * from its own dev-server port while rewriting `Host` to the API's, and a
+ * browser extension or CLI tool talking to the board from a different
+ * loopback port is not the attack this guards against — only a
+ * non-loopback host name is. `Origin` is checked too, but only when the
+ * browser sends one (a same-origin navigation and most non-fetch requests
+ * never do) — its absence is not itself grounds for rejection; when
+ * present, its host part is held to the same loopback-any-port allowlist,
+ * which is what makes `Origin: http://localhost:5173` (Vite's dev-proxy
+ * origin) pass while `Origin: https://evil.com` is rejected. */
+function assertTrustedRequest(req: IncomingMessage): void {
+  const hostHeader = req.headers.host;
+  if (
+    typeof hostHeader !== 'string' ||
+    !isTrustedLoopbackHost(`http://${hostHeader.trim()}`)
+  ) {
+    throw new HttpError(403, 'forbidden', 'untrusted Host header');
+  }
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && !isTrustedLoopbackHost(origin.trim())) {
+    throw new HttpError(403, 'forbidden', 'untrusted Origin header');
+  }
+}
+
+const TRUSTED_LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/** `urlLike` must already be a full URL (`Origin` is one; a bare `Host`
+ * header is turned into one by prefixing `http://` before calling this) —
+ * `URL`'s `hostname` lowercases and strips the port for us, and preserves
+ * IPv6 brackets, so `127.0.0.1:1994`, `LOCALHOST:5173`, and `[::1]:1994`
+ * all normalize to a value in `TRUSTED_LOOPBACK_HOSTNAMES`. An unparseable
+ * value (malformed `Host`/`Origin`) is untrusted. */
+function isTrustedLoopbackHost(urlLike: string): boolean {
+  try {
+    return TRUSTED_LOOPBACK_HOSTNAMES.has(new URL(urlLike).hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -129,6 +185,10 @@ async function handleRequest(
   try {
     const url = safeParseUrl(rawTarget);
     path = url.pathname;
+    // Before routing to either the API or the static/SPA branch — a
+    // forged `Host`/`Origin` is rejected regardless of what it's asking
+    // for.
+    assertTrustedRequest(req);
     if (url.pathname.startsWith('/api/')) {
       const response = await handleApi(req, url, method, routes);
       status = response.status;

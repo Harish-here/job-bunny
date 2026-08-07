@@ -11,6 +11,7 @@ export {
   type SqliteConnectorSettings,
   SqliteConnectorSettingsSchema,
 } from './connector.ts';
+export { deriveIntentStatus, SqliteRunIntentStore } from './intents/index.ts';
 export { RUN_HEARTBEAT_STALE_MS, SqliteRunStore } from './runs/index.ts';
 export { SqliteStateStore } from './state/index.ts';
 export { LATEST_SCHEMA_VERSION, openJobsDb, SqliteStore } from './store/index.ts';

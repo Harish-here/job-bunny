@@ -11,6 +11,7 @@ import type { LogDeps } from '../../../ops/daemon/logs/index.ts';
 import type { ScanDeps } from '../../../ops/daemon/scan/index.ts';
 import type { ServeDeps, SpawnFn, SpawnHandle } from './index.ts';
 import { serveCommand } from './index.ts';
+import { buildDaemonDeps } from './start.ts';
 
 const ROOT = '/fake/root';
 const HOME = '/fake/home';
@@ -116,6 +117,9 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     logs: fakeLogDeps(),
     scan: fakeScanDeps(),
     readRunHistory: () => [],
+    readIntents: () => [],
+    claimIntent: () => true,
+    attachIntentRun: () => {},
     listLaunchAgentFiles: () => [],
     spawn,
     nodeBin: 'node',
@@ -355,4 +359,22 @@ test('status: an unparseable lastTickAt reports "age unknown" and wedged, never 
   const printed = writes.join('\n');
   assert.match(printed, /last tick: not-a-date \(age unknown\) — appears wedged/);
   assert.doesNotMatch(printed, /NaN/);
+});
+
+test('start (child): the constructed DaemonDeps carries readIntents/claimIntent/attachIntentRun through from ServeDeps unchanged', () => {
+  const readIntents = () => [];
+  const claimIntent = () => true;
+  const attachIntentRun = () => {};
+  const { deps } = baseServeDeps({ readIntents, claimIntent, attachIntentRun });
+
+  const daemonDeps = buildDaemonDeps(
+    deps,
+    async () => 0,
+    () => {},
+  );
+
+  assert.equal(daemonDeps.readRunHistory, deps.readRunHistory);
+  assert.equal(daemonDeps.readIntents, readIntents);
+  assert.equal(daemonDeps.claimIntent, claimIntent);
+  assert.equal(daemonDeps.attachIntentRun, attachIntentRun);
 });

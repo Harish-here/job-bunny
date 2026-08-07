@@ -11,7 +11,7 @@
  * rajni` guard is a deliberate belt-and-braces check, never Notion, never
  * any other profile's data (T11 constraint).
  *
- * Truncates in place (`DELETE FROM` all three tables) rather than deleting
+ * Truncates in place (`DELETE FROM` each table below) rather than deleting
  * and recreating the file: Playwright's `webServer` plugin starts the board
  * server (which lazily opens+memoizes this DB) BEFORE `globalSetups` run,
  * so swapping the inode out from under an already-open handle would pin a
@@ -30,6 +30,15 @@
  * `config_docs` row exists (see `store.ts`), so the next invocation's first
  * GET re-seeds from the untouched tracked file with no separate restore
  * step needed.
+ *
+ * Also wipes `run_intents`, `run_events`, and `runs` (fix round 2) — specs
+ * exercising the run-intents/runs UI queue and cancel real intents against
+ * this same db; left in place they'd make later e2e invocations start from
+ * a non-empty history instead of a clean slate. `run_events` is deleted
+ * before `runs` (its `run_id` FK carries no `ON DELETE` action, so it
+ * blocks under `PRAGMA foreign_keys = ON`); `run_intents.claimed_run_id`
+ * is `ON DELETE SET NULL` so it has no such ordering constraint, but is
+ * cleared here too for the same clean-slate reason.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +57,10 @@ export default function seed(): void {
   }
 
   const db = openJobsDb(dbPath);
-  db.exec('DELETE FROM tracking; DELETE FROM jobs; DELETE FROM config_docs;');
+  db.exec(
+    'DELETE FROM tracking; DELETE FROM jobs; DELETE FROM config_docs; ' +
+      'DELETE FROM run_intents; DELETE FROM run_events; DELETE FROM runs;',
+  );
   const store = new SqliteStore(db);
   const now = new Date().toISOString();
   store.upsertJobs(FIXTURE_JOBS, now);
