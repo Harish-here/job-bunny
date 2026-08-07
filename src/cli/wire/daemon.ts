@@ -25,10 +25,11 @@ import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
 import type { RunStore } from '../../ports/index.ts';
+import { resolveHome } from '../home/index.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
 export interface DaemonWireOverrides {
-  /** repo root; default `process.cwd()` — same resolution as
+  /** the data home; default `resolveHome()` — same resolution as
    * `compose.ts`/`wireBoard` in `builders.ts`/`board.ts`. */
   root?: string;
   /** test-only seam: overrides how a run-history reader is constructed for
@@ -63,7 +64,7 @@ export interface DaemonWireOverrides {
 export function wireDaemonRunHistory(
   overrides: DaemonWireOverrides = {},
 ): (profiles: readonly string[], date: string) => RunRecord[] {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   const makeRunStore =
     overrides.makeRunStore ?? ((dbPath: string) => new SqliteRunStore(dbPath));
 
@@ -116,7 +117,7 @@ export function wireDaemonRunHistory(
 export function wireDaemonScheduleConfig(
   overrides: DaemonWireOverrides = {},
 ): (profilesDir: string, name: string) => Promise<string | undefined> {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   return async (_profilesDir, name) => {
     const store = wireConfigStore(name, { root, liftMode: 'readonly' });
     try {

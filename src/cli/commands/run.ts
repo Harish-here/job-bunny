@@ -43,6 +43,7 @@ import { runPipeline as defaultRunPipeline } from '../../pipeline/runner/run.ts'
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
 import { computeRunCapMs } from '../../pipeline/stages/budgets.ts';
 import type { Routine } from '../../routines/types.ts';
+import { resolveHome } from '../home/index.ts';
 import {
   wire as defaultWire,
   resolveLoggingSettings,
@@ -121,7 +122,7 @@ export interface RunDeps {
 }
 
 function defaultDeps(): RunDeps {
-  const root = process.cwd();
+  const root = resolveHome();
   const lockPath = join(root, RUN_LOCK_FILENAME);
   return {
     wire: defaultWire,

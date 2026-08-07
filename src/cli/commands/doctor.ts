@@ -22,6 +22,7 @@ import {
   sqlitePathRetiredCheck,
 } from '../../ops/doctor/config_checks.ts';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
+import { resolveHome } from '../home/index.ts';
 import {
   wire as defaultWire,
   type WireOverrides,
@@ -54,7 +55,11 @@ async function defaultRunDegradedConfigChecks(
 ): Promise<DoctorFinding[]> {
   const store = wireConfigStore(profileName, { liftMode: 'readonly' });
   try {
-    const opts: CoreCheckOpts = { profileName, readDoc: (key) => store.readText(key) };
+    const opts: CoreCheckOpts = {
+      profileName,
+      root: resolveHome(),
+      readDoc: (key) => store.readText(key),
+    };
     const checks: DoctorCheck[] = [
       profileParsesCheck(opts),
       filterParsesCheck(opts),
@@ -86,6 +91,15 @@ export async function doctorCommand(
 ): Promise<number> {
   const resolved: DoctorDeps = { ...defaultDeps(), ...deps };
 
+  // Always `ok`: `main()` already refuses to dispatch `doctor` at all when
+  // the home is missing (the missing-home check runs before any command
+  // does), so by the time this code runs the home exists.
+  const homeFinding: DoctorFinding = {
+    check: 'home',
+    status: 'ok',
+    detail: resolveHome(),
+  };
+
   let checks: WireResult['checks'];
   try {
     // `configLiftMode: 'readonly'` (config→db Phase 4): doctor must never
@@ -109,14 +123,14 @@ export async function doctorCommand(
       detail: `could not wire profile '${opts.profile}': ${message}`,
     };
     const degraded = await resolved.runDegradedConfigChecks(opts.profile);
-    const findings = [wireFinding, ...degraded];
+    const findings = [homeFinding, wireFinding, ...degraded];
     for (const line of formatTable(findings)) {
       resolved.write(line);
     }
     return 1;
   }
 
-  const findings = await Promise.all(checks.map((c) => c.run()));
+  const findings = [homeFinding, ...(await Promise.all(checks.map((c) => c.run())))];
 
   for (const line of formatTable(findings)) {
     resolved.write(line);

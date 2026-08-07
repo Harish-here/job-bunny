@@ -26,7 +26,9 @@ export interface CdpReachableCheckDeps {
   reachable: CdpReachableFn;
   port?: number;
   /** userDataDir whose Chrome pid file is consulted once CDP is found
-   * reachable. Default: DEFAULT_USER_DATA_DIR. */
+   * reachable. `cli/wire` always injects `join(<data home>, 'chrome')`;
+   * DEFAULT_USER_DATA_DIR is only an inert fallback for a caller that
+   * constructs this check with no `userDataDir` at all. */
   userDataDir?: string;
   /** Injectable Chrome pid-file deps. Default: defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;

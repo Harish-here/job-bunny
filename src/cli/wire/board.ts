@@ -72,12 +72,13 @@ import { openJobsDb, SqliteBoardStore } from '../../adapters/db/sqlite/index.ts'
 import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
 import type { ConfigDocKey } from '../../ports/config_store.ts';
 import { seedProfileDocs } from '../commands/profile.ts';
+import { resolveHome } from '../home/index.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
 const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
 
 export interface BoardWireOverrides {
-  /** repo root; default `process.cwd()` — same resolution as
+  /** the data home; default `resolveHome()` — same resolution as
    * `compose.ts`/`wireMigrate` in `builders.ts`. */
   root?: string;
 }
@@ -141,7 +142,7 @@ async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
 }
 
 export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   const stores = new Map<string, BoardStore>();
 
   return {

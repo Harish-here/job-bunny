@@ -16,7 +16,20 @@
  * `cli/wire/builders.ts`), resume.json, search_urls.md, page_inventory
  * coverage (checks the `.json` inventory — the runtime authority per
  * `adapters/lanes/linkedin/inventory.ts`), and ui build (checks
- * `ui/dist/index.html`).
+ * `ui/dist/index.html`). Both `page_inventory` and `ui/dist` are PROGRAM
+ * paths shipped inside the package itself, not data-home paths — they're
+ * probed against `SetupDeps.packageRoot` (default: this file's own
+ * install location via `import.meta.url`, same pattern as
+ * `commands/board.ts`'s `uiDir`), never `SetupDeps.root` (the data home;
+ * fix round — probing these against `root` made every real install report
+ * both steps `needs-action` even when they shipped fine, since an
+ * installed `~/.jobbunny` has no `src/`/`ui/` tree at all). `ui/dist` is
+ * ALSO gitignored (never shipped in the npm tarball), so a missing
+ * `ui/dist/index.html` alone doesn't distinguish "run the build" from "not
+ * shipped here at all" — `stepUiBuilt` (fix round 2) discriminates by
+ * `packageRoot/.git` presence: a checkout has it (`needs-action`, the
+ * existing remediation applies), an installed copy doesn't
+ * (`skipped`, never drives a non-zero exit).
  *
  * `readConnectorNeeds`/`stepResume`/`stepSearchUrls` read their one config
  * doc each (`profile.json`/`resume.json`/`search_urls.md`) through a
@@ -39,9 +52,18 @@
  * `profiles/` or `.env`.
  */
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import { wireConfigStore } from '../wire/index.ts';
 import { defaultProfileFsDeps, type ProfileFsDeps, seedProfileDocs } from './profile.ts';
+
+/** This package's own install location — `src/cli/commands/setup.ts` is
+ * three directories below it, same depth as `commands/board.ts`'s `uiDir`
+ * default. Computed once at import time; real callers never override it
+ * (only `SetupDeps.packageRoot` itself is overridable, for tests). */
+function defaultPackageRoot(): string {
+  return fileURLToPath(new URL('../../../', import.meta.url));
+}
 
 export type StepStatus = 'done' | 'skipped' | 'needs-action';
 
@@ -62,6 +84,10 @@ export interface SetupDeps extends ProfileFsDeps {
    * `root` is the FINAL resolved root (`setupCommand`'s own `deps.root`
    * override, if any) — never a pre-merge snapshot. */
   configStore: (profileName: string) => ConfigStore;
+  /** The package's own install location — where `page_inventory/` and
+   * `ui/dist/` actually ship. Default: `defaultPackageRoot()`. Deliberately
+   * NOT derived from `root` (the data home): see the module doc comment. */
+  packageRoot: string;
 }
 
 function defaultDeps(): ProfileFsDeps {
@@ -244,7 +270,7 @@ async function stepSearchUrls(
 }
 
 async function stepInventory(
-  root: string,
+  packageRoot: string,
   searchUrlsText: string,
   deps: SetupDeps,
 ): Promise<StepResult> {
@@ -259,7 +285,7 @@ async function stepInventory(
   const missing: string[] = [];
   for (const page of pages) {
     const p = path.join(
-      root,
+      packageRoot,
       'src',
       'adapters',
       'lanes',
@@ -283,15 +309,32 @@ async function stepInventory(
   };
 }
 
-async function stepUiBuilt(root: string, deps: SetupDeps): Promise<StepResult> {
-  const p = path.join(root, 'ui', 'dist', 'index.html');
-  if (await deps.exists(p)) {
-    return { step: 'ui build', status: 'done', detail: 'ui/dist present' };
+// `ui/dist` is gitignored and never ships in the npm tarball, so it's
+// absent on BOTH a fresh checkout and an installed copy — `needs-action`
+// only applies to the former (where the user actually can run `npm run
+// ui:build`). Discriminate the two by `.git` presence at `packageRoot`: a
+// checkout (including a git worktree, where `.git` is a file, not a dir)
+// has it, a packed npm copy never does. Reuses the same injectable
+// `deps.exists` seam as the `ui/dist` probe itself — no new dep needed.
+async function stepUiBuilt(packageRoot: string, deps: SetupDeps): Promise<StepResult> {
+  const step = 'ui build';
+  const distPath = path.join(packageRoot, 'ui', 'dist', 'index.html');
+  if (await deps.exists(distPath)) {
+    return { step, status: 'done', detail: 'ui/dist present' };
+  }
+  const gitPath = path.join(packageRoot, '.git');
+  if (await deps.exists(gitPath)) {
+    return {
+      step,
+      status: 'needs-action',
+      detail: 'board UI not built — run: npm run ui:build',
+    };
   }
   return {
-    step: 'ui build',
-    status: 'needs-action',
-    detail: 'board UI not built — run: npm run ui:build',
+    step,
+    status: 'skipped',
+    detail:
+      'board UI not shipped with installed copies yet — run from a checkout to use the board',
   };
 }
 
@@ -307,17 +350,25 @@ export async function setupCommand(
     ...fsDeps,
     configStore:
       deps.configStore ?? ((name) => wireConfigStore(name, { root: fsDeps.root })),
+    packageRoot: deps.packageRoot ?? defaultPackageRoot(),
   };
   const profileDir = path.join(resolved.root, 'profiles', opts.profile);
 
   const steps: StepResult[] = [];
+  // Must run first: on a brand-new machine `<root>/profiles/` does not
+  // exist yet, and the profile's SQLite config store (opened at
+  // `<root>/profiles/<name>/data/jobbunny.db` by `stepScaffold` below)
+  // would otherwise surface a raw ENOENT instead of scaffolding the home.
+  const profilesDir = path.join(resolved.root, 'profiles');
+  await resolved.mkdir(profilesDir);
+  steps.push({ step: 'home', status: 'done', detail: resolved.root });
   steps.push(await stepScaffold(opts.profile, resolved));
   steps.push(await stepNotionToken(resolved.root, profileDir, resolved));
   steps.push(await stepResume(profileDir, resolved));
   const { result: searchUrlsResult, text } = await stepSearchUrls(profileDir, resolved);
   steps.push(searchUrlsResult);
-  steps.push(await stepInventory(resolved.root, text, resolved));
-  steps.push(await stepUiBuilt(resolved.root, resolved));
+  steps.push(await stepInventory(resolved.packageRoot, text, resolved));
+  steps.push(await stepUiBuilt(resolved.packageRoot, resolved));
 
   for (const s of steps) {
     resolved.write(`[setup] ${s.step}: ${s.status} — ${s.detail}`);

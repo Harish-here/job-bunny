@@ -173,3 +173,16 @@ test('config: registered in COMMAND_NAMES and mentioned in USAGE', () => {
   assert.ok(COMMAND_NAMES.has('config'));
   assert.ok(USAGE.includes('config get'));
 });
+
+test('migrate-home: registered in COMMAND_NAMES and mentioned in USAGE', () => {
+  assert.ok(COMMAND_NAMES.has('migrate-home'));
+  assert.ok(USAGE.includes('migrate-home'));
+});
+
+test('migrate-home: parses --from and --apply without --profile', () => {
+  const result = buildOptions('migrate-home', [], {
+    from: '/tmp/jb-legacy',
+    apply: true,
+  });
+  assert.deepEqual(result, { apply: true, from: '/tmp/jb-legacy' });
+});

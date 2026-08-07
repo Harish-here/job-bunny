@@ -26,8 +26,11 @@
  * No `src/adapters/**` import here — every side effect (shelling out to
  * git/gh/npm, reading/writing files, the confirmation prompt, the check
  * poll's sleep) goes through the injected `ReleaseDeps`, mirroring every
- * other `src/cli/commands/*.ts`'s `root: process.cwd()` +
- * dependency-injection convention (see `schedule.ts`, `lane_add_url.ts`).
+ * other `src/cli/commands/*.ts`'s dependency-injection convention (see
+ * `schedule.ts`, `lane_add_url.ts`) — EXCEPT `root`: `release` is a
+ * maintainer command operating on the git checkout, so its `root` stays
+ * `process.cwd()` deliberately, unlike the rest of `cli/`, which defaults
+ * `root` to the resolved data home (`resolveHome()`, `cli/home/index.ts`).
  * Tests inject fakes for all of these and never shell out for real.
  *
  * Split from a single 705-line release.ts: `./version.ts` (version/
