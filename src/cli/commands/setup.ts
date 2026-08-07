@@ -311,6 +311,13 @@ export async function setupCommand(
   const profileDir = path.join(resolved.root, 'profiles', opts.profile);
 
   const steps: StepResult[] = [];
+  // Must run first: on a brand-new machine `<root>/profiles/` does not
+  // exist yet, and the profile's SQLite config store (opened at
+  // `<root>/profiles/<name>/data/jobbunny.db` by `stepScaffold` below)
+  // would otherwise surface a raw ENOENT instead of scaffolding the home.
+  const profilesDir = path.join(resolved.root, 'profiles');
+  await resolved.mkdir(profilesDir);
+  steps.push({ step: 'home', status: 'done', detail: resolved.root });
   steps.push(await stepScaffold(opts.profile, resolved));
   steps.push(await stepNotionToken(resolved.root, profileDir, resolved));
   steps.push(await stepResume(profileDir, resolved));

@@ -30,7 +30,7 @@
  * point (`scripts/notion/client.js`, `scripts/notify/notify.js`); v2 has one
  * bin, so it loads here and only here.
  */
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -65,6 +65,7 @@ import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 import { type StateCommandOptions, stateCommand } from './commands/state.ts';
 import { resolveHome } from './home/index.ts';
+import { nodeGuardMessage } from './node_guard/index.ts';
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
 
@@ -89,6 +90,17 @@ export interface MainDeps {
    * useful information on that opt-in surface; a blanket per-command nag
    * for "you've never run `serve start`" would be unwelcome noise here. */
   checkDaemonLiveness?: () => string | undefined;
+  /** `process.versions.node` by default — injected so the guard is testable
+   * without a second Node install. */
+  nodeVersion?: string;
+  /** Returns the missing-home error line for this command, or `undefined`
+   * when the home exists or the command does not need one. */
+  homeCheck?: (command: string) => string | undefined;
+  /** Where `--help`/`-h` writes the USAGE string. Defaults to
+   * `(line) => console.log(line)`, mirroring how `stderr` defaults to
+   * `console.error` — injected so tests capture the help output without
+   * touching the real stdout. */
+  stdout?: (line: string) => void;
 }
 
 function defaultCheckDaemonLiveness(): string | undefined {
@@ -176,9 +188,34 @@ function defaultCommands(): CommandRegistry {
   };
 }
 
+/** Commands that must run without an existing data home: `setup` and
+ * `migrate-home` create or populate it, and `release` is a maintainer
+ * command that operates on the git checkout, not on user data. */
+const HOME_EXEMPT_COMMANDS = new Set<string>(['setup', 'migrate-home', 'release']);
+
+function defaultCheckHome(command: string): string | undefined {
+  if (HOME_EXEMPT_COMMANDS.has(command)) return undefined;
+  const home = resolveHome();
+  if (existsSync(home)) return undefined;
+  return `no jobbunny home at ${home} — run 'jobbunny setup'`;
+}
+
 export async function main(argv: string[], deps: MainDeps = {}): Promise<number> {
   const commands = { ...defaultCommands(), ...deps.commands };
+
+  const stdout = deps.stdout ?? ((line: string) => console.log(line));
+  if (argv.includes('--help') || argv.includes('-h')) {
+    stdout(USAGE);
+    return 0;
+  }
+
   const stderr = deps.stderr ?? ((line: string) => console.error(line));
+
+  const guard = nodeGuardMessage(deps.nodeVersion ?? process.versions.node);
+  if (guard) {
+    stderr(guard);
+    return 1;
+  }
 
   // §6.8: every command warns, first thing, when the daemon pidfile
   // exists but shows no live daemon — before anything else runs.
@@ -196,6 +233,12 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   if (!commandName || !COMMAND_NAMES.has(commandName)) {
     stderr(USAGE);
     return 2;
+  }
+
+  const homeError = (deps.homeCheck ?? defaultCheckHome)(commandName);
+  if (homeError) {
+    stderr(homeError);
+    return 1;
   }
 
   const built = buildOptions(commandName as CommandName, positionals.slice(1), values);

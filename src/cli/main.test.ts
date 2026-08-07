@@ -6,9 +6,28 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { USAGE } from './args.ts';
 import { type CommandFn, main } from './main.ts';
 
+// The dispatch tests below exercise command routing only (every command is
+// a FAKE — see the module doc comment) and don't care whether a data home
+// exists. Anchoring JOBBUNNY_HOME at the checkout itself keeps the default
+// missing-home check (`defaultCheckHome`, exercised by `deps.homeCheck`'s
+// default) from tripping in a fresh environment (CI, a new contributor's
+// machine) where `~/.jobbunny` does not exist yet — a checkout is a valid
+// home by design (its layout is identical to a home's; see CLAUDE.md's
+// data-home paragraph). Tests that specifically exercise the home check
+// inject their own `homeCheck` and are unaffected by this. `node --test`
+// runs each matched file in its own process, so this does not leak into
+// other test files.
+process.env.JOBBUNNY_HOME = process.cwd();
+
 function captureStderr(): { lines: string[]; write: (s: string) => void } {
+  const lines: string[] = [];
+  return { lines, write: (s: string) => lines.push(s) };
+}
+
+function captureStdout(): { lines: string[]; write: (s: string) => void } {
   const lines: string[] = [];
   return { lines, write: (s: string) => lines.push(s) };
 }
@@ -480,4 +499,89 @@ test('main: prints nothing when checkDaemonLiveness returns undefined', async ()
   });
   assert.equal(code, 0);
   assert.deepEqual(stderr.lines, []);
+});
+
+// --- --help / -h (P8 data-home Task 3) ---
+
+test('main: --help prints USAGE on stdout and exits 0', async () => {
+  const stdout = captureStdout();
+  const code = await main(['--help'], { stdout: stdout.write });
+  assert.equal(code, 0);
+  assert.equal(stdout.lines.join('\n'), USAGE);
+});
+
+test('main: -h behaves like --help and needs no data home', async () => {
+  const stdout = captureStdout();
+  const stderr = captureStderr();
+  const code = await main(['-h'], {
+    stdout: stdout.write,
+    stderr: stderr.write,
+    homeCheck: () => "no jobbunny home at /nope/.jobbunny — run 'jobbunny setup'",
+  });
+  assert.equal(code, 0);
+  assert.equal(stdout.lines.join('\n'), USAGE);
+  assert.deepEqual(stderr.lines, []);
+});
+
+// --- Node guard + missing-home check (P8 data-home Task 3) ---
+
+test('main: an old Node prints the one-line version guard and exits non-zero', async () => {
+  const stderr = captureStderr();
+  const code = await main(['doctor', '--profile', 'x'], {
+    nodeVersion: '22.18.0',
+    stderr: stderr.write,
+  });
+  assert.notEqual(code, 0);
+  assert.deepEqual(stderr.lines, ['jobbunny needs Node >= 24 (found 22.18.0)']);
+});
+
+test('main: the version guard runs before anything else', async () => {
+  let called = false;
+  const stderr = captureStderr();
+  await main(['doctor', '--profile', 'x'], {
+    nodeVersion: '22.18.0',
+    stderr: stderr.write,
+    commands: {
+      doctor: async () => {
+        called = true;
+        return 0;
+      },
+    },
+  });
+  assert.equal(called, false);
+});
+
+test('main: a missing home reports the friendly line and exits non-zero', async () => {
+  const stderr = captureStderr();
+  let called = false;
+  const code = await main(['doctor', '--profile', 'x'], {
+    homeCheck: () => "no jobbunny home at /nope/.jobbunny — run 'jobbunny setup'",
+    stderr: stderr.write,
+    commands: {
+      doctor: async () => {
+        called = true;
+        return 0;
+      },
+    },
+  });
+  assert.deepEqual(stderr.lines, [
+    "no jobbunny home at /nope/.jobbunny — run 'jobbunny setup'",
+  ]);
+  assert.notEqual(code, 0);
+  assert.equal(called, false);
+});
+
+test('main: setup and migrate-home are exempt from the missing-home check', async () => {
+  const exempt = new Set(['setup', 'migrate-home', 'release']);
+  const homeCheck = (command: string) =>
+    exempt.has(command)
+      ? undefined
+      : "no jobbunny home at /nope/.jobbunny — run 'jobbunny setup'";
+  const s = spy();
+  const code = await main(['setup', '--profile', 'x'], {
+    homeCheck,
+    commands: { setup: s.make('setup') },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(s.calls, [['setup', { profile: 'x' }]]);
 });

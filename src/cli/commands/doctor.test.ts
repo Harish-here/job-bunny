@@ -87,10 +87,11 @@ test('doctorCommand: a throwing wire() (e.g. a retired settings.sqlite.path, or 
     },
   );
   assert.equal(code, 1);
-  assert.equal(lines.length, 1 + degraded.length);
-  assert.match(lines[0] as string, /wire/);
-  assert.match(lines[0] as string, /red/);
-  assert.match(lines[0] as string, /settings\.sqlite\.path is no longer supported/);
+  assert.equal(lines.length, 2 + degraded.length);
+  assert.match(lines[0] as string, /^home \| ok \| /);
+  assert.match(lines[1] as string, /wire/);
+  assert.match(lines[1] as string, /red/);
+  assert.match(lines[1] as string, /settings\.sqlite\.path is no longer supported/);
   // Every degraded config check's finding is printed too, not swallowed.
   assert.ok(lines.some((l) => l.includes('profile-parses') && l.includes('ok')));
   assert.ok(lines.some((l) => l.includes('filter-parses') && l.includes('warn')));
@@ -113,10 +114,12 @@ test('doctorCommand: the default runDegradedConfigChecks opens a real readonly C
     },
   );
   assert.equal(code, 1);
-  // wire finding + the five config checks, no fake injected this time.
-  assert.equal(lines.length, 6);
+  // home finding + wire finding + the five config checks, no fake injected
+  // this time.
+  assert.equal(lines.length, 7);
   const checks = lines.map((l) => (l.split(' | ')[0] as string).trim());
   assert.deepEqual(checks, [
+    'home',
     'wire',
     'profile-parses',
     'filter-parses',
@@ -155,4 +158,33 @@ test('doctorCommand: writes a plain-text table of check | status | detail to the
   assert.match(output, /cdp\.reachable/);
   assert.match(output, /red/);
   assert.match(output, /chrome not reachable/);
+});
+
+test('doctorCommand: prints the resolved home first, on the success path', async () => {
+  const lines: string[] = [];
+  const code = await doctorCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx: {} as never, stages: [], routines: [], checks: [] }),
+      write: (line: string) => lines.push(line),
+    },
+  );
+  assert.equal(code, 0);
+  assert.match(lines[0] as string, /^home \| ok \| /);
+});
+
+test('doctorCommand: prints the resolved home first, on the wire()-failure degraded path too', async () => {
+  const lines: string[] = [];
+  const code = await doctorCommand(
+    { profile: 'broken' },
+    {
+      wire: async () => {
+        throw new Error('boom');
+      },
+      write: (line: string) => lines.push(line),
+      runDegradedConfigChecks: async () => [],
+    },
+  );
+  assert.equal(code, 1);
+  assert.match(lines[0] as string, /^home \| ok \| /);
 });

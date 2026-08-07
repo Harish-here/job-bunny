@@ -437,6 +437,31 @@ test('stepResume/stepSearchUrls: configStore resolving undefined for both docs r
   });
 });
 
+// ---------- home creation (P8 data-home Task 3) ----------
+
+test('setupCommand creates <root>/profiles/ first, before any other step', async () => {
+  await withTmpRoot(async (root) => {
+    const mkdirCalls: string[] = [];
+    const lines: string[] = [];
+    const code = await setupCommand(
+      { profile: 'acme' },
+      {
+        root,
+        write: (l) => lines.push(l),
+        mkdir: async (p) => {
+          mkdirCalls.push(p);
+          return mkdir(p, { recursive: true });
+        },
+      },
+    );
+    assert.ok(mkdirCalls.some((p) => p.endsWith('profiles')));
+    assert.match(lines[0] as string, /^\[setup\] home: done — /);
+    assert.ok((lines[0] as string).includes(root));
+    // the home step never blocks the command by itself
+    assert.equal(typeof code, 'number');
+  });
+});
+
 test('readConnectorNeeds reads via the injected configStore: a notion connector known only to the fake store still requires the token', async () => {
   await withTmpRoot(async (root) => {
     const store = fakeConfigStore({
