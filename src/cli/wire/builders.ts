@@ -5,16 +5,23 @@
  * `buildLinkedInLane`, `missingTokenNotionClient`, the opt-in sqlite→Notion
  * mirror (`mirrorDbId`/`buildMirroredConnector`/`mirrorReachableCheck`,
  * local-DB spec PR 3 — a malformed settings slice means 'no mirror', never
- * a throw; a broken mirror's doctor check warns, never reds), the shared
- * `resolveSqlitePath` resolver (`board.ts`/`compose.ts`), and the
- * `MigrateWire`/`wireMigrate` seam for `jobbunny migrate`. Sibling to
- * `compose.ts` in the `only-wire-imports-adapters` carve-out — split out
- * purely to keep `compose.ts` under its line cap, not behavioral.
+ * a throw; a broken mirror's doctor check warns, never reds), the
+ * `canonicalDbPath`/`assertSqlitePathRetired` pair (config→db Phase 4 — the
+ * authoritative resolver + its wire-time enforcement; the old, settings-
+ * honoring `resolveSqlitePath` shim is retired now that Task 5 converted
+ * `board.ts`/`daemon.ts` off it), and the standalone `wireConfigStore` seam.
+ * `MigrateWire`/`wireMigrate` moved to its own file
+ * (`./migrate.ts`, config→db Phase 4) once adding this file's other new
+ * exports pushed this one over the file-size cap. Sibling to `compose.ts`
+ * in the `only-wire-imports-adapters` carve-out — split out purely to keep
+ * `compose.ts` under its line cap, not behavioral.
  */
-import { readFile as fsReadFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CdpChromeProvider } from '../../adapters/browser/cdp-chrome/index.ts';
-import { DEFAULT_USER_DATA_DIR } from '../../adapters/browser/cdp-chrome/index.ts';
+import {
+  cdpReachableCheck,
+  DEFAULT_USER_DATA_DIR,
+} from '../../adapters/browser/cdp-chrome/index.ts';
 import { MirrorConnector } from '../../adapters/db/mirror/index.ts';
 import type {
   DbReachableCheckDeps,
@@ -23,55 +30,102 @@ import type {
 } from '../../adapters/db/notion/index.ts';
 import {
   dbReachableCheck,
-  exportForMigration,
-  NotionApi,
+  type NotionApi,
   NotionConnector,
   NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
-import {
-  openJobsDb,
-  SqliteConnector,
-  SqliteConnectorSettingsSchema,
-  SqliteStore,
-} from '../../adapters/db/sqlite/index.ts';
+import { SqliteConfigStore } from '../../adapters/db/sqlite/config/index.ts';
+import { SqliteConnector, sqliteDbCheck } from '../../adapters/db/sqlite/index.ts';
 import { GreenhouseLane } from '../../adapters/lanes/greenhouse/index.ts';
 import { KekaLane } from '../../adapters/lanes/keka/index.ts';
 import {
   defaultLinkedinBreakerDeps,
+  inventoryFreshnessCheck,
   LinkedInLane,
   loadInventory,
   parseSearchUrls,
 } from '../../adapters/lanes/linkedin/index.ts';
-import { TelegramNotifier } from '../../adapters/notify/telegram/index.ts';
+import {
+  botTokenCheck,
+  TelegramNotifier,
+  TelegramNotifierSettingsSchema,
+} from '../../adapters/notify/telegram/index.ts';
 import type { PipelineConfig } from '../../core/config/schema.ts';
+import { sqlitePathRetiredMessage } from '../../core/config/validators.ts';
 import type { FilterConfig } from '../../core/filter/config.ts';
-import type { MigratedRecord, TrackingFields } from '../../core/tracking/index.ts';
+import type { ConfigStore } from '../../ports/config_store.ts';
 import type { Connector } from '../../ports/connector.ts';
-import type { RunContext } from '../../ports/context.ts';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
 import type { ApiLane, FarmingLane, Lane } from '../../ports/lane.ts';
 import type { StateStore } from '../../ports/state_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
-import { isNotFound, loadPipelineConfig } from './config.ts';
+import type { AdapterRegistry } from './registry.ts';
 import {
   resolveInterUrlDelayRange,
+  resolveInventoryMaxAgeDays,
   resolveJitterRange,
   resolveMaxCardsPerUrl,
 } from './settings.ts';
 
 // --- live adapter construction (ctx/ports/stages/routines) ---
 
-/** THE single authoritative jobbunny.db path resolver — shared by the run
- * store (`compose.ts`), `wireMigrate` below, and `wireBoard`'s
- * `resolveDbPath` (`board.ts`, which delegates here). Deliberately NOT
- * gated on `connector` (D5: the DB is unconditional for every profile;
- * connector governs only where `sync` writes). `safeParse`, not `parse`:
- * malformed `settings.sqlite` degrades to `defaultPath`, never throws. */
-export function resolveSqlitePath(sqliteSettings: unknown, defaultPath: string): string {
-  const parsed = SqliteConnectorSettingsSchema.safeParse(sqliteSettings ?? {});
-  return (parsed.success ? parsed.data.path : undefined) ?? defaultPath;
+/** THE single authoritative jobbunny.db path — always
+ * `profiles/<name>/data/jobbunny.db`. No settings-based override exists
+ * (config→db Phase 4 retires `settings.sqlite.path` — see
+ * `assertSqlitePathRetired`); this function takes no settings input at all.
+ * `board.ts`/`daemon.ts` both resolve every profile's db path through this
+ * one function now (Task 5) — the old settings-honoring `resolveSqlitePath`
+ * shim they used to lean on is retired. */
+export function canonicalDbPath(root: string, profileName: string): string {
+  return path.join(root, 'profiles', profileName, 'data', 'jobbunny.db');
+}
+
+/** Throws when a config still sets `settings.sqlite.path` — the ONE
+ * enforcement point for the retirement (spec's bootstrap decision). Checks
+ * for the KEY'S PRESENCE, not its validity — a malformed value is still a
+ * violation (the setting itself is dead, regardless of shape). Message is
+ * BYTE-EXACT and interpolates the real profile name — pin the full string,
+ * callers must not paraphrase it. */
+export function assertSqlitePathRetired(
+  config: PipelineConfig,
+  profileName: string,
+): void {
+  const sqliteSlice = config.settings.sqlite;
+  const hasPath =
+    sqliteSlice !== null &&
+    typeof sqliteSlice === 'object' &&
+    'path' in (sqliteSlice as object);
+  if (hasPath) {
+    // Shares the exact wording with `core/config/validators.ts`'s
+    // `validateConfigDoc` write-boundary check (fix round) — one canonical
+    // string, not two independently-worded copies.
+    throw new Error(sqlitePathRetiredMessage(profileName));
+  }
+}
+
+export interface WireConfigStoreOverrides {
+  root?: string;
+  liftMode?: 'readwrite' | 'readonly';
+}
+
+/** Narrow composition seam (sibling to `wireBoard`/`wireMigrate`/
+ * `wireDaemonRunHistory`): a standalone `ConfigStore` for ONE profile, for
+ * callers that need to read/write a config doc without a full `wire()`.
+ * Default `liftMode: 'readwrite'` — most callers (setup, `jobbunny config`,
+ * the writers) are meaningful-first-use contexts; pass `'readonly'`
+ * explicitly for a read-only caller (mirrors `wire()`'s own default). */
+export function wireConfigStore(
+  profileName: string,
+  overrides: WireConfigStoreOverrides = {},
+): ConfigStore {
+  const root = overrides.root ?? process.cwd();
+  const dbPath = canonicalDbPath(root, profileName);
+  const profileRoot = path.join(root, 'profiles', profileName);
+  return new SqliteConfigStore(dbPath, profileRoot, {
+    liftMode: overrides.liftMode ?? 'readwrite',
+  });
 }
 
 export function buildConnector(
@@ -176,8 +230,9 @@ export function isApiLane(lane: Lane): lane is ApiLane {
 
 export interface LiveLaneDeps {
   profileName: string;
-  root: string;
-  readFile: (path: string) => Promise<string>;
+  /** Config→db Phase 4: `search_urls.md` is read through the `ConfigStore`
+   * seam, not a raw `readFile`/`root`. */
+  configStore: ConfigStore;
   /** Repo-root — inventories only (see `RuntimeDeps.storage`). */
   storage: Storage;
   /** Phase 3: the lane's resume/capture state target. */
@@ -232,22 +287,9 @@ async function buildLinkedInLane(
       `linkedin lane requires profiles/${deps.profileName}/filter.json (a FilterConfig)`,
     );
   }
-  const searchUrlsPath = path.join(
-    deps.root,
-    'profiles',
-    deps.profileName,
-    'search_urls.md',
-  );
-  let md: string;
-  try {
-    md = await deps.readFile(searchUrlsPath);
-  } catch (err) {
-    if (isNotFound(err)) {
-      throw new Error(
-        `linkedin lane requires profiles/${deps.profileName}/search_urls.md`,
-      );
-    }
-    throw err;
+  const md = await deps.configStore.readText('search_urls.md');
+  if (md === undefined) {
+    throw new Error(`linkedin lane requires profiles/${deps.profileName}/search_urls.md`);
   }
   const urls = parseSearchUrls(md);
   const pages = [...new Set(urls.map((group) => group.page))];
@@ -296,101 +338,50 @@ export function missingTokenNotionClient(): NotionSdkClientLike {
   };
 }
 
-// --- wireMigrate() (local-DB spec, PR 2 Task 4) ---
-//
-// Narrow composition seam for `jobbunny migrate` (Task 5): a Notion-read
-// handle plus a lazily-opened sqlite import handle, nothing else — no
-// pipeline, no connector, no full `wire()`. `overrides`'s type is written
-// inline (not imported from `./compose.ts`) to avoid a builders<->compose
-// type cycle.
+// --- real registry (moved from compose.ts to stay under its line cap —
+// purely a file-size split, not behavioral: this is still the only OTHER
+// place, alongside `wire()` itself, real adapters are constructed) ---
 
-export interface MigrateWire {
-  /** '' when the profile has no settings.notion.dbId — command errors early. */
-  dbId: string;
-  /** profiles/<name>/profile.json, absolute. */
-  profileJsonPath: string;
-  /** Resolved jobbunny.db path — printed in the summary; opening is deferred. */
-  dbPath: string;
-  exportRecords(ctx: RunContext): Promise<MigratedRecord[]>;
-  /** Opens the DB on FIRST CALL — dry-run never calls it, so dry-run
-   * creates no file. Insert-only on both tables. */
-  importRecords(
-    records: MigratedRecord[],
-    now: string,
-  ): { jobs: number; tracking: number };
-}
-
-export async function wireMigrate(
-  profileName: string,
-  overrides: { root?: string; readFile?: (p: string) => Promise<string> } = {},
-): Promise<MigrateWire> {
-  const root = overrides.root ?? process.cwd();
-  const readFile = overrides.readFile ?? ((p: string) => fsReadFile(p, 'utf8'));
-
-  const config = await loadPipelineConfig(profileName, { root, readFile });
-
-  // Tolerant read, not `NotionConnectorSettingsSchema.parse`: a
-  // `settings.notion` slice that exists but omits `dbId` (e.g. `{ dryRun:
-  // true }`) must resolve to '' here so the command's clean "no
-  // settings.notion.dbId configured" exit fires, rather than a raw zod
-  // error at wire time.
-  const notionSlice = config.settings.notion;
-  const dbId =
-    notionSlice &&
-    typeof notionSlice === 'object' &&
-    'dbId' in notionSlice &&
-    typeof (notionSlice as { dbId: unknown }).dbId === 'string'
-      ? (notionSlice as { dbId: string }).dbId
-      : '';
-
-  // Same posture as `wire()`: a real `NotionApi` when `NOTION_TOKEN` is
-  // present, otherwise one built over the throwing stub, so `wireMigrate`
-  // itself never throws on a missing token — the command surfaces that at
-  // first actual `exportRecords` use instead.
-  let api: NotionApi;
-  try {
-    api = new NotionApi();
-  } catch {
-    api = new NotionApi({ client: missingTokenNotionClient() });
-  }
-
-  const profileJsonPath = path.join(root, 'profiles', profileName, 'profile.json');
-  const defaultDbPath = path.join(root, 'profiles', profileName, 'data', 'jobbunny.db');
-  const dbPath = resolveSqlitePath(config.settings.sqlite, defaultDbPath);
-
-  // Lazy + memoized: opening `dbPath` (via `openJobsDb`) only happens on the
-  // first `importRecords` call, so `migrate --dry-run` — which never calls
-  // it — creates no database file.
-  let store: SqliteStore | undefined;
-  function getStore(): SqliteStore {
-    if (!store) store = new SqliteStore(openJobsDb(dbPath));
-    return store;
-  }
-
-  return {
-    dbId,
-    profileJsonPath,
-    dbPath,
-    exportRecords: (ctx) => exportForMigration(api, dbId, ctx),
-    importRecords(records, now) {
-      const s = getStore();
-      const jobs = s.importJobs(
-        records.map((r) => r.jd),
-        now,
-      );
-      const tracking = s.importTracking(
-        records
-          .filter(
-            (r): r is MigratedRecord & { tracking: TrackingFields } =>
-              r.tracking !== undefined,
-          )
-          .map((r) => ({
-            jobId: r.jd.identity.id,
-            fields: r.tracking,
-            updatedAt: now,
-          })),
-      );
-      return { jobs, tracking };
+export const realRegistry: AdapterRegistry = {
+  lanes: {
+    // The CDP-reachability check rides with the browser-driven linkedin
+    // lane rather than living on its own — nothing else in the registry
+    // touches the browser.
+    linkedin: (settings, deps) => [
+      inventoryFreshnessCheck(
+        deps.storage,
+        deps.pages,
+        resolveInventoryMaxAgeDays(settings),
+      ),
+      cdpReachableCheck({ reachable: deps.browserReachable, port: deps.cdpPort }),
+    ],
+    // Greenhouse/Keka lanes are stateless keyless-ATS lanes with no doctor
+    // surface of their own.
+    greenhouse: () => [],
+    keka: () => [],
+  },
+  connectors: {
+    notion: (settings, deps) => {
+      const parsed = NotionConnectorSettingsSchema.parse(settings);
+      // No token ⇒ no api handle ⇒ nothing to reach-check here — the
+      // missing token itself is already a red from `coreChecks`.
+      if (!deps.notionApi) return [];
+      return [dbReachableCheck({ api: deps.notionApi, dbId: parsed.dbId })];
     },
-  };
-}
+    // `settings.sqlite.path` is retired (config→db Phase 4) — the db path
+    // is always `deps.sqliteDefaultPath`; no remaining field is relevant here.
+    sqlite: (_settings, deps) => [sqliteDbCheck({ path: deps.sqliteDefaultPath })],
+  },
+  notifiers: {
+    telegram: (settings) => {
+      TelegramNotifierSettingsSchema.parse(settings);
+      return [botTokenCheck()];
+    },
+  },
+};
+
+// `MigrateWire`/`wireMigrate` (local-DB spec, PR 2 Task 4) now live in
+// `./migrate.ts` — split out to keep this file under the file-size cap
+// (sibling to `board.ts`/`daemon.ts`, each already its own `wireX` seam
+// split out of this same origin). `missingTokenNotionClient` above and
+// `canonicalDbPath` above are its two remaining imports from this file.

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { wire } from './compose.ts';
-import { dataPath, fakeReadFile, profilePath } from './testkit.ts';
+import { dataPath, fakeConfigStore } from './testkit.ts';
 
 /**
  * compose.runstore.test.ts (P8 Task 4, split alongside compose.test.ts to
@@ -26,7 +26,7 @@ const LIVE_PROFILE_JSON = JSON.stringify({
 test('wire: ctx.runStore duck-types as a RunStore (has startRun/finishRun)', async () => {
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeReadFile({ [profilePath('rajni')]: LIVE_PROFILE_JSON }),
+    configStore: fakeConfigStore({ 'profile.json': LIVE_PROFILE_JSON }),
   });
 
   assert.equal(typeof result.ctx.runStore.startRun, 'function');
@@ -39,7 +39,7 @@ test('wire: never creates jobbunny.db on disk as a side effect (SqliteRunStore l
   try {
     await wire('rajni', {
       root,
-      readFile: fakeReadFile({ [profilePath('rajni', root)]: LIVE_PROFILE_JSON }),
+      configStore: fakeConfigStore({ 'profile.json': LIVE_PROFILE_JSON }),
     });
 
     assert.ok(!existsSync(join(dataPath('rajni', root), 'jobbunny.db')));
@@ -59,7 +59,7 @@ test('wire: a sqlite profile still gets exactly one sqlite-db-openable check (no
 
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeReadFile({ [profilePath('rajni')]: profileJson }),
+    configStore: fakeConfigStore({ 'profile.json': profileJson }),
   });
 
   assert.equal(result.checks.filter((c) => c.name === 'sqlite-db-openable').length, 1);
@@ -68,7 +68,7 @@ test('wire: a sqlite profile still gets exactly one sqlite-db-openable check (no
 test('wire: a non-sqlite profile also gets a sqlite-db-openable doctor check (unconditional run-store check)', async () => {
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeReadFile({ [profilePath('rajni')]: LIVE_PROFILE_JSON }),
+    configStore: fakeConfigStore({ 'profile.json': LIVE_PROFILE_JSON }),
   });
 
   assert.equal(result.ctx.config.connector, 'notion');

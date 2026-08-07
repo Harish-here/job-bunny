@@ -11,8 +11,8 @@ export function makeProfilesRoutes(source: BoardSource): RouteDef[] {
     {
       method: 'GET',
       path: '/api/profiles',
-      handler: () => {
-        const body: ProfilesResponse = { profiles: source.listProfiles() };
+      handler: async () => {
+        const body: ProfilesResponse = { profiles: await source.listProfiles() };
         return { status: 200, body };
       },
     },

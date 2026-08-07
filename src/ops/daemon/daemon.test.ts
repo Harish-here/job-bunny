@@ -37,7 +37,6 @@ function fakeScanDeps(
   dirs: Record<string, string[]>,
 ): ScanDeps {
   return {
-    existsSync: (p) => p in files || p in dirs,
     readdirSync: (p) => {
       const entries = dirs[p];
       if (!entries) {
@@ -47,15 +46,8 @@ function fakeScanDeps(
       }
       return entries;
     },
-    readFileSync: (p) => {
-      const content = files[p];
-      if (content === undefined) {
-        const err = new Error('ENOENT') as NodeJS.ErrnoException;
-        err.code = 'ENOENT';
-        throw err;
-      }
-      return content;
-    },
+    readProfileJson: async (profilesDir, name) =>
+      files[join(profilesDir, name, 'profile.json')],
   };
 }
 
@@ -512,8 +504,13 @@ test('stop() during an in-flight child halts the batch: the NEXT owed entry is n
   const daemon = createDaemon(deps);
 
   const ticking = daemon.tick();
-  await Promise.resolve();
-  await Promise.resolve(); // let the ledger append and first spawn settle.
+  // Enough microtask flushes to let the schedule scan (now genuinely
+  // async — config→db Phase 4's `readProfileJson` seam), the ledger
+  // append, and the first spawn all settle, without hardcoding an exact
+  // hop count that would drift with the scan's own internal await depth.
+  for (let i = 0; i < 20 && spawnCalls.length === 0; i++) {
+    await Promise.resolve();
+  }
   assert.deepEqual(spawnCalls, ['alpha']); // alpha in flight; zeta still queued.
 
   // SIGTERM lands while alpha is still running. `serve stop` kills the

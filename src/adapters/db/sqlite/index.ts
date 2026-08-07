@@ -4,6 +4,7 @@
 export { SqliteBoardStore } from './board/index.ts';
 export { type SqliteDbCheckDeps, sqliteDbCheck } from './check.ts';
 export { SqliteCheckpointStore } from './checkpoints/index.ts';
+export { SqliteConfigStore } from './config/index.ts';
 export {
   isStale,
   SqliteConnector,

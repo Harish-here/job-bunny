@@ -13,8 +13,11 @@ import { type BoardDeps, boardCommand } from './board.ts';
 
 function fakeSource(profiles: BoardProfile[] = []): BoardSource {
   return {
-    listProfiles: () => profiles,
-    openStore: () => null,
+    listProfiles: async () => profiles,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close: () => {},
   };
 }

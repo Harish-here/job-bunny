@@ -1,13 +1,28 @@
 /**
- * setup.test.ts (P8) — TDD for `setupCommand`'s idempotent, resumable
- * step list. All against a temp root, never the real `profiles/` or
- * `.env`.
+ * setup.test.ts (P8; config→db Phase 4, Tasks 5 & 7) — TDD for
+ * `setupCommand`'s idempotent, resumable step list. Most tests still
+ * exercise the real temp-dir + real `wireConfigStore` path end to end
+ * (the default `configStore` lifts from these same disk-written legacy
+ * files ONCE — the first `readText` call for a given doc — so a fixture
+ * must seed a doc's real content BEFORE that first read, either by
+ * writing the legacy file to disk before `setupCommand`/
+ * `profileBuildCommand` ever runs, or, once a `config_docs` row already
+ * exists from an earlier scaffold in the SAME test, by writing through a
+ * `wireConfigStore` handle on the same root/profile instead of the disk
+ * file — a later disk write is otherwise silently ignored once a row is
+ * present, `stepScaffold` (Task 7) now being one more reader/writer of
+ * that same row); a dedicated handful further down inject a fake,
+ * in-memory `configStore` to prove `readConnectorNeeds`/`stepResume`/
+ * `stepSearchUrls` genuinely reach the injected seam rather than falling
+ * through to disk.
  */
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
+import { wireConfigStore } from '../wire/index.ts';
 import { profileBuildCommand } from './profile.ts';
 import { setupCommand } from './setup.ts';
 
@@ -20,6 +35,22 @@ async function withTmpRoot(fn: (root: string) => Promise<void>) {
   }
 }
 
+/** In-memory `ConfigStore` fake, pre-seeded with `docs` — same Map-backed
+ * shape as `cli/wire/testkit.ts`'s `fakeConfigStore` (colocated here
+ * rather than imported: `cli/wire/testkit.ts` is that module's own
+ * internal test fixture, not part of its `index.ts` public surface, and
+ * the two-pair rule keeps internals from crossing module boundaries). */
+function fakeConfigStore(docs: Partial<Record<ConfigDocKey, string>>): ConfigStore {
+  const map = new Map(Object.entries(docs));
+  return {
+    readText: async (key) => map.get(key),
+    writeText: async (key, text) => {
+      map.set(key, text);
+    },
+    close() {},
+  };
+}
+
 test('setupCommand on a completely empty root: seeds scaffold, everything else needs-action, exits 1', async () => {
   await withTmpRoot(async (root) => {
     const lines: string[] = [];
@@ -30,7 +61,6 @@ test('setupCommand on a completely empty root: seeds scaffold, everything else n
     assert.equal(code, 1);
 
     // scaffold got seeded even though nothing existed before
-    await readFile(path.join(root, 'profiles', 'acme', 'profile.json'), 'utf8');
     assert.ok(lines.some((l) => l.includes('profile scaffold: done')));
     // scaffold defaults to a local sqlite profile — no Notion token needed
     assert.ok(lines.some((l) => l.includes('.env NOTION_TOKEN: skipped')));
@@ -47,10 +77,16 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
 
     await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=secret-value-123\n');
     await writeFile(path.join(profileDir, 'resume.json'), '{}');
-    await writeFile(
-      path.join(profileDir, 'search_urls.md'),
+    // profileBuildCommand's scaffold already created a config_docs row for
+    // search_urls.md (the zero-URL template) — writing the real content to
+    // disk now would be silently ignored (a row already exists), so write
+    // it through the SAME store instead.
+    const store = wireConfigStore('acme', { root });
+    await store.writeText(
+      'search_urls.md',
       '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
+    store.close();
     const inventoryDir = path.join(
       root,
       'src',
@@ -78,12 +114,13 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
 test('setupCommand never prints or leaks the NOTION_TOKEN value', async () => {
   await withTmpRoot(async (root) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
-    const profileDir = path.join(root, 'profiles', 'acme');
-    // pre-write a notion profile.json so the token path still runs
-    await writeFile(
-      path.join(profileDir, 'profile.json'),
-      JSON.stringify({ connector: 'notion' }),
-    );
+    // profileBuildCommand's scaffold already created a config_docs row for
+    // profile.json (the sqlite default) — overwrite it via the SAME store
+    // so the token path picks up the notion connector (a disk write here
+    // would be silently ignored, a row already exists).
+    const store = wireConfigStore('acme', { root });
+    await store.writeText('profile.json', JSON.stringify({ connector: 'notion' }));
+    store.close();
     await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=super-secret-value\n');
 
     const lines: string[] = [];
@@ -96,12 +133,11 @@ test('setupCommand never prints or leaks the NOTION_TOKEN value', async () => {
 test('setupCommand: .env present but NOTION_TOKEN empty is needs-action', async () => {
   await withTmpRoot(async (root) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
-    const profileDir = path.join(root, 'profiles', 'acme');
-    // pre-write a notion profile.json so the token path still runs
-    await writeFile(
-      path.join(profileDir, 'profile.json'),
-      JSON.stringify({ connector: 'notion' }),
-    );
+    // same rationale as the test above — overwrite the already-scaffolded
+    // profile.json row via the store, not the (now-inert) legacy file.
+    const store = wireConfigStore('acme', { root });
+    await store.writeText('profile.json', JSON.stringify({ connector: 'notion' }));
+    store.close();
     await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=\n');
 
     const lines: string[] = [];
@@ -117,11 +153,15 @@ test('setupCommand: .env present but NOTION_TOKEN empty is needs-action', async 
 test('setupCommand: search_urls.md present with a referenced page but missing inventory is needs-action', async () => {
   await withTmpRoot(async (root) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
-    const profileDir = path.join(root, 'profiles', 'acme');
-    await writeFile(
-      path.join(profileDir, 'search_urls.md'),
+    // profileBuildCommand's scaffold already created a config_docs row for
+    // search_urls.md — overwrite it via the SAME store, not the (now-
+    // inert) legacy file.
+    const store = wireConfigStore('acme', { root });
+    await store.writeText(
+      'search_urls.md',
       '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
+    store.close();
 
     const lines: string[] = [];
     const code = await setupCommand(
@@ -345,5 +385,78 @@ test('page_inventory coverage accepts .json inventory files', async () => {
     const lines: string[] = [];
     await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
     assert.ok(lines.some((l) => l.includes('page_inventory coverage: done')));
+  });
+});
+
+// ---------- config→db Phase 4: readConnectorNeeds/stepResume/stepSearchUrls
+// read via the injected configStore, not the filesystem ----------
+
+test('stepResume and stepSearchUrls read via the injected configStore: resume.json/search_urls.md content that exists ONLY in the fake store (never written to disk) is reported done', async () => {
+  await withTmpRoot(async (root) => {
+    // resume.json is never scaffolded (seedProfileDocs never seeds it —
+    // it stays hand-maintained), so a real disk read would report
+    // "missing" here; search_urls.md pre-seeded in the SAME fake store is
+    // "kept" as-is by stepScaffold (Task 7 — scaffold reads/writes through
+    // this same injected store too), so the 1-URL content below survives
+    // unclobbered — either fallthrough would make this test fail, proving
+    // the seam is genuinely reached.
+    const store = fakeConfigStore({
+      'resume.json': '{}',
+      'search_urls.md': '## linkedin\n### x\n  • eng - https://example.com/jobs\n',
+    });
+    const lines: string[] = [];
+    await setupCommand(
+      { profile: 'ghost' },
+      { root, write: (l) => lines.push(l), configStore: () => store },
+    );
+    assert.ok(lines.some((l) => l.includes('resume.json: done')));
+    assert.ok(
+      lines.some((l) => l.includes('search_urls.md: done') && l.includes('1 URL(s)')),
+    );
+  });
+});
+
+test('stepResume/stepSearchUrls: configStore resolving undefined for both docs reports the same needs-action shape as a true "missing" on disk', async () => {
+  await withTmpRoot(async (root) => {
+    const store = fakeConfigStore({});
+    const lines: string[] = [];
+    await setupCommand(
+      { profile: 'ghost' },
+      { root, write: (l) => lines.push(l), configStore: () => store },
+    );
+    assert.ok(
+      lines.some((l) => l.includes('resume.json: needs-action') && l.includes('missing')),
+    );
+    // search_urls.md, unlike resume.json, IS scaffolded (Task 7 —
+    // stepScaffold seeds it into this same empty fake store before
+    // stepSearchUrls reads it back), so an empty store reports the
+    // zero-URL template's own detail, not a bare "missing".
+    assert.ok(
+      lines.some((l) => l.includes('search_urls.md: needs-action — no URLs yet')),
+    );
+  });
+});
+
+test('readConnectorNeeds reads via the injected configStore: a notion connector known only to the fake store still requires the token', async () => {
+  await withTmpRoot(async (root) => {
+    const store = fakeConfigStore({
+      'profile.json': JSON.stringify({ connector: 'notion' }),
+    });
+    await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=abc\n');
+    const lines: string[] = [];
+    await setupCommand(
+      { profile: 'ghost' },
+      { root, write: (l) => lines.push(l), configStore: () => store },
+    );
+    // stepScaffold (Task 7) reads/writes through this SAME injected fake
+    // store: profile.json is already present (the notion connector above),
+    // so scaffold reports "kept" and leaves it untouched — proving the
+    // token step below reflects that same, unclobbered notion connector.
+    assert.equal(
+      await store.readText('profile.json'),
+      JSON.stringify({ connector: 'notion' }),
+    );
+    const tokenLine = lines.find((l) => l.includes('.env NOTION_TOKEN'));
+    assert.match(tokenLine ?? '', /done/);
   });
 });

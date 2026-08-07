@@ -203,7 +203,7 @@ test('a BoardStore satisfies the port and round-trips a query', () => {
   store.close();
 });
 
-test('a BoardSource satisfies the port and opens a store per profile', () => {
+test('a BoardSource satisfies the port and opens a store per profile', async () => {
   const store: BoardStore = {
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
@@ -213,14 +213,28 @@ test('a BoardSource satisfies the port and opens a store per profile', () => {
     listRunEvents: () => ({ rows: [], total: 0 }),
     close() {},
   };
+  const docs = new Map<string, string>();
   const source: BoardSource = {
-    listProfiles: () => [{ name: 'rajni', connector: 'notion', hasDb: true }],
-    openStore: (name) => (name === 'rajni' ? store : null),
+    listProfiles: async () => [{ name: 'rajni', connector: 'notion', hasDb: true }],
+    openStore: async (name) => (name === 'rajni' ? store : null),
+    readConfigDoc: async (name, doc) => (name === 'rajni' ? docs.get(doc) : undefined),
+    writeConfigDoc: async (name, doc, rawText) => {
+      if (name !== 'rajni') throw new Error(`unknown profile: ${name}`);
+      docs.set(doc, rawText);
+    },
+    createProfile: async () => {},
     close() {},
   };
-  const profiles = source.listProfiles();
+  const profiles = await source.listProfiles();
   assert.deepEqual(profiles, [{ name: 'rajni', connector: 'notion', hasDb: true }]);
-  assert.equal(source.openStore('rajni'), store);
-  assert.equal(source.openStore('unknown-profile'), null);
+  assert.equal(await source.openStore('rajni'), store);
+  assert.equal(await source.openStore('unknown-profile'), null);
+  assert.equal(await source.readConfigDoc('rajni', 'profile.json'), undefined);
+  await source.writeConfigDoc('rajni', 'profile.json', '{}');
+  assert.equal(await source.readConfigDoc('rajni', 'profile.json'), '{}');
+  assert.equal(await source.readConfigDoc('unknown-profile', 'profile.json'), undefined);
+  await assert.rejects(() =>
+    source.writeConfigDoc('unknown-profile', 'profile.json', '{}'),
+  );
   source.close();
 });

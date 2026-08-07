@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { wireDaemonRunHistory } from './daemon.ts';
+import { wireDaemonRunHistory, wireDaemonScheduleConfig } from './daemon.ts';
 
 // This test file may not import `src/adapters/**` directly (no test-file
 // exemption from `only-wire-imports-adapters` — only `daemon.ts` itself is
@@ -106,7 +106,7 @@ test('wireDaemonRunHistory: batches multiple profiles, each read from its OWN db
   );
 });
 
-test('wireDaemonRunHistory: honors settings.sqlite.path override in profile.json', async () => {
+test('wireDaemonRunHistory: settings.sqlite.path in profile.json is silently ignored — the daemon always resolves the CANONICAL path, unlike wire()/doctor which throw/red on the same setting (a deliberate tolerant-vs-loud asymmetry: a broken/stale profile must never take down a tick)', async () => {
   await mkdir(join(root, 'profiles', 'custom'), { recursive: true });
   const customDbDir = join(root, 'elsewhere');
   await mkdir(customDbDir, { recursive: true });
@@ -115,12 +115,16 @@ test('wireDaemonRunHistory: honors settings.sqlite.path override in profile.json
     join(root, 'profiles', 'custom', 'profile.json'),
     JSON.stringify({ connector: 'sqlite', settings: { sqlite: { path: customDbPath } } }),
   );
-  await writeFile(customDbPath, '');
+  // The dead knob's own (now-irrelevant) target is deliberately left
+  // WITHOUT a db file — proving the daemon never even looks at it.
+  const canonicalPath = join(root, 'profiles', 'custom', 'data', 'jobbunny.db');
+  await mkdir(join(root, 'profiles', 'custom', 'data'), { recursive: true });
+  await writeFile(canonicalPath, '');
 
   const readRunHistory = wireDaemonRunHistory({ root });
-  readRunHistory(['custom'], '2026-08-05'); // migrate at the OVERRIDDEN path.
+  readRunHistory(['custom'], '2026-08-05'); // migrate at the CANONICAL path.
 
-  insertRunRow(customDbPath, {
+  insertRunRow(canonicalPath, {
     date: '2026-08-05',
     timeDir: '10-00',
     startedAt: '2026-08-05T10:00:00.000Z',
@@ -130,6 +134,11 @@ test('wireDaemonRunHistory: honors settings.sqlite.path override in profile.json
   assert.deepEqual(history, [
     { profile: 'custom', date: '2026-08-05', startedAt: '10:00' },
   ]);
+  assert.equal(
+    existsSync(customDbPath),
+    false,
+    "the dead setting's target must never be touched",
+  );
 });
 
 test('wireDaemonRunHistory: a malformed profile.json falls back to the default db path (tolerant, never throws)', async () => {
@@ -172,4 +181,28 @@ test('wireDaemonRunHistory: a store that fails once does not permanently blind a
   ]);
   assert.equal(calls, 2, 'expected a fresh store construction per call, never memoized');
   assert.equal(closes, 2, 'expected every constructed store to be closed after its read');
+});
+
+test('wireDaemonScheduleConfig: a profile with a malformed profile.json and NO jobbunny.db yet resolves undefined, never rejects (real SqliteConfigStore readonly-lift path — reproduces the daemon-tick-wide outage this guards against)', async () => {
+  await mkdir(join(root, 'profiles', 'scancfg-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'scancfg-broken', 'profile.json'),
+    'not valid json {{{',
+  );
+  const readProfileJson = wireDaemonScheduleConfig({ root });
+  await assert.doesNotReject(() =>
+    readProfileJson(join(root, 'profiles'), 'scancfg-broken'),
+  );
+  assert.equal(
+    await readProfileJson(join(root, 'profiles'), 'scancfg-broken'),
+    undefined,
+  );
+});
+
+test('wireDaemonScheduleConfig: a profile with a valid profile.json and no db still resolves its raw text (lift-without-insert, readonly mode)', async () => {
+  await mkdir(join(root, 'profiles', 'scancfg-ok'), { recursive: true });
+  const raw = JSON.stringify({ connector: 'sqlite' });
+  await writeFile(join(root, 'profiles', 'scancfg-ok', 'profile.json'), raw);
+  const readProfileJson = wireDaemonScheduleConfig({ root });
+  assert.equal(await readProfileJson(join(root, 'profiles'), 'scancfg-ok'), raw);
 });

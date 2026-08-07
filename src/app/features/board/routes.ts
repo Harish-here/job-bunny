@@ -97,20 +97,21 @@ function noLocalDb(): never {
  * sqlite profile with a corrupted `profile.json` still serves its intact
  * `jobbunny.db` instead of 404ing with a message claiming it's
  * pure-Notion. */
-function openStoreOrThrow(source: BoardSource, req: BoardRequest) {
+async function openStoreOrThrow(source: BoardSource, req: BoardRequest) {
   const name = param(req, 'name');
-  const profile = source.listProfiles().find((p) => p.name === name);
+  const profiles = await source.listProfiles();
+  const profile = profiles.find((p) => p.name === name);
   if (profile && profile.connector !== '' && profile.connector !== 'sqlite') {
     noLocalDb();
   }
-  const store = source.openStore(name);
+  const store = await source.openStore(name);
   if (!store) noLocalDb();
   return store;
 }
 
 function listHandler(source: BoardSource) {
-  return (req: BoardRequest): BoardResponse => {
-    const store = openStoreOrThrow(source, req);
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
     const q = parseOrThrow(ListQuerySchema, Object.fromEntries(req.query));
     const { rows, total } = boardService(store).list({
       status: q.status,
@@ -135,16 +136,16 @@ function listHandler(source: BoardSource) {
 }
 
 function getHandler(source: BoardSource) {
-  return (req: BoardRequest): BoardResponse => {
-    const store = openStoreOrThrow(source, req);
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
     const body: BoardDetailResponse = boardService(store).get(param(req, 'id'));
     return { status: 200, body };
   };
 }
 
 function patchHandler(source: BoardSource) {
-  return (req: BoardRequest): BoardResponse => {
-    const store = openStoreOrThrow(source, req);
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
     const patch = parseOrThrow(TrackingPatchSchema, req.body);
     const now = new Date().toISOString();
     const tracking = boardService(store).patchTracking(param(req, 'id'), patch, now);

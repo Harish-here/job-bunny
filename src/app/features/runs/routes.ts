@@ -50,9 +50,11 @@ function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
 }
 
 /** Same fixed 404 as `features/board/routes.ts`'s `openStoreOrThrow` —
- * pure-Notion profiles have no local `runs`/`run_events` tables either. */
-function openStoreOrThrow(source: BoardSource, req: BoardRequest) {
-  const store = source.openStore(param(req, 'name'));
+ * pure-Notion profiles have no local `runs`/`run_events` tables either.
+ * `async` (config→db Phase 4, Task 5) — `BoardSource.openStore` now reads
+ * `profile.json` through the `ConfigStore` port. */
+async function openStoreOrThrow(source: BoardSource, req: BoardRequest) {
+  const store = await source.openStore(param(req, 'name'));
   if (!store) {
     throw new HttpError(
       404,
@@ -68,8 +70,8 @@ function parseRunId(req: BoardRequest): number {
 }
 
 function listHandler(source: BoardSource) {
-  return (req: BoardRequest): BoardResponse => {
-    const store = openStoreOrThrow(source, req);
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
     const q = parseOrThrow(ListRunsQuerySchema, Object.fromEntries(req.query));
     const { rows, total } = store.listRuns({ limit: q.limit, offset: q.offset });
     const body: ListRunsResponse = {
@@ -83,8 +85,8 @@ function listHandler(source: BoardSource) {
 }
 
 function getHandler(source: BoardSource) {
-  return (req: BoardRequest): BoardResponse => {
-    const store = openStoreOrThrow(source, req);
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
     const id = parseRunId(req);
     const run = store.getRun(id);
     if (!run) throw new HttpError(404, 'not_found', `no such run: ${id}`);
@@ -94,8 +96,8 @@ function getHandler(source: BoardSource) {
 }
 
 function listEventsHandler(source: BoardSource) {
-  return (req: BoardRequest): BoardResponse => {
-    const store = openStoreOrThrow(source, req);
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
     const id = parseRunId(req);
     // `getRun` is the existence check — `listRunEvents` alone can't tell
     // "run has no events yet" apart from "no such run".

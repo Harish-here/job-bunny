@@ -49,6 +49,13 @@ structure_passthrough.json
 !profiles/rajni/resume.json
 !profiles/rajni/data/jobs_raw.json
 
+# config→db Phase 4: `jobbunny config export`'s default output dir
+# (profiles/<name>/export/) is per-profile scratch, never a fixture source —
+# re-ignore it for every profile (including rajni) even though the blanket
+# `!profiles/rajni/` above re-includes rajni's whole tree recursively. Must
+# come after that negation (gitignore is last-match-wins per path).
+profiles/*/export/
+
 # P3 runner: per-run observability artifacts (checkpoints, result.json,
 # heartbeat, logs) are regenerated every run — never committed, even for
 # the rajni fixture.

@@ -95,7 +95,7 @@ export async function boardCommand(
 
   const { port } = await server.listen(opts.port);
   resolved.write(`board: http://127.0.0.1:${port}`);
-  for (const profile of source.listProfiles()) {
+  for (const profile of await source.listProfiles()) {
     // Label by `connector`, not `hasDb`: a `jobbunny.db` file exists for
     // every profile once it has run at least once (local-DB spec D5's
     // unconditional run-history tracking), so `hasDb` alone no longer

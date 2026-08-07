@@ -43,6 +43,10 @@ export interface CommandOptions {
   runId?: number;
   /** `state read|write <key>` — the structure hand-off document key. */
   key?: string;
+  /** `config get|set <doc>` — the legacy config-doc filename. */
+  doc?: string;
+  /** `config export|import` — override for the default `profiles/<name>/export/` dir. */
+  dir?: string;
 }
 
 export type CommandName =
@@ -60,7 +64,8 @@ export type CommandName =
   | 'migrate'
   | 'board'
   | 'runs'
-  | 'state';
+  | 'state'
+  | 'config';
 
 export const COMMAND_NAMES = new Set<string>([
   'run',
@@ -78,6 +83,7 @@ export const COMMAND_NAMES = new Set<string>([
   'board',
   'runs',
   'state',
+  'config',
 ]);
 
 export const USAGE = [
@@ -101,6 +107,10 @@ export const USAGE = [
   '  runs show <id> --profile <name>',
   '  state read  <table|decisions|decisions-partial> --profile <name>   (structure hand-off only — not a general DB tool)',
   '  state write <decisions|decisions-partial>       --profile <name>   (reads stdin)',
+  '  config get    <profile.json|filter.json|resume.json|search_urls.md> --profile <name>',
+  '  config set    <profile.json|filter.json|resume.json|search_urls.md> --profile <name>   (reads stdin)',
+  '  config export --profile <name> [--dir <d>]   (default: profiles/<name>/export/)',
+  '  config import --profile <name> [--dir <d>]   (missing file = skipped, not an error)',
 ].join('\n');
 
 /** The one `parseArgs` options literal every command's flags are drawn
@@ -117,6 +127,7 @@ export const PARSE_ARGS_OPTIONS = {
   'daemon-child': { type: 'boolean', default: false },
   apply: { type: 'boolean', default: false },
   port: { type: 'string' },
+  dir: { type: 'string' },
 } as const satisfies ParseArgsOptionsConfig;
 
 /** Per-command argv → options translation. Returns the options object, or a
@@ -137,6 +148,7 @@ export function buildOptions(
     'daemon-child'?: boolean;
     apply?: boolean;
     port?: string;
+    dir?: string;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -266,6 +278,40 @@ export function buildOptions(
         };
       }
       return needsProfile() ?? { profile, action, key };
+    }
+    case 'config': {
+      const action = rest[0];
+      if (
+        action !== 'get' &&
+        action !== 'set' &&
+        action !== 'export' &&
+        action !== 'import'
+      ) {
+        return { error: 'config takes "get", "set", "export", or "import"' };
+      }
+      if (action === 'get' || action === 'set') {
+        const doc = rest[1];
+        const validDocs = [
+          'profile.json',
+          'filter.json',
+          'resume.json',
+          'search_urls.md',
+        ];
+        if (!doc || !validDocs.includes(doc)) {
+          return {
+            error: `config ${action}: doc must be one of ${validDocs.join(', ')}`,
+          };
+        }
+        return needsProfile() ?? { profile, action, doc };
+      }
+      // export/import: no doc positional, optional --dir
+      return (
+        needsProfile() ?? {
+          profile,
+          action,
+          ...(values.dir === undefined ? {} : { dir: values.dir }),
+        }
+      );
     }
   }
 }

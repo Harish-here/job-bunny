@@ -1,5 +1,6 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
+import type { ConfigDocKey } from './config_store.ts';
 import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
 
 /** One discovered profile, as the board sees it. `hasDb` reflects ONLY
@@ -70,8 +71,16 @@ export interface BoardJobDetail extends BoardJobRow {
   jd: JD; // parsed jd_json — the detail pane payload
 }
 
-/** Read `jobs`, write `tracking` — never the reverse (ownership zones,
- * spec §3). Synchronous by design: node:sqlite is sync. */
+/** The board server binds `127.0.0.1` and writes only the `tracking` and
+ * config tables (hard-rule amendment, config→db Phase 4 ledger L7 —
+ * superseding the previous "writes only `tracking`" wording). `jobs` and
+ * the runs tables stay pipeline/runner-only — the split is structural,
+ * enforced here: `BoardStore` reads `jobs`/`runs`/`run_events` and writes
+ * ONLY `tracking` (`updateTracking`); config-doc writes and profile
+ * creation are `BoardSource`-level operations below (`readConfigDoc`/
+ * `writeConfigDoc`/`createProfile`), never `BoardStore` methods, since a
+ * config doc is per-profile-discovery, not per-opened-job-store.
+ * Synchronous by design: node:sqlite is sync. */
 export interface BoardStore {
   listJobs(query: BoardQuery): { rows: BoardJobRow[]; total: number };
   getJob(id: string): BoardJobDetail | null;
@@ -92,12 +101,55 @@ export interface BoardStore {
 }
 
 /** Cross-profile hub the CLI wires and the app consumes. openStore returns
- * null for unknown profiles and for profiles without a local DB. */
+ * null for unknown profiles and for profiles without a local DB.
+ *
+ * `listProfiles`/`openStore` are `async` (config→db Phase 4, Task 5):
+ * probing a profile's `connector` field now reads `profile.json` through
+ * the `ConfigStore` port, whose `readText` is `Promise`-wrapped (see
+ * `ports/config_store.ts`) even though the real adapter is synchronous
+ * under the hood. `BoardStore`'s own methods stay synchronous — untouched
+ * by this widening, "node:sqlite is sync" still holds for every query
+ * against an ALREADY-OPENED store.
+ *
+ * Write-surface invariant (hard-rule amendment, ledger L7 — the code-level
+ * home for it, `CLAUDE.md` carries the prose): **the board server binds
+ * `127.0.0.1` and writes only the `tracking` and config tables**. `jobs`
+ * and the runs tables stay pipeline/runner-only. As of config→db Phase 4
+ * Task 9 the board's full write surface is exactly `BoardStore.
+ * updateTracking` (tracking) + `writeConfigDoc` (config tables, below) +
+ * `createProfile` (which itself only ever calls `writeConfigDoc` under the
+ * hood, via `seedProfileDocs`) — nothing else, ever. */
 export interface BoardSource {
-  listProfiles(): BoardProfile[];
+  listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
    * discovered profile whose DB file is corrupt or schema-newer — callers
    * surface that as a 500, never a crash. */
-  openStore(name: string): BoardStore | null;
+  openStore(name: string): Promise<BoardStore | null>;
+  /** Raw text for one profile's config doc. `undefined` when the doc is
+   * absent for a REAL profile OR when `name` fails the same membership
+   * check `openStore` uses (defense-in-depth — callers are expected to
+   * check `listProfiles()` membership themselves first, same as
+   * `openStoreOrThrow` already does for jobs routes; this is the backstop,
+   * not the primary gate). Never gated on `hasDb` — UNLIKE `openStore`,
+   * reading/writing config is allowed even for a profile that has never
+   * run (config editing is itself a legitimate "first meaningful use" that
+   * MAY create the db file, exactly like `setup`/`migrate` already do —
+   * this is a deliberate, documented exception to `openStore`'s own
+   * "never create a DB" rule, scoped to config docs only). */
+  readConfigDoc(name: string, doc: ConfigDocKey): Promise<string | undefined>;
+  /** Validator-gated write (throws the validator's message on an invalid
+   * doc — caller turns that into 422). Throws a generic "unknown profile"
+   * message when `name` fails membership (caller is expected to have
+   * already 404'd on that via its own `listProfiles()` check, mirroring
+   * `openStoreOrThrow` — this throw is the defense-in-depth backstop, not
+   * the primary signal). */
+  writeConfigDoc(name: string, doc: ConfigDocKey, rawText: string): Promise<void>;
+  /** Creates `profiles/<name>/data/` + seeds the four config docs (reuses
+   * `seedProfileDocs`, Task 7). Throws on an invalid name (fails
+   * `^[a-z0-9_-]+$`) or a name that already exists — check the name format
+   * BEFORE ever touching the filesystem (never construct a path from an
+   * unsanitized name, same discipline as every other traversal-sensitive
+   * function in this file). */
+  createProfile(name: string): Promise<void>;
   close(): void;
 }

@@ -46,6 +46,7 @@ import {
 } from './args.ts';
 import { autostartCommand } from './commands/autostart.ts';
 import { boardCommand } from './commands/board.ts';
+import { type ConfigDocName, configCommand } from './commands/config.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { migrateCommand } from './commands/migrate.ts';
@@ -159,6 +160,13 @@ function defaultCommands(): CommandRegistry {
         profile: opts.profile ?? '',
         action: (opts.action ?? 'read') as 'read' | 'write',
         key: (opts.key ?? '') as StateCommandOptions['key'],
+      })) as CommandFn,
+    config: (async (opts: CommandOptions) =>
+      configCommand({
+        profile: opts.profile ?? '',
+        action: (opts.action ?? 'get') as 'get' | 'set' | 'export' | 'import',
+        ...(opts.doc === undefined ? {} : { doc: opts.doc as ConfigDocName }),
+        ...(opts.dir === undefined ? {} : { dir: opts.dir }),
       })) as CommandFn,
   };
 }

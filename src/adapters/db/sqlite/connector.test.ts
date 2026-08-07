@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -43,7 +43,24 @@ function tmpConnector(settings: unknown = {}): SqliteConnector {
 test('name is sqlite; construction does no IO; bad settings throw at construction', () => {
   const connector = tmpConnector();
   assert.equal(connector.name, 'sqlite');
-  assert.throws(() => tmpConnector({ path: '' }));
+  // `path` was retired (config→db Phase 4 — see `builders.ts`'s
+  // `assertSqlitePathRetired`); `dryRun` is the schema's only remaining
+  // field, so a wrong-typed `dryRun` is now the invalid-settings trigger.
+  assert.throws(() => tmpConnector({ dryRun: 'not-a-boolean' }));
+});
+
+test('settings.sqlite.path is no longer part of the schema — an extra `path` key is ignored, not honored (the db always opens at defaultDbPath)', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'jb-conn-'));
+  const defaultDbPath = path.join(dir, 'jobbunny.db');
+  const otherDbPath = path.join(dir, 'other.db');
+  const connector = new SqliteConnector(
+    { path: otherDbPath },
+    defaultDbPath,
+    () => '2026-08-01T12:00:00.000Z',
+  );
+  await connector.syncJobs([makeJd('li-99')], fakeCtx());
+  assert.equal(existsSync(defaultDbPath), true);
+  assert.equal(existsSync(otherDbPath), false);
 });
 
 test('rebuildCache on a fresh profile returns [] (empty DB is created, not an error)', async () => {

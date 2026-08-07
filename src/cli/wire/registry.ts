@@ -48,9 +48,10 @@ export interface RuntimeDeps {
   cdpPort: number;
   filterCfg?: FilterConfig;
   pages: string[];
-  /** `profiles/<name>/data/jobbunny.db` — the sqlite connector's default
-   * DB location; the check factory resolves `settings.sqlite.path`
-   * overrides against it. */
+  /** `profiles/<name>/data/jobbunny.db` — the ONE sqlite db location for
+   * every profile (config→db Phase 4 retired `settings.sqlite.path`; the
+   * check factory (`compose.ts`) uses this path unconditionally now, no
+   * override to resolve). */
   sqliteDefaultPath: string;
 }
 

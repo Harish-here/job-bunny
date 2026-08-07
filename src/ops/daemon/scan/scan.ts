@@ -13,27 +13,38 @@
  * from each profile's own `RunStoreReader.listRunTimeDirs` (`cli/wire/
  * daemon.ts`'s `wireDaemonRunHistory`, injected as `DaemonDeps.
  * readRunHistory` — see `ops/daemon/daemon.ts`'s doc comment).
+ *
+ * `readProfileJson` (config→db Phase 4, Task 5) replaced the direct
+ * `existsSync`+`readFileSync` reliance for `profile.json` specifically —
+ * this module (`ops/daemon`) may not import `src/adapters/**`, so its real
+ * implementation (a readonly `ConfigStore`, `cli/wire/daemon.ts`'s
+ * `wireDaemonScheduleConfig`) is injected from outside. `readdirSync`
+ * stays a plain fs dep: it only lists directory NAMES, unrelated to config
+ * content.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync } from 'node:fs';
 import { PipelineConfigSchema } from '../../../core/config/index.ts';
 import type { ProfileSchedule } from '../../../core/schedule/index.ts';
 
 export interface ScanDeps {
-  existsSync(path: string): boolean;
   readdirSync(path: string): string[];
-  readFileSync(path: string): string;
+  /** `undefined` covers every "nothing to schedule" case this module
+   * treats as skip-worthy: missing db AND missing legacy file, or any
+   * other resolution failure the real `ConfigStore`-backed implementation
+   * already degrades to `undefined` for. Real implementation: `cli/wire/
+   * daemon.ts`'s `wireDaemonScheduleConfig`. */
+  readProfileJson(profilesDir: string, name: string): Promise<string | undefined>;
 }
 
 /** Every enabled profile's schedule, read from `<profilesDir>/<name>/profile.json`.
  * Profiles are visited in sorted order for determinism. A profile is
- * skipped (not thrown for) when its profile.json is missing, unreadable,
- * malformed JSON, fails PipelineConfigSchema validation, has no `schedule`
- * block, or has `schedule.enabled === false`. */
-export function scanProfileSchedules(
+ * skipped (not thrown for) when its profile.json is missing/unresolvable,
+ * unparsable JSON, fails PipelineConfigSchema validation, has no
+ * `schedule` block, or has `schedule.enabled === false`. */
+export async function scanProfileSchedules(
   profilesDir: string,
   deps: ScanDeps,
-): ProfileSchedule[] {
+): Promise<ProfileSchedule[]> {
   let names: string[];
   try {
     names = deps.readdirSync(profilesDir);
@@ -43,15 +54,8 @@ export function scanProfileSchedules(
 
   const schedules: ProfileSchedule[] = [];
   for (const name of [...names].sort()) {
-    const profilePath = join(profilesDir, name, 'profile.json');
-    if (!deps.existsSync(profilePath)) continue;
-
-    let raw: string;
-    try {
-      raw = deps.readFileSync(profilePath);
-    } catch {
-      continue; // unreadable — fail-soft, skip this profile.
-    }
+    const raw = await deps.readProfileJson(profilesDir, name);
+    if (raw === undefined) continue; // missing/unresolvable — fail-soft, skip.
 
     let parsedJson: unknown;
     try {
@@ -77,11 +81,15 @@ export function scanProfileSchedules(
   return schedules;
 }
 
-/** Builds the real (non-test) ScanDeps. */
-export function defaultScanDeps(): ScanDeps {
+/** Builds the real (non-test) `readdirSync`-only half of `ScanDeps` —
+ * `readProfileJson` has NO default here (config→db Phase 4, Task 5): it
+ * would need a `src/adapters/**` import (a real `ConfigStore`), forbidden
+ * in this module. Every real caller supplies it explicitly via
+ * `cli/wire/daemon.ts`'s `wireDaemonScheduleConfig` (same precedent as
+ * `ops/daemon/daemon.ts`'s own `DaemonDeps.readRunHistory`, which has no
+ * default here either — always supplied by the real caller). */
+export function defaultScanDeps(): Omit<ScanDeps, 'readProfileJson'> {
   return {
-    existsSync: (p) => existsSync(p),
     readdirSync: (p) => readdirSync(p),
-    readFileSync: (p) => readFileSync(p, 'utf8'),
   };
 }

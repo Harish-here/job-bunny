@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import type { DaemonPidfileDeps } from '../../../ops/daemon/index.ts';
 import {
@@ -16,12 +15,6 @@ import { serveCommand } from './index.ts';
 const ROOT = '/fake/root';
 const HOME = '/fake/home';
 const PROFILES_DIR = '/fake/profiles';
-
-/** The scan helpers compose paths with `node:path.join`, so an expectation
- * spelled as a POSIX literal fails on windows-latest. */
-function profilePath(name: string): string {
-  return join(PROFILES_DIR, name, 'profile.json');
-}
 
 function fakePidfileDeps(): DaemonPidfileDeps {
   const files = new Map<string, string>();
@@ -67,13 +60,8 @@ function fakeLogDeps(): LogDeps {
 
 function fakeScanDeps(): ScanDeps {
   return {
-    existsSync: () => false,
     readdirSync: () => [],
-    readFileSync: () => {
-      const err = new Error('ENOENT') as NodeJS.ErrnoException;
-      err.code = 'ENOENT';
-      throw err;
-    },
+    readProfileJson: async () => undefined,
   };
 }
 
@@ -328,15 +316,13 @@ test('status: renders pid/uptime, last-tick, in-flight (profile + elapsed), and 
     pidfile,
   );
   const scan: ScanDeps = {
-    // Both the profiles dir AND harish's profile.json must report as
-    // existing: scanProfileSchedules (Task 5) gates its readFileSync on
-    // existsSync('<profilesDir>/<name>/profile.json'), so a fake that
-    // only acknowledges the directory yields zero schedules and the
-    // next-fire line below would silently read "none scheduled".
-    existsSync: (p) => p === PROFILES_DIR || p === profilePath('harish'),
+    // scanProfileSchedules (Task 5) reads profile.json through the
+    // injected `readProfileJson` — a fake that resolves `undefined` for
+    // every OTHER name yields zero schedules, and the next-fire line
+    // below would silently read "none scheduled".
     readdirSync: (p) => (p === PROFILES_DIR ? ['harish'] : []),
-    readFileSync: (p) =>
-      p === profilePath('harish')
+    readProfileJson: async (_profilesDir, name) =>
+      name === 'harish'
         ? JSON.stringify({
             connector: 'notion',
             schedule: {
@@ -346,11 +332,7 @@ test('status: renders pid/uptime, last-tick, in-flight (profile + elapsed), and 
               graceMinutes: 90,
             },
           })
-        : (() => {
-            const err = new Error('ENOENT') as NodeJS.ErrnoException;
-            err.code = 'ENOENT';
-            throw err;
-          })(),
+        : undefined,
   };
   const { deps, writes } = baseServeDeps({ pidfile, scan });
   const code = await serveCommand({ action: 'status' }, deps);

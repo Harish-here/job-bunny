@@ -16,19 +16,25 @@ function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
 }
 
-function assertHttpError(
+/** Every handler is `async` now that `openStoreOrThrow` awaits the
+ * `BoardSource` port — a synchronous `assert.throws` can never observe the
+ * throw, it surfaces only as a rejection. */
+async function assertHttpError(
   fn: () => unknown,
   status: number,
   code: string,
   message?: string,
 ) {
-  assert.throws(fn, (err: unknown) => {
-    assert.ok(err instanceof HttpError);
-    assert.equal(err.status, status);
-    assert.equal(err.code, code);
-    if (message !== undefined) assert.equal(err.message, message);
-    return true;
-  });
+  await assert.rejects(
+    async () => fn(),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpError);
+      assert.equal(err.status, status);
+      assert.equal(err.code, code);
+      if (message !== undefined) assert.equal(err.message, message);
+      return true;
+    },
+  );
 }
 
 const SAMPLE_SUMMARY: RunSummary = {
@@ -89,8 +95,11 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
 
 function fakeSource(store: BoardStore | null): BoardSource {
   return {
-    listProfiles: () => [],
-    openStore: () => store,
+    listProfiles: async () => [],
+    openStore: async () => store,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
 }
@@ -133,10 +142,10 @@ test('list: ?limit=10&offset=5 reaches the store and echoes into the response en
   assert.deepEqual(store.listRunsCalls[0], { limit: 10, offset: 5 });
 });
 
-test('list: ?limit=201 is a 400 validation error (cap is 200)', () => {
+test('list: ?limit=201 is a 400 validation error (cap is 200)', async () => {
   const store = fakeStore();
   const route = findRoute(fakeSource(store), '/api/profiles/:name/runs');
-  assertHttpError(
+  await assertHttpError(
     () =>
       route.handler(
         req({ params: { name: 'rajni' }, query: new URLSearchParams({ limit: '201' }) }),
@@ -147,9 +156,9 @@ test('list: ?limit=201 is a 400 validation error (cap is 200)', () => {
   assert.equal(store.listRunsCalls.length, 0);
 });
 
-test('list: null store (no local db) is a 404 no_local_db', () => {
+test('list: null store (no local db) is a 404 no_local_db', async () => {
   const route = findRoute(fakeSource(null), '/api/profiles/:name/runs');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'notion-only' } })),
     404,
     'no_local_db',
@@ -166,28 +175,28 @@ test('get: 200 for a known id', async () => {
   assert.deepEqual(res.body, SAMPLE_DETAIL);
 });
 
-test('get: 404 for an unknown id', () => {
+test('get: 404 for an unknown id', async () => {
   const route = findRoute(fakeSource(fakeStore()), '/api/profiles/:name/runs/:id');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'rajni', id: '999' } })),
     404,
     'not_found',
   );
 });
 
-test('get: non-numeric id is a 400 validation error', () => {
+test('get: non-numeric id is a 400 validation error', async () => {
   const store = fakeStore();
   const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'rajni', id: 'abc' } })),
     400,
     'validation',
   );
 });
 
-test('get: null store (no local db) is a 404 no_local_db', () => {
+test('get: null store (no local db) is a 404 no_local_db', async () => {
   const route = findRoute(fakeSource(null), '/api/profiles/:name/runs/:id');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'notion-only', id: '7' } })),
     404,
     'no_local_db',
@@ -208,10 +217,10 @@ test('events: happy path with defaults', async () => {
   });
 });
 
-test('events: ?limit=1001 is a 400 validation error (cap is 1000)', () => {
+test('events: ?limit=1001 is a 400 validation error (cap is 1000)', async () => {
   const store = fakeStore();
   const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id/events');
-  assertHttpError(
+  await assertHttpError(
     () =>
       route.handler(
         req({
@@ -225,10 +234,10 @@ test('events: ?limit=1001 is a 400 validation error (cap is 1000)', () => {
   assert.equal(store.listRunEventsCalls.length, 0);
 });
 
-test('events: 404 for an unknown run id (checked via getRun before listRunEvents)', () => {
+test('events: 404 for an unknown run id (checked via getRun before listRunEvents)', async () => {
   const store = fakeStore();
   const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id/events');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'rajni', id: '999' } })),
     404,
     'not_found',
@@ -236,19 +245,19 @@ test('events: 404 for an unknown run id (checked via getRun before listRunEvents
   assert.equal(store.listRunEventsCalls.length, 0);
 });
 
-test('events: non-numeric id is a 400 validation error', () => {
+test('events: non-numeric id is a 400 validation error', async () => {
   const store = fakeStore();
   const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id/events');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'rajni', id: 'abc' } })),
     400,
     'validation',
   );
 });
 
-test('events: null store (no local db) is a 404 no_local_db', () => {
+test('events: null store (no local db) is a 404 no_local_db', async () => {
   const route = findRoute(fakeSource(null), '/api/profiles/:name/runs/:id/events');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'notion-only', id: '7' } })),
     404,
     'no_local_db',
