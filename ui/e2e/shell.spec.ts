@@ -84,8 +84,8 @@ test('shell: every page renders at rail width', async ({ page }) => {
   await expect(sidebar).toHaveCSS('width', '56px');
 
   await page.goto('/#/onboarding');
-  await expect(page.getByRole('heading', { name: 'Create profile' })).toBeVisible();
-  await expect(sidebar).toHaveCSS('width', '56px');
+  await expect(page.getByTestId('wizard')).toBeVisible();
+  await expect(page.getByTestId('sidebar')).toHaveCount(0);
 
   await page.goto('/#/settings');
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
