@@ -1,12 +1,16 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useSidebarCollapsed } from './useSidebarCollapsed';
+import {
+  resetSidebarCollapsedForTests,
+  useSidebarCollapsed,
+} from './useSidebarCollapsed';
 
 const STORAGE_KEY = 'jobbunny.sidebar';
 
 afterEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
+  resetSidebarCollapsedForTests();
 });
 
 describe('useSidebarCollapsed', () => {

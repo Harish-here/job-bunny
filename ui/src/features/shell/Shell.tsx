@@ -84,11 +84,13 @@ export function Shell() {
 
   // Hooks must run unconditionally, so `profile` is resolved here (not
   // after the pending/error returns below) with an empty-array/null
-  // fallback while `profilesQuery` is still settling. `useRuns('')` during
-  // that brief window (or for a profile with no jobbunny.db) degrades to an
-  // errored/empty query — `runs` falls back to `[]`, and `pickMascotState`
-  // already treats an empty `runs` array as "asleep" (its own
-  // failure-tolerance contract: never throw, never block the shell).
+  // fallback while `profilesQuery` is still settling. `runsQuery`'s
+  // `enabled: p !== ''` guard keeps `useRuns('')` from firing during that
+  // brief window (no request against `/api/profiles//runs`) — `runs` falls
+  // back to `[]` either way, and `pickMascotState` already treats an empty
+  // `runs` array as "asleep" (its own failure-tolerance contract: never
+  // throw, never block the shell). A profile with no jobbunny.db still
+  // fires the request and degrades to an errored/empty query.
   const profiles = profilesQuery.data?.profiles ?? [];
   const profile = pickProfile(stored, profiles);
 

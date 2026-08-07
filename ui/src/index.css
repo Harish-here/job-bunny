@@ -28,6 +28,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-success-foreground: var(--success-foreground);
+  --color-success-strong: var(--success-strong);
   --color-success: var(--success);
   --color-attention-foreground: var(--attention-foreground);
   --color-attention-strong: var(--attention-strong);
@@ -80,6 +81,7 @@
   --attention-strong: #a04a06;
   --success: #4caf6e;
   --success-foreground: #ffffff;
+  --success-strong: #26703f;
   --border: #e4dbf0;
   --input: #e4dbf0;
   --ring: #7b5ea7;
@@ -121,6 +123,7 @@
   --attention-strong: #ff9e5e;
   --success: #6fcb8e;
   --success-foreground: #1a1523;
+  --success-strong: #6fcb8e;
   --border: #362c4a;
   --input: #3f3355;
   --ring: #b79ce0;

@@ -25,6 +25,18 @@ function emit() {
 }
 
 /**
+ * Test-only seam: clears the in-memory `override` set when a prior test's
+ * `localStorage.setItem` mock threw. Without this, `override` leaks across
+ * cases in the same module instance — unreachable from outside since it's
+ * module-private state with no other write path. Runtime behavior (the
+ * override's own set/clear lifecycle in `setCollapsed`) is unchanged.
+ */
+export function resetSidebarCollapsedForTests(): void {
+  override = null;
+  emit();
+}
+
+/**
  * Persists the sidebar's collapsed/expanded state to localStorage under
  * `jobbunny.sidebar` ('collapsed' | 'expanded'). Mirrors the
  * `useStoredProfile` pattern in `lib/profile.ts` — a module-level listener

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardProfile } from '../../lib/api/types';
 import { Shell } from './Shell';
+import { resetSidebarCollapsedForTests } from './useSidebarCollapsed';
 
 beforeAll(() => {
   // radix Select (inside TriagePage's FilterPopover) needs these in jsdom.
@@ -84,6 +85,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetSidebarCollapsedForTests();
 });
 
 describe('Shell', () => {
