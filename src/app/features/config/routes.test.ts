@@ -64,6 +64,7 @@ function fakeSource(opts: FakeSourceOptions = {}): BoardSource & {
       createCalls.push(name);
       if (opts.createThrows) throw opts.createThrows;
     },
+    openIntents: async () => null,
     close() {},
   };
 }

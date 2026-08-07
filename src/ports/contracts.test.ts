@@ -223,6 +223,7 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
       docs.set(doc, rawText);
     },
     createProfile: async () => {},
+    openIntents: async () => null,
     close() {},
   };
   const profiles = await source.listProfiles();

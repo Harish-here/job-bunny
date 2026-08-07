@@ -16,6 +16,7 @@ import type {
   TrackingPatch,
 } from '../../ports/board.ts';
 import type { LogData, Logger } from '../../ports/context.ts';
+import type { RunIntent, RunIntentStore } from '../../ports/run_intents.ts';
 import { createBoardServer } from './server.ts';
 
 /** Sends a raw request line/headers over a plain TCP socket and resolves
@@ -100,16 +101,48 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   };
 }
 
+const SAMPLE_INTENT: RunIntent = {
+  id: 7,
+  requestedAt: '2026-08-07T09:00:00.000Z',
+  status: 'pending',
+  claimedRunId: null,
+};
+
+/** Records `cancel`'s numeric id argument so a socket test can prove
+ * end-to-end DELETE param binding, not just that SOME 200 came back. */
+function fakeIntentStore(): RunIntentStore & { cancelCalls: number[] } {
+  const cancelCalls: number[] = [];
+  return {
+    cancelCalls,
+    request: () => ({ intent: SAMPLE_INTENT, deduped: false }),
+    cancel(id) {
+      cancelCalls.push(id);
+      return { outcome: 'cancelled', intent: { ...SAMPLE_INTENT, status: 'cancelled' } };
+    },
+    latest: () => SAMPLE_INTENT,
+    list: () => [SAMPLE_INTENT],
+    listClaimable: () => [],
+    claim: () => true,
+    attachRun: () => {},
+    close() {},
+  };
+}
+
 function fakeSource(
-  opts: { store?: BoardStore | null; closed?: { value: boolean } } = {},
+  opts: {
+    store?: BoardStore | null;
+    closed?: { value: boolean };
+    intents?: RunIntentStore | null;
+  } = {},
 ): BoardSource {
-  const { store = null, closed } = opts;
+  const { store = null, closed, intents = null } = opts;
   return {
     listProfiles: async () => PROFILES,
     openStore: async () => store,
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => intents,
     close() {
       if (closed) closed.value = true;
     },
@@ -179,6 +212,53 @@ test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mount
   });
 });
 
+test('POST /api/profiles/:name/run-intents queues one intent', async () => {
+  const intents = fakeIntentStore();
+  const server = createBoardServer({
+    source: fakeSource({ intents }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/run-intents`, {
+      method: 'POST',
+    });
+    assert.equal(res.status, 201);
+    assert.deepEqual(await res.json(), { intent: SAMPLE_INTENT, deduped: false });
+  });
+});
+
+test('DELETE /api/profiles/:name/run-intents/:id cancels it', async () => {
+  const intents = fakeIntentStore();
+  const server = createBoardServer({
+    source: fakeSource({ intents }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/run-intents/7`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(intents.cancelCalls, [7]);
+  });
+});
+
+test('GET /api/profiles/:name/run-intents lists queued intents', async () => {
+  const intents = fakeIntentStore();
+  const server = createBoardServer({
+    source: fakeSource({ intents }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/run-intents`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: RunIntent[] };
+    assert.deepEqual(body.rows, [SAMPLE_INTENT]);
+  });
+});
+
 test('unknown /api route is a 404 not_found envelope', async () => {
   const server = createBoardServer({
     source: fakeSource(),
@@ -225,6 +305,7 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
       writeCalls.push({ name, doc, rawText });
     },
     createProfile: async () => {},
+    openIntents: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -260,6 +341,7 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
     createProfile: async (name) => {
       createCalls.push(name);
     },
+    openIntents: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -324,6 +406,7 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -464,6 +547,7 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
     close() {
       closeCallCount += 1;
       closed.value = true;

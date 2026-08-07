@@ -100,6 +100,7 @@ function fakeSource(store: BoardStore | null): BoardSource {
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
     close() {},
   };
 }

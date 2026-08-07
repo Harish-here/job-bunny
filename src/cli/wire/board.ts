@@ -68,9 +68,14 @@ import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { openJobsDb, SqliteBoardStore } from '../../adapters/db/sqlite/index.ts';
+import {
+  openJobsDb,
+  SqliteBoardStore,
+  SqliteRunIntentStore,
+} from '../../adapters/db/sqlite/index.ts';
 import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
 import type { ConfigDocKey } from '../../ports/config_store.ts';
+import type { RunIntentStore } from '../../ports/run_intents.ts';
 import { seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
@@ -144,6 +149,7 @@ async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
 export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
   const root = overrides.root ?? resolveHome();
   const stores = new Map<string, BoardStore>();
+  const intentStores = new Map<string, RunIntentStore>();
 
   return {
     async listProfiles(): Promise<BoardProfile[]> {
@@ -225,9 +231,29 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       });
     },
 
+    async openIntents(name: string): Promise<RunIntentStore | null> {
+      // Same membership gate as `openStore` (gate 1) — re-derived against
+      // the CURRENT directory names, never path math. Unlike `openStore`,
+      // there is no `hasDb` gate: an intent is durable state a never-run
+      // profile must still be able to record, so opening the store is
+      // allowed to create-and-migrate the db as a side effect.
+      const infos = await listProfileInfos(root);
+      const info = infos.find((p) => p.name === name);
+      if (!info) return null;
+
+      const existing = intentStores.get(name);
+      if (existing) return existing;
+
+      const store = new SqliteRunIntentStore(info.dbPath);
+      intentStores.set(name, store);
+      return store;
+    },
+
     close(): void {
       for (const store of stores.values()) store.close();
       stores.clear();
+      for (const store of intentStores.values()) store.close();
+      intentStores.clear();
     },
   };
 }

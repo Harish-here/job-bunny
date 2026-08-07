@@ -15,6 +15,7 @@ function fakeSource(): BoardSource {
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
     close() {},
   };
 }

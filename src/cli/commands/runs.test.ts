@@ -40,6 +40,7 @@ function fakeSource(store: BoardStore | null): BoardSource & { closed: boolean }
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
     close: () => {
       state.closed = true;
     },

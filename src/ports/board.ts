@@ -1,6 +1,7 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
 import type { ConfigDocKey } from './config_store.ts';
+import type { RunIntentStore } from './run_intents.ts';
 import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
 
 /** One discovered profile, as the board sees it. `hasDb` reflects ONLY
@@ -71,15 +72,17 @@ export interface BoardJobDetail extends BoardJobRow {
   jd: JD; // parsed jd_json — the detail pane payload
 }
 
-/** The board server binds `127.0.0.1` and writes only the `tracking` and
- * config tables (hard-rule amendment, config→db Phase 4 ledger L7 —
+/** The board server binds `127.0.0.1` and writes only the `tracking`,
+ * config, and run-intent tables (hard-rule amendment, config→db Phase 4
+ * ledger L7, widened by UI phase 1 Task 2 to add run intents —
  * superseding the previous "writes only `tracking`" wording). `jobs` and
  * the runs tables stay pipeline/runner-only — the split is structural,
  * enforced here: `BoardStore` reads `jobs`/`runs`/`run_events` and writes
- * ONLY `tracking` (`updateTracking`); config-doc writes and profile
- * creation are `BoardSource`-level operations below (`readConfigDoc`/
- * `writeConfigDoc`/`createProfile`), never `BoardStore` methods, since a
- * config doc is per-profile-discovery, not per-opened-job-store.
+ * ONLY `tracking` (`updateTracking`); config-doc writes, profile creation,
+ * and run-intent inserts/cancels are `BoardSource`-level operations below
+ * (`readConfigDoc`/`writeConfigDoc`/`createProfile`/`openIntents`), never
+ * `BoardStore` methods, since a config doc or a run intent is
+ * per-profile-discovery, not per-opened-job-store.
  * Synchronous by design: node:sqlite is sync. */
 export interface BoardStore {
   listJobs(query: BoardQuery): { rows: BoardJobRow[]; total: number };
@@ -113,12 +116,14 @@ export interface BoardStore {
  *
  * Write-surface invariant (hard-rule amendment, ledger L7 — the code-level
  * home for it, `CLAUDE.md` carries the prose): **the board server binds
- * `127.0.0.1` and writes only the `tracking` and config tables**. `jobs`
- * and the runs tables stay pipeline/runner-only. As of config→db Phase 4
- * Task 9 the board's full write surface is exactly `BoardStore.
+ * `127.0.0.1` and writes only the `tracking`, config, and run-intent
+ * tables**. `jobs` and the runs tables stay pipeline/runner-only. As of UI
+ * phase 1 Task 2 the board's full write surface is exactly `BoardStore.
  * updateTracking` (tracking) + `writeConfigDoc` (config tables, below) +
  * `createProfile` (which itself only ever calls `writeConfigDoc` under the
- * hood, via `seedProfileDocs`) — nothing else, ever. */
+ * hood, via `seedProfileDocs`) + `openIntents`'s returned store (insert a
+ * `pending` run intent, cancel one's own `pending` intent) — nothing else,
+ * ever. */
 export interface BoardSource {
   listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
@@ -151,5 +156,12 @@ export interface BoardSource {
    * unsanitized name, same discipline as every other traversal-sensitive
    * function in this file). */
   createProfile(name: string): Promise<void>;
+  /** One profile's run-intent store. `null` for a name that is not a
+   * current directory under `<root>/profiles`. Unlike `openStore`, this
+   * OPENS-OR-CREATES the profile's db: an intent is durable state a
+   * never-run profile must still be able to record. Memoized per name for
+   * the life of this `BoardSource` and closed by `close()` — callers must
+   * never call `close()` on the returned store. */
+  openIntents(name: string): Promise<RunIntentStore | null>;
   close(): void;
 }
