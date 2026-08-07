@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a resume profile, and stores the results in a per-profile local SQLite DB browsed via a local job-board UI (`jobbunny board`), with opt-in one-way Notion mirroring and optional Telegram digests. Cross-platform (macOS, Windows, Linux): scheduling is an in-process daemon (`jobbunny serve start|stop|status`; darwin-only autostart via `jobbunny autostart enable|disable`), not launchd, and Chrome discovery resolves per-OS candidate paths rather than one hardcoded macOS path. `src/` (TypeScript) is the only pipeline; v0 lives on the `main` branch for history — never reference `scripts/` as a live path. Architecture rationale lives in the explainer agent's KB (`.claude/agents/explainer.md`) — consult it before any architecture work; the original `main-v2.md` decision log is in git history.
+Job Bunny is a personal job-search pipeline: it scrapes LinkedIn job searches with Playwright over Chrome CDP, pulls postings from keyless ATS APIs (Greenhouse, Keka), structures/filters/ranks them against a resume profile, and stores the results in a per-profile local SQLite DB browsed via a local job-board UI (`jobbunny board`), with opt-in one-way Notion mirroring and optional Telegram digests. Cross-platform (macOS, Windows, Linux): scheduling is an in-process daemon (`jobbunny serve start|stop|status`; darwin-only autostart via `jobbunny autostart enable|disable`), not launchd, and Chrome discovery resolves per-OS candidate paths rather than one hardcoded macOS path. Architecture rationale lives in the explainer agent's KB (`.claude/agents/explainer.md`) — consult it before any architecture work.
 
 ## Stability principle
 
@@ -17,7 +17,7 @@ alone.
 
 ## Mandatory: Node 24
 
-Node ≥ 24 required (native type-stripping, no build step); the machine default is now Node 24 (`nvm alias default 24`, 2026-07-26) and the repo pins it via `.nvmrc`, so plain `node`/`npm` commands just work; if `node -v` ever shows < 24, run `source ~/.nvm/nvm.sh && nvm use 24`.
+Node ≥ 24 required (native type-stripping, no build step); the repo pins it via `.nvmrc`, so plain `node`/`npm` commands just work; if `node -v` ever shows < 24, run `source ~/.nvm/nvm.sh && nvm use 24`.
 
 ## Commands
 
