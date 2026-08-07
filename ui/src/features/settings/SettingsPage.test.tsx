@@ -118,9 +118,11 @@ describe('SettingsPage', () => {
         docsFor('harish')['profile.json'],
       );
     });
-    for (const doc of DOCS) {
-      expect(screen.getByLabelText(doc)).toHaveValue(docsFor('harish')[doc]);
-    }
+    await waitFor(() => {
+      for (const doc of DOCS) {
+        expect(screen.getByLabelText(doc)).toHaveValue(docsFor('harish')[doc]);
+      }
+    });
   });
 
   it('shows a Skeleton while the initial value is loading', () => {
