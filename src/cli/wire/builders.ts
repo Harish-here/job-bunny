@@ -18,10 +18,7 @@
  */
 import path from 'node:path';
 import type { CdpChromeProvider } from '../../adapters/browser/cdp-chrome/index.ts';
-import {
-  cdpReachableCheck,
-  DEFAULT_USER_DATA_DIR,
-} from '../../adapters/browser/cdp-chrome/index.ts';
+import { cdpReachableCheck } from '../../adapters/browser/cdp-chrome/index.ts';
 import { MirrorConnector } from '../../adapters/db/mirror/index.ts';
 import type {
   DbReachableCheckDeps,
@@ -240,6 +237,11 @@ export interface LiveLaneDeps {
   stateStore: StateStore;
   filterCfg: FilterConfig | undefined;
   browser: CdpChromeProvider;
+  /** The Chrome user-data-dir, `join(<data home>, 'chrome')`. The LinkedIn
+   * throttle breaker's state file lives inside it; passed as a plain string
+   * because `adapters-no-cross-family` forbids the lane importing
+   * `adapters/browser/**`. */
+  chromeUserDataDir: string;
 }
 
 /** Builds the live `Lane[]` for `config.lanes`. Unlike the check-registry
@@ -313,11 +315,11 @@ async function buildLinkedInLane(
     interUrlDelayRange.minMs,
     interUrlDelayRange.maxMs,
     // Session-scoped, shared by every profile (D11): the throttle belongs
-    // to the `.chrome-debug` Chrome profile whose cookies every profile
-    // farms through, not to any one profile's data dir. Passed as a plain
-    // string because `adapters-no-cross-family` forbids the lane importing
-    // `adapters/browser/**` itself.
-    { userDataDir: DEFAULT_USER_DATA_DIR, deps: defaultLinkedinBreakerDeps() },
+    // to the shared `<data home>/chrome` Chrome profile whose cookies every
+    // profile farms through, not to any one profile's data dir. Passed as a
+    // plain string because `adapters-no-cross-family` forbids the lane
+    // importing `adapters/browser/**` itself.
+    { userDataDir: deps.chromeUserDataDir, deps: defaultLinkedinBreakerDeps() },
   );
 }
 
@@ -354,7 +356,11 @@ export const realRegistry: AdapterRegistry = {
         deps.pages,
         resolveInventoryMaxAgeDays(settings),
       ),
-      cdpReachableCheck({ reachable: deps.browserReachable, port: deps.cdpPort }),
+      cdpReachableCheck({
+        reachable: deps.browserReachable,
+        port: deps.cdpPort,
+        userDataDir: deps.chromeUserDataDir,
+      }),
     ],
     // Greenhouse/Keka lanes are stateless keyless-ATS lanes with no doctor
     // surface of their own.

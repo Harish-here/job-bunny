@@ -32,6 +32,12 @@ structure_passthrough.json
 # Chrome remote-debug profile (local only)
 .chrome-debug/
 
+# Chrome remote-debug profile, data-home layout (local only) — a developer
+# using JOBBUNNY_HOME=$PWD for fixture verification makes Chrome create
+# <repo>/chrome/ here; must never be committed. .chrome-debug/ above stays
+# too — legacy installs keep that directory until they run migrate-home.
+chrome/
+
 # Pipeline orchestration lock (local only)
 .jobbunny-run.lock
 

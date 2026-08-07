@@ -222,6 +222,7 @@ async function wireWithConfigStore(
     filterCfg,
     pages,
     sqliteDefaultPath: dbPath,
+    chromeUserDataDir: path.join(root, 'chrome'),
     ...overrides.deps,
   };
   const registry = overrides.registry ?? realRegistry;
@@ -265,6 +266,7 @@ async function wireWithConfigStore(
   );
   const browser = new CdpChromeProvider({
     port: deps.cdpPort,
+    userDataDir: deps.chromeUserDataDir,
     ...((config.settings['cdp-chrome'] as CdpChromeProviderDeps | undefined) ?? {}),
   });
 
@@ -275,6 +277,7 @@ async function wireWithConfigStore(
     stateStore,
     filterCfg,
     browser,
+    chromeUserDataDir: deps.chromeUserDataDir,
   });
   const connector = buildMirroredConnector(
     buildConnector(

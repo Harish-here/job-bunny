@@ -53,6 +53,9 @@ export interface RuntimeDeps {
    * check factory (`compose.ts`) uses this path unconditionally now, no
    * override to resolve). */
   sqliteDefaultPath: string;
+  /** The Chrome user-data-dir, `join(<data home>, 'chrome')`. Passed as a
+   * plain string because adapters may not import `cli`. */
+  chromeUserDataDir: string;
 }
 
 /** Builds the `DoctorCheck[]` one lane/connector/notifier contributes.
