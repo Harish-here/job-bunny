@@ -64,13 +64,13 @@ test('a db stamped newer than LATEST_SCHEMA_VERSION throws loud', () => {
   const db = openJobsDb(dbPath);
   db.exec('PRAGMA user_version = 99');
   db.close();
-  assert.throws(() => openJobsDb(dbPath), /v99.*newer.*v5/s);
+  assert.throws(() => openJobsDb(dbPath), /v99.*newer.*v6/s);
 });
 
-test('fresh :memory: db lands at v5 with runs + run_events + checkpoints + state_docs + config_docs tables', () => {
+test('fresh :memory: db lands at v6 with runs + run_events + checkpoints + state_docs + config_docs + run_intents tables', () => {
   const db = openJobsDb(':memory:');
   assert.equal(userVersion(db), LATEST_SCHEMA_VERSION);
-  assert.equal(LATEST_SCHEMA_VERSION, 5);
+  assert.equal(LATEST_SCHEMA_VERSION, 6);
   const tables = (
     db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -85,6 +85,17 @@ test('fresh :memory: db lands at v5 with runs + run_events + checkpoints + state
   assert.ok(tables.includes('checkpoints'));
   assert.ok(tables.includes('state_docs'));
   assert.ok(tables.includes('config_docs'));
+  assert.ok(tables.includes('run_intents'));
+  db.close();
+});
+
+test('the run_intents partial unique index exists and guards only pending rows', () => {
+  const db = openJobsDb(':memory:');
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?")
+    .get('idx_run_intents_one_pending') as { sql: string } | undefined;
+  assert.ok(row);
+  assert.match(row.sql, /WHERE status = 'pending'/);
   db.close();
 });
 
@@ -467,5 +478,113 @@ test('a v4-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
       .all() as { name: string }[]
   ).map((t) => t.name);
   assert.ok(tables.includes('config_docs'));
+  upgraded.close();
+});
+
+test('a v5-stamped db upgrades to LATEST_SCHEMA_VERSION with a run_intents table', () => {
+  const dbPath = tmpDbPath();
+  // Build a v5 db by hand: MIGRATIONS[0..4] (through config_docs, no
+  // run_intents yet), stamped user_version=5.
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const v5 = new DatabaseSync(dbPath);
+  v5.exec(`
+    CREATE TABLE jobs (
+      id            TEXT PRIMARY KEY,
+      lane          TEXT NOT NULL,
+      title         TEXT NOT NULL,
+      company       TEXT NOT NULL,
+      url           TEXT NOT NULL,
+      seniority     TEXT,
+      location_city TEXT,
+      work_type     TEXT,
+      timezone      TEXT,
+      skills        TEXT,
+      excitement    TEXT,
+      score         REAL,
+      match_reasons TEXT,
+      date_found    TEXT NOT NULL,
+      jd_json       TEXT NOT NULL,
+      synced_at     TEXT NOT NULL,
+      archived      INTEGER NOT NULL DEFAULT 0,
+      archived_at   TEXT
+    );
+    CREATE TABLE tracking (
+      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
+      status           TEXT,
+      comp_range       TEXT,
+      notes            TEXT,
+      contact          TEXT,
+      date_applied     TEXT,
+      next_action      TEXT,
+      next_action_date TEXT,
+      updated_at       TEXT NOT NULL
+    );
+    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
+    CREATE TABLE runs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_date      TEXT NOT NULL,
+      time_dir      TEXT,
+      kind          TEXT NOT NULL,
+      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+      status        TEXT NOT NULL,
+      started_at    TEXT NOT NULL,
+      finished_at   TEXT,
+      heartbeat_at  TEXT,
+      result_json   TEXT,
+      failure_json  TEXT,
+      sync_dryrun_json TEXT
+    );
+    CREATE INDEX idx_runs_date ON runs(run_date);
+    CREATE TABLE run_events (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id    INTEGER NOT NULL REFERENCES runs(id),
+      ts        TEXT NOT NULL,
+      level     TEXT NOT NULL,
+      msg       TEXT NOT NULL,
+      data_json TEXT
+    );
+    CREATE INDEX idx_run_events_run ON run_events(run_id);
+    CREATE TABLE checkpoints (
+      run_date   TEXT    NOT NULL,
+      time_dir   TEXT    NOT NULL,
+      position   INTEGER NOT NULL,
+      stage      TEXT    NOT NULL,
+      payload_json TEXT  NOT NULL,
+      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+      created_at TEXT    NOT NULL,
+      PRIMARY KEY (run_date, time_dir, position)
+    );
+    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
+    CREATE TABLE state_docs (
+      key        TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE config_docs (
+      key        TEXT PRIMARY KEY,
+      value_text TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  v5.exec('PRAGMA user_version = 5');
+  v5.prepare(
+    `INSERT INTO config_docs (key, value_text, updated_at)
+       VALUES ('profile.json', '{}', '2026-08-06T09:00:00Z')`,
+  ).run();
+  v5.close();
+
+  const upgraded = openJobsDb(dbPath);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+  assert.equal(userVersion(upgraded), 6);
+  const tables = (
+    upgraded
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.includes('run_intents'));
+  const configRow = upgraded
+    .prepare('SELECT value_text FROM config_docs WHERE key = ?')
+    .get('profile.json') as { value_text: string } | undefined;
+  assert.equal(configRow?.value_text, '{}');
   upgraded.close();
 });
