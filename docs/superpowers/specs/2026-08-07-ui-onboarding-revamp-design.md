@@ -143,6 +143,8 @@ Friendly, rounded, quick. Applied via the existing shadcn/Tailwind token set (`u
 
 ## 6. Phasing (one PR each; pipeline untouched until reviewed)
 
+> **Dependency:** Phase 1 depends on the consumer-CLI data-home spec (same date, `2026-08-07-consumer-cli-data-home-design.md`) landing first — all path-touching endpoints (secrets → `.env`, daemon status → pidfile, profile removal → `profiles/<name>/`) resolve through `resolveHome()`, never `process.cwd()`. Phase 2 has no such dependency and may run in parallel with the data-home work.
+
 1. **Server surface** — `run_intents` table + endpoints + daemon pickup, doctor endpoint, secrets endpoint, personas catalog, daemon status, profile removal. Includes the hard-rule amendment + doc sync (CLAUDE.md text shown for approval).
 2. **Lapin restyle** — tokens, new primitives, reskin existing pages, sidebar rework (collapse + README lockup), mascot.
 3. **Wizard** — six steps + first-boot redirect.
