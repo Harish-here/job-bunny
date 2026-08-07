@@ -6,6 +6,8 @@ import { useStoredProfile } from '../../lib/profile';
 import { profilesKeys } from '../shell/profiles.queries';
 import { useProfilesQuery } from '../shell/useProfiles';
 import { clearDraft, readActiveProfile, readDraft, writeDraft } from './draftStore';
+import { Step1Name } from './steps/Step1Name';
+import { Step2Persona } from './steps/Step2Persona';
 import {
   emptyDraft,
   type WizardDraft,
@@ -48,8 +50,9 @@ function initialDraft(): WizardDraft {
  * 10 (steps 1–2) and tasks 5, 6, 7, and 8 (steps 3–6) each replace exactly
  * one of these six `case` branches with the real step, dropped in against
  * the SAME `WizardStepProps` this task already passes; nothing else in
- * `renderStep`'s switch changes when they do. Steps 1 through 5 register a
- * trivial always-`true` handler (nothing is written, so Next simply
+ * `renderStep`'s switch changes when they do. Steps 1 and 2 are real
+ * components (task 10); steps 3 through 5 still register a trivial
+ * always-`true` placeholder handler (nothing is written, so Next simply
  * advances); step 6 registers `null` — it is this wizard's only exit and
  * there is no honest "finish" behavior to wire until task 8 adds the real
  * one. */
@@ -177,9 +180,9 @@ export function WizardPage() {
     };
     switch (step) {
       case 1:
-        return <Placeholder {...stepProps} label="Name it" finishable />;
+        return <Step1Name {...stepProps} />;
       case 2:
-        return <Placeholder {...stepProps} label="Pick a persona" finishable />;
+        return <Step2Persona {...stepProps} />;
       case 3:
         return <Placeholder {...stepProps} label="About you" finishable />;
       case 4:

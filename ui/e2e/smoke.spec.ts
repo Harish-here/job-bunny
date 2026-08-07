@@ -13,6 +13,8 @@
  * path doesn't literally start with `profiles/<that-exact-name>/`).
  */
 import { readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 
@@ -247,11 +249,41 @@ test("settings page: invalid JSON shows the server's error message", async ({ pa
   await expect(filterField).toHaveValue('{not valid json');
 });
 
-test('onboarding wizard: Next advances from step 1 to step 2', async ({ page }) => {
+let createdProfileName: string | undefined;
+
+test('onboarding wizard: step 1 creates a profile, step 2 selects a persona', async ({
+  page,
+}) => {
+  const name = `e2e-tmp-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  createdProfileName = name;
+
   await page.goto('/#/onboarding');
   await expect(page.getByTestId('wizard-step')).toHaveAttribute('data-step', '1');
 
+  await page.getByLabel('Profile name').fill(name);
   await page.getByTestId('wizard-next').click();
 
   await expect(page.getByTestId('wizard-step')).toHaveAttribute('data-step', '2');
+
+  const firstCard = page.getByTestId('wizard-persona').first();
+  await expect(firstCard).toBeVisible();
+  await firstCard.click();
+  await expect(firstCard).toHaveAttribute('aria-pressed', 'true');
+});
+
+test.afterAll(async () => {
+  if (!createdProfileName) return;
+  const name = createdProfileName;
+  // Belt-and-braces guard, same shape the file used before task 4's
+  // placeholder-era rewrite: refuse to delete anything that isn't the
+  // exact throwaway profile this spec created.
+  if (!/^[a-z0-9_-]+$/.test(name) || name === 'rajni') {
+    throw new Error(`refusing: not a valid throwaway profile name (${name})`);
+  }
+  const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+  const target = path.join(REPO_ROOT, 'profiles', name);
+  if (!target.endsWith(`${path.sep}profiles${path.sep}${name}`)) {
+    throw new Error(`refusing: unexpected delete target (${target})`);
+  }
+  await rm(target, { recursive: true, force: true });
 });
