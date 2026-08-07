@@ -40,13 +40,24 @@ export function RunsList({
               }
             }}
             className={cn(
-              'flex cursor-pointer flex-col gap-1 border-b px-3 py-2',
-              selected ? 'bg-muted' : 'hover:bg-muted/50',
+              'flex cursor-pointer flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 hop',
+              selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
             )}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium">{formatWhen(row)}</span>
-              <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
+              <Badge
+                variant={statusVariant(row.status)}
+                className={
+                  row.status === 'passed'
+                    ? 'text-success'
+                    : row.status === 'running'
+                      ? 'text-primary'
+                      : undefined
+                }
+              >
+                {statusLabel(row.status)}
+              </Badge>
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="capitalize">{row.kind}</span>

@@ -63,7 +63,7 @@ export function RunsPage({ profile }: { profile: string }) {
   return (
     <div className="flex h-screen flex-col">
       <div className="flex items-center justify-between border-b p-3">
-        <h1 className="text-sm font-medium">Runs</h1>
+        <h1 className="text-lg font-semibold font-heading">Runs</h1>
         <Button
           type="button"
           variant="secondary"

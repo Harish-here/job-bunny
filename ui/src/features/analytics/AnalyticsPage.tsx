@@ -3,8 +3,11 @@
  * feature exists yet. */
 export function AnalyticsPage() {
   return (
-    <div className="p-6 text-muted-foreground">
-      Coming soon — run stats, funnel drops, and match-quality trends will land here.
+    <div className="flex flex-col gap-2 p-6">
+      <h1 className="text-lg font-semibold font-heading">Analytics</h1>
+      <p className="text-muted-foreground">
+        Coming soon — run stats, funnel drops, and match-quality trends will land here.
+      </p>
     </div>
   );
 }
