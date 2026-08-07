@@ -14,6 +14,8 @@ import { Button } from '../../components/ui/button';
 import type { BoardProfile } from '../../lib/api/types';
 import type { Route, RouteName } from '../../lib/router';
 import { cn } from '../../lib/utils';
+import { Mascot } from './Mascot';
+import type { MascotState } from './mascotState';
 import { ProfileSwitcher } from './ProfileSwitcher';
 
 const NAV_ITEMS: { name: RouteName; label: string; Icon: typeof Inbox }[] = [
@@ -31,6 +33,7 @@ export function Sidebar({
   profiles,
   version,
   collapsed,
+  mascot,
   onChoose,
   onNavigate,
   onToggleCollapsed,
@@ -40,6 +43,7 @@ export function Sidebar({
   profiles: BoardProfile[];
   version: string | undefined;
   collapsed: boolean;
+  mascot: MascotState;
   onChoose: (name: string) => void;
   onNavigate: (route: Route) => void;
   onToggleCollapsed: () => void;
@@ -111,6 +115,7 @@ export function Sidebar({
         })}
       </nav>
       <div className="mt-auto flex flex-col gap-2">
+        <Mascot state={mascot} className="self-center" />
         <ProfileSwitcher
           profile={profile}
           profiles={profiles}

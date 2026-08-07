@@ -7,9 +7,11 @@ import { AnalyticsPage } from '../analytics/AnalyticsPage';
 import { JobPage } from '../job/JobPage';
 import { OnboardingPage } from '../onboarding/OnboardingPage';
 import { RunsPage } from '../runs/RunsPage';
+import { useRun, useRuns } from '../runs/useRunsData';
 import { SettingsPage } from '../settings/SettingsPage';
 import { TrackerPage } from '../tracker/TrackerPage';
 import { TriagePage } from '../triage/TriagePage';
+import { pickMascotState } from './mascotState';
 import { Sidebar } from './Sidebar';
 import { useAppInfo } from './useAppInfo';
 import { useProfilesQuery } from './useProfiles';
@@ -57,6 +59,11 @@ function UnreachableState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+/** Phase 4 replaces this with the pending run-intent selector (spec §2.4);
+ * phase 2 has no intent table to read, so the ears-up state ships wired to
+ * a constant and is exercised by mascotState.test.ts. */
+const QUEUED_STUB = false;
+
 export function Shell() {
   const route = useRoute();
   const profilesQuery = useProfilesQuery();
@@ -75,14 +82,32 @@ export function Shell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [collapsed, setCollapsed]);
 
+  // Hooks must run unconditionally, so `profile` is resolved here (not
+  // after the pending/error returns below) with an empty-array/null
+  // fallback while `profilesQuery` is still settling. `useRuns('')` during
+  // that brief window (or for a profile with no jobbunny.db) degrades to an
+  // errored/empty query — `runs` falls back to `[]`, and `pickMascotState`
+  // already treats an empty `runs` array as "asleep" (its own
+  // failure-tolerance contract: never throw, never block the shell).
+  const profiles = profilesQuery.data?.profiles ?? [];
+  const profile = pickProfile(stored, profiles);
+
+  const runsQuery = useRuns(profile ?? '');
+  const runs = runsQuery.data?.rows ?? [];
+  const newestId = runs.reduce((max, r) => Math.max(max, r.id), -1);
+  const detail = useRun(profile ?? '', newestId);
+  const mascot = pickMascotState({
+    runs,
+    newestResult: detail.data?.result,
+    queued: QUEUED_STUB,
+    now: Date.now(),
+  });
+
   if (profilesQuery.isPending) return <ShellSkeleton />;
 
   if (profilesQuery.isError) {
     return <UnreachableState onRetry={() => profilesQuery.refetch()} />;
   }
-
-  const profiles = profilesQuery.data.profiles;
-  const profile = pickProfile(stored, profiles);
 
   return (
     <div className="flex">
@@ -92,6 +117,7 @@ export function Shell() {
         profiles={profiles}
         version={appInfo.data?.version}
         collapsed={collapsed}
+        mascot={mascot}
         onChoose={setStored}
         onNavigate={navigate}
         onToggleCollapsed={() => setCollapsed(!collapsed)}
