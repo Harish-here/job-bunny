@@ -72,12 +72,15 @@ function needsQuoting(value: string): boolean {
   return /[\s#"']/.test(value);
 }
 
-/** Double-quotes `value`, escaping embedded backslashes first (so a
- * pre-existing `\"` isn't double-escaped) and then embedded double
- * quotes. */
+/** Plain double-quote wrapping — no escaping. `dotenv`'s `parse()` only
+ * unescapes `\n`/`\r` inside a double-quoted value and has no notion of
+ * `\"` or `\\`; escaping here would silently corrupt any value containing
+ * a quote or backslash on round-trip instead of failing loudly. Callers
+ * that need to write such a value must reject it before calling — see
+ * `upsertEnvLine`'s own guard below, the single choke point for this
+ * module's write path. */
 function quoteValue(value: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return `"${escaped}"`;
+  return `"${value}"`;
 }
 
 /** Returns `text` with `key` set to `value`. When a non-comment
@@ -85,11 +88,17 @@ function quoteValue(value: string): string {
  * whole (as a plain `KEY=value` line, even if the original was
  * `export`-prefixed) and every other line is preserved byte-for-byte;
  * otherwise `KEY=value` is appended. The result always ends in exactly
- * one trailing newline. `value` is double-quoted (with embedded quotes
- * and backslashes escaped) whenever it contains whitespace, `#`, or a
- * quote character — otherwise it's written bare; callers reject values
- * containing a newline before calling either way. */
+ * one trailing newline. `value` is double-quoted whenever it contains
+ * whitespace, `#`, or a quote character — otherwise it's written bare.
+ * `value` must not contain a `"` or `\` character: `dotenv.parse` cannot
+ * round-trip either (it has no escaping convention, and `\n`/`\r`
+ * sequences inside a quoted value get unescaped on read), so such a
+ * value is rejected here rather than silently corrupted; callers also
+ * reject values containing a newline before calling. */
 export function upsertEnvLine(text: string, key: string, value: string): string {
+  if (value.includes('"') || value.includes('\\')) {
+    throw new Error('env value must not contain a quote or backslash character');
+  }
   const regex = assignmentRegex(key);
   const lines = contentLines(text);
   const index = lines.findIndex((line) => !isCommentLine(line) && regex.test(line));

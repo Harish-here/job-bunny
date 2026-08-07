@@ -84,3 +84,16 @@ test('upsertEnvLine: a clean value (no whitespace/#/quotes) is left unquoted and
   assert.equal(written, 'NOTION_TOKEN=abc123\n');
   assert.deepEqual(dotenv.parse(written), { NOTION_TOKEN: 'abc123' });
 });
+
+// --- upsertEnvLine: unrepresentable values are rejected, not mis-escaped ---
+
+test('upsertEnvLine: a value containing a double quote is rejected', () => {
+  assert.throws(() => upsertEnvLine('', 'NOTION_TOKEN', 'sk-"abc'), /quote or backslash/);
+});
+
+test('upsertEnvLine: a value containing a backslash is rejected', () => {
+  assert.throws(
+    () => upsertEnvLine('', 'NOTION_TOKEN', 'sk-\\nabc'),
+    /quote or backslash/,
+  );
+});

@@ -171,6 +171,34 @@ test('PUT: a value containing a newline is rejected', async () => {
   assert.equal(source.writeCalls.length, 0);
 });
 
+test('PUT: a value containing a quote is rejected with the fixed message and never written', async () => {
+  const source = fakeSource(PRESENCE);
+  const route = findRoute(source, 'PUT', '/api/secrets/:key');
+  await assertHttpError(
+    () =>
+      route.handler(req({ params: { key: 'NOTION_TOKEN' }, body: { value: 'sk-"abc' } })),
+    400,
+    'validation',
+    'secret value must not contain quotes or backslashes',
+  );
+  assert.equal(source.writeCalls.length, 0);
+});
+
+test('PUT: a value containing a backslash is rejected with the fixed message and never written', async () => {
+  const source = fakeSource(PRESENCE);
+  const route = findRoute(source, 'PUT', '/api/secrets/:key');
+  await assertHttpError(
+    () =>
+      route.handler(
+        req({ params: { key: 'NOTION_TOKEN' }, body: { value: 'sk-\\nabc' } }),
+      ),
+    400,
+    'validation',
+    'secret value must not contain quotes or backslashes',
+  );
+  assert.equal(source.writeCalls.length, 0);
+});
+
 test('PUT: no error message or response body ever contains the submitted value', async () => {
   const SECRET = 'SUPER-SECRET-abc123';
   const cases: Array<{ params: Record<string, string>; body: unknown }> = [
@@ -178,6 +206,8 @@ test('PUT: no error message or response body ever contains the submitted value',
     { params: { key: 'NOTION_TOKEN' }, body: {} },
     { params: { key: 'NOTION_TOKEN' }, body: { value: '' } },
     { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}\n` } },
+    { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}"` } },
+    { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}\\` } },
   ];
   for (const c of cases) {
     const source = fakeSource(PRESENCE);
