@@ -1,6 +1,7 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
 import type { ConfigDocKey } from './config_store.ts';
+import type { DoctorReport } from './doctor.ts';
 import type { RunIntentStore } from './run_intents.ts';
 import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
 
@@ -165,6 +166,10 @@ export interface BoardSource {
    * unsanitized name, same discipline as every other traversal-sensitive
    * function in this file). */
   createProfile(name: string): Promise<void>;
+  /** Runs the composed doctor checks for one profile and returns the report.
+   * `null` for a profile name that is not a current directory under
+   * `<root>/profiles`. Read-only: it never writes a row, a file, or a doc. */
+  runDoctor(name: string): Promise<DoctorReport | null>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this
    * OPENS-OR-CREATES the profile's db: an intent is durable state a

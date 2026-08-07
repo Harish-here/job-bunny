@@ -50,14 +50,15 @@ export interface DoctorDeps {
   runDegradedConfigChecks: (profileName: string) => Promise<DoctorFinding[]>;
 }
 
-async function defaultRunDegradedConfigChecks(
+export async function defaultRunDegradedConfigChecks(
   profileName: string,
+  root: string = resolveHome(),
 ): Promise<DoctorFinding[]> {
   const store = wireConfigStore(profileName, { liftMode: 'readonly' });
   try {
     const opts: CoreCheckOpts = {
       profileName,
-      root: resolveHome(),
+      root,
       readDoc: (key) => store.readText(key),
     };
     const checks: DoctorCheck[] = [
@@ -83,6 +84,19 @@ function defaultDeps(): DoctorDeps {
 
 function formatTable(findings: DoctorFinding[]): string[] {
   return findings.map((f) => `${f.check} | ${f.status} | ${f.detail}`);
+}
+
+/** The synthesized `wire` finding, shared verbatim between the CLI's own
+ * wire()-failure degrade path and the board server's `runDoctor`
+ * (`cli/wire/board.ts`) — one exported string constructor instead of two
+ * independently-worded copies that could drift on the next edit. */
+export function wireFailureFinding(profileName: string, err: unknown): DoctorFinding {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    check: 'wire',
+    status: 'red',
+    detail: `could not wire profile '${profileName}': ${message}`,
+  };
 }
 
 export async function doctorCommand(
@@ -116,12 +130,7 @@ export async function doctorCommand(
     // can support. Adapter-reachability/env/daemon/claude checks (the ones
     // that DO need the wired result — connector, notifier settings, etc.)
     // are genuinely unavailable here and are skipped, not synthesized.
-    const message = err instanceof Error ? err.message : String(err);
-    const wireFinding: DoctorFinding = {
-      check: 'wire',
-      status: 'red',
-      detail: `could not wire profile '${opts.profile}': ${message}`,
-    };
+    const wireFinding = wireFailureFinding(opts.profile, err);
     const degraded = await resolved.runDegradedConfigChecks(opts.profile);
     const findings = [homeFinding, wireFinding, ...degraded];
     for (const line of formatTable(findings)) {

@@ -43,6 +43,7 @@ function fakeSource(store: BoardStore | null): BoardSource & { closed: boolean }
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor: async () => null,
     close: () => {
       state.closed = true;
     },

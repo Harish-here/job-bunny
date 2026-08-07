@@ -133,9 +133,10 @@ function fakeSource(
     store?: BoardStore | null;
     closed?: { value: boolean };
     intents?: RunIntentStore | null;
+    runDoctor?: BoardSource['runDoctor'];
   } = {},
 ): BoardSource {
-  const { store = null, closed, intents = null } = opts;
+  const { store = null, closed, intents = null, runDoctor = async () => null } = opts;
   return {
     listProfiles: async () => PROFILES,
     openStore: async () => store,
@@ -145,6 +146,7 @@ function fakeSource(
     openIntents: async () => intents,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor,
     close() {
       if (closed) closed.value = true;
     },
@@ -211,6 +213,23 @@ test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mount
     const body = (await res.json()) as { rows: unknown[]; total: number };
     assert.equal(body.total, 1);
     assert.equal(body.rows.length, 1);
+  });
+});
+
+test('GET /api/profiles/:name/doctor returns the report', async () => {
+  const report = {
+    findings: [{ check: 'home', status: 'ok' as const, detail: '/tmp/home' }],
+    status: 'ok' as const,
+  };
+  const server = createBoardServer({
+    source: fakeSource({ runDoctor: async () => report }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/doctor`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { status: 'ok', findings: report.findings });
   });
 });
 
@@ -310,6 +329,7 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -348,6 +368,7 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -415,6 +436,7 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -562,6 +584,7 @@ test('PUT then GET /api/secrets round-trips presence without echoing the value',
     writeSecret: async (key, value) => {
       written.set(key, value);
     },
+    runDoctor: async () => null,
     close() {},
   };
   const server = createBoardServer({
@@ -600,6 +623,7 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor: async () => null,
     close() {
       closeCallCount += 1;
       closed.value = true;

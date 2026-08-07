@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
-import { doctorCommand } from './doctor.ts';
+import { doctorCommand, wireFailureFinding } from './doctor.ts';
 
 function fakeCheck(name: string, finding: DoctorFinding): DoctorCheck {
   return { name, run: async () => finding };
@@ -171,6 +171,12 @@ test('doctorCommand: prints the resolved home first, on the success path', async
   );
   assert.equal(code, 0);
   assert.match(lines[0] as string, /^home \| ok \| /);
+});
+
+test('wireFailureFinding: names the profile and the error message', () => {
+  const finding = wireFailureFinding('rajni', new Error('boom'));
+  assert.equal(finding.detail, "could not wire profile 'rajni': boom");
+  assert.equal(finding.status, 'red');
 });
 
 test('doctorCommand: prints the resolved home first, on the wire()-failure degraded path too', async () => {

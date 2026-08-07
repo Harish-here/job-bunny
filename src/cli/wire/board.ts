@@ -74,6 +74,7 @@ import {
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
 import { hasEnvValue, upsertEnvLine } from '../../core/env_file/index.ts';
+import { runChecks } from '../../ops/doctor/aggregate.ts';
 import {
   type BoardProfile,
   type BoardSource,
@@ -83,10 +84,16 @@ import {
   type SecretPresence,
 } from '../../ports/board.ts';
 import type { ConfigDocKey } from '../../ports/config_store.ts';
+import type { DoctorReport } from '../../ports/doctor.ts';
 import type { RunIntentStore } from '../../ports/run_intents.ts';
+import {
+  defaultRunDegradedConfigChecks,
+  wireFailureFinding,
+} from '../commands/doctor.ts';
 import { seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
+import { wire } from './compose.ts';
 
 const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
 
@@ -249,6 +256,25 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
         mkdir: (p) => mkdir(p, { recursive: true }),
         write: () => {}, // silent — the route reports the outcome, not this seam
       });
+    },
+
+    async runDoctor(name: string): Promise<DoctorReport | null> {
+      // Same membership gate as `openStore`/`readConfigDoc` — re-derived
+      // against the CURRENT directory names, never path math.
+      const infos = await listProfileInfos(root);
+      if (!infos.some((p) => p.name === name)) return null;
+
+      try {
+        const { checks } = await wire(name, { root, configLiftMode: 'readonly' });
+        return await runChecks(checks);
+      } catch (err) {
+        // Same wire()-failure degrade path the CLI's `doctor` command
+        // takes (`commands/doctor.ts`) — the synthesized `wire` finding
+        // is itself red, so the report's status is always 'red' here;
+        // never recomputed from the degraded findings.
+        const degraded = await defaultRunDegradedConfigChecks(name, root);
+        return { findings: [wireFailureFinding(name, err), ...degraded], status: 'red' };
+      }
     },
 
     async openIntents(name: string): Promise<RunIntentStore | null> {

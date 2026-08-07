@@ -49,6 +49,7 @@ function fakeSource(presence: SecretPresence): BoardSource & {
     writeSecret: async (key, value) => {
       writeCalls.push({ key, value });
     },
+    runDoctor: async () => null,
     close() {},
   };
 }

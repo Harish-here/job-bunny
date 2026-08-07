@@ -21,6 +21,7 @@ function fakeSource(profiles: BoardProfile[] = []): BoardSource {
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    runDoctor: async () => null,
     close: () => {},
   };
 }
