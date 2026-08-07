@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import { test } from 'node:test';
 import { z } from 'zod';
+import type { PERSONA_CATALOG } from '../../core/personas/index.ts';
 import type {
   BoardProfile,
   BoardSource,
@@ -650,4 +651,20 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     2,
     'source.close() must run even when httpServer.close() rejects',
   );
+});
+
+test('GET /api/personas serves the catalog over HTTP', async () => {
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/personas`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+    const body = (await res.json()) as typeof PERSONA_CATALOG;
+    assert.equal(body.personas.length, 11);
+    assert.equal(body.personas[body.personas.length - 1]?.id, 'scratch');
+  });
 });

@@ -23,6 +23,7 @@ import { makeBoardRoutes } from '../features/board/index.ts';
 import { makeConfigRoutes } from '../features/config/index.ts';
 import { makeDoctorRoutes } from '../features/doctor/index.ts';
 import { makeIntentRoutes } from '../features/intents/index.ts';
+import { makePersonasRoutes } from '../features/personas/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
 import { makeRunsRoutes } from '../features/runs/index.ts';
 import { makeSecretsRoutes } from '../features/secrets/index.ts';
@@ -62,6 +63,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
     ...makeConfigRoutes(source),
     ...makeDoctorRoutes(source),
     ...makeAppInfoRoutes(version),
+    ...makePersonasRoutes(),
   ];
 
   const httpServer = createServer((req, res) => {
