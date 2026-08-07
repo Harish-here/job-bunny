@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { wireDaemonRunHistory, wireDaemonScheduleConfig } from './daemon.ts';
+import {
+  wireDaemonIntents,
+  wireDaemonRunHistory,
+  wireDaemonScheduleConfig,
+} from './daemon.ts';
 
 // This test file may not import `src/adapters/**` directly (no test-file
 // exemption from `only-wire-imports-adapters` — only `daemon.ts` itself is
@@ -205,4 +209,157 @@ test('wireDaemonScheduleConfig: a profile with a valid profile.json and no db st
   await writeFile(join(root, 'profiles', 'scancfg-ok', 'profile.json'), raw);
   const readProfileJson = wireDaemonScheduleConfig({ root });
   assert.equal(await readProfileJson(join(root, 'profiles'), 'scancfg-ok'), raw);
+});
+
+// --- wireDaemonIntents ---
+//
+// `readIntents` scans the WHOLE `<root>/profiles` directory, so unlike
+// `wireDaemonRunHistory` (which is always called with an explicit profile
+// list) these tests each get their OWN freshly minted temp root — reusing
+// the file-scope `root` above would let one test's leftover profile
+// directory leak into a later test's full-directory scan.
+async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'jb-wire-daemon-intents-'));
+  try {
+    return await fn(tempRoot);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function seedProfileDirIn(root: string, name: string): Promise<string> {
+  const dbDir = join(root, 'profiles', name, 'data');
+  await mkdir(dbDir, { recursive: true });
+  return join(dbDir, 'jobbunny.db');
+}
+
+function insertIntentRow(
+  dbPath: string,
+  row: { requestedAt: string; status: string },
+): number {
+  const db = new DatabaseSync(dbPath);
+  const result = db
+    .prepare(
+      'INSERT INTO run_intents (requested_at, status, claimed_run_id) VALUES (?, ?, NULL)',
+    )
+    .run(row.requestedAt, row.status);
+  db.close();
+  return Number(result.lastInsertRowid);
+}
+
+function readClaimedRunId(dbPath: string, intentId: number): number | null {
+  const db = new DatabaseSync(dbPath);
+  const row = db
+    .prepare('SELECT claimed_run_id FROM run_intents WHERE id = ?')
+    .get(intentId) as { claimed_run_id: number | null } | undefined;
+  db.close();
+  return row?.claimed_run_id ?? null;
+}
+
+function readRunIdByTimeDir(dbPath: string, timeDir: string): number {
+  const db = new DatabaseSync(dbPath);
+  const row = db.prepare('SELECT id FROM runs WHERE time_dir = ?').get(timeDir) as {
+    id: number;
+  };
+  db.close();
+  return row.id;
+}
+
+test('wireDaemonIntents.readIntents: a profile with no jobbunny.db yet contributes nothing and creates no file', async () => {
+  await withTempRoot(async (tempRoot) => {
+    const dbPath = await seedProfileDirIn(tempRoot, 'nodb');
+    const { readIntents } = wireDaemonIntents({ root: tempRoot });
+    assert.deepEqual(readIntents(new Date('2026-08-05T12:00:00.000Z')), []);
+    assert.equal(existsSync(dbPath), false, 'a tick must never create the db file');
+  });
+});
+
+test('wireDaemonIntents.readIntents: a pending intent is returned', async () => {
+  await withTempRoot(async (tempRoot) => {
+    const dbPath = await seedProfileDirIn(tempRoot, 'pending');
+    await writeFile(dbPath, '');
+    const { readIntents, claimIntent } = wireDaemonIntents({ root: tempRoot });
+    claimIntent('pending', -1); // migrates the schema (no matching row — a no-op claim).
+    const id = insertIntentRow(dbPath, {
+      requestedAt: '2026-08-05T11:59:00.000Z',
+      status: 'pending',
+    });
+    assert.deepEqual(readIntents(new Date('2026-08-05T12:00:00.000Z')), [
+      { profile: 'pending', intentId: id, requestedAt: '2026-08-05T11:59:00.000Z' },
+    ]);
+  });
+});
+
+test('wireDaemonIntents.readIntents: an expired intent is not returned', async () => {
+  await withTempRoot(async (tempRoot) => {
+    const dbPath = await seedProfileDirIn(tempRoot, 'expired');
+    await writeFile(dbPath, '');
+    const { readIntents, claimIntent } = wireDaemonIntents({ root: tempRoot });
+    claimIntent('expired', -1); // migrates the schema.
+    insertIntentRow(dbPath, {
+      requestedAt: '2026-08-05T11:00:00.000Z', // 60 minutes old — well past the 10-minute expiry.
+      status: 'pending',
+    });
+    assert.deepEqual(readIntents(new Date('2026-08-05T12:00:00.000Z')), []);
+  });
+});
+
+test('wireDaemonIntents.claimIntent: returns true once, then false on a second call for the same intent', async () => {
+  await withTempRoot(async (tempRoot) => {
+    const dbPath = await seedProfileDirIn(tempRoot, 'claimtwice');
+    await writeFile(dbPath, '');
+    const { claimIntent } = wireDaemonIntents({ root: tempRoot });
+    claimIntent('claimtwice', -1); // migrates the schema.
+    const id = insertIntentRow(dbPath, {
+      requestedAt: '2026-08-05T12:00:00.000Z',
+      status: 'pending',
+    });
+    assert.equal(claimIntent('claimtwice', id), true);
+    assert.equal(claimIntent('claimtwice', id), false);
+  });
+});
+
+test('wireDaemonIntents.attachIntentRun: sets claimed_run_id to a run started after since', async () => {
+  await withTempRoot(async (tempRoot) => {
+    const dbPath = await seedProfileDirIn(tempRoot, 'attach-after');
+    await writeFile(dbPath, '');
+    const { claimIntent, attachIntentRun } = wireDaemonIntents({ root: tempRoot });
+    claimIntent('attach-after', -1); // migrates the schema.
+    const intentId = insertIntentRow(dbPath, {
+      requestedAt: '2026-08-05T12:00:00.000Z',
+      status: 'claimed',
+    });
+    insertRunRow(dbPath, {
+      date: '2026-08-05',
+      timeDir: '12-05',
+      startedAt: '2026-08-05T12:05:00.000Z', // after `since` below.
+    });
+    const runId = readRunIdByTimeDir(dbPath, '12-05');
+
+    attachIntentRun('attach-after', intentId, '2026-08-05T12:00:00.000Z');
+
+    assert.equal(readClaimedRunId(dbPath, intentId), runId);
+  });
+});
+
+test('wireDaemonIntents.attachIntentRun: leaves claimed_run_id null when the only run started before since', async () => {
+  await withTempRoot(async (tempRoot) => {
+    const dbPath = await seedProfileDirIn(tempRoot, 'attach-before');
+    await writeFile(dbPath, '');
+    const { claimIntent, attachIntentRun } = wireDaemonIntents({ root: tempRoot });
+    claimIntent('attach-before', -1); // migrates the schema.
+    const intentId = insertIntentRow(dbPath, {
+      requestedAt: '2026-08-05T12:00:00.000Z',
+      status: 'claimed',
+    });
+    insertRunRow(dbPath, {
+      date: '2026-08-05',
+      timeDir: '11-55',
+      startedAt: '2026-08-05T11:55:00.000Z', // before `since` below.
+    });
+
+    attachIntentRun('attach-before', intentId, '2026-08-05T12:00:00.000Z');
+
+    assert.equal(readClaimedRunId(dbPath, intentId), null);
+  });
 });

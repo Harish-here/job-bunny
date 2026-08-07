@@ -128,6 +128,32 @@ export async function runServeStartParent(deps: ServeDeps): Promise<number> {
   return 0;
 }
 
+/** Assembles the daemon child's `DaemonDeps` from the command's own
+ * `ServeDeps` bag, `spawnRun`, and `log` — split out purely so a test can
+ * verify the wiring (in particular `readIntents`/`claimIntent`/
+ * `attachIntentRun`, threaded through unchanged) without invoking
+ * `runServeStartChild` itself, which installs real `SIGTERM`/`SIGINT`
+ * handlers that call `process.exit(0)`. */
+export function buildDaemonDeps(
+  deps: ServeDeps,
+  spawnRun: DaemonDeps['spawnRun'],
+  log: DaemonDeps['log'],
+): DaemonDeps {
+  return {
+    root: deps.root,
+    profilesDir: deps.profilesDir,
+    scan: deps.scan,
+    pidfile: deps.pidfile,
+    spawnRun,
+    readRunHistory: deps.readRunHistory,
+    readIntents: deps.readIntents,
+    claimIntent: deps.claimIntent,
+    attachIntentRun: deps.attachIntentRun,
+    log,
+    now: () => new Date(),
+  };
+}
+
 export async function runServeStartChild(deps: ServeDeps): Promise<number> {
   // F8: FIRST action — claim the pidfile's `pid` field for this process.
   // The parent created the file under its OWN pid (an `wx` placeholder
@@ -171,16 +197,7 @@ export async function runServeStartChild(deps: ServeDeps): Promise<number> {
     clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
   };
 
-  const daemonDeps: DaemonDeps = {
-    root: deps.root,
-    profilesDir: deps.profilesDir,
-    scan: deps.scan,
-    pidfile: deps.pidfile,
-    spawnRun: createSpawnRun(superviseDeps),
-    readRunHistory: deps.readRunHistory,
-    log,
-    now: () => new Date(),
-  };
+  const daemonDeps = buildDaemonDeps(deps, createSpawnRun(superviseDeps), log);
 
   const daemon = createDaemon(daemonDeps);
   daemon.start();

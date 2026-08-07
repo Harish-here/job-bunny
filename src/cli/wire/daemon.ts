@@ -20,11 +20,14 @@
  * `resolveProfileDbPath` (a `readFileSync`+`JSON.parse`+settings-walk) is
  * dead and removed (`daemon.test.ts` never named it directly).
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { SqliteRunIntentStore } from '../../adapters/db/sqlite/intents/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
 import type { RunStore } from '../../ports/index.ts';
+import type { PendingIntent } from '../../ports/run_intents.ts';
 import { resolveHome } from '../home/index.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
@@ -130,5 +133,99 @@ export function wireDaemonScheduleConfig(
     } finally {
       store.close();
     }
+  };
+}
+
+/** Builds the daemon's three board-queued-intent seams (2026-08-07 addition
+ * — `DaemonDeps.readIntents`/`claimIntent`/`attachIntentRun`, `ops/daemon/
+ * daemon.ts`'s intent pass). Every store is opened fresh per call and
+ * closed in a `finally`, matching `wireDaemonRunHistory`/
+ * `wireDaemonScheduleConfig` above and for the identical reason: a
+ * long-lived daemon must never let one transient failure blind a profile
+ * forever. Never memoized. */
+export function wireDaemonIntents(overrides: DaemonWireOverrides = {}): {
+  readIntents: (now: Date) => PendingIntent[];
+  claimIntent: (profile: string, intentId: number) => boolean;
+  attachIntentRun: (profile: string, intentId: number, since: string) => void;
+} {
+  const root = overrides.root ?? resolveHome();
+
+  return {
+    readIntents(now: Date): PendingIntent[] {
+      const profilesDir = path.join(root, 'profiles');
+      let names: string[];
+      try {
+        names = readdirSync(profilesDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name);
+      } catch {
+        return [];
+      }
+
+      const results: PendingIntent[] = [];
+      for (const name of names) {
+        const dbPath = canonicalDbPath(root, name);
+        // A profile that has never run has no intents and must NOT have
+        // its db created (and migrated) as a side effect of a tick merely
+        // checking for intents.
+        if (!existsSync(dbPath)) continue;
+        try {
+          const store = new SqliteRunIntentStore(dbPath);
+          try {
+            for (const intent of store.listClaimable(now.toISOString())) {
+              results.push({
+                profile: name,
+                intentId: intent.id,
+                requestedAt: intent.requestedAt,
+              });
+            }
+          } finally {
+            store.close();
+          }
+        } catch {
+          // One unreadable profile must never blind the others — no log,
+          // no record contributed.
+        }
+      }
+
+      return results.sort((a, b) => {
+        const requestedCmp = a.requestedAt.localeCompare(b.requestedAt);
+        return requestedCmp !== 0 ? requestedCmp : a.profile.localeCompare(b.profile);
+      });
+    },
+
+    claimIntent(profile: string, intentId: number): boolean {
+      const store = new SqliteRunIntentStore(canonicalDbPath(root, profile));
+      try {
+        return store.claim(intentId);
+      } catch {
+        return false;
+      } finally {
+        store.close();
+      }
+    },
+
+    attachIntentRun(profile: string, intentId: number, since: string): void {
+      try {
+        const runStore = new SqliteRunStore(canonicalDbPath(root, profile));
+        let runId: number | undefined;
+        try {
+          const runs = runStore.listRuns({ limit: 20 });
+          runId = runs.find((run) => run.startedAt >= since)?.id;
+        } finally {
+          runStore.close();
+        }
+        if (runId === undefined) return;
+
+        const intentStore = new SqliteRunIntentStore(canonicalDbPath(root, profile));
+        try {
+          intentStore.attachRun(intentId, runId);
+        } finally {
+          intentStore.close();
+        }
+      } catch {
+        // Swallowed — see this function's own doc comment.
+      }
+    },
   };
 }
