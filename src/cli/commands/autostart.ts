@@ -37,8 +37,13 @@ export interface AutostartCommandOptions {
 
 export interface AutostartDeps {
   platform: NodeJS.Platform;
+  /** The operating-system home directory (`os.homedir()`), used to build
+   * `~/Library/LaunchAgents/...` and the daemon log path. Distinct from
+   * `root` (the data home) — do not conflate the two. */
   home: string;
   uid: number | undefined;
+  /** The resolved data home (`resolveHome()`), written into the plist's
+   * `WorkingDirectory`. */
   root: string;
   /** F1: the PATH the daemon (and therefore every run child it spawns)
    * inherits, captured at `enable` time from the interactive shell that
@@ -71,12 +76,15 @@ function escapeXml(value: string): string {
 /** `RunAtLoad: true`, deliberately NO `StartCalendarInterval` (§6.7): this
  * LaunchAgent's only job is starting `jobbunny serve start` at login —
  * the daemon's own tick loop, not launchd, decides WHEN a run fires.
- * B2: also sets `WorkingDirectory` to `root` — without it, launchd runs
- * the program with cwd `/`, so the pidfile lands at `/.jobbunny-daemon.
- * pid`, `profilesDir` resolves to `/profiles`, and `main.ts`'s
- * `dotenv/config` load finds no `.env`. The retired plist embedded `cd
- * '${root}'` in its own `buildCommand` for exactly this reason —
- * `WorkingDirectory` is the LaunchAgent-native equivalent.
+ * B2: also sets `WorkingDirectory` to `root`, the resolved data home —
+ * without it, launchd runs the program with cwd `/`. It is no longer the
+ * data ANCHOR (every path now resolves through `resolveHome()`, so the
+ * daemon finds its data regardless of cwd); it is simply the
+ * least-surprising cwd for the daemon, and pointing it at the data home
+ * is the honest choice. `root` here is a DIFFERENT value from `home`
+ * (the operating-system home directory, used only for
+ * `~/Library/LaunchAgents` and the daemon log path) — do not conflate
+ * the two.
  *
  * F1: `EnvironmentVariables.PATH` is equally load-bearing. launchd hands
  * an agent a bare `/usr/bin:/bin:/usr/sbin:/sbin`, and `claude` lives in
@@ -146,7 +154,9 @@ function defaultAutostartDeps(): AutostartDeps {
     platform: process.platform,
     home,
     uid: process.getuid?.(),
-    root: resolveHome(), // B2: WorkingDirectory, captured at enable time.
+    root: resolveHome(), // B2: WorkingDirectory is the resolved data home,
+    // captured at enable time — no longer the data anchor (every path now
+    // resolves through resolveHome()), just the least-surprising cwd.
     envPath: process.env.PATH ?? '', // F1: captured at enable time, same as root.
     nodeBin: process.execPath,
     cliEntry: fileURLToPath(new URL('../main.ts', import.meta.url)),

@@ -12,7 +12,7 @@ test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval, sets Worki
   const xml = renderAutostartPlist(
     '/usr/local/bin/node',
     '/repo/src/cli/main.ts',
-    '/repo',
+    '/Users/tester/.jobbunny',
     '/usr/local/bin:/usr/bin:/bin',
     HOME,
   );
@@ -21,9 +21,13 @@ test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval, sets Worki
   assert.match(xml, /<string>com\.jobbunny\.autostart<\/string>/);
   assert.match(xml, /<string>serve<\/string>/);
   assert.match(xml, /<string>start<\/string>/);
-  // B2: WorkingDirectory must be set, or launchd runs `serve start` with
-  // cwd `/` — wrong pidfile, wrong profilesDir, no .env loaded.
-  assert.match(xml, /<key>WorkingDirectory<\/key>\s*<string>\/repo<\/string>/);
+  // B2: WorkingDirectory must be set to the resolved data home, or launchd
+  // runs `serve start` with cwd `/` — wrong pidfile, wrong profilesDir, no
+  // .env loaded.
+  assert.match(
+    xml,
+    /<key>WorkingDirectory<\/key>\s*<string>\/Users\/tester\/\.jobbunny<\/string>/,
+  );
 });
 
 test('renderAutostartPlist: carries the enabling shell PATH in EnvironmentVariables (F1)', () => {
@@ -124,6 +128,27 @@ test('enable: writes the plist (with WorkingDirectory and PATH) and bootstraps i
   // renderer's own arguments.
   assert.match(plist, /<string>\/fake\/home\/\.local\/bin:\/usr\/bin:\/bin<\/string>/);
   assert.deepEqual(launchctlCalls[0], ['bootstrap', 'gui/501', PLIST_PATH]);
+});
+
+test('enable: the plist WorkingDirectory is the injected data home, not the process cwd', async () => {
+  const { deps, written } = fakeDeps({
+    root: '/Users/tester/.jobbunny',
+    home: '/Users/tester',
+  });
+  const code = await autostartCommand({ action: 'enable' }, deps);
+  assert.equal(code, 0);
+  const expectedPath = join(
+    '/Users/tester',
+    'Library',
+    'LaunchAgents',
+    'com.jobbunny.autostart.plist',
+  );
+  const plist = written.get(expectedPath);
+  assert.ok(plist);
+  assert.match(
+    plist,
+    /<key>WorkingDirectory<\/key>\s*<string>\/Users\/tester\/\.jobbunny<\/string>/,
+  );
 });
 
 test('enable: refuses when a legacy launchd plist is found, without writing the plist', async () => {
