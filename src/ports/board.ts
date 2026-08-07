@@ -32,6 +32,17 @@ export const SECRET_KEYS = ['NOTION_TOKEN', 'TELEGRAM_BOT_TOKEN'] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 export type SecretPresence = Record<SecretKey, 'present' | 'absent'>;
 
+/** The outcome of a guarded `removeProfile` call — see `BoardSource`'s own
+ * doc comment for the guard order. `run_in_progress`/`intent_pending`
+ * carry the blocking id so the UI can offer "view the run"/"cancel the
+ * queued run" instead of a dead end. */
+export type RemoveProfileOutcome =
+  | { outcome: 'removed' }
+  | { outcome: 'not_found' }
+  | { outcome: 'protected' }
+  | { outcome: 'run_in_progress'; runId: number }
+  | { outcome: 'intent_pending'; intentId: number };
+
 export interface BoardQuery {
   status?: string;
   excitement?: string;
@@ -144,18 +155,19 @@ export interface BoardStore {
  * home for it, `CLAUDE.md` carries the prose): **the board server binds
  * `127.0.0.1` and writes only the `tracking`, config, run-intent, and
  * secrets surfaces**. `jobs` and the runs tables stay pipeline/runner-only.
- * As of UI phase 1 Task 4 the board's full write surface is exactly
+ * As of UI phase 1 Task 8 the board's full write surface is exactly
  * `BoardStore.updateTracking` (tracking) + `writeConfigDoc` (config
  * tables, below) + `createProfile` (which itself only ever calls
  * `writeConfigDoc` under the hood, via `seedProfileDocs`) +
  * `openIntents`'s returned store (insert a `pending` run intent, cancel
  * one's own `pending` intent) + `writeSecret` (write-only, allowlisted
  * `SECRET_KEYS`, appends/replaces one line of the data home's `.env` —
- * never reads a value back) — nothing else, ever. `runDoctor` (Task 5) and
- * `readDaemonStatus` (Task 7) are READ-ONLY additions to this surface —
- * they compose existing checks / read the daemon's own pidfile and each
- * profile's schedule, never write a row, a file, or a doc, and never
- * start, stop, or signal anything. */
+ * never reads a value back) + `removeProfile` (guarded, irreversible
+ * deletion of `<root>/profiles/<name>/` — Task 8) — nothing else, ever.
+ * `runDoctor` (Task 5) and `readDaemonStatus` (Task 7) are READ-ONLY
+ * additions to this surface — they compose existing checks / read the
+ * daemon's own pidfile and each profile's schedule, never write a row, a
+ * file, or a doc, and never start, stop, or signal anything. */
 export interface BoardSource {
   listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
@@ -208,5 +220,11 @@ export interface BoardSource {
   /** Write-only. Appends or replaces `key`'s line in `<root>/.env`.
    * Never reads a value back out and never returns one. */
   writeSecret(key: SecretKey, value: string): Promise<void>;
+  /** Deletes `<root>/profiles/<name>/` and everything under it, after the
+   * guards in `RemoveProfileOutcome`. Mirrors the CLI's semantics: it
+   * refuses the protected fixture profile and never touches Notion.
+   * Irreversible — there is no dry-run mode on this method, because the
+   * UI's type-the-name confirmation dialog is the dry run. */
+  removeProfile(name: string): Promise<RemoveProfileOutcome>;
   close(): void;
 }

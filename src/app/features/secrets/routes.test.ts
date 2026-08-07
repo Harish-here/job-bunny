@@ -63,6 +63,7 @@ function fakeSource(presence: SecretPresence): BoardSource & {
     writeSecret: async (key, value) => {
       writeCalls.push({ key, value });
     },
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},

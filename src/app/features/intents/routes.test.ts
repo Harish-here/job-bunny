@@ -126,6 +126,7 @@ function fakeSource(opts: {
     },
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},

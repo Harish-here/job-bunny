@@ -66,7 +66,7 @@
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openJobsDb,
@@ -80,6 +80,7 @@ import {
   type BoardSource,
   type BoardStore,
   type DaemonStatus,
+  type RemoveProfileOutcome,
   SECRET_KEYS,
   type SecretKey,
   type SecretPresence,
@@ -91,7 +92,7 @@ import {
   defaultRunDegradedConfigChecks,
   wireFailureFinding,
 } from '../commands/doctor.ts';
-import { seedProfileDocs } from '../commands/profile.ts';
+import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
@@ -315,6 +316,61 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       // `.env` keeps whatever permissions the user gave it; this task
       // does not chmod files it did not create.
       await writeFile(path.join(root, '.env'), updated, { mode: 0o600 });
+    },
+
+    // Guard order is the design (Task 8) — membership, protected, running
+    // run, pending intent, handle release, delete. See the port's own doc
+    // comment for the rationale.
+    async removeProfile(name: string): Promise<RemoveProfileOutcome> {
+      // Gate 1 — membership, not path math: re-derived against the
+      // CURRENT directory names, same as every other traversal-sensitive
+      // method above. This is what makes an attacker-supplied name safe
+      // to use in a path below.
+      const infos = await listProfileInfos(root);
+      if (!infos.some((p) => p.name === name)) return { outcome: 'not_found' };
+
+      // Gate 2 — protected fixture profile, no I/O. Imported from the CLI
+      // command so the two can never disagree.
+      if (PROTECTED_PROFILES.has(name)) return { outcome: 'protected' };
+
+      // Gate 3 — a running run blocks; a crashed (stale-heartbeat) one
+      // does not, so one wedged run can never make a profile permanently
+      // undeletable.
+      const store = await this.openStore(name);
+      if (store) {
+        const { rows } = store.listRuns({ limit: 1, offset: 0 });
+        if (rows[0]?.status === 'running') {
+          return { outcome: 'run_in_progress', runId: rows[0].id };
+        }
+      }
+
+      // Gate 4 — a pending intent blocks; an expired one does not, so a
+      // dead daemon can never strand the profile.
+      const intents = await this.openIntents(name);
+      if (intents) {
+        const intent = intents.latest(new Date().toISOString());
+        if (intent?.status === 'pending') {
+          return { outcome: 'intent_pending', intentId: intent.id };
+        }
+      }
+
+      // Gate 5 — release memoized handles before deleting anything: an
+      // open sqlite handle makes the directory undeletable on Windows and
+      // leaves a stale handle pointing at a deleted file everywhere else.
+      const openBoardStore = stores.get(name);
+      if (openBoardStore) {
+        openBoardStore.close();
+        stores.delete(name);
+      }
+      const openIntentStore = intentStores.get(name);
+      if (openIntentStore) {
+        openIntentStore.close();
+        intentStores.delete(name);
+      }
+
+      // Gate 6 — delete. Never touches Notion or the network.
+      await rm(path.join(root, 'profiles', name), { recursive: true, force: true });
+      return { outcome: 'removed' };
     },
 
     close(): void {

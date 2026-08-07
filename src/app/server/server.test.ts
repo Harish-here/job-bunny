@@ -146,6 +146,7 @@ function fakeSource(
     intents?: RunIntentStore | null;
     runDoctor?: BoardSource['runDoctor'];
     readDaemonStatus?: BoardSource['readDaemonStatus'];
+    removeProfile?: BoardSource['removeProfile'];
   } = {},
 ): BoardSource {
   const {
@@ -154,6 +155,7 @@ function fakeSource(
     intents = null,
     runDoctor = async () => null,
     readDaemonStatus = async () => FAKE_DAEMON_STATUS,
+    removeProfile = async () => ({ outcome: 'removed' }),
   } = opts;
   return {
     listProfiles: async () => PROFILES,
@@ -164,6 +166,7 @@ function fakeSource(
     openIntents: async () => intents,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile,
     runDoctor,
     readDaemonStatus,
     close() {
@@ -197,6 +200,21 @@ test('GET /api/profiles returns the source data', async () => {
       profiles: [{ name: 'p1', connector: 'sqlite', hasDb: true }],
     });
     assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  });
+});
+
+test('DELETE /api/profiles/:name removes the profile', async () => {
+  const server = createBoardServer({
+    source: fakeSource({ removeProfile: async () => ({ outcome: 'removed' }) }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { removed: true, name: 'p1' });
   });
 });
 
@@ -348,6 +366,7 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
@@ -388,6 +407,7 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
@@ -457,6 +477,7 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
@@ -606,6 +627,7 @@ test('PUT then GET /api/secrets round-trips presence without echoing the value',
     writeSecret: async (key, value) => {
       written.set(key, value);
     },
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
@@ -646,6 +668,7 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {

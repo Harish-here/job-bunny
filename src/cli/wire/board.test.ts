@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, describe, test } from 'node:test';
 import { wireBoard } from './board.ts';
 
@@ -17,6 +18,24 @@ function writeProfile(name: string, contents: unknown): void {
     path.join(profileDir(name), 'profile.json'),
     typeof contents === 'string' ? contents : JSON.stringify(contents),
   );
+}
+
+// `removeProfile`'s "running"/"crashed" tests seed a raw `runs` row. This
+// file may not import `src/adapters/**` directly (no test-file exemption
+// from `only-wire-imports-adapters` — only `board.ts` itself is carved
+// out, same posture as `daemon.test.ts`), so seeding goes through
+// `node:sqlite` (a node builtin) directly against an already-migrated db
+// file — see each test's own setup for how migration is triggered first.
+function insertRunRow(dbPath: string, status: string, heartbeatAt: string): number {
+  const db = new DatabaseSync(dbPath);
+  const result = db
+    .prepare(
+      `INSERT INTO runs (run_date, time_dir, kind, status, started_at, heartbeat_at)
+       VALUES ('2026-08-07', '10-00', 'run', ?, '2026-08-07T10:00:00.000Z', ?)`,
+    )
+    .run(status, heartbeatAt);
+  db.close();
+  return Number(result.lastInsertRowid);
 }
 
 before(() => {
@@ -282,6 +301,96 @@ describe('wireBoard — createProfile', () => {
       /invalid profile name: Bad Name!/,
     );
     assert.equal(existsSync(profileDir('Bad Name!')), false);
+    source.close();
+  });
+});
+
+describe('wireBoard — removeProfile', () => {
+  test('an unknown name is not_found and no directory is touched', async () => {
+    const source = wireBoard({ root });
+    const outcome = await source.removeProfile('does-not-exist-remove');
+    assert.deepEqual(outcome, { outcome: 'not_found' });
+    assert.equal(existsSync(profileDir('does-not-exist-remove')), false);
+    source.close();
+  });
+
+  test('rajni is protected', async () => {
+    writeProfile('rajni', { connector: 'sqlite' });
+    const source = wireBoard({ root });
+    const outcome = await source.removeProfile('rajni');
+    assert.deepEqual(outcome, { outcome: 'protected' });
+    assert.equal(existsSync(profileDir('rajni')), true);
+    source.close();
+  });
+
+  test("a profile whose newest run is 'running' is run_in_progress with that run's id", async () => {
+    writeProfile('running-profile', { connector: 'sqlite' });
+    const dbPath = path.join(profileDir('running-profile'), 'data', 'jobbunny.db');
+    mkdirSync(path.dirname(dbPath), { recursive: true });
+    writeFileSync(dbPath, ''); // valid, unmigrated empty sqlite db.
+
+    const migrateSource = wireBoard({ root });
+    await migrateSource.openStore('running-profile'); // applies real migrations.
+    migrateSource.close();
+
+    const runId = insertRunRow(dbPath, 'running', new Date().toISOString());
+
+    const source = wireBoard({ root });
+    const outcome = await source.removeProfile('running-profile');
+    assert.deepEqual(outcome, { outcome: 'run_in_progress', runId });
+    assert.equal(existsSync(profileDir('running-profile')), true);
+    source.close();
+  });
+
+  test("a profile whose newest run is 'crashed' is NOT blocked and gets removed", async () => {
+    writeProfile('crashed-profile', { connector: 'sqlite' });
+    const dbPath = path.join(profileDir('crashed-profile'), 'data', 'jobbunny.db');
+    mkdirSync(path.dirname(dbPath), { recursive: true });
+    writeFileSync(dbPath, '');
+
+    const migrateSource = wireBoard({ root });
+    await migrateSource.openStore('crashed-profile');
+    migrateSource.close();
+
+    // A stale heartbeat (far older than RUN_HEARTBEAT_STALE_MS) derives
+    // 'crashed' on read, even though the stored column is still 'running'.
+    insertRunRow(dbPath, 'running', '2020-01-01T00:00:00.000Z');
+
+    const source = wireBoard({ root });
+    const outcome = await source.removeProfile('crashed-profile');
+    assert.deepEqual(outcome, { outcome: 'removed' });
+    assert.equal(existsSync(profileDir('crashed-profile')), false);
+    const remaining = await source.listProfiles();
+    assert.ok(!remaining.some((p) => p.name === 'crashed-profile'));
+    source.close();
+  });
+
+  test('a profile with a fresh pending intent is intent_pending', async () => {
+    writeProfile('pending-profile', { connector: 'sqlite' });
+    const source = wireBoard({ root });
+    const intents = await source.openIntents('pending-profile');
+    assert.ok(intents);
+    const { intent } = intents.request(new Date().toISOString());
+
+    const outcome = await source.removeProfile('pending-profile');
+    assert.deepEqual(outcome, { outcome: 'intent_pending', intentId: intent.id });
+    assert.equal(existsSync(profileDir('pending-profile')), true);
+    source.close();
+  });
+
+  test('a profile whose only intent is expired is NOT blocked and gets removed', async () => {
+    writeProfile('expired-profile', { connector: 'sqlite' });
+    const source = wireBoard({ root });
+    const intents = await source.openIntents('expired-profile');
+    assert.ok(intents);
+    // Far older than INTENT_EXPIRY_MS (10 minutes) — derives 'expired' on read.
+    intents.request('2020-01-01T00:00:00.000Z');
+
+    const outcome = await source.removeProfile('expired-profile');
+    assert.deepEqual(outcome, { outcome: 'removed' });
+    assert.equal(existsSync(profileDir('expired-profile')), false);
+    const remaining = await source.listProfiles();
+    assert.ok(!remaining.some((p) => p.name === 'expired-profile'));
     source.close();
   });
 });

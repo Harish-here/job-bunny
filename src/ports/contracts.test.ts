@@ -226,6 +226,7 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     readDaemonStatus: async () => ({
       state: 'stopped',

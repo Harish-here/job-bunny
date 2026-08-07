@@ -235,8 +235,11 @@ function defaultRemoveDeps(): ProfileRemoveDeps {
 }
 
 // The committed fixture profile used by /verify — never removable via
-// this command (mirrors v0 remove_profile.js's guard).
-const PROTECTED_PROFILES = new Set(['rajni']);
+// this command (mirrors v0 remove_profile.js's guard). Exported so
+// `cli/wire/board.ts`'s `removeProfile` guard imports this SAME set rather
+// than re-declaring it — the CLI and the board must never disagree about
+// which profiles are protected.
+export const PROTECTED_PROFILES = new Set(['rajni']);
 
 export async function profileRemoveCommand(
   opts: ProfileRemoveOptions,
