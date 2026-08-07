@@ -5,6 +5,7 @@
  * exercised here.
  */
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { USAGE } from './args.ts';
 import { type CommandFn, defaultCheckHome, HOME_EXEMPT_COMMANDS, main } from './main.ts';
@@ -613,17 +614,19 @@ test('defaultCheckHome: HOME_EXEMPT_COMMANDS names exactly setup, migrate-home, 
 });
 
 test('defaultCheckHome: a non-exempt command against a non-existent home returns the exact frozen message', () => {
+  const home = resolve('/nope/.jobbunny');
   const detail = defaultCheckHome('doctor', {
     env: { JOBBUNNY_HOME: '/nope/.jobbunny' },
     existsSyncFn: () => false,
   });
-  assert.equal(detail, "no jobbunny home at /nope/.jobbunny — run 'jobbunny setup'");
+  assert.equal(detail, `no jobbunny home at ${home} — run 'jobbunny setup'`);
 });
 
 test('defaultCheckHome: a non-exempt command against an EXISTING home returns undefined', () => {
+  const home = resolve('/exists/.jobbunny');
   const detail = defaultCheckHome('doctor', {
     env: { JOBBUNNY_HOME: '/exists/.jobbunny' },
-    existsSyncFn: (p) => p === '/exists/.jobbunny',
+    existsSyncFn: (p) => p === home,
   });
   assert.equal(detail, undefined);
 });

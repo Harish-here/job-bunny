@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { resolveHome } from './resolve.ts';
 
 test('resolveHome: an absolute JOBBUNNY_HOME is returned unchanged', () => {
   assert.equal(
     resolveHome({ JOBBUNNY_HOME: '/srv/jb' }, () => '/Users/x'),
-    '/srv/jb',
+    resolve('/srv/jb'),
   );
 });
 
@@ -40,5 +40,5 @@ test('resolveHome: a whitespace-only JOBBUNNY_HOME is treated as unset', () => {
 
 test('resolveHome: the injected homedir is the only source of the default (no real os.homedir call)', () => {
   const result = resolveHome({}, () => '/fake/home');
-  assert.ok(result.startsWith('/fake/home'));
+  assert.equal(result, join('/fake/home', '.jobbunny'));
 });
