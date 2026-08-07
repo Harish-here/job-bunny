@@ -38,7 +38,13 @@ export function JobPage({ profile, id }: { profile: string; id: string }) {
   return (
     <div className="flex h-screen flex-col">
       <div className="border-b p-3">
-        <Button type="button" variant="ghost" size="sm" onClick={() => goBack(id)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hop"
+          onClick={() => goBack(id)}
+        >
           <ArrowLeft className="size-4" /> Back
         </Button>
       </div>
@@ -55,7 +61,7 @@ export function JobPage({ profile, id }: { profile: string; id: string }) {
           <div className="text-muted-foreground">Couldn't load this job.</div>
         ) : (
           <div className="grid grid-cols-[1fr_360px] gap-6">
-            <div className="flex flex-col gap-4">
+            <div className="flex w-full max-w-[72ch] flex-col gap-4">
               <JobHeader job={jobQuery.data} />
               <JdText jd={jobQuery.data.jd} />
             </div>

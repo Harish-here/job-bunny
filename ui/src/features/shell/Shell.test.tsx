@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardProfile } from '../../lib/api/types';
 import { Shell } from './Shell';
+import { resetSidebarCollapsedForTests } from './useSidebarCollapsed';
 
 beforeAll(() => {
   // radix Select (inside TriagePage's FilterPopover) needs these in jsdom.
@@ -79,10 +80,12 @@ function renderShell() {
 
 beforeEach(() => {
   window.location.hash = '';
+  localStorage.clear();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetSidebarCollapsedForTests();
 });
 
 describe('Shell', () => {
@@ -91,7 +94,7 @@ describe('Shell', () => {
     renderShell();
 
     await waitFor(() => {
-      expect(screen.getByText('Job Bunny')).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'JOB BUNNY' })).toBeInTheDocument();
     });
 
     expect(screen.getByAltText('Job Bunny')).toBeInTheDocument();
@@ -131,7 +134,7 @@ describe('Shell', () => {
     await userEvent.click(retryButton);
 
     await waitFor(() => {
-      expect(screen.getByText('Job Bunny')).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'JOB BUNNY' })).toBeInTheDocument();
     });
     expect(await screen.findByPlaceholderText('Search company…')).toBeInTheDocument();
   });
@@ -142,5 +145,27 @@ describe('Shell', () => {
     renderShell();
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  it('collapses to the rail and remembers it', async () => {
+    stubFetch({});
+    renderShell();
+
+    const toggle = await screen.findByRole('button', { name: 'Toggle sidebar' });
+    await userEvent.click(toggle);
+
+    expect(screen.getByTestId('sidebar')).toHaveAttribute('data-collapsed', 'true');
+    expect(localStorage.getItem('jobbunny.sidebar')).toBe('collapsed');
+
+    for (const label of [
+      'Triage',
+      'Tracker',
+      'Runs',
+      'Analytics',
+      'Onboarding',
+      'Settings',
+    ]) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
   });
 });

@@ -36,7 +36,7 @@ function ConfigDocEditor({ profile, doc }: { profile: string; doc: ConfigDocName
   }, [profile, doc, query.isSuccess]);
 
   return (
-    <section className="flex flex-col gap-2 rounded-lg border p-4">
+    <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between">
         <h2 className="font-mono text-sm font-medium">{doc}</h2>
         {mutation.isPending && (
@@ -81,7 +81,7 @@ function ConfigDocEditor({ profile, doc }: { profile: string; doc: ConfigDocName
 export function SettingsPage({ profile }: { profile: string }) {
   return (
     <div className="flex flex-col gap-4 p-6">
-      <h1 className="text-sm font-medium">Settings</h1>
+      <h1 className="text-lg font-semibold font-heading">Settings</h1>
       {DOCS.map((doc) => (
         <ConfigDocEditor key={doc} profile={profile} doc={doc} />
       ))}

@@ -1,4 +1,3 @@
-import { Badge } from '../../components/ui/badge';
 import type { BoardJobRow } from '../../lib/api/types';
 
 /**
@@ -21,12 +20,12 @@ export function DueStrip({
         <button
           key={row.id}
           type="button"
-          className="shrink-0"
+          className="shrink-0 hop"
           onClick={() => onFocusCard(row.id)}
         >
-          <Badge variant="destructive">
+          <span className="inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl bg-attention px-2 py-0.5 text-xs font-medium whitespace-nowrap text-attention-foreground">
             ⚡ {row.company} — {row.tracking?.nextAction} ({row.tracking?.nextActionDate})
-          </Badge>
+          </span>
         </button>
       ))}
     </div>

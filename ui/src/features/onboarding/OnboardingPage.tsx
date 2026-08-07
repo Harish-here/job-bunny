@@ -36,34 +36,40 @@ export function OnboardingPage() {
   const canSubmit = trimmed !== '' && isValid && !mutation.isPending;
 
   return (
-    <div className="flex max-w-md flex-col gap-4 p-6">
-      <h1 className="text-sm font-medium">Create profile</h1>
-      <p className="text-sm text-muted-foreground">
-        Creates a new local profile with empty config-doc templates you can fill in on the
-        Settings page. For guided onboarding (secrets, resume parsing, Notion setup), run
-        the /setup wizard in Claude Code instead.
-      </p>
-      <form
-        className="flex flex-col gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (canSubmit) mutation.mutate(trimmed);
-        }}
-      >
-        <span className="text-xs text-muted-foreground">Name</span>
-        <Input aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        {trimmed !== '' && !isValid && (
-          <span className="text-xs text-destructive">
-            Use lowercase letters, digits, underscores, and hyphens only.
-          </span>
+    <div className="flex flex-col items-center p-6">
+      <div className="flex w-full max-w-xl flex-col gap-4">
+        <h1 className="text-lg font-semibold font-heading">Create profile</h1>
+        <p className="text-sm text-muted-foreground">
+          Creates a new local profile with empty config-doc templates you can fill in on
+          the Settings page. For guided onboarding (secrets, resume parsing, Notion
+          setup), run the /setup wizard in Claude Code instead.
+        </p>
+        <form
+          className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSubmit) mutation.mutate(trimmed);
+          }}
+        >
+          <span className="text-xs text-muted-foreground">Name</span>
+          <Input
+            aria-label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {trimmed !== '' && !isValid && (
+            <span className="text-xs text-destructive">
+              Use lowercase letters, digits, underscores, and hyphens only.
+            </span>
+          )}
+          <Button type="submit" disabled={!canSubmit} className="self-start">
+            Create
+          </Button>
+        </form>
+        {mutation.isError && (
+          <span className="text-sm text-destructive">{mutation.error.message}</span>
         )}
-        <Button type="submit" disabled={!canSubmit} className="self-start">
-          Create
-        </Button>
-      </form>
-      {mutation.isError && (
-        <span className="text-sm text-destructive">{mutation.error.message}</span>
-      )}
+      </div>
     </div>
   );
 }

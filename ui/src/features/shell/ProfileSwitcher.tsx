@@ -10,16 +10,27 @@ import type { BoardProfile } from '../../lib/api/types';
 export function ProfileSwitcher({
   profile,
   profiles,
+  collapsed,
   onChoose,
 }: {
   profile: string | null;
   profiles: BoardProfile[];
+  collapsed?: boolean;
   onChoose: (name: string) => void;
 }) {
   return (
     <Select value={profile ?? undefined} onValueChange={onChoose}>
-      <SelectTrigger className="w-full" aria-label="Profile">
-        <SelectValue placeholder="Select profile" />
+      <SelectTrigger
+        className={collapsed ? 'size-8 justify-center gap-0 p-0' : 'w-full'}
+        aria-label="Profile"
+      >
+        {collapsed ? (
+          <span className="text-sm font-semibold">
+            {profile?.[0]?.toUpperCase() ?? '?'}
+          </span>
+        ) : (
+          <SelectValue placeholder="Select profile" />
+        )}
       </SelectTrigger>
       <SelectContent>
         {profiles.map((p) => (

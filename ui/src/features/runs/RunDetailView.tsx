@@ -35,7 +35,7 @@ function FunnelTable({ run }: { run: RunDetail }) {
         {stages.map((stage) => (
           <tr key={stage.name} className="border-b last:border-b-0">
             <td className="py-1.5 pr-2 font-medium">{stage.name}</td>
-            <td className="py-1.5 pr-2 whitespace-nowrap text-muted-foreground">
+            <td className="py-1.5 pr-2 whitespace-nowrap font-heading text-muted-foreground">
               {stage.jobsIn} → {stage.jobsOut}
             </td>
             <td className="py-1.5">
@@ -93,7 +93,7 @@ function EventsList({ events }: { events: RunEventRow[] }) {
               data-level={event.level}
               className="flex items-start gap-2 border-b py-1 text-sm last:border-b-0"
             >
-              <span className="w-40 shrink-0 text-xs text-muted-foreground">
+              <span className="w-40 shrink-0 font-mono text-xs text-muted-foreground">
                 {event.ts}
               </span>
               <Badge variant="outline" className="shrink-0 uppercase">
@@ -122,7 +122,7 @@ export function RunDetailView({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">{formatWhen(run)}</h2>
+          <h2 className="text-lg font-semibold font-heading">{formatWhen(run)}</h2>
           <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
         </div>
         <div className="text-sm text-muted-foreground">

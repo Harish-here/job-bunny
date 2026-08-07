@@ -118,7 +118,9 @@ export function TriagePage({ profile }: { profile: string }) {
       <section className="flex flex-col overflow-y-auto border-r">
         <div className="flex flex-col gap-2 border-b p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium">{undecidedCount} undecided</span>
+            <span className="text-sm font-medium text-attention-strong">
+              {undecidedCount} undecided
+            </span>
             <FilterPopover
               query={query}
               statusOptions={metaQuery.data?.statusOptions ?? []}
@@ -138,6 +140,7 @@ export function TriagePage({ profile }: { profile: string }) {
               type="button"
               variant={query.sort === 'score' ? 'ghost' : 'secondary'}
               size="sm"
+              className="hop"
               onClick={() => toggleSort('date_found')}
             >
               Date {query.sort !== 'score' && (query.order === 'asc' ? '↑' : '↓')}
@@ -146,6 +149,7 @@ export function TriagePage({ profile }: { profile: string }) {
               type="button"
               variant={query.sort === 'score' ? 'secondary' : 'ghost'}
               size="sm"
+              className="hop"
               onClick={() => toggleSort('score')}
             >
               Score {query.sort === 'score' && (query.order === 'asc' ? '↑' : '↓')}
@@ -181,6 +185,7 @@ export function TriagePage({ profile }: { profile: string }) {
               type="button"
               variant="ghost"
               size="sm"
+              className="hop"
               disabled={offset === 0}
               onClick={() => setOffset(Math.max(offset - limit, 0))}
             >
@@ -193,6 +198,7 @@ export function TriagePage({ profile }: { profile: string }) {
               type="button"
               variant="ghost"
               size="sm"
+              className="hop"
               disabled={offset + limit >= total}
               onClick={() => setOffset(offset + limit)}
             >

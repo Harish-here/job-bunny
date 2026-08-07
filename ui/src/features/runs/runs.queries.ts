@@ -13,6 +13,7 @@ export const runsQuery = (p: string) =>
   queryOptions({
     queryKey: runsKeys.list(p),
     queryFn: () => listRuns(p, { limit: 100 }),
+    enabled: p !== '',
   });
 
 export const runQuery = (p: string, id: number) =>
