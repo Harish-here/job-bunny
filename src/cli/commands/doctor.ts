@@ -22,6 +22,7 @@ import {
   sqlitePathRetiredCheck,
 } from '../../ops/doctor/config_checks.ts';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
+import { resolveHome } from '../home/index.ts';
 import {
   wire as defaultWire,
   type WireOverrides,
@@ -54,7 +55,11 @@ async function defaultRunDegradedConfigChecks(
 ): Promise<DoctorFinding[]> {
   const store = wireConfigStore(profileName, { liftMode: 'readonly' });
   try {
-    const opts: CoreCheckOpts = { profileName, readDoc: (key) => store.readText(key) };
+    const opts: CoreCheckOpts = {
+      profileName,
+      root: resolveHome(),
+      readDoc: (key) => store.readText(key),
+    };
     const checks: DoctorCheck[] = [
       profileParsesCheck(opts),
       filterParsesCheck(opts),

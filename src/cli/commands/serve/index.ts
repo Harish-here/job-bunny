@@ -38,6 +38,7 @@ import {
   type LogDeps,
 } from '../../../ops/daemon/logs/index.ts';
 import { defaultScanDeps, type ScanDeps } from '../../../ops/daemon/scan/index.ts';
+import { resolveHome } from '../../home/index.ts';
 import { wireDaemonRunHistory, wireDaemonScheduleConfig } from '../../wire/index.ts';
 import { runServeStop } from './lifecycle.ts';
 import { runServeStartChild, runServeStartParent } from './start.ts';
@@ -105,7 +106,7 @@ export interface ServeCommandOptions {
 }
 
 function defaultServeDeps(): ServeDeps {
-  const root = process.cwd();
+  const root = resolveHome();
   const home = homedir();
   // B3: built once, then reused for BOTH `pidfile.pidIsAlive` (the
   // staleness probe `isDaemonPidfileStale` actually consults) and the

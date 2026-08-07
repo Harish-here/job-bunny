@@ -61,6 +61,7 @@ import type { StateStore } from '../../ports/state_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
+import { resolveHome } from '../home/index.ts';
 import type { AdapterRegistry } from './registry.ts';
 import {
   resolveInterUrlDelayRange,
@@ -120,7 +121,7 @@ export function wireConfigStore(
   profileName: string,
   overrides: WireConfigStoreOverrides = {},
 ): ConfigStore {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   const dbPath = canonicalDbPath(root, profileName);
   const profileRoot = path.join(root, 'profiles', profileName);
   return new SqliteConfigStore(dbPath, profileRoot, {

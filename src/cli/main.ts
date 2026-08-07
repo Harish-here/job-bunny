@@ -18,19 +18,23 @@
  * ever touches `process.exitCode`, so `main` itself is safe to call from a
  * test without side effects on the real process.
  *
- * `dotenv/config` is imported FIRST, for its side effect only: `NOTION_TOKEN`
- * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and a daemon-spawned
- * scheduled run (`ops/daemon/supervise`) inherits a minimal environment that
- * does not include them. Without this
- * a scheduled run would wire a throwing-stub connector, die at sync, and then
- * fail to send the digest that would have reported it — a silent daily
- * failure. v0 does the same thing per entry point (`scripts/notion/client.js`,
- * `scripts/notify/notify.js`); v2 has one bin, so it loads here and only here.
+ * `dotenv.config({ path: join(resolveHome(), '.env') })` runs inside the
+ * `isMain()` bin guard at the bottom (not at module top level — see that
+ * guard's own comment for why), loading `.env` from the resolved data home
+ * rather than a cwd-relative `./.env`: `NOTION_TOKEN` and
+ * `TELEGRAM_BOT_TOKEN` live there, and a daemon-spawned scheduled run
+ * (`ops/daemon/supervise`) inherits a minimal environment that does not
+ * include them. Without this a scheduled run would wire a throwing-stub
+ * connector, die at sync, and then fail to send the digest that would have
+ * reported it — a silent daily failure. v0 does the same thing per entry
+ * point (`scripts/notion/client.js`, `scripts/notify/notify.js`); v2 has one
+ * bin, so it loads here and only here.
  */
-import 'dotenv/config';
 import { realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import dotenv from 'dotenv';
 import {
   defaultDaemonPidfileDeps,
   HEARTBEAT_STALE_MS,
@@ -60,6 +64,7 @@ import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 import { type StateCommandOptions, stateCommand } from './commands/state.ts';
+import { resolveHome } from './home/index.ts';
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
 
@@ -88,7 +93,7 @@ export interface MainDeps {
 
 function defaultCheckDaemonLiveness(): string | undefined {
   const pidfileDeps = defaultDaemonPidfileDeps();
-  const file = readDaemonPidfile(process.cwd(), pidfileDeps);
+  const file = readDaemonPidfile(resolveHome(), pidfileDeps);
   if (!file) return undefined; // absent or unparseable — both silent.
   if (!pidfileDeps.pidIsAlive(file.pid)) {
     return (
@@ -231,6 +236,7 @@ function isMain(): boolean {
 }
 
 if (isMain()) {
+  dotenv.config({ path: join(resolveHome(), '.env') });
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   });

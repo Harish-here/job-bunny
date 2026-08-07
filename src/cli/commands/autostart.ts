@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { daemonLogPath } from '../../ops/daemon/logs/index.ts';
+import { resolveHome } from '../home/index.ts';
 import { LEGACY_PLIST_REGEX, migrationCleanupBlock } from './serve/index.ts';
 
 const execFileAsync = promisify(execFile);
@@ -145,7 +146,7 @@ function defaultAutostartDeps(): AutostartDeps {
     platform: process.platform,
     home,
     uid: process.getuid?.(),
-    root: process.cwd(), // B2: WorkingDirectory, captured at enable time.
+    root: resolveHome(), // B2: WorkingDirectory, captured at enable time.
     envPath: process.env.PATH ?? '', // F1: captured at enable time, same as root.
     nodeBin: process.execPath,
     cliEntry: fileURLToPath(new URL('../main.ts', import.meta.url)),

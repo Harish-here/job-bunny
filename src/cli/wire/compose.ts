@@ -61,6 +61,7 @@ import {
 import type { ConfigStore } from '../../ports/config_store.ts';
 import type { DoctorCheck } from '../../ports/doctor.ts';
 import type { Routine } from '../../routines/types.ts';
+import { resolveHome } from '../home/index.ts';
 import {
   assertSqlitePathRetired,
   buildConnector,
@@ -128,7 +129,7 @@ export async function wire(
   profileName: string,
   overrides: WireOverrides = {},
 ): Promise<WireResult> {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   const dbPath = canonicalDbPath(root, profileName);
   const profileRoot = path.join(root, 'profiles', profileName);
   const ownsConfigStore = overrides.configStore === undefined;
@@ -156,7 +157,7 @@ async function wireWithConfigStore(
   overrides: WireOverrides,
   configStore: ConfigStore,
 ): Promise<WireResult> {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   const dbPath = canonicalDbPath(root, profileName);
 
   const config = await loadPipelineConfig(profileName, { configStore });

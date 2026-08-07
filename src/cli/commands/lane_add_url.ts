@@ -21,6 +21,7 @@ import { constants } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { ConfigStore } from '../../ports/config_store.ts';
+import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
 
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
@@ -62,7 +63,7 @@ export interface LaneAddUrlDeps {
  * overrides — same posture as `config.ts`/`setup.ts`). */
 function defaultFsDeps(): Omit<LaneAddUrlDeps, 'configStore'> {
   return {
-    root: process.cwd(),
+    root: resolveHome(),
     exists: (p) =>
       access(p, constants.F_OK)
         .then(() => true)

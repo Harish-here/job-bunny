@@ -20,6 +20,7 @@ import { constants } from 'node:fs';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ConfigStore } from '../../ports/config_store.ts';
+import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
 
 export type ConfigDocName =
@@ -89,7 +90,7 @@ function defaultFsDeps(): Omit<ConfigDeps, 'configStore'> {
     },
     write: (line: string) => console.log(line),
     stderr: (line: string) => console.error(line),
-    root: process.cwd(),
+    root: resolveHome(),
     exists: async (p: string) => {
       try {
         await access(p, constants.F_OK);

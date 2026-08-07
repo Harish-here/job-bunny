@@ -45,11 +45,14 @@ const execFileAsync = promisify(execFile);
  * or ownership distinction; `CoreCheckOpts.readLegacyFile` is still
  * declared in `config_checks.ts`, this file only consumes it.
  *
- * `root`/`env`/`readFile` are injected (default to `process.cwd()`,
- * `process.env`, `node:fs/promises` `readFile` utf8) so tests hit no real
- * disk or environment. Every `run()` here never throws — failures are
- * caught and turned into a `red` finding — matching the `DoctorCheck`
- * contract in `ports/doctor.ts`.
+ * `root`/`env`/`readFile` are injected (every CLI caller supplies `root`
+ * explicitly as the resolved data home — `cli/wire/compose.ts`'s
+ * `coreChecks({ profileName, root, ... })` — `config_checks.ts`'s own
+ * cwd-based fallback is unreachable from the CLI; `env` defaults to
+ * `process.env`, `readFile` to `node:fs/promises` `readFile` utf8) so tests
+ * hit no real disk or environment. Every `run()` here never throws —
+ * failures are caught and turned into a `red` finding — matching the
+ * `DoctorCheck` contract in `ports/doctor.ts`.
  *
  * Boundary: this file is `src/ops/**` and must only import from
  * `core/`, `ports/`, `pipeline/`, `routines/` (enforced by
