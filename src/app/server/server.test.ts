@@ -143,6 +143,8 @@ function fakeSource(
     writeConfigDoc: async () => {},
     createProfile: async () => {},
     openIntents: async () => intents,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {
       if (closed) closed.value = true;
     },
@@ -306,6 +308,8 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
     },
     createProfile: async () => {},
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {},
   };
   const server = createBoardServer({
@@ -342,6 +346,8 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
       createCalls.push(name);
     },
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {},
   };
   const server = createBoardServer({
@@ -407,6 +413,8 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     writeConfigDoc: async () => {},
     createProfile: async () => {},
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {},
   };
   const server = createBoardServer({
@@ -538,6 +546,48 @@ test('a real ZodError leaking from a route handler is converted to 400 validatio
   });
 });
 
+test('PUT then GET /api/secrets round-trips presence without echoing the value', async () => {
+  const written = new Map<string, string>();
+  const source: BoardSource = {
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({
+      NOTION_TOKEN: written.has('NOTION_TOKEN') ? 'present' : 'absent',
+      TELEGRAM_BOT_TOKEN: written.has('TELEGRAM_BOT_TOKEN') ? 'present' : 'absent',
+    }),
+    writeSecret: async (key, value) => {
+      written.set(key, value);
+    },
+    close() {},
+  };
+  const server = createBoardServer({
+    source,
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const putRes = await fetch(`http://127.0.0.1:${port}/api/secrets/NOTION_TOKEN`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'tok-123-secret' }),
+    });
+    assert.equal(putRes.status, 200);
+    const putText = await putRes.text();
+    assert.ok(!putText.includes('tok-123-secret'));
+    assert.deepEqual(JSON.parse(putText), { key: 'NOTION_TOKEN', status: 'present' });
+
+    const getRes = await fetch(`http://127.0.0.1:${port}/api/secrets`);
+    assert.equal(getRes.status, 200);
+    const body = (await getRes.json()) as Record<string, string>;
+    assert.equal(body.NOTION_TOKEN, 'present');
+    assert.equal(body.TELEGRAM_BOT_TOKEN, 'absent');
+  });
+});
+
 test('close() still calls source.close() when httpServer.close() rejects', async () => {
   const closed = { value: false };
   let closeCallCount = 0;
@@ -548,6 +598,8 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     writeConfigDoc: async () => {},
     createProfile: async () => {},
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {
       closeCallCount += 1;
       closed.value = true;

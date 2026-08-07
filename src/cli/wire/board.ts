@@ -66,14 +66,22 @@
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openJobsDb,
   SqliteBoardStore,
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
-import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
+import { hasEnvValue, upsertEnvLine } from '../../core/env_file/index.ts';
+import {
+  type BoardProfile,
+  type BoardSource,
+  type BoardStore,
+  SECRET_KEYS,
+  type SecretKey,
+  type SecretPresence,
+} from '../../ports/board.ts';
 import type { ConfigDocKey } from '../../ports/config_store.ts';
 import type { RunIntentStore } from '../../ports/run_intents.ts';
 import { seedProfileDocs } from '../commands/profile.ts';
@@ -96,6 +104,18 @@ interface ProfileInfo extends BoardProfile {
  * `connector` (config→db Phase 4 — `settings.sqlite.path` is retired). */
 function resolveDbPath(root: string, name: string): string {
   return canonicalDbPath(root, name);
+}
+
+/** `<root>/.env`'s current text, UTF-8. A missing file (ENOENT) reads as
+ * the empty string, not an error — same tolerant posture as every other
+ * "file may not exist yet" read in this module. */
+async function readEnvText(root: string): Promise<string> {
+  try {
+    return await readFile(path.join(root, '.env'), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw err;
+  }
 }
 
 /** Reads `profile.json`'s `connector` field through a short-lived,
@@ -247,6 +267,22 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       const store = new SqliteRunIntentStore(info.dbPath);
       intentStores.set(name, store);
       return store;
+    },
+
+    async listSecrets(): Promise<SecretPresence> {
+      const text = await readEnvText(root);
+      return Object.fromEntries(
+        SECRET_KEYS.map((key) => [key, hasEnvValue(text, key) ? 'present' : 'absent']),
+      ) as SecretPresence;
+    },
+
+    async writeSecret(key: SecretKey, value: string): Promise<void> {
+      const text = await readEnvText(root);
+      const updated = upsertEnvLine(text, key, value);
+      // `mode` only applies when the file is created — an existing
+      // `.env` keeps whatever permissions the user gave it; this task
+      // does not chmod files it did not create.
+      await writeFile(path.join(root, '.env'), updated, { mode: 0o600 });
     },
 
     close(): void {

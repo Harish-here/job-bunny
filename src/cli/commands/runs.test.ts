@@ -41,6 +41,8 @@ function fakeSource(store: BoardStore | null): BoardSource & { closed: boolean }
     writeConfigDoc: async () => {},
     createProfile: async () => {},
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close: () => {
       state.closed = true;
     },

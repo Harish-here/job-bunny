@@ -24,6 +24,7 @@ import { makeConfigRoutes } from '../features/config/index.ts';
 import { makeIntentRoutes } from '../features/intents/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
 import { makeRunsRoutes } from '../features/runs/index.ts';
+import { makeSecretsRoutes } from '../features/secrets/index.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../shared/index.ts';
 import { HttpError, jsonError, matchRoute, readJsonBody } from '../shared/index.ts';
 import { serveStatic } from './static.ts';
@@ -56,6 +57,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
     ...makeBoardRoutes(source),
     ...makeRunsRoutes(source),
     ...makeIntentRoutes(source),
+    ...makeSecretsRoutes(source),
     ...makeConfigRoutes(source),
     ...makeAppInfoRoutes(version),
   ];

@@ -65,6 +65,8 @@ function fakeSource(opts: FakeSourceOptions = {}): BoardSource & {
       if (opts.createThrows) throw opts.createThrows;
     },
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {},
   };
 }

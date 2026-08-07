@@ -27,6 +27,10 @@ export interface BoardProfile {
   hasDb: boolean; // a jobbunny.db file exists for this profile
 }
 
+export const SECRET_KEYS = ['NOTION_TOKEN', 'TELEGRAM_BOT_TOKEN'] as const;
+export type SecretKey = (typeof SECRET_KEYS)[number];
+export type SecretPresence = Record<SecretKey, 'present' | 'absent'>;
+
 export interface BoardQuery {
   status?: string;
   excitement?: string;
@@ -73,16 +77,19 @@ export interface BoardJobDetail extends BoardJobRow {
 }
 
 /** The board server binds `127.0.0.1` and writes only the `tracking`,
- * config, and run-intent tables (hard-rule amendment, config→db Phase 4
- * ledger L7, widened by UI phase 1 Task 2 to add run intents —
- * superseding the previous "writes only `tracking`" wording). `jobs` and
- * the runs tables stay pipeline/runner-only — the split is structural,
- * enforced here: `BoardStore` reads `jobs`/`runs`/`run_events` and writes
- * ONLY `tracking` (`updateTracking`); config-doc writes, profile creation,
- * and run-intent inserts/cancels are `BoardSource`-level operations below
- * (`readConfigDoc`/`writeConfigDoc`/`createProfile`/`openIntents`), never
- * `BoardStore` methods, since a config doc or a run intent is
- * per-profile-discovery, not per-opened-job-store.
+ * config, run-intent, and secrets (the data home's `.env`) surfaces
+ * (hard-rule amendment, config→db Phase 4 ledger L7, widened by UI phase
+ * 1 Task 2 to add run intents and Task 4 to add write-only allowlisted
+ * secrets — superseding the previous "writes only `tracking`" wording).
+ * `jobs` and the runs tables stay pipeline/runner-only — the split is
+ * structural, enforced here: `BoardStore` reads `jobs`/`runs`/`run_events`
+ * and writes ONLY `tracking` (`updateTracking`); config-doc writes,
+ * profile creation, run-intent inserts/cancels, and secret writes are
+ * `BoardSource`-level operations below
+ * (`readConfigDoc`/`writeConfigDoc`/`createProfile`/`openIntents`/
+ * `writeSecret`), never `BoardStore` methods, since a config doc or a run
+ * intent is per-profile-discovery, and a secret lives in the data home's
+ * single `.env` (cross-profile, not per-opened-job-store at all).
  * Synchronous by design: node:sqlite is sync. */
 export interface BoardStore {
   listJobs(query: BoardQuery): { rows: BoardJobRow[]; total: number };
@@ -116,14 +123,16 @@ export interface BoardStore {
  *
  * Write-surface invariant (hard-rule amendment, ledger L7 — the code-level
  * home for it, `CLAUDE.md` carries the prose): **the board server binds
- * `127.0.0.1` and writes only the `tracking`, config, and run-intent
- * tables**. `jobs` and the runs tables stay pipeline/runner-only. As of UI
- * phase 1 Task 2 the board's full write surface is exactly `BoardStore.
- * updateTracking` (tracking) + `writeConfigDoc` (config tables, below) +
- * `createProfile` (which itself only ever calls `writeConfigDoc` under the
- * hood, via `seedProfileDocs`) + `openIntents`'s returned store (insert a
- * `pending` run intent, cancel one's own `pending` intent) — nothing else,
- * ever. */
+ * `127.0.0.1` and writes only the `tracking`, config, run-intent, and
+ * secrets surfaces**. `jobs` and the runs tables stay pipeline/runner-only.
+ * As of UI phase 1 Task 4 the board's full write surface is exactly
+ * `BoardStore.updateTracking` (tracking) + `writeConfigDoc` (config
+ * tables, below) + `createProfile` (which itself only ever calls
+ * `writeConfigDoc` under the hood, via `seedProfileDocs`) +
+ * `openIntents`'s returned store (insert a `pending` run intent, cancel
+ * one's own `pending` intent) + `writeSecret` (write-only, allowlisted
+ * `SECRET_KEYS`, appends/replaces one line of the data home's `.env` —
+ * never reads a value back) — nothing else, ever. */
 export interface BoardSource {
   listProfiles(): Promise<BoardProfile[]>;
   /** null for unknown names and profiles without a local DB. MAY throw for a
@@ -163,5 +172,10 @@ export interface BoardSource {
    * the life of this `BoardSource` and closed by `close()` — callers must
    * never call `close()` on the returned store. */
   openIntents(name: string): Promise<RunIntentStore | null>;
+  /** Presence only — never a value, never a prefix, never a length. */
+  listSecrets(): Promise<SecretPresence>;
+  /** Write-only. Appends or replaces `key`'s line in `<root>/.env`.
+   * Never reads a value back out and never returns one. */
+  writeSecret(key: SecretKey, value: string): Promise<void>;
   close(): void;
 }

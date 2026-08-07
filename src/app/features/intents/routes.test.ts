@@ -115,6 +115,8 @@ function fakeSource(opts: {
       openIntentsCalls.push(name);
       return intents;
     },
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {},
   };
 }

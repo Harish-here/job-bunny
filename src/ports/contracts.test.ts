@@ -224,6 +224,8 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     },
     createProfile: async () => {},
     openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
     close() {},
   };
   const profiles = await source.listProfiles();
