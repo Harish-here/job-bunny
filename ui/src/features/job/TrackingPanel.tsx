@@ -78,7 +78,7 @@ export function TrackingPanel({ profile, job }: { profile: string; job: BoardJob
   }
 
   return (
-    <details open className="rounded-lg border">
+    <details open className="rounded-lg border border-border bg-card">
       <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-2 text-sm font-medium">
         <span>Tracking</span>
         {mutation.isPending && (

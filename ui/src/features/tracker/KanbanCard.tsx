@@ -67,7 +67,7 @@ export function KanbanCard({
         }
       }}
       className={cn(
-        'flex cursor-pointer flex-col gap-1 rounded-lg border bg-card p-2 text-sm shadow-sm',
+        'flex cursor-pointer flex-col gap-1 rounded-lg border border-border bg-card p-2 text-sm shadow-sm hop',
         isDragging && 'opacity-50',
         highlighted && 'ring-2 ring-primary transition-shadow',
       )}

@@ -26,7 +26,7 @@ export function KanbanColumn({
       data-testid="kanban-column"
       data-status={status}
       className={cn(
-        'flex w-64 shrink-0 flex-col rounded-lg border bg-muted/20',
+        'flex w-64 shrink-0 flex-col rounded-lg border border-border bg-muted/20',
         isOver && 'ring-2 ring-primary',
       )}
     >

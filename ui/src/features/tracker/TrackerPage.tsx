@@ -99,11 +99,11 @@ export function TrackerPage({ profile }: { profile: string }) {
 
           <div
             data-testid="closed-column"
-            className="flex w-64 shrink-0 flex-col rounded-lg border bg-muted/20"
+            className="flex w-64 shrink-0 flex-col rounded-lg border border-border bg-muted/20"
           >
             <button
               type="button"
-              className="flex items-center gap-1 border-b px-2 py-1.5 text-sm font-medium"
+              className="flex items-center gap-1 border-b px-2 py-1.5 text-sm font-medium hop"
               onClick={() => setClosedOpen((open) => !open)}
             >
               {closedOpen ? (

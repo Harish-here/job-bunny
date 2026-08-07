@@ -7,7 +7,7 @@ import type { BoardJobRow } from '../../lib/api/types';
 export function JobFacts({ job }: { job: BoardJobRow }) {
   const locationLine = [job.locationCity, job.workType].filter(Boolean).join(' — ');
   return (
-    <div className="flex flex-col gap-3 text-sm">
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 text-sm">
       <div className="text-muted-foreground">
         {locationLine || 'Location unknown'}
         {job.timezone && ` · ${job.timezone}`}

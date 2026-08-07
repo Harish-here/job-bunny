@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 function dotClass(status: string | null | undefined): string {
   if (status == null) return 'bg-muted-foreground/40';
   if (status === 'Rejected' || status === 'Passed') return 'bg-destructive';
-  if (status === 'Offer') return 'bg-emerald-500';
+  if (status === 'Offer') return 'bg-success';
   return 'bg-primary';
 }
 
@@ -34,8 +34,8 @@ export function JobRow({
         }
       }}
       className={cn(
-        'flex cursor-pointer flex-col gap-0.5 border-b px-3 py-1.5',
-        selected ? 'bg-muted' : 'hover:bg-muted/50',
+        'flex cursor-pointer flex-col gap-0.5 border-b px-3 py-1.5 hop',
+        selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
       )}
     >
       <div className="flex items-center gap-2">

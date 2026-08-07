@@ -21,10 +21,13 @@ export function DueStrip({
         <button
           key={row.id}
           type="button"
-          className="shrink-0"
+          className="shrink-0 hop"
           onClick={() => onFocusCard(row.id)}
         >
-          <Badge variant="destructive">
+          <Badge
+            variant="outline"
+            className="border-attention/40 bg-attention/10 text-attention"
+          >
             ⚡ {row.company} — {row.tracking?.nextAction} ({row.tracking?.nextActionDate})
           </Badge>
         </button>
