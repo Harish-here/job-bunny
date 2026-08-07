@@ -115,30 +115,41 @@ export function openJobsDb(dbPath: string): DatabaseSync {
     mkdirSync(path.dirname(dbPath), { recursive: true });
   }
   const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA busy_timeout = 5000;');
-  db.exec('PRAGMA foreign_keys = ON;');
-  let version = (db.prepare('PRAGMA user_version').get() as { user_version: number })
-    .user_version;
-  if (version > LATEST_SCHEMA_VERSION) {
-    db.close();
-    throw new Error(
-      `jobbunny.db schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
-    );
-  }
-  while (version < LATEST_SCHEMA_VERSION) {
-    const step = MIGRATIONS[version];
-    if (!step) throw new Error(`no migration defined from schema v${version}`);
-    db.exec('BEGIN');
-    try {
-      db.exec(step);
-      db.exec(`PRAGMA user_version = ${version + 1}`);
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
+  // Everything below can throw on a garbage/corrupt/permission-denied file
+  // (e.g. the very first PRAGMA against a not-a-database file). `db` is
+  // already an OPEN native handle at that point — without this try/catch a
+  // failed open leaked it (never closed, only reclaimed by the OS on
+  // process exit), which is harmless on POSIX but makes the backing file
+  // un-removable on Windows (EBUSY/EPERM) until the process ends. Close on
+  // ANY failure path here, then rethrow unchanged.
+  try {
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA busy_timeout = 5000;');
+    db.exec('PRAGMA foreign_keys = ON;');
+    let version = (db.prepare('PRAGMA user_version').get() as { user_version: number })
+      .user_version;
+    if (version > LATEST_SCHEMA_VERSION) {
+      throw new Error(
+        `jobbunny.db schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
+      );
     }
-    version += 1;
+    while (version < LATEST_SCHEMA_VERSION) {
+      const step = MIGRATIONS[version];
+      if (!step) throw new Error(`no migration defined from schema v${version}`);
+      db.exec('BEGIN');
+      try {
+        db.exec(step);
+        db.exec(`PRAGMA user_version = ${version + 1}`);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+      version += 1;
+    }
+    return db;
+  } catch (err) {
+    db.close();
+    throw err;
   }
-  return db;
 }

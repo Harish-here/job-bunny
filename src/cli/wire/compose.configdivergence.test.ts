@@ -64,6 +64,9 @@ test('real repro: a hand-edit to filter.json after the one-time lift is silently
   // one-time lift (`SqliteConfigStore`'s own doc comment).
   const first = await wire(name, { root });
   first.ctx.runStore.close();
+  // `first.checks` is never used below (only `second.checks` is) — safe to
+  // close `first`'s own `configStore` right away, unlike `second`'s.
+  first.configStore?.close();
 
   // The user hand-edits the legacy file directly, never through `jobbunny
   // config set` — exactly the scenario the finding describes.
@@ -94,6 +97,10 @@ test('real repro: a hand-edit to filter.json after the one-time lift is silently
     finding.detail,
     new RegExp(`jobbunny config import --profile ${name} --dir profiles/${name}`),
   );
+  // `divergenceCheck.run()` (above) is the last thing that needs
+  // `second.configStore` open — safe to close now, before the `after`
+  // hook's `rmSync`.
+  second.configStore?.close();
 });
 
 test('no divergence: an unmodified legacy file after lift reports ok', async () => {
@@ -114,6 +121,7 @@ test('no divergence: an unmodified legacy file after lift reports ok', async () 
 
   const first = await wire(name, { root });
   first.ctx.runStore.close();
+  first.configStore?.close();
 
   const second = await wire(name, { root });
   second.ctx.runStore.close();
@@ -124,4 +132,5 @@ test('no divergence: an unmodified legacy file after lift reports ok', async () 
   assert.ok(divergenceCheck);
   const finding = await divergenceCheck.run();
   assert.equal(finding.status, 'ok');
+  second.configStore?.close();
 });

@@ -48,7 +48,11 @@ async function withTmpRoot(fn: (root: string) => Promise<void>) {
   try {
     await fn(root);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    // maxRetries/retryDelay: on Windows, a just-closed (or briefly-leaked)
+    // sqlite handle can leave the underlying file transiently locked by
+    // the OS for a few ms after `close()` returns — retry instead of
+    // failing the whole test on EBUSY/EPERM.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
   }
 }
 

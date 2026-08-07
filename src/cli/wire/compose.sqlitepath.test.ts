@@ -123,7 +123,7 @@ test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path 
   });
   const expectedDbPath = canonicalDbPath(root, 'nprof');
 
-  const { ctx } = await wire('nprof', { root });
+  const { ctx, configStore } = await wire('nprof', { root });
   const runId = ctx.runStore.startRun({
     date: '2026-08-06',
     timeDir: '10-00',
@@ -149,4 +149,10 @@ test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path 
   // board's own memoized stores. Must close before the `after` hook's
   // `rmSync`, or Windows' file lock turns cleanup into an EPERM.
   ctx.runStore.close();
+  // `wire()`'s internal `SqliteConfigStore` (config→db Phase 4) is a THIRD
+  // separate handle on the same file, never closed by `wire()` itself
+  // (checks may still need it) — same Windows-EPERM reasoning as
+  // `ctx.runStore` above.
+  assert.ok(configStore, 'wire() without a configStore override always sets one');
+  configStore.close();
 });

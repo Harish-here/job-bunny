@@ -12,6 +12,7 @@
  * `includeOnly: '^src'` never cruises `test/`.
  */
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { test } from 'node:test';
 import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
 import { type ConfigDeps, configCommand } from './config.ts';
@@ -174,11 +175,13 @@ test('config export: default dir is profiles/<profile>/export, mkdir called befo
     }),
   );
 
+  const expectedDir = path.join('/repo', 'profiles', 'acme', 'export');
+
   assert.equal(code, 0);
-  assert.deepEqual(mkdirCalls, ['/repo/profiles/acme/export']);
+  assert.deepEqual(mkdirCalls, [expectedDir]);
   assert.ok(mkdirHappenedBeforeWrite);
   assert.deepEqual(writeFileCalls, [
-    { path: '/repo/profiles/acme/export/profile.json', data: '{}' },
+    { path: path.join(expectedDir, 'profile.json'), data: '{}' },
   ]);
 });
 
@@ -199,7 +202,7 @@ test('config export: explicit --dir is respected over the default', async () => 
   );
 
   assert.equal(code, 0);
-  assert.deepEqual(writeFileCalls, [{ path: '/custom/dir/resume.json' }]);
+  assert.deepEqual(writeFileCalls, [{ path: path.join('/custom/dir', 'resume.json') }]);
 });
 
 test('config export: a doc undefined in the store produces a "skipped (not present)" line, exit still 0', async () => {
@@ -244,7 +247,7 @@ test('config import: a file present in exists/readFile is imported via writeText
     { profile: 'acme', action: 'import', dir: '/from' },
     baseDeps({
       configStore: () => store,
-      exists: async (p) => p === '/from/profile.json',
+      exists: async (p) => p === path.join('/from', 'profile.json'),
       readFile: async () => '{"connector":"sqlite"}',
       write: (l) => lines.push(l),
     }),

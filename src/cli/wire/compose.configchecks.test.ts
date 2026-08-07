@@ -80,6 +80,12 @@ test('doc-in-db-only: a board-created profile (config_docs rows, zero legacy fil
   const emptyLanes = await findingFor(result.checks, 'empty-lanes');
   assert.equal(emptyLanes.status, 'red');
   assert.match(emptyLanes.detail, /no lanes configured/);
+  // Both checks above ran through `readDoc: (key) => configStore.readText(key)`
+  // (wire()'s own doc comment) — only safe to close once every check that
+  // closes over it has actually run. Must close before the `after` hook's
+  // `rmSync`, or Windows' file lock turns cleanup into an EPERM.
+  assert.ok(result.configStore, 'wire() without a configStore override always sets one');
+  result.configStore.close();
 });
 
 test('doc-in-file-only: a legacy-file-only profile (never lifted) is reported ok by profile-parses', async () => {

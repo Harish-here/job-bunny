@@ -7,10 +7,11 @@ import { wire } from './compose.ts';
 
 /**
  * compose.configstore.test.ts (config→db Phase 4 Task 4, mirrors
- * `compose.statestore.test.ts`'s structure) — `configStore` is NOT exposed
- * on `ctx` (unlike `stateStore`/`checkpointStore`/`runStore`; it's an
- * internal wiring detail of `wire()` itself, consumed only during config
- * loading and lane construction), so this file instead pins `wire()`'s
+ * `compose.statestore.test.ts`'s structure) — `configStore` lives on
+ * `WireResult` itself, not `ctx` (unlike `stateStore`/`checkpointStore`/
+ * `runStore`; it's the internal store `wire()` builds to load config and
+ * assemble checks, exposed only so a caller can close it once done — see
+ * `WireResult`'s own doc comment), so this file pins `wire()`'s
  * `configLiftMode`-gated create-vs-never-create behavior against REAL
  * legacy files on disk (not a `fakeConfigStore` — those never lift, so they
  * can't exercise this distinction at all). `canonicalDbPath`'s own pure
@@ -58,6 +59,7 @@ test('wire: configLiftMode "readonly" + a legacy-only profile (real file, no db 
 
   assert.equal(result.ctx.config.connector, 'sqlite');
   assert.equal(existsSync(dbPath), false, 'readonly lift must never create the db file');
+  result.configStore?.close();
 });
 
 test('wire: default (readwrite) mode + the SAME legacy-only profile DOES create jobbunny.db (the lift cements a config_docs row) — sibling to the updated Phase-1 invariant, scoped here for symmetry', async () => {
@@ -80,6 +82,7 @@ test('wire: default (readwrite) mode + the SAME legacy-only profile DOES create 
     'readwrite lift must create the db file (the INSERT requires openJobsDb to open it)',
   );
   result.ctx.runStore.close();
+  result.configStore?.close();
 });
 
 test("wire: settings.sqlite.path throws assertSqlitePathRetired's exact message, for real, through the full wire() call", async () => {

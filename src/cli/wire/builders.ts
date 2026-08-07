@@ -18,7 +18,10 @@
  */
 import path from 'node:path';
 import type { CdpChromeProvider } from '../../adapters/browser/cdp-chrome/index.ts';
-import { DEFAULT_USER_DATA_DIR } from '../../adapters/browser/cdp-chrome/index.ts';
+import {
+  cdpReachableCheck,
+  DEFAULT_USER_DATA_DIR,
+} from '../../adapters/browser/cdp-chrome/index.ts';
 import { MirrorConnector } from '../../adapters/db/mirror/index.ts';
 import type {
   DbReachableCheckDeps,
@@ -32,16 +35,21 @@ import {
   NotionConnectorSettingsSchema,
 } from '../../adapters/db/notion/index.ts';
 import { SqliteConfigStore } from '../../adapters/db/sqlite/config/index.ts';
-import { SqliteConnector } from '../../adapters/db/sqlite/index.ts';
+import { SqliteConnector, sqliteDbCheck } from '../../adapters/db/sqlite/index.ts';
 import { GreenhouseLane } from '../../adapters/lanes/greenhouse/index.ts';
 import { KekaLane } from '../../adapters/lanes/keka/index.ts';
 import {
   defaultLinkedinBreakerDeps,
+  inventoryFreshnessCheck,
   LinkedInLane,
   loadInventory,
   parseSearchUrls,
 } from '../../adapters/lanes/linkedin/index.ts';
-import { TelegramNotifier } from '../../adapters/notify/telegram/index.ts';
+import {
+  botTokenCheck,
+  TelegramNotifier,
+  TelegramNotifierSettingsSchema,
+} from '../../adapters/notify/telegram/index.ts';
 import type { PipelineConfig } from '../../core/config/schema.ts';
 import { sqlitePathRetiredMessage } from '../../core/config/validators.ts';
 import type { FilterConfig } from '../../core/filter/config.ts';
@@ -53,8 +61,10 @@ import type { StateStore } from '../../ports/state_store.ts';
 import type { Storage } from '../../ports/storage.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
+import type { AdapterRegistry } from './registry.ts';
 import {
   resolveInterUrlDelayRange,
+  resolveInventoryMaxAgeDays,
   resolveJitterRange,
   resolveMaxCardsPerUrl,
 } from './settings.ts';
@@ -327,6 +337,48 @@ export function missingTokenNotionClient(): NotionSdkClientLike {
     pages: { create: fail, update: fail },
   };
 }
+
+// --- real registry (moved from compose.ts to stay under its line cap —
+// purely a file-size split, not behavioral: this is still the only OTHER
+// place, alongside `wire()` itself, real adapters are constructed) ---
+
+export const realRegistry: AdapterRegistry = {
+  lanes: {
+    // The CDP-reachability check rides with the browser-driven linkedin
+    // lane rather than living on its own — nothing else in the registry
+    // touches the browser.
+    linkedin: (settings, deps) => [
+      inventoryFreshnessCheck(
+        deps.storage,
+        deps.pages,
+        resolveInventoryMaxAgeDays(settings),
+      ),
+      cdpReachableCheck({ reachable: deps.browserReachable, port: deps.cdpPort }),
+    ],
+    // Greenhouse/Keka lanes are stateless keyless-ATS lanes with no doctor
+    // surface of their own.
+    greenhouse: () => [],
+    keka: () => [],
+  },
+  connectors: {
+    notion: (settings, deps) => {
+      const parsed = NotionConnectorSettingsSchema.parse(settings);
+      // No token ⇒ no api handle ⇒ nothing to reach-check here — the
+      // missing token itself is already a red from `coreChecks`.
+      if (!deps.notionApi) return [];
+      return [dbReachableCheck({ api: deps.notionApi, dbId: parsed.dbId })];
+    },
+    // `settings.sqlite.path` is retired (config→db Phase 4) — the db path
+    // is always `deps.sqliteDefaultPath`; no remaining field is relevant here.
+    sqlite: (_settings, deps) => [sqliteDbCheck({ path: deps.sqliteDefaultPath })],
+  },
+  notifiers: {
+    telegram: (settings) => {
+      TelegramNotifierSettingsSchema.parse(settings);
+      return [botTokenCheck()];
+    },
+  },
+};
 
 // `MigrateWire`/`wireMigrate` (local-DB spec, PR 2 Task 4) now live in
 // `./migrate.ts` — split out to keep this file under the file-size cap

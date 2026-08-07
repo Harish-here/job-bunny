@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -41,6 +41,22 @@ test('file open creates parent directories and reopening is idempotent', () => {
   const second = openJobsDb(dbPath);
   assert.equal(userVersion(second), LATEST_SCHEMA_VERSION);
   second.close();
+});
+
+test('a garbage (non-sqlite) file throws loud AND leaves no open handle behind', () => {
+  const dbPath = tmpDbPath();
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  writeFileSync(dbPath, 'not a real sqlite file at all');
+
+  assert.throws(() => openJobsDb(dbPath), /file is not a database/);
+
+  // Regression pin (fix round 3): a failed open used to leak the native
+  // DatabaseSync handle it had already opened before the first failing
+  // PRAGMA — harmless on POSIX (an unlinked-but-open file just lingers
+  // until the process exits) but on Windows it makes the file
+  // un-removable (EBUSY/EPERM) until this process ends. If the handle is
+  // truly closed, removing it right away never throws.
+  assert.doesNotThrow(() => rmSync(dbPath, { force: true }));
 });
 
 test('a db stamped newer than LATEST_SCHEMA_VERSION throws loud', () => {
