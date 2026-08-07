@@ -23,7 +23,13 @@
  * `commands/board.ts`'s `uiDir`), never `SetupDeps.root` (the data home;
  * fix round — probing these against `root` made every real install report
  * both steps `needs-action` even when they shipped fine, since an
- * installed `~/.jobbunny` has no `src/`/`ui/` tree at all).
+ * installed `~/.jobbunny` has no `src/`/`ui/` tree at all). `ui/dist` is
+ * ALSO gitignored (never shipped in the npm tarball), so a missing
+ * `ui/dist/index.html` alone doesn't distinguish "run the build" from "not
+ * shipped here at all" — `stepUiBuilt` (fix round 2) discriminates by
+ * `packageRoot/.git` presence: a checkout has it (`needs-action`, the
+ * existing remediation applies), an installed copy doesn't
+ * (`skipped`, never drives a non-zero exit).
  *
  * `readConnectorNeeds`/`stepResume`/`stepSearchUrls` read their one config
  * doc each (`profile.json`/`resume.json`/`search_urls.md`) through a
@@ -303,15 +309,32 @@ async function stepInventory(
   };
 }
 
+// `ui/dist` is gitignored and never ships in the npm tarball, so it's
+// absent on BOTH a fresh checkout and an installed copy — `needs-action`
+// only applies to the former (where the user actually can run `npm run
+// ui:build`). Discriminate the two by `.git` presence at `packageRoot`: a
+// checkout (including a git worktree, where `.git` is a file, not a dir)
+// has it, a packed npm copy never does. Reuses the same injectable
+// `deps.exists` seam as the `ui/dist` probe itself — no new dep needed.
 async function stepUiBuilt(packageRoot: string, deps: SetupDeps): Promise<StepResult> {
-  const p = path.join(packageRoot, 'ui', 'dist', 'index.html');
-  if (await deps.exists(p)) {
-    return { step: 'ui build', status: 'done', detail: 'ui/dist present' };
+  const step = 'ui build';
+  const distPath = path.join(packageRoot, 'ui', 'dist', 'index.html');
+  if (await deps.exists(distPath)) {
+    return { step, status: 'done', detail: 'ui/dist present' };
+  }
+  const gitPath = path.join(packageRoot, '.git');
+  if (await deps.exists(gitPath)) {
+    return {
+      step,
+      status: 'needs-action',
+      detail: 'board UI not built — run: npm run ui:build',
+    };
   }
   return {
-    step: 'ui build',
-    status: 'needs-action',
-    detail: 'board UI not built — run: npm run ui:build',
+    step,
+    status: 'skipped',
+    detail:
+      'board UI not shipped with installed copies yet — run from a checkout to use the board',
   };
 }
 

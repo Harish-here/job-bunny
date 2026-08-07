@@ -49,7 +49,7 @@ Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage deta
 ```bash
 git clone <repo> && cd job-bunny
 npm install          # no build step — Node 24 runs the TypeScript directly
-npm install -g .     # links the `jobbunny` command
+npm install -g .     # installs the jobbunny command (a packed copy — re-run after pulling changes)
 jobbunny setup --profile <name>
 ```
 

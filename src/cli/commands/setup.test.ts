@@ -130,6 +130,45 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
   });
 });
 
+// Installed-copy shape (fix round 2): `packageRoot` has neither `ui/dist`
+// nor `.git` — an npm-packed install. Every OTHER step is healthy, so the
+// run must still exit 0 with `ui build: skipped`, never `needs-action`.
+test('setupCommand: installed-copy packageRoot (no .git, no ui/dist) still exits 0', async () => {
+  await withTmpRoots(async (root, packageRoot) => {
+    await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
+    const profileDir = path.join(root, 'profiles', 'acme');
+
+    await writeFile(path.join(root, '.env'), 'NOTION_TOKEN=secret-value-123\n');
+    await writeFile(path.join(profileDir, 'resume.json'), '{}');
+    const store = wireConfigStore('acme', { root });
+    await store.writeText(
+      'search_urls.md',
+      '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
+    );
+    store.close();
+    const inventoryDir = path.join(
+      packageRoot,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+    );
+    await mkdir(inventoryDir, { recursive: true });
+    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.json'), '{}\n');
+    // Deliberately no ui/dist, no .git under packageRoot.
+
+    const lines: string[] = [];
+    const code = await setupCommand(
+      { profile: 'acme' },
+      { root, packageRoot, write: (l) => lines.push(l) },
+    );
+    assert.equal(code, 0);
+    assert.ok(lines.every((l) => !l.includes('needs-action')));
+    assert.ok(lines.some((l) => l.includes('ui build: skipped')));
+  });
+});
+
 test('setupCommand: page_inventory coverage and ui build report done (and the run exits 0) even though root — the data home — has no src/ or ui/ tree at all', async () => {
   // Real-component regression proof (fix round, critical finding 2):
   // `root` never gets a `src/` or `ui/` directory anywhere in this test —
@@ -420,8 +459,16 @@ test('unparseable profile.json makes the token step needs-action, not a crash', 
 
 // ---------- ui build step ----------
 
-test('ui build: needs-action without ui/dist, done with it', async () => {
+// Fix round 2: `ui/dist` is gitignored and never ships in the npm tarball,
+// so its absence alone doesn't distinguish "checkout, run the build" from
+// "installed copy, not shipped here" — `stepUiBuilt` discriminates by
+// `packageRoot/.git` presence. This test proves the checkout shape
+// (`.git` present, no `ui/dist`) still reports `needs-action`, then that
+// building `ui/dist` flips it to `done`.
+test('ui build: needs-action without ui/dist in a checkout (.git present), done with it', async () => {
   await withTmpRoots(async (root, packageRoot) => {
+    await mkdir(path.join(packageRoot, '.git'), { recursive: true });
+
     let lines: string[] = [];
     await setupCommand(
       { profile: 'zz' },
@@ -449,6 +496,28 @@ test('ui build: needs-action without ui/dist, done with it', async () => {
       { root, packageRoot, write: (l) => lines.push(l) },
     );
     assert.ok(lines.some((l) => l.includes('[setup] ui build: done — ui/dist present')));
+  });
+});
+
+// Installed-copy shape: no `ui/dist` AND no `.git` at `packageRoot` (an
+// npm-packed copy has neither) — must report `skipped`, not
+// `needs-action`, and must never be the reason a healthy `setupCommand`
+// run exits non-zero.
+test('ui build: skipped (not needs-action) when packageRoot has neither ui/dist nor .git', async () => {
+  await withTmpRoots(async (root, packageRoot) => {
+    const lines: string[] = [];
+    await setupCommand(
+      { profile: 'zz' },
+      { root, packageRoot, write: (l) => lines.push(l) },
+    );
+    assert.ok(
+      lines.some((l) =>
+        l.includes(
+          '[setup] ui build: skipped — board UI not shipped with installed copies yet — run from a checkout to use the board',
+        ),
+      ),
+    );
+    assert.ok(!lines.some((l) => l.includes('ui build: needs-action')));
   });
 });
 
