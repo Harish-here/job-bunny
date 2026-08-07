@@ -90,14 +90,18 @@ function quoteValue(value: string): string {
  * otherwise `KEY=value` is appended. The result always ends in exactly
  * one trailing newline. `value` is double-quoted whenever it contains
  * whitespace, `#`, or a quote character — otherwise it's written bare.
- * `value` must not contain a `"` or `\` character: `dotenv.parse` cannot
- * round-trip either (it has no escaping convention, and `\n`/`\r`
- * sequences inside a quoted value get unescaped on read), so such a
- * value is rejected here rather than silently corrupted; callers also
- * reject values containing a newline before calling. */
+ * `value` must not contain a `"`, backtick, or `\` character:
+ * `dotenv.parse`'s own quote-delimiter regex (`/^(['"`])([\s\S]*)\1$/`)
+ * treats a value whose first and last characters are matching backticks
+ * as a THIRD quoted form (stripped on read, same as `'`/`"`), and it has
+ * no escaping convention for any of the three — so all three are
+ * rejected here rather than silently corrupted; callers also reject
+ * values containing a newline before calling. */
 export function upsertEnvLine(text: string, key: string, value: string): string {
-  if (value.includes('"') || value.includes('\\')) {
-    throw new Error('env value must not contain a quote or backslash character');
+  if (value.includes('"') || value.includes('`') || value.includes('\\')) {
+    throw new Error(
+      'env value must not contain a quote, backtick, or backslash character',
+    );
   }
   const regex = assignmentRegex(key);
   const lines = contentLines(text);

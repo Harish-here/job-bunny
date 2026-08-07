@@ -51,16 +51,17 @@ function putHandler(source: BoardSource) {
       throw new HttpError(400, 'validation', 'value must not contain a newline');
     }
 
-    // Step 4: quotes and backslashes are rejected, not escaped — dotenv's
-    // parse() has no escaping convention for either (it only unescapes
-    // \n/\r inside a quoted value), so `env_file`'s write path cannot
-    // round-trip them. Checked here too, ahead of the write, so the 400
-    // is reported before any attempt to touch `.env`.
-    if (value.includes('"') || value.includes('\\')) {
+    // Step 4: quotes, backticks, and backslashes are rejected, not
+    // escaped — dotenv's parse() has no escaping convention for any of
+    // them (a backtick-wrapped value is its own third quote-delimiter
+    // form, silently stripped on read), so `env_file`'s write path
+    // cannot round-trip them. Checked here too, ahead of the write, so
+    // the 400 is reported before any attempt to touch `.env`.
+    if (value.includes('"') || value.includes('`') || value.includes('\\')) {
       throw new HttpError(
         400,
         'validation',
-        'secret value must not contain quotes or backslashes',
+        'secret value must not contain quotes, backticks, or backslashes',
       );
     }
 

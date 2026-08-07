@@ -179,7 +179,7 @@ test('PUT: a value containing a quote is rejected with the fixed message and nev
       route.handler(req({ params: { key: 'NOTION_TOKEN' }, body: { value: 'sk-"abc' } })),
     400,
     'validation',
-    'secret value must not contain quotes or backslashes',
+    'secret value must not contain quotes, backticks, or backslashes',
   );
   assert.equal(source.writeCalls.length, 0);
 });
@@ -194,7 +194,35 @@ test('PUT: a value containing a backslash is rejected with the fixed message and
       ),
     400,
     'validation',
-    'secret value must not contain quotes or backslashes',
+    'secret value must not contain quotes, backticks, or backslashes',
+  );
+  assert.equal(source.writeCalls.length, 0);
+});
+
+test('PUT: a value containing a backtick is rejected with the fixed message and never written', async () => {
+  const source = fakeSource(PRESENCE);
+  const route = findRoute(source, 'PUT', '/api/secrets/:key');
+  await assertHttpError(
+    () =>
+      route.handler(req({ params: { key: 'NOTION_TOKEN' }, body: { value: 'sk-`abc' } })),
+    400,
+    'validation',
+    'secret value must not contain quotes, backticks, or backslashes',
+  );
+  assert.equal(source.writeCalls.length, 0);
+});
+
+test('PUT: a value wrapped first-and-last in backticks is rejected (dotenvs third quote-delimiter form)', async () => {
+  const source = fakeSource(PRESENCE);
+  const route = findRoute(source, 'PUT', '/api/secrets/:key');
+  await assertHttpError(
+    () =>
+      route.handler(
+        req({ params: { key: 'NOTION_TOKEN' }, body: { value: '`sk-abc123`' } }),
+      ),
+    400,
+    'validation',
+    'secret value must not contain quotes, backticks, or backslashes',
   );
   assert.equal(source.writeCalls.length, 0);
 });
@@ -208,6 +236,7 @@ test('PUT: no error message or response body ever contains the submitted value',
     { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}\n` } },
     { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}"` } },
     { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}\\` } },
+    { params: { key: 'NOTION_TOKEN' }, body: { value: `${SECRET}\`` } },
   ];
   for (const c of cases) {
     const source = fakeSource(PRESENCE);

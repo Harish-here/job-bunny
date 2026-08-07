@@ -88,12 +88,29 @@ test('upsertEnvLine: a clean value (no whitespace/#/quotes) is left unquoted and
 // --- upsertEnvLine: unrepresentable values are rejected, not mis-escaped ---
 
 test('upsertEnvLine: a value containing a double quote is rejected', () => {
-  assert.throws(() => upsertEnvLine('', 'NOTION_TOKEN', 'sk-"abc'), /quote or backslash/);
+  assert.throws(
+    () => upsertEnvLine('', 'NOTION_TOKEN', 'sk-"abc'),
+    /quote, backtick, or backslash/,
+  );
 });
 
 test('upsertEnvLine: a value containing a backslash is rejected', () => {
   assert.throws(
     () => upsertEnvLine('', 'NOTION_TOKEN', 'sk-\\nabc'),
-    /quote or backslash/,
+    /quote, backtick, or backslash/,
+  );
+});
+
+test('upsertEnvLine: a value containing a backtick is rejected', () => {
+  assert.throws(
+    () => upsertEnvLine('', 'NOTION_TOKEN', 'sk-`abc'),
+    /quote, backtick, or backslash/,
+  );
+});
+
+test('upsertEnvLine: a value wrapped first-and-last in backticks is rejected (dotenvs third quote-delimiter form)', () => {
+  assert.throws(
+    () => upsertEnvLine('', 'NOTION_TOKEN', '`sk-abc123`'),
+    /quote, backtick, or backslash/,
   );
 });
