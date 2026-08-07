@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { USAGE } from './args.ts';
-import { type CommandFn, main } from './main.ts';
+import { type CommandFn, defaultCheckHome, HOME_EXEMPT_COMMANDS, main } from './main.ts';
 
 // The dispatch tests below exercise command routing only (every command is
 // a FAKE — see the module doc comment) and don't care whether a data home
@@ -584,4 +584,46 @@ test('main: setup and migrate-home are exempt from the missing-home check', asyn
   });
   assert.equal(code, 0);
   assert.deepEqual(s.calls, [['setup', { profile: 'x' }]]);
+});
+
+// --- defaultCheckHome / HOME_EXEMPT_COMMANDS (fix round) ---
+// Direct coverage of main.ts's own default `homeCheck` implementation —
+// the tests above only prove `main()` forwards a command name to whatever
+// `homeCheck` it's given, never this function's own exemption set,
+// `existsSync` probe, or the exact frozen message string. `env`/
+// `existsSyncFn` are injected here so none of this depends on the ambient
+// `JOBBUNNY_HOME` this file sets at module load (line 23) or on any real
+// filesystem state.
+
+test('defaultCheckHome: setup, migrate-home, and release are exempt — undefined regardless of whether the home exists', () => {
+  const neverExists = () => false;
+  assert.equal(defaultCheckHome('setup', { existsSyncFn: neverExists }), undefined);
+  assert.equal(
+    defaultCheckHome('migrate-home', { existsSyncFn: neverExists }),
+    undefined,
+  );
+  assert.equal(defaultCheckHome('release', { existsSyncFn: neverExists }), undefined);
+});
+
+test('defaultCheckHome: HOME_EXEMPT_COMMANDS names exactly setup, migrate-home, release', () => {
+  assert.deepEqual(
+    [...HOME_EXEMPT_COMMANDS].sort(),
+    ['migrate-home', 'release', 'setup'].sort(),
+  );
+});
+
+test('defaultCheckHome: a non-exempt command against a non-existent home returns the exact frozen message', () => {
+  const detail = defaultCheckHome('doctor', {
+    env: { JOBBUNNY_HOME: '/nope/.jobbunny' },
+    existsSyncFn: () => false,
+  });
+  assert.equal(detail, "no jobbunny home at /nope/.jobbunny — run 'jobbunny setup'");
+});
+
+test('defaultCheckHome: a non-exempt command against an EXISTING home returns undefined', () => {
+  const detail = defaultCheckHome('doctor', {
+    env: { JOBBUNNY_HOME: '/exists/.jobbunny' },
+    existsSyncFn: (p) => p === '/exists/.jobbunny',
+  });
+  assert.equal(detail, undefined);
 });

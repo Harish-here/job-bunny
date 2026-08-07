@@ -93,6 +93,16 @@ function escapeXml(value: string): string {
  * silently. `envPath` is the enabling shell's own PATH, captured at
  * `enable` time.
  *
+ * `EnvironmentVariables.JOBBUNNY_HOME` (fix round): launchd agents inherit
+ * NOTHING from the interactive shell — a user who sets `JOBBUNNY_HOME` to
+ * a custom data home and then runs `autostart enable` would otherwise get
+ * a plist whose `WorkingDirectory` honors that custom home but whose
+ * `resolveHome()` call, at login with no `JOBBUNNY_HOME` in the launchd
+ * environment, silently falls back to `~/.jobbunny` instead — wrong
+ * pidfile, wrong profiles, no `.env`. Set to `root` (the SAME resolved
+ * data home as `WorkingDirectory`), captured at `enable` time exactly
+ * like `envPath`.
+ *
  * F4: `StandardOutPath`/`StandardErrorPath` both point at daemon.log. The
  * CHILD's output is already redirected to that file by the parent's own
  * `spawn` (§6.1), but the PARENT — the `serve start` launchd actually
@@ -129,6 +139,8 @@ export function renderAutostartPlist(
     '    <dict>',
     '      <key>PATH</key>',
     `      <string>${escapeXml(envPath)}</string>`,
+    '      <key>JOBBUNNY_HOME</key>',
+    `      <string>${escapeXml(root)}</string>`,
     '    </dict>',
     '    <key>StandardOutPath</key>',
     `    <string>${logPath}</string>`,

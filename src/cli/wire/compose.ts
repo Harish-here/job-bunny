@@ -20,6 +20,7 @@
  * (`src/ops/daemon/`) replaced launchd triggering; no successor port exists.
  */
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { CdpChromeProviderDeps } from '../../adapters/browser/cdp-chrome/index.ts';
 import {
   CdpChromeProvider,
@@ -194,14 +195,24 @@ async function wireWithConfigStore(
     notionApiForConnector = new NotionApi({ client: missingTokenNotionClient() });
   }
 
-  // TWO storage handles, deliberately: `page_inventory/<page>.json` is
-  // machine-shared (repo-root), while every stage artifact (`cache/`,
-  // `registry/`, `structure/`, the LinkedIn lane's resume/capture state) is
-  // per-profile. A single repo-root handle (pre-2026-07-25) made two
-  // profiles share one cache/registry — the first real run read a 0-entry
-  // repo-root `registry/companies.json` instead of the profile's 27 curated
+  // TWO storage handles, deliberately: `page_inventory/<page>.json` is a
+  // PROGRAM file shipped inside the package itself
+  // (`src/adapters/lanes/linkedin/page_inventory/<page>.json`), so this
+  // handle is anchored at the package's own install location — NEVER the
+  // data home, since an installed `~/.jobbunny` has no `src/` tree at all
+  // (fix round: this used to be `new FsStorage(root)`, i.e. the DATA home;
+  // on any install whose data home wasn't the checkout, `loadInventory`
+  // read through `<data home>/src/adapters/...`, which never exists, so
+  // LinkedIn lane construction threw for every configured page and took
+  // down the whole pipeline via farm's total-outage guard) — while every
+  // stage artifact (`cache/`, `registry/`, `structure/`, the LinkedIn
+  // lane's resume/capture state) is per-profile, rooted at the data home. A
+  // single handle for BOTH (pre-2026-07-25) made two profiles share one
+  // cache/registry — the first real run read a 0-entry repo-root
+  // `registry/companies.json` instead of the profile's 27 curated
   // companies, so Greenhouse/Keka probed nothing and the run still passed.
-  const storage = new FsStorage(root);
+  const packageRoot = fileURLToPath(new URL('../../../', import.meta.url));
+  const storage = new FsStorage(packageRoot);
   const profileStorage = new FsStorage(path.join(root, 'profiles', profileName, 'data'));
   // `SqliteRunStore` opens lazily (ledger L13) — no file I/O here. `dbPath`
   // is THE authoritative jobbunny.db location (canonicalDbPath, above).

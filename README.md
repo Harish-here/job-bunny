@@ -140,9 +140,13 @@ npm run check                                # the gate: typecheck + lint + boun
 node --test src/core/filter/engine.test.ts   # one file
 
 # Verify a stage against the committed synthetic fixture profile, using the
-# checkout itself as the data home:
-JOBBUNNY_HOME=$PWD jobbunny stage source --profile rajni
-JOBBUNNY_HOME=$PWD jobbunny doctor --profile rajni
+# checkout itself as the data home. Run through the checkout's own entry
+# point (node src/cli/main.ts), not the globally installed `jobbunny` —
+# `npm install -g .` installs a packed COPY, not a symlink, so the global
+# binary does not pick up local changes; CLAUDE.md and the `verify` skill
+# both verify this same way for exactly that reason.
+JOBBUNNY_HOME=$PWD node src/cli/main.ts stage source --profile rajni
+JOBBUNNY_HOME=$PWD node src/cli/main.ts doctor --profile rajni
 ```
 
 A data home's internal layout is identical to the repo's own layout, so the checkout itself is a valid data home — that's what keeps `profiles/rajni/` usable for verification without a separate install.

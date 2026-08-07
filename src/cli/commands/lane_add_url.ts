@@ -14,15 +14,29 @@
  * directly), not raw `readFile`/`writeFile` — this command is a
  * meaningful write action, so the default store opens readwrite. The
  * SEPARATE `exists(inventoryPath)` check below is unrelated: it checks a
- * REPO file under `src/adapters/lanes/linkedin/page_inventory/`, not a
- * profile config doc, and stays on plain fs access.
+ * PROGRAM file shipped inside the package itself, under
+ * `src/adapters/lanes/linkedin/page_inventory/` — resolved from this
+ * file's own install location (`import.meta.url`, same pattern as
+ * `commands/setup.ts`'s `packageRoot`/`commands/board.ts`'s `uiDir`),
+ * never `resolved.root` (the data home; fix round — probing it against
+ * `root` always missed on a real install, since an installed
+ * `~/.jobbunny` has no `src/` tree at all, so this command false-alarmed
+ * "no inventory yet" even for page-types that ship in the package). Stays
+ * on plain fs access, not a profile config doc.
  */
 import { constants } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
+
+/** This package's own `page_inventory/` — never `root` (the data home).
+ * `src/cli/commands/lane_add_url.ts` is two directories below `src/`. */
+const PACKAGE_PAGE_INVENTORY_DIR = fileURLToPath(
+  new URL('../../adapters/lanes/linkedin/page_inventory/', import.meta.url),
+);
 
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
 // "start" is a pagination offset, not a filter — always reset to beginning.
@@ -168,15 +182,7 @@ export async function laneAddUrlCommand(
   resolved.write(`[lane add-url] stripped ${EPHEMERAL.join(', ')}`);
   resolved.write(`[lane add-url] appended under ${channel} / ${page}: ${cleanUrl}`);
 
-  const inventoryPath = path.join(
-    resolved.root,
-    'src',
-    'adapters',
-    'lanes',
-    'linkedin',
-    'page_inventory',
-    `${page}.json`,
-  );
+  const inventoryPath = path.join(PACKAGE_PAGE_INVENTORY_DIR, `${page}.json`);
   if (!(await resolved.exists(inventoryPath))) {
     resolved.warn(
       `[lane add-url] no inventory yet for "${page}" — run /page-analyse before /run.`,

@@ -28,6 +28,13 @@ test('renderAutostartPlist: RunAtLoad true, no StartCalendarInterval, sets Worki
     xml,
     /<key>WorkingDirectory<\/key>\s*<string>\/Users\/tester\/\.jobbunny<\/string>/,
   );
+  // Fix round: launchd agents inherit nothing from the interactive shell —
+  // JOBBUNNY_HOME must ALSO be set (to the same resolved data home), or a
+  // custom-home user's daemon silently falls back to ~/.jobbunny at login.
+  assert.match(
+    xml,
+    /<key>JOBBUNNY_HOME<\/key>\s*<string>\/Users\/tester\/\.jobbunny<\/string>/,
+  );
 });
 
 test('renderAutostartPlist: carries the enabling shell PATH in EnvironmentVariables (F1)', () => {
@@ -43,7 +50,7 @@ test('renderAutostartPlist: carries the enabling shell PATH in EnvironmentVariab
   );
   assert.match(
     xml,
-    /<key>EnvironmentVariables<\/key>\s*<dict>\s*<key>PATH<\/key>\s*<string>\/Users\/rajni\/\.local\/bin:\/usr\/bin:\/bin<\/string>\s*<\/dict>/,
+    /<key>EnvironmentVariables<\/key>\s*<dict>\s*<key>PATH<\/key>\s*<string>\/Users\/rajni\/\.local\/bin:\/usr\/bin:\/bin<\/string>/,
   );
 });
 

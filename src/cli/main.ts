@@ -196,13 +196,27 @@ function defaultCommands(): CommandRegistry {
 
 /** Commands that must run without an existing data home: `setup` and
  * `migrate-home` create or populate it, and `release` is a maintainer
- * command that operates on the git checkout, not on user data. */
-const HOME_EXEMPT_COMMANDS = new Set<string>(['setup', 'migrate-home', 'release']);
+ * command that operates on the git checkout, not on user data. Exported
+ * (fix round) so `main.test.ts` can pin this set directly, rather than only
+ * proving `main()` forwards a command name through an inline fake. */
+export const HOME_EXEMPT_COMMANDS = new Set<string>(['setup', 'migrate-home', 'release']);
 
-function defaultCheckHome(command: string): string | undefined {
+/** Exported (fix round) so its exact frozen message string, exemption set,
+ * and `existsSync` probe are all under direct test — the previous
+ * `main.test.ts` coverage only proved `main()` forwards the command name to
+ * an inline, test-owned `homeCheck` fake, never this function's own logic.
+ * `env`/`existsSyncFn` are injectable (mirrors `resolveHome`'s own
+ * `env`/`homedir` params) so a test can pin a fake home/existence result
+ * without touching the real `process.env`/filesystem or the ambient
+ * `JOBBUNNY_HOME` this test file sets at module load. Both default to the
+ * real thing — `main()`'s own call site is unaffected. */
+export function defaultCheckHome(
+  command: string,
+  deps: { env?: NodeJS.ProcessEnv; existsSyncFn?: typeof existsSync } = {},
+): string | undefined {
   if (HOME_EXEMPT_COMMANDS.has(command)) return undefined;
-  const home = resolveHome();
-  if (existsSync(home)) return undefined;
+  const home = resolveHome(deps.env ?? process.env);
+  if ((deps.existsSyncFn ?? existsSync)(home)) return undefined;
   return `no jobbunny home at ${home} — run 'jobbunny setup'`;
 }
 

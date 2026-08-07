@@ -30,10 +30,12 @@ import type { Storage } from '../../ports/storage.ts';
  * a throwaway fake object — `assembleAdapterChecks` never inspects it
  * itself, only hands it to whichever factory the config names. */
 export interface RuntimeDeps {
-  /** Repo-root-rooted. Inventories
-   * (`src/adapters/lanes/linkedin/page_inventory/<page>.json`) are
-   * machine-shared, NOT per-profile — this handle exists to reach them and
-   * nothing else. Per-stage artifacts go through `profileStorage`. */
+  /** Package-root-rooted — the installed package's own location, NOT the
+   * data home (see `compose.ts`'s `packageRoot`). Inventories
+   * (`src/adapters/lanes/linkedin/page_inventory/<page>.json`) are program
+   * files shipped inside the package, machine-shared, NOT per-profile —
+   * this handle exists to reach them and nothing else. Per-stage artifacts
+   * go through `profileStorage`. */
   storage: Storage;
   /** Rooted at `profiles/<name>/data` — every per-profile artifact
    * (cache, registry, structure, lane resume/capture state). */

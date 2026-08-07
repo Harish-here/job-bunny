@@ -148,13 +148,29 @@ test('laneAddUrlCommand creates search_urls.md with channel/page nodes and the U
   await withTmpRoot(async (root) => {
     const warnings: string[] = [];
     const store = fakeConfigStore();
+    // `exists` is stubbed (rather than relying on a real missing file)
+    // because the inventory probe is now package-rooted (fix round) —
+    // `linkedin__jobs-search.json` genuinely ships in this repo's own
+    // package, so a real fs check would never report "missing" for it.
+    // The stub also pins the regression itself: the probed path must NOT
+    // contain `root` (the data home) at all.
+    const probedPaths: string[] = [];
     const code = await laneAddUrlCommand(
       {
         profile: 'acme',
         url: 'https://www.linkedin.com/jobs/search/?keywords=engineer',
         label: 'eng',
       },
-      { root, write: () => {}, warn: (l) => warnings.push(l), configStore: () => store },
+      {
+        root,
+        write: () => {},
+        warn: (l) => warnings.push(l),
+        configStore: () => store,
+        exists: async (p) => {
+          probedPaths.push(p);
+          return false;
+        },
+      },
     );
     assert.equal(code, 0);
 
@@ -171,26 +187,22 @@ test('laneAddUrlCommand creates search_urls.md with channel/page nodes and the U
     );
     assert.equal(warnings.length, 1);
     assert.match(warnings[0] ?? '', /no inventory yet/);
+    assert.equal(probedPaths.length, 1);
+    assert.ok(
+      !(probedPaths[0] ?? '').includes(root),
+      'the inventory probe must not be rooted at the data home',
+    );
   });
 });
 
-test('laneAddUrlCommand does not warn when the page inventory exists', async () => {
+test('laneAddUrlCommand does not warn when the page inventory exists in the package — even with a data-home-shaped root that has no src/ tree at all', async () => {
+  // Real-component regression proof (fix round, important finding 3):
+  // `root` here is a genuine data-home tmp dir with NO `src/` tree
+  // whatsoever, and `exists` is left on its REAL default (no stub) — the
+  // page ('linkedin__jobs-search') is a page inventory that genuinely
+  // ships inside this repo's own package. Before the fix, the probe was
+  // rooted at `root` and always reported "missing" here.
   await withTmpRoot(async (root) => {
-    const { mkdir, writeFile } = await import('node:fs/promises');
-    const inventoryDir = path.join(
-      root,
-      'src',
-      'adapters',
-      'lanes',
-      'linkedin',
-      'page_inventory',
-    );
-    await mkdir(inventoryDir, { recursive: true });
-    await writeFile(
-      path.join(inventoryDir, 'linkedin__jobs-search.json'),
-      '# inventory\n',
-    );
-
     const warnings: string[] = [];
     const store = fakeConfigStore();
     const code = await laneAddUrlCommand(

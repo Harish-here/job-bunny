@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -547,50 +547,19 @@ test('mirrorReachableCheck: downgrades red to warn (suffixed), passes ok/warn th
 // --- linkedin lane: happy path ---
 // Unlike greenhouse/keka, the linkedin lane's live construction reads a
 // per-page `Inventory` via `loadInventory(storage, page)`, and `storage` is
-// always a real `FsStorage(root)` inside `wire()` — there is no injectable
-// Storage seam for the live composition path (only `readFile`/`root`, used
-// above for profile.json/filter.json/search_urls.md). So this test
-// uses a real temp directory as `root` and writes a real
-// `src/adapters/lanes/linkedin/page_inventory/<page>.json` file for
-// `FsStorage` to read, while still
-// routing profile.json/filter.json/search_urls.md through the same
-// injected `readFile` seam every other test in this file uses.
-function validInventoryJson(page: string): string {
-  return JSON.stringify({
-    page,
-    pageType: 'details-page',
-    generatedAt: '2026-01-01',
-    selectors: {
-      cardList: '.jobs-list',
-      card: '.job-card',
-      cardTitle: '.job-title',
-      cardCompany: '.job-company',
-      cardLocation: '.job-location',
-      cardLink: 'a.job-link',
-      jdRoot: '.jd-root',
-    },
-    behaviors: {},
-  });
-}
+// always a real `FsStorage(<package root>)` inside `wire()` — anchored at
+// this package's own install location, not `root` (the injected DATA home).
+// So these tests reference a page inventory that REALLY ships in this
+// repo's `src/adapters/lanes/linkedin/page_inventory/`
+// ('linkedin__jobs-search') rather than writing a fake one under `root`
+// (fix round, critical finding 1 — `root` is the data home and never has a
+// `src/` tree on a real install), while still routing
+// profile.json/filter.json/search_urls.md through the same injected
+// `readFile` seam every other test in this file uses.
 
 test('wire: linkedin lane builds successfully end to end (search_urls.md -> parseSearchUrls -> loadInventory -> LinkedInLane)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-'));
   try {
-    const inventoryDir = join(
-      root,
-      'src',
-      'adapters',
-      'lanes',
-      'linkedin',
-      'page_inventory',
-    );
-    await mkdir(inventoryDir, { recursive: true });
-    await writeFile(
-      join(inventoryDir, 'staff-eng.json'),
-      validInventoryJson('staff-eng'),
-      'utf8',
-    );
-
     const profileJson = JSON.stringify({
       lanes: ['linkedin'],
       connector: 'notion',
@@ -600,7 +569,7 @@ test('wire: linkedin lane builds successfully end to end (search_urls.md -> pars
     });
     const searchUrlsMd = [
       '## Staff Engineer searches',
-      '### staff-eng',
+      '### linkedin__jobs-search',
       '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
     ].join('\n');
     const configStore = fakeConfigStore({
@@ -635,21 +604,6 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
   // imported here (`only-wire-imports-adapters`).
   const root = await mkdtemp(join(tmpdir(), 'jb-wire-linkedin-pacing-'));
   try {
-    const inventoryDir = join(
-      root,
-      'src',
-      'adapters',
-      'lanes',
-      'linkedin',
-      'page_inventory',
-    );
-    await mkdir(inventoryDir, { recursive: true });
-    await writeFile(
-      join(inventoryDir, 'staff-eng.json'),
-      validInventoryJson('staff-eng'),
-      'utf8',
-    );
-
     const profileJson = JSON.stringify({
       lanes: ['linkedin'],
       connector: 'notion',
@@ -666,7 +620,7 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
       },
     });
     const searchUrlsMd = [
-      '### staff-eng',
+      '### linkedin__jobs-search',
       '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
     ].join('\n');
     const configStore = fakeConfigStore({

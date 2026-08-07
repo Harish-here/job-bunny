@@ -26,45 +26,20 @@ import type { DoctorCheck } from '../../ports/doctor.ts';
 import { wire } from './compose.ts';
 import { fakeConfigStore } from './testkit.ts';
 
-function validInventoryJson(page: string): string {
-  return JSON.stringify({
-    page,
-    pageType: 'details-page',
-    generatedAt: '2026-01-01',
-    selectors: {
-      cardList: '.jobs-list',
-      card: '.job-card',
-      cardTitle: '.job-title',
-      cardCompany: '.job-company',
-      cardLocation: '.job-location',
-      cardLink: 'a.job-link',
-      jdRoot: '.jd-root',
-    },
-    behaviors: {},
-  });
-}
-
-/** Wires a minimal `linkedin`-lane profile against `root` (real temp dir —
- * the linkedin lane's live construction reads a real page-inventory file
- * off `FsStorage(root)`) and returns the `cdp-reachable` check it
- * registers — the only observable proxy for `RuntimeDeps.chromeUserDataDir`
- * available from outside `cli/wire`. */
-async function wireLinkedinCdpCheck(root: string): Promise<DoctorCheck> {
-  const inventoryDir = join(
-    root,
-    'src',
-    'adapters',
-    'lanes',
-    'linkedin',
-    'page_inventory',
-  );
-  await mkdir(inventoryDir, { recursive: true });
-  await writeFile(
-    join(inventoryDir, 'staff-eng.json'),
-    validInventoryJson('staff-eng'),
-    'utf8',
-  );
-
+/** Wires a minimal `linkedin`-lane profile against `root` (the DATA home —
+ * NEVER seeded with a fake `src/adapters/...` inventory tree: the
+ * `page_inventory/<page>.json` the linkedin lane reads is a PROGRAM file
+ * that ships inside the package itself, at the package's own install
+ * location, not under the data home. `page` must therefore name a page
+ * inventory that REALLY ships in this repo's
+ * `src/adapters/lanes/linkedin/page_inventory/` — 'linkedin__jobs-search'
+ * by default) and returns the `cdp-reachable` check it registers — the
+ * only observable proxy for `RuntimeDeps.chromeUserDataDir` available from
+ * outside `cli/wire`. */
+async function wireLinkedinCdpCheck(
+  root: string,
+  page = 'linkedin__jobs-search',
+): Promise<DoctorCheck> {
   const profileJson = JSON.stringify({
     lanes: ['linkedin'],
     connector: 'notion',
@@ -74,7 +49,7 @@ async function wireLinkedinCdpCheck(root: string): Promise<DoctorCheck> {
   });
   const searchUrlsMd = [
     '## Staff Engineer searches',
-    '### staff-eng',
+    `### ${page}`,
     '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
   ].join('\n');
   const configStore = fakeConfigStore({
@@ -113,6 +88,31 @@ test('wire: the Chrome user-data-dir is <root>/chrome', async () => {
     const finding = await check.run();
     assert.equal(finding.status, 'ok');
     assert.match(finding.detail, /CDP reachable/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('wire: the linkedin lane builds from the package-shipped page_inventory even when the data home (root) has no src/ tree at all', async () => {
+  // Real-component regression proof (fix round, critical finding 1):
+  // `root` here is the DATA home a real install passes to `wire()`, and it
+  // deliberately contains no `src/` tree — an installed `~/.jobbunny` never
+  // does. The page used ('linkedin__jobs-search') is a REAL inventory file
+  // that ships inside this package's own
+  // `src/adapters/lanes/linkedin/page_inventory/` — not a fixture written
+  // into a temp dir. Before the fix, `loadInventory` read the machine-shared
+  // inventory handle off `root` (the data home) instead of the package's
+  // own install location, so this always threw "missing page inventory".
+  const root = await mkdtemp(join(tmpdir(), 'jb-wire-chromedir-nosrc-'));
+  try {
+    const check = await wireLinkedinCdpCheck(root, 'linkedin__jobs-search');
+    const finding = await check.run();
+    // `browserReachable` is overridden to report reachable, so a
+    // non-throwing `wire()` call plus a functioning `cdp-reachable` check
+    // is proof the linkedin lane (and its `loadInventory` call) built
+    // successfully against the package's own inventory tree.
+    assert.equal(finding.status, 'warn');
+    assert.match(finding.detail, /no Job Bunny pid file found/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -35,6 +35,23 @@ async function withTmpRoot(fn: (root: string) => Promise<void>) {
   }
 }
 
+/** Like `withTmpRoot`, but also yields a SEPARATE tmp dir for
+ * `SetupDeps.packageRoot` — the `page_inventory`/`ui/dist` probe root
+ * (fix round: these are PROGRAM paths, no longer resolved from `root`,
+ * the data home). Kept as its own helper rather than folding into
+ * `withTmpRoot` so the many tests that never touch page_inventory/ui-build
+ * stay on the simpler one-tmp-dir shape. */
+async function withTmpRoots(fn: (root: string, packageRoot: string) => Promise<void>) {
+  const root = await mkdtemp(path.join(tmpdir(), 'jobbunny-setup-'));
+  const packageRoot = await mkdtemp(path.join(tmpdir(), 'jobbunny-setup-pkg-'));
+  try {
+    await fn(root, packageRoot);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(packageRoot, { recursive: true, force: true });
+  }
+}
+
 /** In-memory `ConfigStore` fake, pre-seeded with `docs` — same Map-backed
  * shape as `cli/wire/testkit.ts`'s `fakeConfigStore` (colocated here
  * rather than imported: `cli/wire/testkit.ts` is that module's own
@@ -71,7 +88,7 @@ test('setupCommand on a completely empty root: seeds scaffold, everything else n
 });
 
 test('setupCommand: fully satisfied profile reports all done/skipped and exits 0', async () => {
-  await withTmpRoot(async (root) => {
+  await withTmpRoots(async (root, packageRoot) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
     const profileDir = path.join(root, 'profiles', 'acme');
 
@@ -87,8 +104,10 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
       '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
     store.close();
+    // page_inventory/ui-dist are PROGRAM paths (fix round) — seeded under
+    // `packageRoot`, never `root` (the data home).
     const inventoryDir = path.join(
-      root,
+      packageRoot,
       'src',
       'adapters',
       'lanes',
@@ -97,17 +116,74 @@ test('setupCommand: fully satisfied profile reports all done/skipped and exits 0
     );
     await mkdir(inventoryDir, { recursive: true });
     await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.json'), '{}\n');
-    const uiDistDir = path.join(root, 'ui', 'dist');
+    const uiDistDir = path.join(packageRoot, 'ui', 'dist');
     await mkdir(uiDistDir, { recursive: true });
     await writeFile(path.join(uiDistDir, 'index.html'), '<!doctype html>\n');
 
     const lines: string[] = [];
     const code = await setupCommand(
       { profile: 'acme' },
-      { root, write: (l) => lines.push(l) },
+      { root, packageRoot, write: (l) => lines.push(l) },
     );
     assert.equal(code, 0);
     assert.ok(lines.every((l) => !l.includes('needs-action')));
+  });
+});
+
+test('setupCommand: page_inventory coverage and ui build report done (and the run exits 0) even though root — the data home — has no src/ or ui/ tree at all', async () => {
+  // Real-component regression proof (fix round, critical finding 2):
+  // `root` never gets a `src/` or `ui/` directory anywhere in this test —
+  // exactly like a real, freshly-set-up `~/.jobbunny`. Before the fix,
+  // `stepInventory`/`stepUiBuilt` probed `root` itself for these PROGRAM
+  // paths, so a perfectly healthy first run always reported both
+  // `needs-action` and `setupCommand` always exited 1.
+  await withTmpRoots(async (root, packageRoot) => {
+    await profileBuildCommand({ profile: 'nutshell' }, { root, write: () => {} });
+    const profileDir = path.join(root, 'profiles', 'nutshell');
+    await writeFile(path.join(profileDir, 'resume.json'), '{}');
+    const store = wireConfigStore('nutshell', { root });
+    await store.writeText(
+      'search_urls.md',
+      '## linkedin\n### linkedin__jobs-search\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
+    );
+    store.close();
+
+    const inventoryDir = path.join(
+      packageRoot,
+      'src',
+      'adapters',
+      'lanes',
+      'linkedin',
+      'page_inventory',
+    );
+    await mkdir(inventoryDir, { recursive: true });
+    await writeFile(path.join(inventoryDir, 'linkedin__jobs-search.json'), '{}\n');
+    await mkdir(path.join(packageRoot, 'ui', 'dist'), { recursive: true });
+    await writeFile(
+      path.join(packageRoot, 'ui', 'dist', 'index.html'),
+      '<!doctype html>\n',
+    );
+
+    let rootHasSrcOrUi = true;
+    try {
+      await readFile(path.join(root, 'src'), 'utf8');
+    } catch {
+      try {
+        await readFile(path.join(root, 'ui'), 'utf8');
+      } catch {
+        rootHasSrcOrUi = false;
+      }
+    }
+    assert.equal(rootHasSrcOrUi, false, 'root must have no src/ or ui/ tree');
+
+    const lines: string[] = [];
+    const code = await setupCommand(
+      { profile: 'nutshell' },
+      { root, packageRoot, write: (l) => lines.push(l) },
+    );
+    assert.ok(lines.some((l) => l.includes('page_inventory coverage: done')));
+    assert.ok(lines.some((l) => l.includes('ui build: done')));
+    assert.equal(code, 0);
   });
 });
 
@@ -151,7 +227,7 @@ test('setupCommand: .env present but NOTION_TOKEN empty is needs-action', async 
 });
 
 test('setupCommand: search_urls.md present with a referenced page but missing inventory is needs-action', async () => {
-  await withTmpRoot(async (root) => {
+  await withTmpRoots(async (root, packageRoot) => {
     await profileBuildCommand({ profile: 'acme' }, { root, write: () => {} });
     // profileBuildCommand's scaffold already created a config_docs row for
     // search_urls.md — overwrite it via the SAME store, not the (now-
@@ -162,11 +238,16 @@ test('setupCommand: search_urls.md present with a referenced page but missing in
       '## linkedin\n### linkedin__jobs-search\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n  • eng - https://www.linkedin.com/jobs/search/?keywords=eng\n',
     );
     store.close();
+    // `packageRoot` is a fresh, empty tmp dir — `linkedin__jobs-search`
+    // really ships in THIS repo's own package, so an unoverridden
+    // `packageRoot` would falsely report "done" here; the override proves
+    // the "missing" case genuinely, independent of what this checkout
+    // happens to ship.
 
     const lines: string[] = [];
     const code = await setupCommand(
       { profile: 'acme' },
-      { root, write: (l) => lines.push(l) },
+      { root, packageRoot, write: (l) => lines.push(l) },
     );
     assert.equal(code, 1);
     assert.ok(
@@ -340,9 +421,12 @@ test('unparseable profile.json makes the token step needs-action, not a crash', 
 // ---------- ui build step ----------
 
 test('ui build: needs-action without ui/dist, done with it', async () => {
-  await withTmpRoot(async (root) => {
+  await withTmpRoots(async (root, packageRoot) => {
     let lines: string[] = [];
-    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    await setupCommand(
+      { profile: 'zz' },
+      { root, packageRoot, write: (l) => lines.push(l) },
+    );
     assert.ok(
       lines.some((l) =>
         l.includes(
@@ -351,11 +435,19 @@ test('ui build: needs-action without ui/dist, done with it', async () => {
       ),
     );
 
-    await mkdir(path.join(root, 'ui', 'dist'), { recursive: true });
-    await writeFile(path.join(root, 'ui', 'dist', 'index.html'), '<!doctype html>\n');
+    // ui/dist is a PROGRAM path (fix round) — seeded under `packageRoot`,
+    // never `root` (the data home).
+    await mkdir(path.join(packageRoot, 'ui', 'dist'), { recursive: true });
+    await writeFile(
+      path.join(packageRoot, 'ui', 'dist', 'index.html'),
+      '<!doctype html>\n',
+    );
 
     lines = [];
-    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    await setupCommand(
+      { profile: 'zz' },
+      { root, packageRoot, write: (l) => lines.push(l) },
+    );
     assert.ok(lines.some((l) => l.includes('[setup] ui build: done — ui/dist present')));
   });
 });
@@ -363,15 +455,17 @@ test('ui build: needs-action without ui/dist, done with it', async () => {
 // ---------- page_inventory .json authority ----------
 
 test('page_inventory coverage accepts .json inventory files', async () => {
-  await withTmpRoot(async (root) => {
+  await withTmpRoots(async (root, packageRoot) => {
     const profileDir = path.join(root, 'profiles', 'zz');
     await mkdir(profileDir, { recursive: true });
     await writeFile(
       path.join(profileDir, 'search_urls.md'),
       '## linkedin\n### search-results\n  • eng - https://example.com/jobs\n',
     );
+    // page_inventory is a PROGRAM path (fix round) — seeded under
+    // `packageRoot`, never `root` (the data home).
     const inventoryDir = path.join(
-      root,
+      packageRoot,
       'src',
       'adapters',
       'lanes',
@@ -383,7 +477,10 @@ test('page_inventory coverage accepts .json inventory files', async () => {
     await writeFile(path.join(inventoryDir, 'search-results.json'), '{}\n');
 
     const lines: string[] = [];
-    await setupCommand({ profile: 'zz' }, { root, write: (l) => lines.push(l) });
+    await setupCommand(
+      { profile: 'zz' },
+      { root, packageRoot, write: (l) => lines.push(l) },
+    );
     assert.ok(lines.some((l) => l.includes('page_inventory coverage: done')));
   });
 });
