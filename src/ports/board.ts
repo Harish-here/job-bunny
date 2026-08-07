@@ -218,7 +218,12 @@ export interface BoardSource {
   /** Presence only — never a value, never a prefix, never a length. */
   listSecrets(): Promise<SecretPresence>;
   /** Write-only. Appends or replaces `key`'s line in `<root>/.env`.
-   * Never reads a value back out and never returns one. */
+   * Never reads a value back out and never returns one. Process-visible:
+   * a `wireBoard` implementation must also update the running process's
+   * own `process.env[key]`, not just the file — `.env` is loaded once at
+   * CLI startup, and the board process outlives that load, so a doctor
+   * check reading `process.env` right after a write must see the new
+   * value without a restart. */
   writeSecret(key: SecretKey, value: string): Promise<void>;
   /** Deletes `<root>/profiles/<name>/` and everything under it, after the
    * guards in `RemoveProfileOutcome`. Mirrors the CLI's semantics: it

@@ -74,7 +74,6 @@ import {
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
 import { hasEnvValue, upsertEnvLine } from '../../core/env_file/index.ts';
-import { runChecks } from '../../ops/doctor/aggregate.ts';
 import {
   type BoardProfile,
   type BoardSource,
@@ -88,15 +87,11 @@ import {
 import type { ConfigDocKey } from '../../ports/config_store.ts';
 import type { DoctorReport } from '../../ports/doctor.ts';
 import type { RunIntentStore } from '../../ports/run_intents.ts';
-import {
-  defaultRunDegradedConfigChecks,
-  wireFailureFinding,
-} from '../commands/doctor.ts';
 import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
+import { runBoardDoctor } from './board_doctor.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
-import { wire } from './compose.ts';
 
 const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
 
@@ -263,21 +258,12 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
 
     async runDoctor(name: string): Promise<DoctorReport | null> {
       // Same membership gate as `openStore`/`readConfigDoc` — re-derived
-      // against the CURRENT directory names, never path math.
+      // against the CURRENT directory names, never path math. The actual
+      // check-running (and its own short-lived `configStore` close) lives
+      // in `board_doctor.ts` — split out purely for the file-size cap.
       const infos = await listProfileInfos(root);
       if (!infos.some((p) => p.name === name)) return null;
-
-      try {
-        const { checks } = await wire(name, { root, configLiftMode: 'readonly' });
-        return await runChecks(checks);
-      } catch (err) {
-        // Same wire()-failure degrade path the CLI's `doctor` command
-        // takes (`commands/doctor.ts`) — the synthesized `wire` finding
-        // is itself red, so the report's status is always 'red' here;
-        // never recomputed from the degraded findings.
-        const degraded = await defaultRunDegradedConfigChecks(name, root);
-        return { findings: [wireFailureFinding(name, err), ...degraded], status: 'red' };
-      }
+      return runBoardDoctor(name, root);
     },
 
     readDaemonStatus(): Promise<DaemonStatus> {
@@ -316,6 +302,14 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       // `.env` keeps whatever permissions the user gave it; this task
       // does not chmod files it did not create.
       await writeFile(path.join(root, '.env'), updated, { mode: 0o600 });
+      // `.env` is loaded exactly once, at CLI startup (`main.ts`'s
+      // `dotenv.config`) — the long-lived board process never re-reads
+      // it. Without this, `GET /api/profiles/:name/doctor` (which reads
+      // `process.env` via `ops/doctor/aggregate.ts`'s `resolveEnv`) keeps
+      // reporting the token missing until the server restarts, even
+      // though `GET /api/secrets` (which re-reads the file) already says
+      // 'present' — process-visible so the two endpoints agree.
+      process.env[key] = value;
     },
 
     // Guard order is the design (Task 8) — membership, protected, running

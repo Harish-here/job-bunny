@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -392,5 +393,74 @@ describe('wireBoard — removeProfile', () => {
     const remaining = await source.listProfiles();
     assert.ok(!remaining.some((p) => p.name === 'expired-profile'));
     source.close();
+  });
+});
+
+describe('wireBoard — runDoctor (fix round: configStore leak)', () => {
+  // `lsof -p <pid>` filtered to this profile's own db path — a real,
+  // OS-observed count of open file descriptors, not a synthetic mock. On
+  // the pre-fix code (`const { checks } = await wire(...)`, `configStore`
+  // never destructured/closed) this same setup measurably grows by one fd
+  // per call; verified by hand against the buggy version before writing
+  // this test. `lsof` is posix-only, so the growth assertion is skipped on
+  // win32 — `runDoctor` itself is still exercised there for basic sanity.
+  function countOpenFdsFor(dbPath: string): number {
+    const out = execSync(`lsof -p ${process.pid}`, { encoding: 'utf8' });
+    return out.split('\n').filter((line) => line.includes(dbPath)).length;
+  }
+
+  test('repeated calls do not accumulate open configStore file descriptors', async () => {
+    writeProfile('doctor-leak', { connector: 'sqlite' });
+    const dbPath = path.join(profileDir('doctor-leak'), 'data', 'jobbunny.db');
+    mkdirSync(path.dirname(dbPath), { recursive: true });
+    writeFileSync(dbPath, '');
+
+    const source = wireBoard({ root });
+    await source.runDoctor('doctor-leak'); // warm-up: first open/close.
+    assert.ok((await source.runDoctor('doctor-leak'))?.status);
+
+    if (process.platform !== 'win32') {
+      const before = countOpenFdsFor(dbPath);
+      for (let i = 0; i < 5; i += 1) await source.runDoctor('doctor-leak');
+      const after = countOpenFdsFor(dbPath);
+      assert.equal(
+        after,
+        before,
+        'runDoctor must close its own short-lived configStore every call',
+      );
+    }
+    source.close();
+  });
+
+  test('the profile directory (and its jobbunny.db) is still removable after doctor calls', async () => {
+    writeProfile('doctor-removable', { connector: 'sqlite' });
+    const dbPath = path.join(profileDir('doctor-removable'), 'data', 'jobbunny.db');
+    mkdirSync(path.dirname(dbPath), { recursive: true });
+    writeFileSync(dbPath, '');
+
+    const source = wireBoard({ root });
+    await source.runDoctor('doctor-removable');
+    await source.runDoctor('doctor-removable');
+    const outcome = await source.removeProfile('doctor-removable');
+    assert.deepEqual(outcome, { outcome: 'removed' });
+    assert.equal(existsSync(profileDir('doctor-removable')), false);
+    source.close();
+  });
+});
+
+describe('wireBoard — writeSecret (fix round: process.env visibility)', () => {
+  test('writeSecret updates process.env[key] in the running process, not just the file', async () => {
+    const original = process.env.NOTION_TOKEN;
+    try {
+      delete process.env.NOTION_TOKEN;
+      const source = wireBoard({ root });
+      assert.equal(process.env.NOTION_TOKEN, undefined);
+      await source.writeSecret('NOTION_TOKEN', 'tok-fix-round-secret');
+      assert.equal(process.env.NOTION_TOKEN, 'tok-fix-round-secret');
+      source.close();
+    } finally {
+      if (original === undefined) delete process.env.NOTION_TOKEN;
+      else process.env.NOTION_TOKEN = original;
+    }
   });
 });

@@ -22,10 +22,13 @@ import type { RunIntent, RunIntentStore } from '../../ports/run_intents.ts';
 import { createBoardServer } from './server.ts';
 
 /** Sends a raw request line/headers over a plain TCP socket and resolves
- * with everything read back before the connection closes. Used only for
- * the malformed-request-target test below, which needs a request-target
- * that `fetch()` can never be made to send (fetch always sends
- * origin-form targets). */
+ * with everything read back before the connection closes. Used for the
+ * malformed-request-target test below (which needs a request-target
+ * `fetch()` can never be made to send — fetch always sends origin-form
+ * targets), and for the forged-`Host`/foreign-`Origin` tests (which need
+ * a `Host` header `fetch()` can never be made to lie about — `fetch()`
+ * always derives `Host` from the URL it's given, even when a `Host`
+ * header is explicitly passed in `headers`). */
 function sendRawRequest(port: number, raw: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, '127.0.0.1', () => {
@@ -570,6 +573,54 @@ test('a malformed absolute-form request target is a 400 bad_request envelope, no
     // normal request right after must still succeed.
     const res = await fetch(`http://127.0.0.1:${port}/api/profiles`);
     assert.equal(res.status, 200);
+  });
+});
+
+// --- fix round: DNS-rebinding / cross-origin request forgery ---
+
+test('a forged Host header is a 403 forbidden envelope, even for a plain GET', async () => {
+  // A `Host` naming a different port (or a resolvable-but-attacker-owned
+  // name, in a DNS-rebinding attack) must be rejected regardless of the
+  // request-target — this is the check that survives DNS rebinding,
+  // where the browser genuinely believes the request is same-origin so
+  // no `Origin` header applies at all.
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const raw = `GET /api/profiles HTTP/1.1\r\nHost: evil.example.com:${port}\r\nConnection: close\r\n\r\n`;
+    const response = await sendRawRequest(port, raw);
+    assert.match(
+      response,
+      /^HTTP\/1\.1 403/,
+      `expected a 403 status line, got: ${response}`,
+    );
+    assert.match(response, /"code":"forbidden"/);
+  });
+});
+
+test('a foreign Origin header is a 403 forbidden envelope even with a correct Host', async () => {
+  // A CORS "simple request" (no body, no custom header — exactly what
+  // `POST /api/profiles/:name/run-intents` is) still carries `Host`
+  // correctly since the browser sends it to the real target; only
+  // `Origin` betrays the cross-site page. Must be rejected even though
+  // `Host` is legitimate.
+  const server = createBoardServer({
+    source: fakeSource(),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const raw = `GET /api/profiles HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: http://evil.example.com\r\nConnection: close\r\n\r\n`;
+    const response = await sendRawRequest(port, raw);
+    assert.match(
+      response,
+      /^HTTP\/1\.1 403/,
+      `expected a 403 status line, got: ${response}`,
+    );
+    assert.match(response, /"code":"forbidden"/);
   });
 });
 

@@ -68,12 +68,17 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
     ...makePersonasRoutes(),
   ];
 
+  // Set by `listen()` once the actual port is known (0 in ⇒ an ephemeral
+  // port out) — `assertTrustedRequest` needs the REAL bound port, not the
+  // caller's requested one, to validate `Host`/`Origin`.
+  let boundPort = 0;
+
   const httpServer = createServer((req, res) => {
     // Last-resort net: `handleRequest` covers its own body in a
     // try/catch/finally, but nothing may ever crash the process from a
     // future edit inside it — a bare `void` here would turn any escaping
     // throw into an unhandled rejection (fatal on Node 24 by default).
-    handleRequest(req, res, routes, uiDir, logger).catch((err) => {
+    handleRequest(req, res, routes, uiDir, logger, boundPort).catch((err) => {
       logger.error('board: handler crashed (last resort)', { error: String(err) });
       if (!res.headersSent) {
         writeJson(res, jsonError(500, 'internal', 'internal server error'));
@@ -91,7 +96,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
         httpServer.listen(port, host, () => {
           httpServer.removeListener('error', onError);
           const address = httpServer.address();
-          const boundPort = typeof address === 'object' && address ? address.port : port;
+          boundPort = typeof address === 'object' && address ? address.port : port;
           resolve({ port: boundPort });
         });
       });
@@ -121,12 +126,46 @@ function safeParseUrl(rawTarget: string): URL {
   }
 }
 
+/** Defeats DNS rebinding and simple cross-origin requests against a board
+ * that now has real side effects (queue a run, run doctor's CDP/Notion
+ * probes, overwrite a secret, delete a profile): a `Host` header that
+ * doesn't name this server's OWN bound loopback address is rejected
+ * outright — this is what DNS rebinding attacks, so checking `Origin`
+ * alone is not enough. `Origin` is checked too, but only when the browser
+ * sends one (a same-origin navigation and most non-fetch requests never
+ * do) — its absence is not itself grounds for rejection. Compared
+ * lowercased: header VALUES (unlike names) are not normalized by Node's
+ * HTTP parser. */
+function assertTrustedRequest(req: IncomingMessage, boundPort: number): void {
+  const hostHeader = req.headers.host;
+  if (typeof hostHeader !== 'string' || !isTrustedHostPort(hostHeader, boundPort)) {
+    throw new HttpError(403, 'forbidden', 'untrusted Host header');
+  }
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && !isTrustedOrigin(origin, boundPort)) {
+    throw new HttpError(403, 'forbidden', 'untrusted Origin header');
+  }
+}
+
+function isTrustedHostPort(hostHeader: string, boundPort: number): boolean {
+  const lower = hostHeader.trim().toLowerCase();
+  return lower === `127.0.0.1:${boundPort}` || lower === `localhost:${boundPort}`;
+}
+
+function isTrustedOrigin(origin: string, boundPort: number): boolean {
+  const lower = origin.trim().toLowerCase();
+  return (
+    lower === `http://127.0.0.1:${boundPort}` || lower === `http://localhost:${boundPort}`
+  );
+}
+
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   routes: RouteDef[],
   uiDir: string | undefined,
   logger: Logger,
+  boundPort: number,
 ): Promise<void> {
   const start = performance.now();
   const method = req.method ?? 'GET';
@@ -139,6 +178,10 @@ async function handleRequest(
   try {
     const url = safeParseUrl(rawTarget);
     path = url.pathname;
+    // Before routing to either the API or the static/SPA branch — a
+    // forged `Host`/`Origin` is rejected regardless of what it's asking
+    // for.
+    assertTrustedRequest(req, boundPort);
     if (url.pathname.startsWith('/api/')) {
       const response = await handleApi(req, url, method, routes);
       status = response.status;
