@@ -66,7 +66,7 @@
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod as fsChmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openJobsDb,
@@ -99,6 +99,12 @@ export interface BoardWireOverrides {
   /** the data home; default `resolveHome()` — same resolution as
    * `compose.ts`/`wireMigrate` in `builders.ts`. */
   root?: string;
+  /** test-only seam: overrides how `.env` is chmod'd to `0o600` after
+   * `writeSecret` writes it. Default calls the real `node:fs/promises`
+   * `chmod`. Tests use this to assert the call happened (path + mode)
+   * without depending on the host OS actually honoring the permission
+   * bits. */
+  chmodEnvFile?: (path: string, mode: number) => Promise<void>;
 }
 
 interface ProfileInfo extends BoardProfile {
@@ -173,6 +179,7 @@ async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
 
 export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
   const root = overrides.root ?? resolveHome();
+  const chmodEnvFile = overrides.chmodEnvFile ?? fsChmod;
   const stores = new Map<string, BoardStore>();
   const intentStores = new Map<string, RunIntentStore>();
 
@@ -298,10 +305,14 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
     async writeSecret(key: SecretKey, value: string): Promise<void> {
       const text = await readEnvText(root);
       const updated = upsertEnvLine(text, key, value);
-      // `mode` only applies when the file is created — an existing
-      // `.env` keeps whatever permissions the user gave it; this task
-      // does not chmod files it did not create.
-      await writeFile(path.join(root, '.env'), updated, { mode: 0o600 });
+      const envPath = path.join(root, '.env');
+      // `mode` on `writeFile` only applies when the file is CREATED — an
+      // already-existing `.env` (the common case: most calls are updates
+      // to a file `setup` already created) keeps whatever permissions it
+      // already had unless chmod'd explicitly, so every write chmods the
+      // file to `0o600` afterward regardless of whether it already existed.
+      await writeFile(envPath, updated, { mode: 0o600 });
+      await chmodEnvFile(envPath, 0o600);
       // `.env` is loaded exactly once, at CLI startup (`main.ts`'s
       // `dotenv.config`) — the long-lived board process never re-reads
       // it. Without this, `GET /api/profiles/:name/doctor` (which reads

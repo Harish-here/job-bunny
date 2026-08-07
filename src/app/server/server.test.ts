@@ -577,50 +577,54 @@ test('a malformed absolute-form request target is a 400 bad_request envelope, no
 });
 
 // --- fix round: DNS-rebinding / cross-origin request forgery ---
+// fix round 2: loopback-scoped but PORT-agnostic, so it survives `npm run
+// ui:dev`'s Vite proxy (rewrites `Host` to the API's port, forwards the
+// browser's real `Origin`, e.g. `http://localhost:5173`) while still
+// rejecting any non-loopback host name (DNS rebinding / cross-site).
 
-test('a forged Host header is a 403 forbidden envelope, even for a plain GET', async () => {
-  // A `Host` naming a different port (or a resolvable-but-attacker-owned
-  // name, in a DNS-rebinding attack) must be rejected regardless of the
-  // request-target — this is the check that survives DNS rebinding,
-  // where the browser genuinely believes the request is same-origin so
-  // no `Origin` header applies at all.
+test('Host/Origin trust: loopback any-port allowed, non-loopback rejected', async () => {
   const server = createBoardServer({
     source: fakeSource(),
     logger: silentLogger,
     version: TEST_VERSION,
   });
+  // [name, host, origin, forbidden] — origin `undefined` means the header
+  // is omitted entirely (CLI/curl/same-origin navigation never send one).
+  type Case = [
+    name: string,
+    host: string,
+    origin: string | undefined,
+    forbidden: boolean,
+  ];
   await withServer(server, async (port) => {
-    const raw = `GET /api/profiles HTTP/1.1\r\nHost: evil.example.com:${port}\r\nConnection: close\r\n\r\n`;
-    const response = await sendRawRequest(port, raw);
-    assert.match(
-      response,
-      /^HTTP\/1\.1 403/,
-      `expected a 403 status line, got: ${response}`,
-    );
-    assert.match(response, /"code":"forbidden"/);
-  });
-});
-
-test('a foreign Origin header is a 403 forbidden envelope even with a correct Host', async () => {
-  // A CORS "simple request" (no body, no custom header — exactly what
-  // `POST /api/profiles/:name/run-intents` is) still carries `Host`
-  // correctly since the browser sends it to the real target; only
-  // `Origin` betrays the cross-site page. Must be rejected even though
-  // `Host` is legitimate.
-  const server = createBoardServer({
-    source: fakeSource(),
-    logger: silentLogger,
-    version: TEST_VERSION,
-  });
-  await withServer(server, async (port) => {
-    const raw = `GET /api/profiles HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: http://evil.example.com\r\nConnection: close\r\n\r\n`;
-    const response = await sendRawRequest(port, raw);
-    assert.match(
-      response,
-      /^HTTP\/1\.1 403/,
-      `expected a 403 status line, got: ${response}`,
-    );
-    assert.match(response, /"code":"forbidden"/);
+    const loopback = `127.0.0.1:${port}`;
+    const cases: Case[] = [
+      // DNS-rebinding case: the browser believes it's same-origin, so it
+      // sends no `Origin` — only `Host` betrays the attack.
+      ['forged Host', `evil.example.com:${port}`, undefined, true],
+      ['Host with no port', 'evil.com', undefined, true],
+      // Correct `Host` (sent to the real target); only `Origin` betrays a
+      // cross-site page.
+      ['foreign Origin', loopback, 'http://evil.example.com', true],
+      ['https Origin, unrelated domain', loopback, 'https://evil.com', true],
+      // Vite dev-proxy origin (`npm run ui:dev`): a different port, but
+      // still loopback — must pass.
+      ['Vite dev-proxy Origin', loopback, 'http://localhost:5173', false],
+      ['loopback Origin, unrelated port', loopback, 'http://127.0.0.1:1994', false],
+      ['no Origin header', loopback, undefined, false],
+    ];
+    for (const [name, host, origin, forbidden] of cases) {
+      const originLine = origin ? `Origin: ${origin}\r\n` : '';
+      const raw = `GET /api/profiles HTTP/1.1\r\nHost: ${host}\r\n${originLine}Connection: close\r\n\r\n`;
+      const response = await sendRawRequest(port, raw);
+      const expected = forbidden ? 403 : 200;
+      assert.match(
+        response,
+        new RegExp(`^HTTP/1\\.1 ${expected}`),
+        `[${name}] expected ${expected}, got: ${response}`,
+      );
+      if (forbidden) assert.match(response, /"code":"forbidden"/, `[${name}]`);
+    }
   });
 });
 

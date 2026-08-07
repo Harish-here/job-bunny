@@ -62,18 +62,39 @@ export function hasEnvValue(text: string, key: string): boolean {
   return false;
 }
 
+/** A value containing whitespace or `#` would otherwise either get
+ * silently truncated at the `#` (dotenv treats an unquoted `#` as a
+ * comment starter) or pick up leading/trailing whitespace ambiguity; a
+ * value containing a quote character would break out of a would-be
+ * quoted form. Any of those get double-quoted; anything else is written
+ * bare, matching every pre-existing `.env` line in the wild. */
+function needsQuoting(value: string): boolean {
+  return /[\s#"']/.test(value);
+}
+
+/** Double-quotes `value`, escaping embedded backslashes first (so a
+ * pre-existing `\"` isn't double-escaped) and then embedded double
+ * quotes. */
+function quoteValue(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
 /** Returns `text` with `key` set to `value`. When a non-comment
  * assignment for `key` already exists, the FIRST such line is replaced
  * whole (as a plain `KEY=value` line, even if the original was
  * `export`-prefixed) and every other line is preserved byte-for-byte;
  * otherwise `KEY=value` is appended. The result always ends in exactly
- * one trailing newline. The value is written raw — callers reject values
- * containing a newline before calling. */
+ * one trailing newline. `value` is double-quoted (with embedded quotes
+ * and backslashes escaped) whenever it contains whitespace, `#`, or a
+ * quote character — otherwise it's written bare; callers reject values
+ * containing a newline before calling either way. */
 export function upsertEnvLine(text: string, key: string, value: string): string {
   const regex = assignmentRegex(key);
   const lines = contentLines(text);
   const index = lines.findIndex((line) => !isCommentLine(line) && regex.test(line));
-  const newLine = `${key}=${value}`;
+  const written = needsQuoting(value) ? quoteValue(value) : value;
+  const newLine = `${key}=${written}`;
   if (index === -1) {
     lines.push(newLine);
   } else {

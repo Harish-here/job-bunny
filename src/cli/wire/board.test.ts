@@ -464,3 +464,30 @@ describe('wireBoard — writeSecret (fix round: process.env visibility)', () => 
     }
   });
 });
+
+describe('wireBoard — writeSecret (fix round 2: explicit chmod 0o600)', () => {
+  test('writeSecret chmods .env to 0o600 after writing, even when the file already existed', async () => {
+    const original = process.env.NOTION_TOKEN;
+    const chmodCalls: Array<{ path: string; mode: number }> = [];
+    try {
+      delete process.env.NOTION_TOKEN;
+      // Pre-existing `.env`, so `writeFile`'s own `{ mode: 0o600 }` (which
+      // only applies on create) would NOT be the thing enforcing this.
+      writeFileSync(path.join(root, '.env'), 'UNRELATED=keep\n');
+      const source = wireBoard({
+        root,
+        chmodEnvFile: async (p, mode) => {
+          chmodCalls.push({ path: p, mode });
+        },
+      });
+      await source.writeSecret('NOTION_TOKEN', 'tok-chmod-secret');
+      assert.equal(chmodCalls.length, 1);
+      assert.equal(chmodCalls[0]?.path, path.join(root, '.env'));
+      assert.equal(chmodCalls[0]?.mode, 0o600);
+      source.close();
+    } finally {
+      if (original === undefined) delete process.env.NOTION_TOKEN;
+      else process.env.NOTION_TOKEN = original;
+    }
+  });
+});

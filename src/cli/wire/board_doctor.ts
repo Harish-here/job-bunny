@@ -2,13 +2,16 @@
  * cli/wire/board_doctor.ts (fix round) — `BoardSource.runDoctor`'s real
  * implementation, split out of `board.ts` purely for the file-size cap
  * (`board.ts` hit 404 lines once this call was fixed to close its own
- * `configStore` — see below — pushing it past the 400-line cap). Sibling
- * to `board.ts`/`builders.ts`/`compose.ts` in the
- * `only-wire-imports-adapters` carve-out (`.dependency-cruiser.cjs`) —
- * this file itself imports no adapter directly, only `compose.ts`'s
- * `wire()` (already carve-out-legal for `cli/wire/`) and
- * `ops/doctor/aggregate.ts`'s `runChecks`. Mirrors `board_daemon.ts`'s own
- * precedent for splitting a `BoardSource` method's body out of `board.ts`.
+ * `configStore` — see below — pushing it past the 400-line cap). NOT a
+ * member of `only-wire-imports-adapters`'s carve-out (`.dependency-
+ * cruiser.cjs`'s `pathNot` there names only `compose|builders|registry|
+ * board|daemon|migrate\.ts$` — `board_doctor.ts` isn't on that list) — and
+ * it doesn't need to be: this file imports no adapter directly, only
+ * `compose.ts`'s `wire()` (which IS carve-out-legal) and
+ * `ops/doctor/aggregate.ts`'s `runChecks`, so the rule's `to: { path:
+ * '^src/adapters' }` never matches anything this file imports. Mirrors
+ * `board_daemon.ts`'s own precedent for splitting a `BoardSource` method's
+ * body out of `board.ts`.
  *
  * Membership (whether `name` is a CURRENT directory under
  * `<root>/profiles`) is NOT this function's concern — `board.ts`'s

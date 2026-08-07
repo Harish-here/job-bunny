@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import dotenv from 'dotenv';
 import { hasEnvValue, upsertEnvLine } from './env_file.ts';
 
 // --- hasEnvValue ---
@@ -62,4 +63,24 @@ test('upsertEnvLine: leaves a commented-out assignment alone and appends a real 
   const before = '# NOTION_TOKEN=xxx\n';
   const after = upsertEnvLine(before, 'NOTION_TOKEN', 'abc');
   assert.equal(after, '# NOTION_TOKEN=xxx\nNOTION_TOKEN=abc\n');
+});
+
+// --- upsertEnvLine: quoting round-trips through the real `dotenv.parse` ---
+
+test('upsertEnvLine: a value containing a space is quoted and round-trips', () => {
+  const written = upsertEnvLine('', 'NOTION_TOKEN', 'hello world');
+  assert.equal(written, 'NOTION_TOKEN="hello world"\n');
+  assert.deepEqual(dotenv.parse(written), { NOTION_TOKEN: 'hello world' });
+});
+
+test('upsertEnvLine: a value containing " #comment" is quoted so dotenv does not truncate it', () => {
+  const written = upsertEnvLine('', 'NOTION_TOKEN', 'secret #comment');
+  assert.equal(written, 'NOTION_TOKEN="secret #comment"\n');
+  assert.deepEqual(dotenv.parse(written), { NOTION_TOKEN: 'secret #comment' });
+});
+
+test('upsertEnvLine: a clean value (no whitespace/#/quotes) is left unquoted and round-trips', () => {
+  const written = upsertEnvLine('', 'NOTION_TOKEN', 'abc123');
+  assert.equal(written, 'NOTION_TOKEN=abc123\n');
+  assert.deepEqual(dotenv.parse(written), { NOTION_TOKEN: 'abc123' });
 });
