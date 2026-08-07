@@ -2,7 +2,16 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 const STORAGE_KEY = 'jobbunny.sidebar';
 
+// Set whenever `setItem` throws (storage blocked or full) so this session's
+// state still tracks the latest `setCollapsed` call even though it can't
+// persist. `readCollapsed` — the `useSyncExternalStore` snapshot — checks
+// this before falling back to localStorage, otherwise a re-read after a
+// failed write would just reproduce the stale/default value and the UI
+// wouldn't move.
+let override: boolean | null = null;
+
 function readCollapsed(): boolean {
+  if (override !== null) return override;
   try {
     return localStorage.getItem(STORAGE_KEY) === 'collapsed';
   } catch {
@@ -33,9 +42,11 @@ export function useSidebarCollapsed(): [boolean, (value: boolean) => void] {
   const setCollapsed = useCallback((value: boolean) => {
     try {
       localStorage.setItem(STORAGE_KEY, value ? 'collapsed' : 'expanded');
+      override = null;
     } catch {
-      // Storage blocked or full — the in-memory listeners still fire below,
-      // so the UI updates for this session even though it won't persist.
+      // Storage blocked or full — keep tracking the requested value in
+      // memory for this session; it just won't survive a reload.
+      override = value;
     }
     emit();
   }, []);

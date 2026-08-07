@@ -19,17 +19,23 @@ export function formatWhen(row: Pick<RunSummary, 'date' | 'timeDir'>): string {
   return row.timeDir == null ? row.date : `${row.date} ${row.timeDir}`;
 }
 
-export type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
+export type BadgeVariant =
+  | 'default'
+  | 'secondary'
+  | 'destructive'
+  | 'success'
+  | 'running'
+  | 'outline';
 
 export function statusVariant(status: RunSummary['status']): BadgeVariant {
   switch (status) {
     case 'passed':
-      return 'default';
+      return 'success';
     case 'failed':
     case 'crashed':
       return 'destructive';
     case 'running':
-      return 'secondary';
+      return 'running';
     default:
       return 'outline';
   }

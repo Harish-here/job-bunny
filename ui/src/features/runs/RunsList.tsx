@@ -46,18 +46,7 @@ export function RunsList({
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium">{formatWhen(row)}</span>
-              <Badge
-                variant={statusVariant(row.status)}
-                className={
-                  row.status === 'passed'
-                    ? 'text-success'
-                    : row.status === 'running'
-                      ? 'text-primary'
-                      : undefined
-                }
-              >
-                {statusLabel(row.status)}
-              </Badge>
+              <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="capitalize">{row.kind}</span>

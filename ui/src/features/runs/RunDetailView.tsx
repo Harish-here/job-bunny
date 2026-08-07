@@ -123,18 +123,7 @@ export function RunDetailView({
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold font-heading">{formatWhen(run)}</h2>
-          <Badge
-            variant={statusVariant(run.status)}
-            className={
-              run.status === 'passed'
-                ? 'text-success'
-                : run.status === 'running'
-                  ? 'text-primary'
-                  : undefined
-            }
-          >
-            {statusLabel(run.status)}
-          </Badge>
+          <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
         </div>
         <div className="text-sm text-muted-foreground">
           <span className="capitalize">{run.kind}</span>

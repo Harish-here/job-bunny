@@ -9,7 +9,7 @@ import {
   Settings,
 } from 'lucide-react';
 import logo from '../../assets/logo.svg';
-import wordmark from '../../assets/wordmark.svg';
+import { Wordmark } from '../../assets/Wordmark';
 import { Button } from '../../components/ui/button';
 import type { BoardProfile } from '../../lib/api/types';
 import type { Route, RouteName } from '../../lib/router';
@@ -69,7 +69,7 @@ export function Sidebar({
         ) : (
           <div className="flex flex-col items-start gap-1">
             <img src={logo} alt="Job Bunny" className="size-14" />
-            <img src={wordmark} alt="JOB BUNNY" className="w-[158px]" />
+            <Wordmark className="w-[158px] text-sidebar-foreground" />
             {version && (
               <div className="font-mono text-xs text-muted-foreground">v{version}</div>
             )}

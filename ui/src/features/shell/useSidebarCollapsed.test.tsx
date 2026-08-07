@@ -50,4 +50,16 @@ describe('useSidebarCollapsed', () => {
     const { result } = renderHook(() => useSidebarCollapsed());
     expect(result.current[0]).toBe(false);
   });
+
+  it('still flips the in-session state when localStorage.setItem throws', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage blocked');
+    });
+    const { result } = renderHook(() => useSidebarCollapsed());
+
+    act(() => {
+      result.current[1](true);
+    });
+    expect(result.current[0]).toBe(true);
+  });
 });

@@ -24,10 +24,7 @@ export function DueStrip({
           className="shrink-0 hop"
           onClick={() => onFocusCard(row.id)}
         >
-          <Badge
-            variant="outline"
-            className="border-attention/40 bg-attention/10 text-attention"
-          >
+          <Badge variant="outline" className="bg-attention text-attention-foreground">
             ⚡ {row.company} — {row.tracking?.nextAction} ({row.tracking?.nextActionDate})
           </Badge>
         </button>

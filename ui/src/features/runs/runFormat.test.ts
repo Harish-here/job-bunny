@@ -37,10 +37,10 @@ describe('formatWhen', () => {
 
 describe('statusVariant/statusLabel', () => {
   it('maps every status to a badge variant and a capitalized label', () => {
-    expect(statusVariant('passed')).toBe('default');
+    expect(statusVariant('passed')).toBe('success');
     expect(statusVariant('failed')).toBe('destructive');
     expect(statusVariant('crashed')).toBe('destructive');
-    expect(statusVariant('running')).toBe('secondary');
+    expect(statusVariant('running')).toBe('running');
     expect(statusLabel('running')).toBe('Running');
     expect(statusLabel('crashed')).toBe('Crashed');
   });

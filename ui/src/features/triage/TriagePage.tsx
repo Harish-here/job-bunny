@@ -118,7 +118,7 @@ export function TriagePage({ profile }: { profile: string }) {
       <section className="flex flex-col overflow-y-auto border-r">
         <div className="flex flex-col gap-2 border-b p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium text-attention">
+            <span className="text-sm font-medium text-attention-strong">
               {undecidedCount} undecided
             </span>
             <FilterPopover

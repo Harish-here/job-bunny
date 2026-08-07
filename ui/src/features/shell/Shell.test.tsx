@@ -92,7 +92,7 @@ describe('Shell', () => {
     renderShell();
 
     await waitFor(() => {
-      expect(screen.getByAltText('JOB BUNNY')).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'JOB BUNNY' })).toBeInTheDocument();
     });
 
     expect(screen.getByAltText('Job Bunny')).toBeInTheDocument();
@@ -132,7 +132,7 @@ describe('Shell', () => {
     await userEvent.click(retryButton);
 
     await waitFor(() => {
-      expect(screen.getByAltText('JOB BUNNY')).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'JOB BUNNY' })).toBeInTheDocument();
     });
     expect(await screen.findByPlaceholderText('Search company…')).toBeInTheDocument();
   });

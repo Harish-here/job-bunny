@@ -45,6 +45,6 @@ test('renders the app shell', async () => {
   );
 
   await waitFor(() => {
-    expect(screen.getByAltText('JOB BUNNY')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'JOB BUNNY' })).toBeInTheDocument();
   });
 });

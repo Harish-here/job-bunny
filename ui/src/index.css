@@ -30,6 +30,7 @@
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
   --color-attention-foreground: var(--attention-foreground);
+  --color-attention-strong: var(--attention-strong);
   --color-attention: var(--attention);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
@@ -76,6 +77,7 @@
   --destructive: #d64545;
   --attention: #ff8a3d;
   --attention-foreground: #3d2c55;
+  --attention-strong: #a04a06;
   --success: #4caf6e;
   --success-foreground: #ffffff;
   --border: #e4dbf0;
@@ -116,6 +118,7 @@
   --destructive: #f08a8a;
   --attention: #ff9e5e;
   --attention-foreground: #1a1523;
+  --attention-strong: #ff9e5e;
   --success: #6fcb8e;
   --success-foreground: #1a1523;
   --border: #362c4a;
