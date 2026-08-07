@@ -135,6 +135,10 @@ test('wire() run store, wireMigrate, and wireBoard all resolve the SAME db path 
 
   const migrateWire = await wireMigrate('nprof', { root });
   assert.equal(migrateWire.dbPath, expectedDbPath);
+  // `wireMigrate` eagerly constructs its own `SqliteConfigStore` — a FOURTH
+  // separate handle on the same file. Must close before the `after` hook's
+  // `rmSync`, or Windows' file lock turns cleanup into an EPERM.
+  migrateWire.configStore.close();
 
   const board = wireBoard({ root });
   const profiles = await board.listProfiles();
