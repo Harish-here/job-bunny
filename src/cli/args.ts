@@ -47,6 +47,8 @@ export interface CommandOptions {
   doc?: string;
   /** `config export|import` — override for the default `profiles/<name>/export/` dir. */
   dir?: string;
+  /** `migrate-home [--from <path>]` — source install; defaults to cwd. */
+  from?: string;
 }
 
 export type CommandName =
@@ -62,6 +64,7 @@ export type CommandName =
   | 'setup'
   | 'release'
   | 'migrate'
+  | 'migrate-home'
   | 'board'
   | 'runs'
   | 'state'
@@ -80,6 +83,7 @@ export const COMMAND_NAMES = new Set<string>([
   'setup',
   'release',
   'migrate',
+  'migrate-home',
   'board',
   'runs',
   'state',
@@ -102,6 +106,7 @@ export const USAGE = [
   '  setup --profile <name>',
   '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
   '  migrate   --profile <name> [--apply]     (Notion → local sqlite import; dry-run by default)',
+  '  migrate-home [--from <path>] [--apply]     (one-shot: move a legacy repo-local install into the data home; dry-run by default)',
   '  board     [--port <n>]                    (job board server on 127.0.0.1; profile-less)',
   '  runs      --profile <name>                (run history from the DB)',
   '  runs show <id> --profile <name>',
@@ -128,6 +133,7 @@ export const PARSE_ARGS_OPTIONS = {
   apply: { type: 'boolean', default: false },
   port: { type: 'string' },
   dir: { type: 'string' },
+  from: { type: 'string' },
 } as const satisfies ParseArgsOptionsConfig;
 
 /** Per-command argv → options translation. Returns the options object, or a
@@ -149,6 +155,7 @@ export function buildOptions(
     apply?: boolean;
     port?: string;
     dir?: string;
+    from?: string;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -233,6 +240,11 @@ export function buildOptions(
     }
     case 'migrate':
       return needsProfile() ?? { profile, apply: values.apply ?? false };
+    case 'migrate-home':
+      return {
+        apply: values.apply ?? false,
+        ...(values.from === undefined ? {} : { from: values.from }),
+      };
     case 'board': {
       // Profile-less, like `serve`/`autostart` — no `needsProfile()` gate.
       let port: number | undefined;

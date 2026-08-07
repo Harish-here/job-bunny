@@ -54,6 +54,7 @@ import { type ConfigDocName, configCommand } from './commands/config.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { migrateCommand } from './commands/migrate.ts';
+import { migrateHomeCommand } from './commands/migrate_home.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
 import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
@@ -163,6 +164,11 @@ function defaultCommands(): CommandRegistry {
       migrateCommand({
         profile: opts.profile ?? '',
         apply: opts.apply ?? false,
+      })) as CommandFn,
+    'migrate-home': (async (opts: CommandOptions) =>
+      migrateHomeCommand({
+        apply: opts.apply ?? false,
+        ...(opts.from === undefined ? {} : { from: opts.from }),
       })) as CommandFn,
     board: (async (opts: CommandOptions) =>
       // 1994 — not random: the operator's birthday.
