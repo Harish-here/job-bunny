@@ -5,6 +5,8 @@ description: Repo-specific recipe for driving Job Bunny's v2 pipeline stages at 
 
 # Verifying Job Bunny changes
 
+Runtime verification runs from the checkout with the repo itself as the data home: `JOBBUNNY_HOME=$PWD node src/cli/main.ts <cmd> --profile rajni` (never the globally installed `jobbunny` bin — that's a packed copy that goes stale against the working tree).
+
 v2 stages are driven through the `jobbunny` CLI, always under Node 24 (the machine default; `.nvmrc` pins the repo — if `node -v` ever shows < 24, run `source ~/.nvm/nvm.sh && nvm use 24`):
 
 ```bash
@@ -24,9 +26,9 @@ Use it instead of `profiles/harish/`/`profiles/uvashree/` (real user data — ne
 for a test run) or hand-building a throwaway profile.
 
 ```bash
-node src/cli/main.ts stage filter --profile rajni
-node src/cli/main.ts stage dedup --profile rajni
-node src/cli/main.ts stage rank --profile rajni
+JOBBUNNY_HOME=$PWD node src/cli/main.ts stage filter --profile rajni
+JOBBUNNY_HOME=$PWD node src/cli/main.ts stage dedup --profile rajni
+JOBBUNNY_HOME=$PWD node src/cli/main.ts stage rank --profile rajni
 ```
 
 Every `stage <name>` run continues in TODAY's latest existing group (a `(run_date, time_dir)`
@@ -63,9 +65,9 @@ a doc for an experiment, either:
 
 ```bash
 # Edit the doc, then write it back through the store (stdin pipe, TTY refused):
-node src/cli/main.ts config get filter.json --profile rajni > /tmp/rajni-filter.json
+JOBBUNNY_HOME=$PWD node src/cli/main.ts config get filter.json --profile rajni > /tmp/rajni-filter.json
 # ...edit /tmp/rajni-filter.json...
-node src/cli/main.ts config set filter.json --profile rajni < /tmp/rajni-filter.json
+JOBBUNNY_HOME=$PWD node src/cli/main.ts config set filter.json --profile rajni < /tmp/rajni-filter.json
 ```
 
 or, to go back to the tracked fixture's pristine config rather than a hand-edited variant, force
@@ -128,7 +130,7 @@ kill -TERM <pid>; sleep 3; kill -0 <pid> 2>/dev/null && kill -KILL <pid>
 
 To test code that runs *before* the browser connects (e.g. resume/reset logic), poll the run's
 events instead — run observability now lives in the profile's local sqlite DB, not a `run.log`
-file: `node src/cli/main.ts runs --profile rajni show <id>` (or query `run_events` directly via
+file: `JOBBUNNY_HOME=$PWD node src/cli/main.ts runs --profile rajni show <id>` (or query `run_events` directly via
 `sqlite3 profiles/rajni/data/jobbunny.db`) — for a checkpoint just before the part you're
 testing, give it ~0.3s to let the buffered `RunStoreLogger` flush land, then SIGTERM.
 
