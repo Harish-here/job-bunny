@@ -95,8 +95,15 @@ export async function boardCommand(
 
   const { port } = await server.listen(opts.port);
   resolved.write(`board: http://127.0.0.1:${port}`);
-  for (const profile of source.listProfiles()) {
-    resolved.write(`${profile.name} — ${profile.hasDb ? 'local db' : 'notion-only'}`);
+  for (const profile of await source.listProfiles()) {
+    // Label by `connector`, not `hasDb`: a `jobbunny.db` file exists for
+    // every profile once it has run at least once (local-DB spec D5's
+    // unconditional run-history tracking), so `hasDb` alone no longer
+    // implies "this profile's jobs live locally" — `connector === 'sqlite'`
+    // is the only thing that does (see `ports/board.ts`'s `BoardProfile`).
+    resolved.write(
+      `${profile.name} — ${profile.connector === 'sqlite' ? 'local db' : 'notion-only'}`,
+    );
   }
 
   await resolved.waitForStop();

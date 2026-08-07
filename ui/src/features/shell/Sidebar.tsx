@@ -8,8 +8,10 @@ import { ProfileSwitcher } from './ProfileSwitcher';
 const NAV_ITEMS: { name: RouteName; label: string }[] = [
   { name: 'triage', label: 'Triage' },
   { name: 'tracker', label: 'Tracker' },
+  { name: 'runs', label: 'Runs' },
   { name: 'analytics', label: 'Analytics' },
   { name: 'onboarding', label: 'Onboarding' },
+  { name: 'settings', label: 'Settings' },
 ];
 
 export function Sidebar({

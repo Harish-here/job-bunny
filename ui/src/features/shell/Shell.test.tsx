@@ -24,7 +24,9 @@ function stubFetch(opts: {
   let profileCalls = 0;
   const impl = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes('/api/profiles')) {
+    // `endsWith`, not `includes` — every profile-scoped URL below
+    // (`/jobs`, `/meta`, `/config/...`) also contains this substring.
+    if (url.endsWith('/api/profiles')) {
       profileCalls += 1;
       const shouldFail =
         opts.failProfiles === 'always' ||
@@ -56,6 +58,9 @@ function stubFetch(opts: {
         ok: true,
         json: async () => ({ rows: [], total: 0, limit: 50, offset: 0 }),
       } as unknown as Response;
+    }
+    if (url.includes('/config/')) {
+      return { ok: true, json: async () => ({ text: '' }) } as unknown as Response;
     }
     throw new Error(`unexpected fetch url: ${url}`);
   });
@@ -91,7 +96,14 @@ describe('Shell', () => {
 
     expect(screen.getByAltText('Job Bunny')).toBeInTheDocument();
     expect(screen.getByText('v2.1.0')).toBeInTheDocument();
-    for (const label of ['Triage', 'Tracker', 'Analytics', 'Onboarding']) {
+    for (const label of [
+      'Triage',
+      'Tracker',
+      'Runs',
+      'Analytics',
+      'Onboarding',
+      'Settings',
+    ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
 
@@ -122,5 +134,13 @@ describe('Shell', () => {
       expect(screen.getByText('Job Bunny')).toBeInTheDocument();
     });
     expect(await screen.findByPlaceholderText('Search company…')).toBeInTheDocument();
+  });
+
+  it('renders SettingsPage on the settings route', async () => {
+    stubFetch({});
+    window.location.hash = '#/settings';
+    renderShell();
+
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 });

@@ -20,7 +20,9 @@ import type { BoardSource } from '../../ports/board.ts';
 import type { Logger } from '../../ports/context.ts';
 import { makeAppInfoRoutes } from '../features/appinfo/index.ts';
 import { makeBoardRoutes } from '../features/board/index.ts';
+import { makeConfigRoutes } from '../features/config/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
+import { makeRunsRoutes } from '../features/runs/index.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../shared/index.ts';
 import { HttpError, jsonError, matchRoute, readJsonBody } from '../shared/index.ts';
 import { serveStatic } from './static.ts';
@@ -51,6 +53,8 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
   const routes: RouteDef[] = [
     ...makeProfilesRoutes(source),
     ...makeBoardRoutes(source),
+    ...makeRunsRoutes(source),
+    ...makeConfigRoutes(source),
     ...makeAppInfoRoutes(version),
   ];
 
@@ -167,7 +171,12 @@ async function handleApi(
   if (!matched) {
     return jsonError(404, 'not_found', `no such route: ${method} ${url.pathname}`);
   }
-  const body = matched.route.method === 'PATCH' ? await readJsonBody(req) : undefined;
+  const body =
+    matched.route.method === 'PATCH' ||
+    matched.route.method === 'PUT' ||
+    matched.route.method === 'POST'
+      ? await readJsonBody(req)
+      : undefined;
   const request: BoardRequest = { params: matched.params, query: url.searchParams, body };
   return matched.route.handler(request);
 }

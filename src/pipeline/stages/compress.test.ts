@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { JD } from '../../core/jd/index.ts';
-import type { Storage } from '../../ports/index.ts';
+import type { StateStore } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import {
   compressStage,
@@ -14,25 +14,22 @@ import {
 
 type FakeSourcedJD = JD & { content: { rawText: string } };
 
-function fakeStorage(): Storage & { store: Map<string, unknown> } {
+function fakeStateStore(): StateStore & { store: Map<string, unknown> } {
   const store = new Map<string, unknown>();
   return {
     store,
-    async readJson<T>(relPath: string, schema: { parse(v: unknown): T }) {
-      if (!store.has(relPath)) return undefined;
-      return schema.parse(store.get(relPath));
+    async readDoc<T>(key: string, schema: { parse(v: unknown): T }) {
+      if (!store.has(key)) return undefined;
+      return schema.parse(store.get(key));
     },
-    async writeJson(relPath: string, value: unknown) {
-      store.set(relPath, value);
+    async writeDoc(key: string, value: unknown) {
+      store.set(key, value);
     },
-    async listSubdirs() {
-      return [];
-    },
-    async removeTree() {},
+    close() {},
   };
 }
 
-function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
+function fakeCtx(stateStore: ReturnType<typeof fakeStateStore>): StageContext {
   return {
     profile: 'rajni',
     signal: AbortSignal.timeout(30_000),
@@ -43,7 +40,8 @@ function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
       error() {},
     },
     beat() {},
-    storage,
+    storage: {} as StageContext['storage'],
+    stateStore,
   };
 }
 
@@ -187,8 +185,8 @@ test('toTable: two jobs sharing an id — first kept, second dropped with a comp
 });
 
 test('compressStage: writes table + passthrough to storage and threads jobs through unchanged (no dropped)', async () => {
-  const storage = fakeStorage();
-  const ctx = fakeCtx(storage);
+  const stateStore = fakeStateStore();
+  const ctx = fakeCtx(stateStore);
   const jobs = [fakeJob('li-7'), fakeJob('li-8')];
   const input: StagePayload = { jobs, dropped: [] };
 
@@ -197,32 +195,32 @@ test('compressStage: writes table + passthrough to storage and threads jobs thro
   assert.equal(out.jobs, input.jobs);
   assert.deepEqual(out.dropped, []);
 
-  const table = storage.store.get(TABLE_PATH);
+  const table = stateStore.store.get(TABLE_PATH);
   assert.equal(typeof table, 'string');
   assert.ok((table as string).includes('li-7'));
   assert.ok((table as string).includes('li-8'));
 
-  const passthrough = storage.store.get(PASSTHROUGH_PATH) as Record<string, JD>;
+  const passthrough = stateStore.store.get(PASSTHROUGH_PATH) as Record<string, JD>;
   assert.deepEqual(Object.keys(passthrough).sort(), ['li-7', 'li-8']);
   assert.deepEqual(passthrough['li-7'], jobs[0]);
 });
 
 test('compressStage: fails loud when a job in the payload has no content', async () => {
-  const storage = fakeStorage();
-  const ctx = fakeCtx(storage);
+  const stateStore = fakeStateStore();
+  const ctx = fakeCtx(stateStore);
   const contentless: JD = { identity: fakeJob('li-9').identity };
   const input: StagePayload = { jobs: [contentless], dropped: [] };
 
   await assert.rejects(() => compressStage.run(input, ctx), /content/i);
 
   // Nothing should be written on a loud failure.
-  assert.equal(storage.store.has(TABLE_PATH), false);
-  assert.equal(storage.store.has(PASSTHROUGH_PATH), false);
+  assert.equal(stateStore.store.has(TABLE_PATH), false);
+  assert.equal(stateStore.store.has(PASSTHROUGH_PATH), false);
 });
 
 test('compressStage: a duplicate id in the payload accumulates onto input.dropped, not replacing it', async () => {
-  const storage = fakeStorage();
-  const ctx = fakeCtx(storage);
+  const stateStore = fakeStateStore();
+  const ctx = fakeCtx(stateStore);
   const first = fakeJob('dup-2');
   const second = fakeJob('dup-2', { title: 'Other Title' });
   const preexisting = {

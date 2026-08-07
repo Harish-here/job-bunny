@@ -177,6 +177,7 @@ export async function runServeStartChild(deps: ServeDeps): Promise<number> {
     scan: deps.scan,
     pidfile: deps.pidfile,
     spawnRun: createSpawnRun(superviseDeps),
+    readRunHistory: deps.readRunHistory,
     log,
     now: () => new Date(),
   };

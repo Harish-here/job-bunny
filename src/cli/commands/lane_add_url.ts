@@ -1,20 +1,27 @@
 /**
- * commands/lane_add_url.ts (P8) — `lane add-url <url> [label] --profile <p>`:
- * appends a LinkedIn saved-search URL to `profiles/<p>/search_urls.md`
- * under the right channel/page-type node, after stripping ephemeral
- * query params that change per click/session/alert (a stable URL is what
- * lets a rerun dedup against the same saved search). Faithful TS port of
- * v0 `scripts/setup/add_url.js` — see that file's header for the
- * rationale behind each stripped param and the `f_TPR` absolute-vs-
- * relative distinction.
+ * commands/lane_add_url.ts (P8; config→db Phase 4, Task 7) — `lane add-url
+ * <url> [label] --profile <p>`: appends a LinkedIn saved-search URL to the
+ * profile's `search_urls.md` config doc under the right channel/page-type
+ * node, after stripping ephemeral query params that change per click/
+ * session/alert (a stable URL is what lets a rerun dedup against the same
+ * saved search). Faithful TS port of v0 `scripts/setup/add_url.js` — see
+ * that file's header for the rationale behind each stripped param and the
+ * `f_TPR` absolute-vs-relative distinction.
  *
- * No `src/adapters/**` import — all filesystem access goes through
- * injected `LaneAddUrlDeps` so tests use a temp dir and never touch the
- * real `profiles/`.
+ * `search_urls.md` is read/written through the injected `ConfigStore`
+ * seam (`LaneAddUrlDeps.configStore`, default `wireConfigStore` — a
+ * plain function import from `../wire/index.ts`, never `src/adapters/**`
+ * directly), not raw `readFile`/`writeFile` — this command is a
+ * meaningful write action, so the default store opens readwrite. The
+ * SEPARATE `exists(inventoryPath)` check below is unrelated: it checks a
+ * REPO file under `src/adapters/lanes/linkedin/page_inventory/`, not a
+ * profile config doc, and stays on plain fs access.
  */
 import { constants } from 'node:fs';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import type { ConfigStore } from '../../ports/config_store.ts';
+import { wireConfigStore } from '../wire/index.ts';
 
 // Ephemeral params that change per click/session/alert — stripped so the same search dedups.
 // "start" is a pagination offset, not a filter — always reset to beginning.
@@ -40,22 +47,26 @@ export interface LaneAddUrlOptions {
 export interface LaneAddUrlDeps {
   root: string;
   exists: (path: string) => Promise<boolean>;
-  readFile: (path: string) => Promise<string>;
-  writeFile: (path: string, data: string) => Promise<void>;
+  /** Test seam — a factory so each call scopes and closes its OWN
+   * short-lived store, never a shared/memoized instance. Default binds
+   * `wireConfigStore` to the FINAL resolved `root` — readwrite, this
+   * command is a meaningful write action. */
+  configStore: (profileName: string) => ConfigStore;
   mkdir: (path: string) => Promise<unknown>;
   write: (line: string) => void;
   warn: (line: string) => void;
 }
 
-function defaultDeps(): LaneAddUrlDeps {
+/** Everything except `configStore`, whose default binds to the FINAL
+ * resolved `root` (computed by `laneAddUrlCommand` after merging
+ * overrides — same posture as `config.ts`/`setup.ts`). */
+function defaultFsDeps(): Omit<LaneAddUrlDeps, 'configStore'> {
   return {
     root: process.cwd(),
     exists: (p) =>
       access(p, constants.F_OK)
         .then(() => true)
         .catch(() => false),
-    readFile: (p) => readFile(p, 'utf8'),
-    writeFile: (p, data) => writeFile(p, data),
     mkdir: (p) => mkdir(p, { recursive: true }),
     write: (line) => console.log(line),
     warn: (line) => console.warn(line),
@@ -104,7 +115,12 @@ export async function laneAddUrlCommand(
   opts: LaneAddUrlOptions,
   deps: Partial<LaneAddUrlDeps> = {},
 ): Promise<number> {
-  const resolved: LaneAddUrlDeps = { ...defaultDeps(), ...deps };
+  const fsDeps: Omit<LaneAddUrlDeps, 'configStore'> = { ...defaultFsDeps(), ...deps };
+  const resolved: LaneAddUrlDeps = {
+    ...fsDeps,
+    configStore:
+      deps.configStore ?? ((name) => wireConfigStore(name, { root: fsDeps.root })),
+  };
 
   const u = stripEphemerals(opts.url);
   const { channel, page } = resolvePage(u);
@@ -113,38 +129,41 @@ export async function laneAddUrlCommand(
 
   const profileDir = path.join(resolved.root, 'profiles', opts.profile);
   await resolved.mkdir(profileDir);
-  const urlsPath = path.join(profileDir, 'search_urls.md');
 
-  let text = (await resolved.exists(urlsPath))
-    ? await resolved.readFile(urlsPath)
-    : '# Search URLs\n';
+  const store = resolved.configStore(opts.profile);
+  try {
+    let text = (await store.readText('search_urls.md')) ?? '# Search URLs\n';
 
-  const channelHeading = `## ${channel}`;
-  const pageHeading = `### ${page}`;
+    const channelHeading = `## ${channel}`;
+    const pageHeading = `### ${page}`;
 
-  if (!text.split('\n').includes(channelHeading)) {
-    text = `${text.replace(/\n*$/, '\n')}\n${channelHeading}\n`;
+    if (!text.split('\n').includes(channelHeading)) {
+      text = `${text.replace(/\n*$/, '\n')}\n${channelHeading}\n`;
+    }
+    if (!text.split('\n').includes(pageHeading)) {
+      // add the page node (with inventory pointer) right after the channel heading
+      text = text.replace(
+        channelHeading,
+        `${channelHeading}\n${pageHeading}\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->`,
+      );
+    }
+
+    // insert the URL line after the page heading's inventory comment (or the heading itself)
+    const arr = text.split('\n');
+    let idx = arr.indexOf(pageHeading);
+    while (
+      idx + 1 < arr.length &&
+      (arr[idx + 1]?.startsWith('<!--') || arr[idx + 1]?.trim() === '')
+    )
+      idx++;
+    arr.splice(idx + 1, 0, line);
+    text = arr.join('\n');
+
+    await store.writeText('search_urls.md', text);
+  } finally {
+    store.close();
   }
-  if (!text.split('\n').includes(pageHeading)) {
-    // add the page node (with inventory pointer) right after the channel heading
-    text = text.replace(
-      channelHeading,
-      `${channelHeading}\n${pageHeading}\n<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->`,
-    );
-  }
 
-  // insert the URL line after the page heading's inventory comment (or the heading itself)
-  const arr = text.split('\n');
-  let idx = arr.indexOf(pageHeading);
-  while (
-    idx + 1 < arr.length &&
-    (arr[idx + 1]?.startsWith('<!--') || arr[idx + 1]?.trim() === '')
-  )
-    idx++;
-  arr.splice(idx + 1, 0, line);
-  text = arr.join('\n');
-
-  await resolved.writeFile(urlsPath, text);
   resolved.write(`[lane add-url] stripped ${EPHEMERAL.join(', ')}`);
   resolved.write(`[lane add-url] appended under ${channel} / ${page}: ${cleanUrl}`);
 

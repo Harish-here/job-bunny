@@ -1,23 +1,70 @@
 /**
  * run.test.ts (P8) — TDD for `runCommand`. Every dependency (`wire`,
- * `runPipeline`, `now`, `acquireLock`/`releaseLock`) is FAKE — no real
- * adapter, no real filesystem write outside a fake `RunFolder`-shaped
- * stub, and no real lock file is ever exercised here. `fakeLockDeps()`
- * below is spread into every test's deps so `runCommand`'s new lock
- * acquisition always succeeds by default — the lock-specific behavior
- * (skip on a held lock) gets its own dedicated tests further down.
+ * `runPipeline`, `now`, `acquireLock`/`releaseLock`, `runStore`,
+ * `checkpointStore`) is FAKE — no real filesystem or lock file is ever
+ * exercised here. `fakeLockDeps()` below is spread into every test's deps
+ * so `runCommand`'s new lock acquisition always succeeds by default — the
+ * lock-specific behavior (skip on a held lock) gets its own dedicated
+ * tests further down.
+ *
+ * The `--resume` group-discovery/resumedFrom tests live in
+ * `run.resume.test.ts`, split out (checkpoints-to-db Phase 2 Task 6) to
+ * stay under the 800-line test-file cap — mirrors
+ * `cli/wire/compose.checkpointstore.test.ts`'s split precedent.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { RunResult } from '../../ops/observability/index.ts';
+import { formatRunTime, type RunResult } from '../../ops/observability/index.ts';
 import type { LockInfo } from '../../ops/scheduling/run_lock.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { RunnerOptions } from '../../pipeline/runner/run.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
+import type { CheckpointRef, CheckpointStore } from '../../ports/checkpoint_store.ts';
 import type { DoctorCheck } from '../../ports/doctor.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
+import type { RunStore } from '../../ports/run_store.ts';
 import type { Routine } from '../../routines/types.ts';
 import { computeRunCapMs, type RunDeps, runCommand } from './run.ts';
+
+/** Recording `CheckpointStore` fake — `nextTimeDir` echoes `time` back
+ * (no collision-avoidance needed in these tests); `latestTimeDir` and
+ * `readLatest` return the fixed results supplied by `opts` (default
+ * `undefined` — "no prior group / no checkpoint found"). */
+function fakeCheckpointStore(
+  opts: {
+    latestTimeDirResult?: string;
+    readLatestResult?: { ref: CheckpointRef; payload: unknown };
+  } = {},
+): {
+  store: CheckpointStore;
+  nextTimeDirCalls: Array<{ runDate: string; time: string }>;
+  latestTimeDirCalls: string[];
+} {
+  const nextTimeDirCalls: Array<{ runDate: string; time: string }> = [];
+  const latestTimeDirCalls: string[] = [];
+  const store: CheckpointStore = {
+    write() {},
+    readLatest() {
+      return opts.readLatestResult;
+    },
+    latestTimeDir(runDate) {
+      latestTimeDirCalls.push(runDate);
+      return opts.latestTimeDirResult;
+    },
+    latestCheckpointTimeDir() {
+      return undefined; // --resume discovery has its own dedicated tests in run.resume.test.ts
+    },
+    nextTimeDir(runDate, time) {
+      nextTimeDirCalls.push({ runDate, time });
+      return time;
+    },
+    pruneOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+  return { store, nextTimeDirCalls, latestTimeDirCalls };
+}
 
 function fakeLockDeps(): Pick<RunDeps, 'acquireLock' | 'releaseLock'> {
   return {
@@ -37,15 +84,81 @@ function passedResult(overrides: Partial<RunResult> = {}): RunResult {
   };
 }
 
-function fakeCtx(notified: NotifyEvent[]): PipelineCtx {
+/** Recording `RunStore` fake — `startRun` auto-increments ids from 1;
+ * `findRunId` returns `opts.findRunIdResult` (default `null`, "no prior row
+ * on record"). Every write is recorded verbatim for assertions. */
+function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
+  store: RunStore;
+  started: Array<Parameters<RunStore['startRun']>[0]>;
+  finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }>;
+  findRunIdCalls: Array<{ date: string; timeDir: string }>;
+} {
+  const started: Array<Parameters<RunStore['startRun']>[0]> = [];
+  const finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }> = [];
+  const findRunIdCalls: Array<{ date: string; timeDir: string }> = [];
+  let nextId = 1;
+  const store: RunStore = {
+    startRun(meta) {
+      started.push(meta);
+      return nextId++;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun(runId, outcome, result, finishedAt) {
+      finished.push({ runId, outcome, result, finishedAt });
+    },
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId(date, timeDir) {
+      findRunIdCalls.push({ date, timeDir });
+      return opts.findRunIdResult ?? null;
+    },
+    listRunTimeDirs() {
+      return [];
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+  return { store, started, finished, findRunIdCalls };
+}
+
+function fakeCtx(
+  notified: NotifyEvent[],
+  runStore: RunStore = fakeRunStore().store,
+  checkpointStore: CheckpointStore = fakeCheckpointStore().store,
+): PipelineCtx {
   return {
     profile: 'rajni',
     signal: new AbortController().signal,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: {} as PipelineCtx['storage'],
+    stateStore: {} as PipelineCtx['stateStore'],
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
+    runStore,
+    checkpointStore,
     async notify(event: NotifyEvent) {
       notified.push(event);
     },
@@ -140,7 +253,7 @@ test('runCommand: pre-run routines always run before runPipeline is called', asy
   assert.equal(code, 0);
 });
 
-test('runCommand: --dry-run threads a syncDryRunPath keyed to the run date into wire()', async () => {
+test('runCommand: --dry-run threads syncDryRun: true into wire()', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);
   let receivedOverrides: unknown;
@@ -160,9 +273,7 @@ test('runCommand: --dry-run threads a syncDryRunPath keyed to the run date into 
   );
 
   assert.equal(code, 0);
-  assert.deepEqual(receivedOverrides, {
-    syncDryRunPath: 'runs/2026-07-25/sync_dryrun.json',
-  });
+  assert.deepEqual(receivedOverrides, { syncDryRun: true });
 });
 
 test('runCommand: without --dry-run, wire() gets no overrides', async () => {
@@ -207,7 +318,7 @@ test('runCommand: --dry-run makes the digest text reflect the dry run', async ()
   assert.match(text, /DRY RUN/);
 });
 
-test('runCommand: overrides ctx.logger with a JsonlLogger before running the pipeline', async () => {
+test('runCommand: overrides ctx.logger with a RunStoreLogger before running the pipeline', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);
   let observedLoggerCtor: string | undefined;
@@ -226,7 +337,104 @@ test('runCommand: overrides ctx.logger with a JsonlLogger before running the pip
     },
   );
 
-  assert.equal(observedLoggerCtor, 'JsonlLogger');
+  assert.equal(observedLoggerCtor, 'RunStoreLogger');
+});
+
+// --- runs-observability: the driver opens/closes the run row (Task 6) ---
+
+test('runCommand: a passed run opens a "run"-kind runs row and closes it with the passed outcome and the RunResult blob', async () => {
+  const notified: NotifyEvent[] = [];
+  const { store, started, finished } = fakeRunStore();
+  const ctx = fakeCtx(notified, store);
+  const result = passedResult();
+  const now = new Date('2026-07-25T09:00:00Z');
+
+  const code = await runCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+      runPipeline: async () => result,
+      now: () => now,
+      root: '/fake/root',
+      ...fakeLockDeps(),
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]?.kind, 'run');
+  assert.equal(started[0]?.date, '2026-07-25');
+  // `timeDir` is the LOCAL clock's HH-MM (`formatRunTime`) — computed the
+  // same way here rather than hardcoded, so this test is timezone-agnostic.
+  assert.equal(started[0]?.timeDir, formatRunTime(now));
+  assert.equal(started[0]?.resumedFrom, undefined, 'no --resume ⇒ no resumedFrom');
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.runId, 1);
+  assert.equal(finished[0]?.outcome, 'passed');
+  assert.deepEqual(finished[0]?.result, result);
+});
+
+test('runCommand: a failed run closes its runs row with outcome "failed"', async () => {
+  const notified: NotifyEvent[] = [];
+  const { store, finished } = fakeRunStore();
+  const ctx = fakeCtx(notified, store);
+
+  const code = await runCommand(
+    { profile: 'rajni' },
+    {
+      wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+      runPipeline: async () =>
+        passedResult({ outcome: 'failed', failedStage: 'extract' }),
+      now: () => new Date('2026-07-25T09:00:00Z'),
+      root: '/fake/root',
+      ...fakeLockDeps(),
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0]?.outcome, 'failed');
+});
+
+// The --resume group-discovery/resumedFrom tests (including the L18c fix)
+// live in `run.resume.test.ts`, split out to stay under the 800-line
+// test-file cap.
+
+test('runCommand: flushes the buffered RunStoreLogger events (via ctx.runStore.appendEvents) before releasing the lock, even when runPipeline throws', async () => {
+  const notified: NotifyEvent[] = [];
+  const order: string[] = [];
+  const { store } = fakeRunStore();
+  const observedStore: RunStore = {
+    ...store,
+    appendEvents(runId, events) {
+      order.push('appendEvents');
+      store.appendEvents(runId, events);
+    },
+  };
+  const ctx = fakeCtx(notified, observedStore);
+
+  await assert.rejects(
+    runCommand(
+      { profile: 'rajni' },
+      {
+        wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
+        runPipeline: async (_stages, runCtx) => {
+          // Buffered (not flushed immediately) — `runLogger.flush()` in the
+          // driver's `finally` is what has to drain this before release.
+          runCtx.logger.info('about to throw');
+          throw new Error('boom');
+        },
+        now: () => new Date('2026-07-25T09:00:00Z'),
+        root: '/fake/root',
+        acquireLock: async () => ({ acquired: true }),
+        releaseLock: async () => {
+          order.push('release');
+        },
+      },
+    ),
+  );
+
+  assert.deepEqual(order, ['appendEvents', 'release']);
 });
 
 test('runCommand: a profile with invalid settings.logging throws before any stage runs', async () => {
@@ -344,7 +552,7 @@ test('runCommand: derives runCapMs from the wired stages when no override is giv
     { profile: 'rajni' },
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
-      runPipeline: async (_stages, _ctx, _folder, opts) => {
+      runPipeline: async (_stages, _ctx, _group, opts) => {
         receivedOpts = opts;
         return passedResult();
       },
@@ -368,7 +576,7 @@ test('runCommand: an explicit runCapMs override wins over the derived value', as
     { profile: 'rajni', runCapMs: 42_000 },
     {
       wire: async () => ({ ctx, stages: FAKE_STAGES, routines: [], checks: [] }),
-      runPipeline: async (_stages, _ctx, _folder, opts) => {
+      runPipeline: async (_stages, _ctx, _group, opts) => {
         receivedOpts = opts;
         return passedResult();
       },

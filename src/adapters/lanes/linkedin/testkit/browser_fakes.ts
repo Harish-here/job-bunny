@@ -4,6 +4,7 @@ import type {
   BrowserProvider,
   PageHandle,
 } from '../../../../ports/browser.ts';
+import type { StateStore } from '../../../../ports/state_store.ts';
 import type { Storage } from '../../../../ports/storage.ts';
 
 /** In-memory fake mirroring the real FsStorage contract. `writes` logs
@@ -36,6 +37,36 @@ export class FakeStorage implements Storage {
   }
 
   async removeTree(): Promise<void> {}
+}
+
+/** In-memory fake mirroring the real SqliteStateStore contract — the
+ * lane's resume/capture state target (Phase 3). Distinct from `FakeStorage`
+ * above: inventories stay on `Storage` (repo-root, machine-shared), so
+ * every lane-state fixture (`lane.test.ts` and friends, `fire/probe.test.ts`)
+ * needs this instead. */
+export class FakeStateStore implements StateStore {
+  private readonly files = new Map<string, unknown>();
+  readonly writes: string[] = [];
+
+  set(relPath: string, value: unknown): void {
+    this.files.set(relPath, value);
+  }
+
+  get(relPath: string): unknown {
+    return this.files.get(relPath);
+  }
+
+  async readDoc<T>(relPath: string, schema: ZodType<T>): Promise<T | undefined> {
+    if (!this.files.has(relPath)) return undefined;
+    return schema.parse(this.files.get(relPath));
+  }
+
+  async writeDoc(relPath: string, value: unknown): Promise<void> {
+    this.files.set(relPath, value);
+    this.writes.push(relPath);
+  }
+
+  close(): void {}
 }
 
 export interface RawCardFixture {

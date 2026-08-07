@@ -4,7 +4,7 @@ import { LinkedInLane } from './lane.ts';
 import { RESUME_STATE_PATH, type ResumeStateShape } from './resume_state.ts';
 import {
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeCtx,
   fixtureFilterConfig,
   newScript,
@@ -51,13 +51,13 @@ test('every url yielding only identity-invalid cards: the lane throws loud (tota
   script.harvestByUrl.set(URL_2, [identityInvalidCard('9201')]);
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const lane = new LinkedInLane(
     provider,
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   await assert.rejects(
@@ -84,13 +84,13 @@ test('one url all-invalid among healthy urls: that url is recorded failed, the r
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9401/', 'JD text — Acme FE');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const lane = new LinkedInLane(
     provider,
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(fakeCtx());
@@ -117,7 +117,7 @@ test('one url all-invalid among healthy urls: that url is recorded failed, the r
   // URL_1 was marked failed internally (not just coincidentally empty):
   // its persisted resume state must NOT be marked done, so a later fire
   // retries it — URL_2, healthy, must be marked done.
-  const resume = storage.get(RESUME_STATE_PATH) as ResumeStateShape;
+  const resume = stateStore.get(RESUME_STATE_PATH) as ResumeStateShape;
   assert.equal(Object.hasOwn(resume.done, URL_1), false);
   assert.equal(Object.hasOwn(resume.done, URL_2), true);
 });
@@ -137,13 +137,13 @@ test('a mixed page (one identity-invalid card among otherwise-normal cards): no 
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9501/', 'JD text — Acme FE');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const lane = new LinkedInLane(
     provider,
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(fakeCtx());
@@ -157,6 +157,6 @@ test('a mixed page (one identity-invalid card among otherwise-normal cards): no 
   assert.equal(invalidDrop?.reasons[0]?.rule, 'linkedin.cardIdentityInvalid');
 
   // URL_1 stayed healthy: marked done, unlike the all-invalid scenario.
-  const resume = storage.get(RESUME_STATE_PATH) as ResumeStateShape;
+  const resume = stateStore.get(RESUME_STATE_PATH) as ResumeStateShape;
   assert.equal(Object.hasOwn(resume.done, URL_1), true);
 });

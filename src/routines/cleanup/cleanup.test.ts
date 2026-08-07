@@ -4,10 +4,12 @@ import type { CacheEntry, DroppedRecord, JD, SyncedJD } from '../../core/jd/inde
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/index.ts';
 import type {
   ArchivePolicy,
+  CheckpointStore,
   Connector,
   LogData,
   Logger,
   RunContext,
+  RunStore,
   Storage,
 } from '../../ports/index.ts';
 import {
@@ -89,11 +91,85 @@ function fakeRunsStorage(opts?: {
   };
 }
 
+/** Recording `RunStore` fake — `pruneRunsOlderThan` records its call args
+ * and returns `opts.prunedResult` (default 0); every other method is a
+ * stub, since this routine never calls them. */
+function fakeRunStore(opts?: { prunedResult?: number }): {
+  store: RunStore;
+  prunedCalls: Array<{ today: string; ttlDays: number }>;
+} {
+  const prunedCalls: Array<{ today: string; ttlDays: number }> = [];
+  const store: RunStore = {
+    startRun() {
+      return -1;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun() {},
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    listRunTimeDirs() {
+      return [];
+    },
+    pruneRunsOlderThan(today, ttlDays) {
+      prunedCalls.push({ today, ttlDays });
+      return opts?.prunedResult ?? 0;
+    },
+    close() {},
+  };
+  return { store, prunedCalls };
+}
+
+/** Recording `CheckpointStore` fake — `pruneOlderThan` records its call
+ * args and returns `opts.prunedResult` (default 0); every other method is
+ * a stub, since this routine never calls them. */
+function fakeCheckpointStore(opts?: { prunedResult?: number }): {
+  store: CheckpointStore;
+  prunedCalls: Array<{ today: string; ttlDays: number }>;
+} {
+  const prunedCalls: Array<{ today: string; ttlDays: number }> = [];
+  const store: CheckpointStore = {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan(today, ttlDays) {
+      prunedCalls.push({ today, ttlDays });
+      return opts?.prunedResult ?? 0;
+    },
+    close() {},
+  };
+  return { store, prunedCalls };
+}
+
 function fakeCtx(opts?: {
   settings?: Record<string, unknown>;
   connector?: Connector;
   logger?: Logger;
   storage?: Storage;
+  runStore?: RunStore;
+  checkpointStore?: PipelineCtx['checkpointStore'];
 }): PipelineCtx {
   const connector = opts?.connector ?? fakeConnector();
   const ports: WiredPorts = { lanes: [], connector, notifiers: [] };
@@ -103,6 +179,7 @@ function fakeCtx(opts?: {
     logger: opts?.logger ?? { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: opts?.storage ?? fakeRunsStorage(),
+    stateStore: {} as PipelineCtx['stateStore'],
     config: {
       lanes: [],
       connector: 'notion',
@@ -111,6 +188,8 @@ function fakeCtx(opts?: {
       settings: opts?.settings ?? {},
     },
     ports,
+    runStore: opts?.runStore ?? fakeRunStore().store,
+    checkpointStore: opts?.checkpointStore ?? fakeCheckpointStore().store,
     async notify() {},
   };
 }
@@ -266,6 +345,91 @@ test('run(): prunes run folders older than runsOlderThanDays, keeps today and re
     { passedOlderThanDays: 7, untouchedOlderThanDays: 30 },
   ]);
   assert.deepEqual(storage.removedTrees, ['runs/2026-06-01']);
+});
+
+test('run(): prunes runs/run_events rows via ctx.runStore, with the same TTL and today used for the folder prune', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const { store, prunedCalls } = fakeRunStore({ prunedResult: 4 });
+  const ctx = fakeCtx({
+    connector,
+    logger,
+    runStore: store,
+    settings: { cleanup: { runsOlderThanDays: 45 } },
+  });
+
+  await cleanupRoutine.run(ctx);
+
+  assert.equal(prunedCalls.length, 1);
+  assert.equal(prunedCalls[0]?.ttlDays, 45);
+  assert.match(prunedCalls[0]?.today ?? '', /^\d{4}-\d{2}-\d{2}$/);
+
+  const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned run rows');
+  assert.ok(infoCall, 'must log the number of pruned run rows');
+  assert.equal(infoCall?.data?.prunedDbRuns, 4);
+  assert.equal(infoCall?.data?.runsOlderThanDays, 45);
+});
+
+test('run(): prunes checkpoint rows via ctx.checkpointStore, with the same TTL and today used for the runs-row prune', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const { store: runStore, prunedCalls: runPrunedCalls } = fakeRunStore({
+    prunedResult: 4,
+  });
+  const { store: checkpointStore, prunedCalls: checkpointPrunedCalls } =
+    fakeCheckpointStore({ prunedResult: 2 });
+  const ctx = fakeCtx({
+    connector,
+    logger,
+    runStore,
+    checkpointStore,
+    settings: { cleanup: { runsOlderThanDays: 45 } },
+  });
+
+  await cleanupRoutine.run(ctx);
+
+  assert.equal(checkpointPrunedCalls.length, 1);
+  assert.equal(checkpointPrunedCalls[0]?.ttlDays, 45);
+  assert.equal(checkpointPrunedCalls[0]?.today, runPrunedCalls[0]?.today);
+  assert.equal(checkpointPrunedCalls[0]?.ttlDays, runPrunedCalls[0]?.ttlDays);
+
+  const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned checkpoint rows');
+  assert.ok(infoCall, 'must log the number of pruned checkpoint rows');
+  assert.equal(infoCall?.data?.prunedCheckpoints, 2);
+  assert.equal(infoCall?.data?.runsOlderThanDays, 45);
+});
+
+test('run(): a throwing checkpointStore.pruneOlderThan is warned about but does not throw, letting the routine complete (LOUD-by-contract wrapped fail-soft by this caller)', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const checkpointStore: CheckpointStore = {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan() {
+      throw new Error('SQLITE_BUSY');
+    },
+    close() {},
+  };
+  const ctx = fakeCtx({ connector, logger, checkpointStore });
+
+  await assert.doesNotReject(() => cleanupRoutine.run(ctx));
+
+  const warnCall = logger.calls.find(
+    (c) => c.level === 'warn' && c.msg === 'cleanup: checkpoint prune failed',
+  );
+  assert.ok(warnCall, 'a throwing checkpoint prune must be warned, not thrown');
+  assert.match(String(warnCall?.data?.detail), /SQLITE_BUSY/);
 });
 
 test('run(): a removeTree failure for one run folder is warned about but does not throw, and other prunes still happen', async () => {

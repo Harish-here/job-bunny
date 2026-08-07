@@ -10,8 +10,11 @@ const PROFILES: BoardProfile[] = [
 
 function fakeSource(): BoardSource {
   return {
-    listProfiles: () => PROFILES,
-    openStore: () => null,
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
 }

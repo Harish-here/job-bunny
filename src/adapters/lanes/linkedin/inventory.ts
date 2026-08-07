@@ -6,6 +6,13 @@ import type { DoctorCheck, DoctorFinding, Storage } from '../../../ports/index.t
  * inventory via /page-analyse, never by editing lane code). Inventories are
  * machine-shared JSON at `src/adapters/lanes/linkedin/page_inventory/<page>.json`
  * (repo-root-relative, read via the repo-root storage handle).
+ *
+ * Deliberately stays on the `Storage` port (Phase 3, persist-to-db): unlike
+ * the rest of this package's resume/capture state (see `lane.ts`,
+ * `capture_store.ts`, `resume_state.ts`, `fire/probe.ts`,
+ * `fire/loop/url_runner.ts`), inventories are machine-shared, repo-root-
+ * relative files, not per-profile pipeline state — they never move to
+ * `StateStore`.
  */
 export const InventorySchema = z.object({
   page: z.string(),

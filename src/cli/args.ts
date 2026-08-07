@@ -39,6 +39,14 @@ export interface CommandOptions {
   daemonChild?: boolean;
   apply?: boolean;
   port?: number;
+  /** `runs show <id>` — present ⇒ show, absent ⇒ list. */
+  runId?: number;
+  /** `state read|write <key>` — the structure hand-off document key. */
+  key?: string;
+  /** `config get|set <doc>` — the legacy config-doc filename. */
+  doc?: string;
+  /** `config export|import` — override for the default `profiles/<name>/export/` dir. */
+  dir?: string;
 }
 
 export type CommandName =
@@ -54,7 +62,10 @@ export type CommandName =
   | 'setup'
   | 'release'
   | 'migrate'
-  | 'board';
+  | 'board'
+  | 'runs'
+  | 'state'
+  | 'config';
 
 export const COMMAND_NAMES = new Set<string>([
   'run',
@@ -70,6 +81,9 @@ export const COMMAND_NAMES = new Set<string>([
   'release',
   'migrate',
   'board',
+  'runs',
+  'state',
+  'config',
 ]);
 
 export const USAGE = [
@@ -89,6 +103,14 @@ export const USAGE = [
   '  release <X.Y.Z> [--dry-run] [--no-merge] [--yes]  (cross-profile — no --profile)',
   '  migrate   --profile <name> [--apply]     (Notion → local sqlite import; dry-run by default)',
   '  board     [--port <n>]                    (job board server on 127.0.0.1; profile-less)',
+  '  runs      --profile <name>                (run history from the DB)',
+  '  runs show <id> --profile <name>',
+  '  state read  <table|decisions|decisions-partial> --profile <name>   (structure hand-off only — not a general DB tool)',
+  '  state write <decisions|decisions-partial>       --profile <name>   (reads stdin)',
+  '  config get    <profile.json|filter.json|resume.json|search_urls.md> --profile <name>',
+  '  config set    <profile.json|filter.json|resume.json|search_urls.md> --profile <name>   (reads stdin)',
+  '  config export --profile <name> [--dir <d>]   (default: profiles/<name>/export/)',
+  '  config import --profile <name> [--dir <d>]   (missing file = skipped, not an error)',
 ].join('\n');
 
 /** The one `parseArgs` options literal every command's flags are drawn
@@ -105,6 +127,7 @@ export const PARSE_ARGS_OPTIONS = {
   'daemon-child': { type: 'boolean', default: false },
   apply: { type: 'boolean', default: false },
   port: { type: 'string' },
+  dir: { type: 'string' },
 } as const satisfies ParseArgsOptionsConfig;
 
 /** Per-command argv → options translation. Returns the options object, or a
@@ -125,6 +148,7 @@ export function buildOptions(
     'daemon-child'?: boolean;
     apply?: boolean;
     port?: string;
+    dir?: string;
   },
 ): CommandOptions | { error: string } {
   const profile = values.profile;
@@ -219,6 +243,75 @@ export function buildOptions(
         }
       }
       return port === undefined ? {} : { port };
+    }
+    case 'runs': {
+      const sub = rest[0];
+      if (sub === undefined) {
+        return needsProfile() ?? { profile };
+      }
+      if (sub !== 'show') {
+        return { error: 'runs takes no sub-action, or "show <id>"' };
+      }
+      const idArg = rest[1];
+      if (!idArg) return { error: 'runs show: missing run id' };
+      const runId = Number(idArg);
+      if (!Number.isInteger(runId) || runId <= 0) {
+        return {
+          error: `runs show: run id must be a positive integer, got "${idArg}"`,
+        };
+      }
+      return needsProfile() ?? { profile, runId };
+    }
+    case 'state': {
+      const action = rest[0];
+      if (action !== 'read' && action !== 'write') {
+        return { error: 'state takes "read" or "write"' };
+      }
+      const key = rest[1];
+      const validKeys =
+        action === 'read'
+          ? ['table', 'decisions', 'decisions-partial']
+          : ['decisions', 'decisions-partial'];
+      if (!key || !validKeys.includes(key)) {
+        return {
+          error: `state ${action}: key must be one of ${validKeys.join(', ')} (this is not a general DB tool)`,
+        };
+      }
+      return needsProfile() ?? { profile, action, key };
+    }
+    case 'config': {
+      const action = rest[0];
+      if (
+        action !== 'get' &&
+        action !== 'set' &&
+        action !== 'export' &&
+        action !== 'import'
+      ) {
+        return { error: 'config takes "get", "set", "export", or "import"' };
+      }
+      if (action === 'get' || action === 'set') {
+        const doc = rest[1];
+        const validDocs = [
+          'profile.json',
+          'filter.json',
+          'resume.json',
+          'search_urls.md',
+        ];
+        if (!doc || !validDocs.includes(doc)) {
+          return {
+            error: `config ${action}: doc must be one of ${validDocs.join(', ')}`,
+          };
+        }
+        return needsProfile() ?? { profile, action, doc };
+      }
+      // export/import: no doc positional, optional --dir
+      return (
+        needsProfile() ?? {
+          profile,
+          action,
+          ...(values.dir === undefined ? {} : { dir: values.dir }),
+        }
+      );
     }
   }
 }

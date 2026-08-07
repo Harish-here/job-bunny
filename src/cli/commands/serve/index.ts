@@ -27,6 +27,7 @@ import { readdirSync as fsReaddirSync, readFileSync as fsReadFileSync } from 'no
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { RunRecord } from '../../../core/schedule/index.ts';
 import {
   type DaemonPidfileDeps,
   defaultDaemonPidfileDeps,
@@ -37,6 +38,7 @@ import {
   type LogDeps,
 } from '../../../ops/daemon/logs/index.ts';
 import { defaultScanDeps, type ScanDeps } from '../../../ops/daemon/scan/index.ts';
+import { wireDaemonRunHistory, wireDaemonScheduleConfig } from '../../wire/index.ts';
 import { runServeStop } from './lifecycle.ts';
 import { runServeStartChild, runServeStartParent } from './start.ts';
 import { runServeStatus } from './status.ts';
@@ -75,6 +77,13 @@ export interface ServeDeps {
   pidfile: DaemonPidfileDeps;
   logs: LogDeps;
   scan: ScanDeps;
+  /** Each named profile's own durable run-history read — real
+   * implementation: `cli/wire/daemon.ts`'s `wireDaemonRunHistory`, over
+   * that profile's own `jobbunny.db` `runs` table. Shared by the daemon
+   * child (`start.ts`'s `DaemonDeps.readRunHistory`) and `serve status`
+   * (`status.ts`'s "currently owed" line), so both agree on the same
+   * durable evidence the tick loop itself uses. */
+  readRunHistory: (profiles: readonly string[], date: string) => RunRecord[];
   listLaunchAgentFiles(): string[];
   spawn: SpawnFn;
   nodeBin: string;
@@ -114,7 +123,11 @@ function defaultServeDeps(): ServeDeps {
     profilesDir: path.join(root, 'profiles'),
     pidfile: pidfileDeps,
     logs: defaultLogDeps(),
-    scan: defaultScanDeps(),
+    scan: {
+      ...defaultScanDeps(),
+      readProfileJson: wireDaemonScheduleConfig({ root }),
+    },
+    readRunHistory: wireDaemonRunHistory({ root }),
     listLaunchAgentFiles: () => {
       try {
         return fsReaddirSync(path.join(home, 'Library', 'LaunchAgents'));

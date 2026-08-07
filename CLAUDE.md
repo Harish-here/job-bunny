@@ -30,6 +30,7 @@ node src/cli/main.ts stage <stage-name> --profile <name>
 node src/cli/main.ts routine <routine-name> --profile <name>
 node src/cli/main.ts migrate --profile <name> [--apply]  # Notion → local sqlite import; dry-run by default
 node src/cli/main.ts board [--port <n>]           # job-board UI + API, all profiles, 127.0.0.1 only (default port 1994)
+node src/cli/main.ts runs --profile <name> [show <id>]   # run history from the DB
 npm run ui:build                                  # build the board SPA into ui/dist (its gate: npm run ui:check; e2e smoke: npm run ui:e2e)
 node src/cli/main.ts serve start|stop|status
 node src/cli/main.ts autostart enable|disable     # darwin only
@@ -78,9 +79,9 @@ Key invariants:
 - **Fail-soft where breadth matters, fail-loud on total outage.** One broken URL/card/probe/fetch is a `SoftError` — recorded, run continues. A stage that attempted work and captured **nothing** throws loud (e.g. the LinkedIn lane when every attempted URL yields zero JDs — shaped like an expired login).
 - **Lanes are config-driven.** Selectors and page behavior come from `src/adapters/lanes/linkedin/page_inventory/<page>.json` at runtime; DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing lane code.
 - **Farm writes what source reads.** `farm` must run before `source`: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry.
-- **The runner is the single notifier.** Success and failure digests are both built from `result.json` at run end.
+- **The runner is the single notifier.** Success and failure digests are both built from the run's `RunResult` at run end; run observability (history, funnels, log events) is recorded in the per-profile sqlite DB (`runs`/`run_events` via `ports/run_store.ts`), not in files.
 - **Uniform checkpoints.** Each invocation owns its own `profiles/<name>/data/runs/<date>/<HH-MM>/` folder (local start time); the runner writes `NN-<stage>.json` there after every stage. `--resume` creates a fresh folder and seeds it from the latest checkpoint in the latest earlier same-day folder; `stage <name>` continues in today's latest existing folder instead of creating a new one, so a chain of single-stage runs shares checkpoints.
-- **Local sqlite is the source of truth when `connector: "sqlite"`.** The opt-in Notion mirror (`settings.notion.mirror: true`) is a one-way, budgeted, best-effort push — mirror failures or slowness never fail, stall, or red a run or doctor.
+- **Local sqlite is the source of truth when `connector: "sqlite"`.** The opt-in Notion mirror (`settings.notion.mirror: true`) is a one-way, budgeted, best-effort push — mirror failures or slowness never fail, stall, or red a run or doctor. Every profile has `profiles/<name>/data/jobbunny.db` regardless of connector — runs observability always lives there; a DB failure on a notion-connector profile degrades to a no-op run store, never a failed run.
 
 ## Slash commands
 
@@ -107,7 +108,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **`profile remove` is dry-run by default and refuses `rajni`** (the committed fixture); `--force` actually deletes `profiles/<name>/`. It never touches Notion.
 - **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
 - **The LinkedIn lane paces itself and trips a throttle breaker.** 5–12s jitter per navigation plus a 20–45s pause between saved-search URLs (`settings.linkedin.jitterMinMs/jitterMaxMs/interUrlDelayMinMs/interUrlDelayMaxMs`, defaults in `cli/wire/settings.ts`). Consecutive server-withheld JD shells (`jdRoot` present, text empty — a soft-block, never selector drift) open a time-boxed, session-scoped circuit breaker shared by every profile; thresholds, duration, and state location are lane constants — see `src/adapters/lanes/linkedin/`. An open breaker makes the lane return a **skipped** result without launching Chrome; `farm` excludes skipped lanes from its total-outage denominator, so the rest of the pipeline still runs.
-- **The board server binds `127.0.0.1` and writes only the `tracking` table.** `jobs` stays pipeline-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
+- **The board server binds `127.0.0.1` and writes only the `tracking` and config tables.** `jobs` and the runs tables stay pipeline/runner-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
 
 ## Conventions
 

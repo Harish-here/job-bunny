@@ -8,7 +8,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PipelineCtx, WiredPorts } from '../../pipeline/runner/context.ts';
-import type { ArchivePolicy, Connector, RunContext } from '../../ports/index.ts';
+import type {
+  ArchivePolicy,
+  CheckpointStore,
+  Connector,
+  RunContext,
+  RunStore,
+} from '../../ports/index.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
 import { cleanupRoutine } from '../../routines/cleanup/index.ts';
 import type { Routine } from '../../routines/types.ts';
@@ -32,6 +38,66 @@ function fakeConnector(): Connector & { archiveCalls: ArchivePolicy[] } {
   };
 }
 
+/** Stub `RunStore` — this file's real-`cleanupRoutine` test needs
+ * `pruneRunsOlderThan` to exist (called unconditionally); no test here
+ * asserts on its call args, so every other method is a no-op stub. */
+function fakeRunStore(): RunStore {
+  return {
+    startRun() {
+      return -1;
+    },
+    appendEvents() {},
+    heartbeat() {},
+    recordFailure() {},
+    recordSyncDryrun() {},
+    finishRun() {},
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    listRunTimeDirs() {
+      return [];
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+}
+
+/** Stub `CheckpointStore` — this file's real-`cleanupRoutine` test needs
+ * `pruneOlderThan` to exist (called unconditionally); no test here asserts
+ * on its call args, so every other method is a no-op stub. */
+function fakeCheckpointStore(): CheckpointStore {
+  return {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+}
+
 function fakeCtx(connector: Connector): PipelineCtx {
   const ports: WiredPorts = { lanes: [], connector, notifiers: [] };
   return {
@@ -49,6 +115,13 @@ function fakeCtx(connector: Connector): PipelineCtx {
       },
       async removeTree() {},
     },
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: {
       lanes: [],
       connector: 'notion',
@@ -57,6 +130,8 @@ function fakeCtx(connector: Connector): PipelineCtx {
       settings: {},
     },
     ports,
+    runStore: fakeRunStore(),
+    checkpointStore: fakeCheckpointStore(),
     async notify(_event: NotifyEvent) {},
   };
 }

@@ -5,17 +5,17 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import type { JD } from '../../core/jd/index.ts';
 import type { RunContext } from '../../ports/context.ts';
-import { mirrorReachableCheck, wireMigrate } from './builders.ts';
+import { mirrorReachableCheck } from './builders.ts';
 import { wire } from './compose.ts';
-import { dataPath, fakeReadFile, profilePath } from './testkit.ts';
+import { wireMigrate } from './migrate.ts';
+import { dataPath, fakeConfigStore } from './testkit.ts';
 
 /**
  * compose.test.ts (P8, split from wire.test.ts) — exercises `wire()`'s live
  * ctx/stages/routines composition end to end. Adapter identity is asserted
- * via each port's `.name`/`.kind`, never `instanceof` — this test file,
- * like every file under `src/cli` except `cli/wire/compose.ts` itself (and
- * `registry.ts`'s type-only exception), may not import `src/adapters/**`
- * (depcruise's `only-wire-imports-adapters`).
+ * via `.name`/`.kind`, never `instanceof` — like every file under `src/cli`
+ * except `compose.ts` itself (and `registry.ts`'s type-only exception), this
+ * file may not import `src/adapters/**` (depcruise's `only-wire-imports-adapters`).
  */
 
 // --- wire() ---
@@ -38,7 +38,7 @@ test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction 
   try {
     const result = await wire('rajni', {
       root: '/repo',
-      readFile: fakeReadFile({ [profilePath('rajni')]: NOTION_ONLY_PROFILE_JSON }),
+      configStore: fakeConfigStore({ 'profile.json': NOTION_ONLY_PROFILE_JSON }),
     });
 
     // Resolves rather than rejecting, and still carries the core checks
@@ -53,11 +53,10 @@ test('wire: does not throw when NOTION_TOKEN is missing (NotionApi construction 
 });
 
 // --- wire(): live ctx/stages/routines composition ---
-//
 // These tests avoid `linkedin` (its live construction needs a real
 // filesystem for inventories via `FsStorage`, and a browser port) so they
-// can run entirely against the injected fake `readFile` — greenhouse/keka
-// need no per-profile files at all.
+// run entirely against a fake `ConfigStore` — greenhouse/keka need no
+// per-profile docs at all.
 
 const LIVE_PROFILE_JSON = JSON.stringify({
   lanes: ['greenhouse', 'keka'],
@@ -67,12 +66,12 @@ const LIVE_PROFILE_JSON = JSON.stringify({
   settings: { notion: { dbId: 'db-1' }, telegram: { chatId: 7 } },
 });
 
-function fakeLiveReadFile(profileJson: string = LIVE_PROFILE_JSON) {
-  return fakeReadFile({ [profilePath('rajni')]: profileJson });
+function liveConfigStore(profileJson: string = LIVE_PROFILE_JSON) {
+  return fakeConfigStore({ 'profile.json': profileJson });
 }
 
 test('wire: returns a live ctx with config/ports/storage/notify populated', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
   assert.equal(result.ctx.profile, 'rajni');
   assert.equal(result.ctx.config.connector, 'notion');
@@ -97,7 +96,7 @@ test('wire: returns a live ctx with config/ports/storage/notify populated', asyn
 // PASSED/FAILED RunResult, so a thrown/rejected notifier send must not turn
 // an otherwise-passed run into a crash.
 test('wire: ctx.notify never throws when a notifier fails, and still calls the others', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
   const errors: string[] = [];
   result.ctx.logger = {
@@ -140,7 +139,7 @@ test('wire: ctx.notify never throws when a notifier fails, and still calls the o
 // instead of the profile's own, silently sourcing nothing from the ATS lanes
 // while still reporting `passed`. The two roots must stay distinct.
 test('wire: ctx.storage is rooted at the profile data dir, not the repo root', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
   assert.equal(
     (result.ctx.storage as unknown as { rootDir: string }).rootDir,
@@ -149,7 +148,7 @@ test('wire: ctx.storage is rooted at the profile data dir, not the repo root', a
 });
 
 test('wire: stages is the 10 job-flow stages in spec order', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
   assert.deepEqual(
     result.stages.map((s) => s.name),
@@ -169,7 +168,7 @@ test('wire: stages is the 10 job-flow stages in spec order', async () => {
 });
 
 test('wire: routines maps config.routines to instances', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
   assert.deepEqual(
     result.routines.map((r) => r.name),
@@ -187,7 +186,7 @@ test('wire: unknown routine name throws loud', async () => {
   });
 
   await assert.rejects(
-    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    () => wire('rajni', { root: '/repo', configStore: liveConfigStore(profileJson) }),
     /not-a-real-routine/,
   );
 });
@@ -202,7 +201,7 @@ test('wire: unknown lane name throws loud (live construction, not just checks)',
   });
 
   await assert.rejects(
-    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    () => wire('rajni', { root: '/repo', configStore: liveConfigStore(profileJson) }),
     /not-a-real-lane/,
   );
 });
@@ -217,7 +216,7 @@ test('wire: unknown connector name throws loud', async () => {
   });
 
   await assert.rejects(
-    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    () => wire('rajni', { root: '/repo', configStore: liveConfigStore(profileJson) }),
     /not-a-real-connector/,
   );
 });
@@ -232,7 +231,7 @@ test('wire: unknown notifier name throws loud', async () => {
   });
 
   await assert.rejects(
-    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    () => wire('rajni', { root: '/repo', configStore: liveConfigStore(profileJson) }),
     /not-a-real-notifier/,
   );
 });
@@ -247,7 +246,7 @@ test('wire: linkedin lane requires a FilterConfig, throws a clear error when abs
   });
 
   await assert.rejects(
-    () => wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    () => wire('rajni', { root: '/repo', configStore: liveConfigStore(profileJson) }),
     /filter/,
   );
 });
@@ -256,7 +255,7 @@ test('wire: missing NOTION_TOKEN still resolves wire(), but the live connector r
   const originalToken = process.env.NOTION_TOKEN;
   delete process.env.NOTION_TOKEN;
   try {
-    const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+    const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
     await assert.rejects(
       () =>
@@ -275,7 +274,7 @@ test('wire: missing NOTION_TOKEN still resolves wire(), but the live connector r
 });
 
 test('wire: filter defaults to parsed-{} FilterConfig when filter.json is absent (no rule drops anything)', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
   const filterStage = result.stages.find((s) => s.name === 'filter');
   assert.ok(filterStage);
 
@@ -303,6 +302,7 @@ test('wire: filter defaults to parsed-{} FilterConfig when filter.json is absent
       logger: { debug() {}, info() {}, warn() {}, error() {} },
       beat() {},
       storage: result.ctx.storage,
+      stateStore: result.ctx.stateStore,
     },
   );
 
@@ -311,7 +311,7 @@ test('wire: filter defaults to parsed-{} FilterConfig when filter.json is absent
 });
 
 test('wire: existing checks behavior is unchanged alongside the live ctx/stages/routines', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
   assert.ok(result.checks.length > 0);
   assert.ok(result.checks.some((c) => c.name.length > 0));
 });
@@ -329,7 +329,7 @@ test('wire: a sqlite profile builds SqliteConnector and contributes the sqlite d
 
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeLiveReadFile(profileJson),
+    configStore: liveConfigStore(profileJson),
   });
 
   assert.equal(result.ctx.ports.connector.name, 'sqlite');
@@ -361,7 +361,7 @@ test('wire: a sqlite profile with settings.notion.mirror wraps the connector in 
 
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeLiveReadFile(profileJson),
+    configStore: liveConfigStore(profileJson),
     deps: { notionApi: fakeQueryableNotionApi() },
   });
 
@@ -381,7 +381,7 @@ test('wire: settings.notion.mirror true but no dbId does not wrap and does not a
 
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeLiveReadFile(profileJson),
+    configStore: liveConfigStore(profileJson),
     deps: { notionApi: fakeQueryableNotionApi() },
   });
 
@@ -405,7 +405,7 @@ test('wire: a malformed settings.notion slice never mirrors, never throws, no no
     });
     const result = await wire('rajni', {
       root: '/repo',
-      readFile: fakeLiveReadFile(profileJson),
+      configStore: liveConfigStore(profileJson),
       deps: { notionApi: fakeQueryableNotionApi() },
     });
     assert.equal(result.ctx.ports.connector.name, 'sqlite');
@@ -431,7 +431,7 @@ test('wire: a sqlite profile with settings.notion.dbId but no mirror flag does n
 
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeLiveReadFile(profileJson),
+    configStore: liveConfigStore(profileJson),
     deps: { notionApi: fakeQueryableNotionApi() },
   });
 
@@ -450,7 +450,7 @@ test('wire: settings.notion.mirror on a notion profile is a no-op (gate is sqlit
 
   const result = await wire('rajni', {
     root: '/repo',
-    readFile: fakeLiveReadFile(profileJson),
+    configStore: liveConfigStore(profileJson),
     deps: { notionApi: fakeQueryableNotionApi() },
   });
 
@@ -472,7 +472,7 @@ test('wire: a mirrored sqlite connector writes locally and best-effort pushes to
     });
     result = await wire('rajni', {
       root,
-      readFile: fakeReadFile({ [profilePath('rajni', root)]: profileJson }),
+      configStore: fakeConfigStore({ 'profile.json': profileJson }),
     });
 
     assert.equal(result.ctx.ports.connector.name, 'sqlite+notion');
@@ -603,13 +603,13 @@ test('wire: linkedin lane builds successfully end to end (search_urls.md -> pars
       '### staff-eng',
       '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
     ].join('\n');
-    const readFile = fakeReadFile({
-      [join(root, 'profiles', 'rajni', 'profile.json')]: profileJson,
-      [join(root, 'profiles', 'rajni', 'filter.json')]: JSON.stringify({}),
-      [join(root, 'profiles', 'rajni', 'search_urls.md')]: searchUrlsMd,
+    const configStore = fakeConfigStore({
+      'profile.json': profileJson,
+      'filter.json': JSON.stringify({}),
+      'search_urls.md': searchUrlsMd,
     });
 
-    const result = await wire('rajni', { root, readFile });
+    const result = await wire('rajni', { root, configStore });
 
     const farmingLanes = result.ctx.ports.lanes.filter((l) => l.kind === 'farming');
     assert.equal(farmingLanes.length, 1);
@@ -669,13 +669,13 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
       '### staff-eng',
       '  • US remote - https://www.linkedin.com/jobs/search/?keywords=staff+engineer',
     ].join('\n');
-    const readFile = fakeReadFile({
-      [join(root, 'profiles', 'rajni', 'profile.json')]: profileJson,
-      [join(root, 'profiles', 'rajni', 'filter.json')]: JSON.stringify({}),
-      [join(root, 'profiles', 'rajni', 'search_urls.md')]: searchUrlsMd,
+    const configStore = fakeConfigStore({
+      'profile.json': profileJson,
+      'filter.json': JSON.stringify({}),
+      'search_urls.md': searchUrlsMd,
     });
 
-    const result = await wire('rajni', { root, readFile });
+    const result = await wire('rajni', { root, configStore });
 
     const lane = result.ctx.ports.lanes.find((l) => l.name === 'linkedin');
     assert.ok(lane);
@@ -707,7 +707,7 @@ test('wire: the linkedin lane is constructed with each resolved pacing value in 
 // --- wire logger (N4) ---
 
 test('wire: ctx.logger is a wire logger emitting NDJSON to stderr before it is swapped', async () => {
-  const result = await wire('rajni', { root: '/repo', readFile: fakeLiveReadFile() });
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
 
   const originalConsoleError = console.error;
   const lines: string[] = [];
@@ -736,7 +736,7 @@ test('wire: a profile with invalid settings.logging throws', async () => {
   });
 
   await assert.rejects(() =>
-    wire('rajni', { root: '/repo', readFile: fakeLiveReadFile(profileJson) }),
+    wire('rajni', { root: '/repo', configStore: liveConfigStore(profileJson) }),
   );
 });
 
@@ -757,7 +757,7 @@ test('wireMigrate: resolves dbId/profileJsonPath/dbPath from a profile with sett
 
   const migrateWire = await wireMigrate('p1', {
     root: '/repo',
-    readFile: fakeReadFile({ [profilePath('p1')]: profileJson }),
+    configStore: fakeConfigStore({ 'profile.json': profileJson }),
   });
 
   assert.equal(migrateWire.dbId, 'db-x');
@@ -776,7 +776,7 @@ test('wireMigrate: dbId is "" when the profile has no settings.notion slice', as
 
   const migrateWire = await wireMigrate('p1', {
     root: '/repo',
-    readFile: fakeReadFile({ [profilePath('p1')]: profileJson }),
+    configStore: fakeConfigStore({ 'profile.json': profileJson }),
   });
 
   assert.equal(migrateWire.dbId, '');
@@ -793,7 +793,7 @@ test('wireMigrate: dbId is "" when settings.notion exists but has no dbId (e.g. 
 
   const migrateWire = await wireMigrate('p1', {
     root: '/repo',
-    readFile: fakeReadFile({ [profilePath('p1')]: profileJson }),
+    configStore: fakeConfigStore({ 'profile.json': profileJson }),
   });
 
   assert.equal(migrateWire.dbId, '');

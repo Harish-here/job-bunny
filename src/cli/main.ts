@@ -46,6 +46,7 @@ import {
 } from './args.ts';
 import { autostartCommand } from './commands/autostart.ts';
 import { boardCommand } from './commands/board.ts';
+import { type ConfigDocName, configCommand } from './commands/config.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { migrateCommand } from './commands/migrate.ts';
@@ -54,9 +55,11 @@ import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
 import { routineCommand } from './commands/routine.ts';
 import { runCommand } from './commands/run.ts';
+import { runsCommand } from './commands/runs.ts';
 import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
+import { type StateCommandOptions, stateCommand } from './commands/state.ts';
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
 
@@ -147,6 +150,24 @@ function defaultCommands(): CommandRegistry {
     board: (async (opts: CommandOptions) =>
       // 1994 — not random: the operator's birthday.
       boardCommand({ port: opts.port ?? 1994 })) as CommandFn,
+    runs: (async (opts: CommandOptions) =>
+      runsCommand({
+        profile: opts.profile ?? '',
+        ...(opts.runId === undefined ? {} : { runId: opts.runId }),
+      })) as CommandFn,
+    state: (async (opts: CommandOptions) =>
+      stateCommand({
+        profile: opts.profile ?? '',
+        action: (opts.action ?? 'read') as 'read' | 'write',
+        key: (opts.key ?? '') as StateCommandOptions['key'],
+      })) as CommandFn,
+    config: (async (opts: CommandOptions) =>
+      configCommand({
+        profile: opts.profile ?? '',
+        action: (opts.action ?? 'get') as 'get' | 'set' | 'export' | 'import',
+        ...(opts.doc === undefined ? {} : { doc: opts.doc as ConfigDocName }),
+        ...(opts.dir === undefined ? {} : { dir: opts.dir }),
+      })) as CommandFn,
   };
 }
 

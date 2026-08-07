@@ -1,11 +1,19 @@
 /**
- * commands/migrate.ts (local-DB spec PR 2, Task 5) — the `migrate` CLI
- * command: reads an existing Notion job database via `wireMigrate`, prints
- * a summary, and — ONLY with `--apply` — imports it into local sqlite
- * (insert-only, `wire.importRecords`) and flips the profile's connector to
- * `sqlite`. Dry-run (the default) performs ZERO writes: `importRecords` is
- * never called, so `wireMigrate`'s lazily-opened DB file is never created,
- * and `profile.json` is left byte-unchanged.
+ * commands/migrate.ts (local-DB spec PR 2, Task 5; config→db Phase 4,
+ * Task 7) — the `migrate` CLI command: reads an existing Notion job
+ * database via `wireMigrate`, prints a summary, and — ONLY with `--apply`
+ * — imports it into local sqlite (insert-only, `wire.importRecords`) and
+ * flips the profile's connector to `sqlite`. Dry-run (the default)
+ * performs ZERO writes: `importRecords` is never called, so
+ * `wireMigrate`'s lazily-opened DB file is never created, and
+ * `profile.json` is left byte-unchanged.
+ *
+ * The `--apply` connector flip reads/writes `profile.json` through
+ * `wire.configStore` (Task 4's readwrite `ConfigStore` field on
+ * `MigrateWire`), not raw `readFile`/`writeFile` — validation is
+ * automatic: `writeText`'s own internal `validateConfigDoc` call already
+ * runs `PipelineConfigSchema.parse` on the result before storing, so this
+ * command adds no second, redundant validation step.
  *
  * No `src/adapters/**` import here — `wireMigrate` is injected (real
  * default: `cli/wire/index.ts`'s `wireMigrate`, which reaches
@@ -15,7 +23,6 @@
  * re-running --apply — both imports are insert-only, so completed work is
  * never redone or clobbered.
  */
-import { readFile as fsReadFile, writeFile as fsWriteFile } from 'node:fs/promises';
 import { createWireLogger } from '../../ops/observability/index.ts';
 import type { RunContext } from '../../ports/context.ts';
 import { wireMigrate as defaultWireMigrate, type MigrateWire } from '../wire/index.ts';
@@ -32,16 +39,12 @@ export interface MigrateCommandOptions {
 export interface MigrateDeps {
   wireMigrate: (profileName: string) => Promise<MigrateWire>;
   write: (line: string) => void;
-  readFile: (p: string) => Promise<string>;
-  writeFile: (p: string, data: string) => Promise<void>;
 }
 
 function defaultDeps(): MigrateDeps {
   return {
     wireMigrate: defaultWireMigrate,
     write: (line: string) => console.log(line),
-    readFile: (p: string) => fsReadFile(p, 'utf8'),
-    writeFile: (p: string, data: string) => fsWriteFile(p, data, 'utf8'),
   };
 }
 
@@ -92,12 +95,21 @@ export async function migrateCommand(
   const now = new Date().toISOString();
   const counts = wire.importRecords(records, now);
 
-  const raw = await resolved.readFile(wire.profileJsonPath);
+  const raw = await wire.configStore.readText('profile.json');
+  if (raw === undefined) {
+    // Should not happen — wireMigrate already successfully loaded this same
+    // doc earlier in this same command run (via loadPipelineConfig). Throw
+    // loud rather than silently no-op if it somehow does.
+    throw new Error(`profiles/${opts.profile}/profile.json unexpectedly missing`);
+  }
   const parsed = JSON.parse(raw);
   parsed.connector = 'sqlite';
   parsed.settings ??= {};
   parsed.settings.sqlite ??= {};
-  await resolved.writeFile(wire.profileJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);
+  await wire.configStore.writeText(
+    'profile.json',
+    `${JSON.stringify(parsed, null, 2)}\n`,
+  );
 
   resolved.write(
     `imported ${counts.jobs} jobs (${total - counts.jobs} already present, left untouched), ` +

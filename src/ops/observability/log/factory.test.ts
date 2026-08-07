@@ -1,25 +1,41 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
+import type { RunEventRow, RunStoreWriter } from '../../../ports/index.ts';
 import {
   createDaemonLogger,
   createRunLogger,
   createWireLogger,
   LoggingSettingsSchema,
 } from './factory.ts';
-import { JsonlLogger } from './loggers.ts';
+import { RunStoreLogger } from './loggers.ts';
 
-let root: string;
-
-before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'jb-factory-'));
-});
-
-after(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+/** Minimal fake `RunStoreWriter` — only `appendEvents` matters here. */
+function fakeStore(): RunStoreWriter & {
+  calls: Array<{ runId: number; events: RunEventRow[] }>;
+} {
+  const calls: Array<{ runId: number; events: RunEventRow[] }> = [];
+  return {
+    calls,
+    startRun: () => {
+      throw new Error('unexpected startRun call');
+    },
+    appendEvents: (runId, events) => {
+      calls.push({ runId, events });
+    },
+    heartbeat: () => {
+      throw new Error('unexpected heartbeat call');
+    },
+    recordFailure: () => {
+      throw new Error('unexpected recordFailure call');
+    },
+    recordSyncDryrun: () => {
+      throw new Error('unexpected recordSyncDryrun call');
+    },
+    finishRun: () => {
+      throw new Error('unexpected finishRun call');
+    },
+  };
+}
 
 // --- LoggingSettingsSchema ---
 
@@ -40,28 +56,34 @@ test('LoggingSettingsSchema: a present-but-invalid level throws (fail loud)', ()
 
 // --- createRunLogger ---
 
-test('createRunLogger: returns a JsonlLogger at the given path with cfg thresholds applied', async () => {
-  const filePath = join(root, 'run.log');
-  const logger = createRunLogger(filePath, { fileLevel: 'info', ttyLevel: 'warn' });
-  assert.ok(logger instanceof JsonlLogger);
-  assert.equal(logger.filePath, filePath);
-  logger.debug('should be filtered out of the file');
+test('createRunLogger: returns a RunStoreLogger bound to the given store/runId with cfg thresholds applied', () => {
+  const store = fakeStore();
+  const logger = createRunLogger(store, 42, { fileLevel: 'info', ttyLevel: 'warn' });
+  assert.ok(logger instanceof RunStoreLogger);
+  logger.debug('should be filtered out of the buffer');
   logger.info('should land');
-  await logger.flush();
-  const raw = await readFile(filePath, 'utf8');
-  const lines = raw.trim().split('\n');
-  assert.equal(lines.length, 1);
-  assert.match(lines[0] ?? '', /"msg":"should land"/);
+  logger.flush();
+  assert.equal(store.calls.length, 1);
+  assert.equal(store.calls[0]?.runId, 42);
+  assert.equal(store.calls[0]?.events.length, 1);
+  assert.equal(store.calls[0]?.events[0]?.msg, 'should land');
 });
 
-test('createRunLogger: defaults to {fileLevel: debug, ttyLevel: debug} when cfg is absent', async () => {
-  const filePath = join(root, 'run-default.log');
-  const logger = createRunLogger(filePath);
+test('createRunLogger: defaults to {fileLevel: debug, ttyLevel: debug} when cfg is absent', () => {
+  const store = fakeStore();
+  const logger = createRunLogger(store, 1);
   logger.debug('detail');
-  await logger.flush();
-  const raw = await readFile(filePath, 'utf8');
-  const line = JSON.parse(raw.trim());
-  assert.equal(line.level, 'debug');
+  logger.flush();
+  assert.equal(store.calls.length, 1);
+  assert.equal(store.calls[0]?.events[0]?.level, 'debug');
+});
+
+test('createRunLogger: a debug line never buffers when fileLevel is warn', () => {
+  const store = fakeStore();
+  const logger = createRunLogger(store, 1, { fileLevel: 'warn', ttyLevel: 'debug' });
+  logger.debug('should never buffer');
+  logger.flush();
+  assert.equal(store.calls.length, 0);
 });
 
 // --- createWireLogger ---

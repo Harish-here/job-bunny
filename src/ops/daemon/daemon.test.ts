@@ -37,7 +37,6 @@ function fakeScanDeps(
   dirs: Record<string, string[]>,
 ): ScanDeps {
   return {
-    existsSync: (p) => p in files || p in dirs,
     readdirSync: (p) => {
       const entries = dirs[p];
       if (!entries) {
@@ -47,15 +46,8 @@ function fakeScanDeps(
       }
       return entries;
     },
-    readFileSync: (p) => {
-      const content = files[p];
-      if (content === undefined) {
-        const err = new Error('ENOENT') as NodeJS.ErrnoException;
-        err.code = 'ENOENT';
-        throw err;
-      }
-      return content;
-    },
+    readProfileJson: async (profilesDir, name) =>
+      files[join(profilesDir, name, 'profile.json')],
   };
 }
 
@@ -116,6 +108,7 @@ function baseDeps(overrides: Partial<DaemonDeps> = {}): {
     scan: fakeScanDeps({}, {}),
     pidfile,
     spawnRun: (async () => 0) as SpawnRun,
+    readRunHistory: () => [],
     log: (event, data, level) => {
       events.push({ event, data, level });
     },
@@ -215,6 +208,32 @@ test('a ledger entry suppresses a respawn for a slot with no run folder', async 
 
   await createDaemon(deps).tick(); // same slot, still no run folder.
   assert.deepEqual(spawnCalls, ['harish']); // NOT spawned again — the ledger entry served it.
+});
+
+test('readRunHistory evidence alone (no ledger entry at all) suppresses a respawn — the durable-evidence fix for a daemon restart within grace', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'], graceMinutes: 90 }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+  // Simulates a FRESH daemon (no pidfile ledger entry — as after `serve
+  // stop`/`serve start` or a crash-restart) whose profile's own jobbunny.db
+  // already has a `runs` row for this slot (a prior daemon process spawned
+  // and served it). Before the fix this evidence was never read (disk scan
+  // of a run FOLDER that Phase 2 stopped writing), so the slot looked
+  // unattempted and would respawn — a duplicate scheduled run.
+  const readRunHistory = (): [{ profile: string; date: string; startedAt: string }] => [
+    { profile: 'harish', date: '2026-07-27', startedAt: '14:00' },
+  ];
+  const { deps } = baseDeps({ scan, spawnRun, readRunHistory });
+
+  await createDaemon(deps).tick();
+
+  assert.deepEqual(spawnCalls, []); // durable db evidence alone already served this slot.
 });
 
 test('a pidfile that vanishes mid-tick blocks the spawn instead of storming', async () => {
@@ -485,8 +504,13 @@ test('stop() during an in-flight child halts the batch: the NEXT owed entry is n
   const daemon = createDaemon(deps);
 
   const ticking = daemon.tick();
-  await Promise.resolve();
-  await Promise.resolve(); // let the ledger append and first spawn settle.
+  // Enough microtask flushes to let the schedule scan (now genuinely
+  // async — config→db Phase 4's `readProfileJson` seam), the ledger
+  // append, and the first spawn all settle, without hardcoding an exact
+  // hop count that would drift with the scan's own internal await depth.
+  for (let i = 0; i < 20 && spawnCalls.length === 0; i++) {
+    await Promise.resolve();
+  }
   assert.deepEqual(spawnCalls, ['alpha']); // alpha in flight; zeta still queued.
 
   // SIGTERM lands while alpha is still running. `serve stop` kills the

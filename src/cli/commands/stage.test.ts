@@ -1,35 +1,148 @@
 /**
- * stage.test.ts (P8) — TDD for `stageCommand`. `wire` is FAKE; the
- * `RunFolder` is REAL (rooted at a temp dir) so checkpoint read/write is
- * exercised for real, matching run.test.ts's / reconcile.test.ts's
- * convention.
+ * stage.test.ts (P8 / DB Phase 2 Task 7) — TDD for `stageCommand`. `wire`
+ * is FAKE; the checkpoint store is a tiny in-memory FAKE that actually
+ * behaves like a store (write/readLatest/latestTimeDir), matching
+ * run.test.ts's / reconcile.test.ts's convention now that checkpoints live
+ * in `ctx.checkpointStore` rather than a real `RunFolder`.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { test } from 'node:test';
 import {
   formatRunTime,
-  type JsonlLogger,
-  RunFolder,
+  type RunResult,
+  type RunStoreLogger,
 } from '../../ops/observability/index.ts';
 import type { PipelineCtx } from '../../pipeline/runner/context.ts';
 import type { StageDef, StagePayload } from '../../pipeline/runner/stage.ts';
+import type { CheckpointRef, CheckpointStore } from '../../ports/checkpoint_store.ts';
 import type { NotifyEvent } from '../../ports/notifier.ts';
+import type { RunEventRow, RunFailure, RunStore } from '../../ports/run_store.ts';
 import { stageCommand } from './stage.ts';
 
-let root: string;
+/** In-memory `CheckpointStore` fake that ACTUALLY behaves like a tiny
+ * store — this is what makes the chain-semantics test below meaningful.
+ * Deliberate simplification vs. the real `SqliteCheckpointStore` adapter:
+ * it collapses each group down to only its LATEST checkpoint (not full
+ * position history) — that's all `readLatest`/`latestTimeDir` ever need to
+ * expose for `stageCommand`'s own tests. */
+function fakeCheckpointStore(): CheckpointStore & {
+  rows: Map<string, { ref: CheckpointRef; payload: unknown }>;
+} {
+  const rows = new Map<string, { ref: CheckpointRef; payload: unknown }>();
+  const key = (runDate: string, timeDir: string) => `${runDate}|${timeDir}`;
+  return {
+    rows,
+    write(ref, payload) {
+      const k = key(ref.runDate, ref.timeDir);
+      const existing = rows.get(k);
+      if (!existing || ref.position >= existing.ref.position) {
+        rows.set(k, { ref, payload });
+      }
+    },
+    readLatest(runDate, timeDir) {
+      return rows.get(key(runDate, timeDir));
+    },
+    latestTimeDir(runDate) {
+      const dirs = [...rows.values()]
+        .filter((r) => r.ref.runDate === runDate)
+        .map((r) => r.ref.timeDir);
+      return dirs.length ? dirs.sort().at(-1) : undefined;
+    },
+    // This fake collapses each group to only its latest checkpoint — every
+    // row in `rows` is by definition a real checkpoint, so there is no
+    // separate "bare runs row" case to distinguish; `latestCheckpointTimeDir`
+    // is identical to `latestTimeDir` here.
+    latestCheckpointTimeDir(runDate) {
+      const dirs = [...rows.values()]
+        .filter((r) => r.ref.runDate === runDate)
+        .map((r) => r.ref.timeDir);
+      return dirs.length ? dirs.sort().at(-1) : undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time; // not exercised by stage.ts
+    },
+    pruneOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+}
 
-before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'jb-stage-cmd-'));
-});
+/** Recording `RunStore` fake — mirrors `run.test.ts`'s `fakeRunStore()`.
+ * `startRun` auto-increments ids from 1; every write is recorded verbatim
+ * for assertions. */
+function fakeStore(): RunStore & {
+  started: Array<Parameters<RunStore['startRun']>[0]>;
+  events: Array<{ runId: number; events: RunEventRow[] }>;
+  failures: Array<{ runId: number; failure: RunFailure }>;
+  heartbeats: Array<{ runId: number; at: string }>;
+  finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }>;
+} {
+  const started: Array<Parameters<RunStore['startRun']>[0]> = [];
+  const events: Array<{ runId: number; events: RunEventRow[] }> = [];
+  const failures: Array<{ runId: number; failure: RunFailure }> = [];
+  const heartbeats: Array<{ runId: number; at: string }> = [];
+  const finished: Array<{
+    runId: number;
+    outcome: 'passed' | 'failed';
+    result: unknown;
+    finishedAt: string;
+  }> = [];
+  let nextId = 1;
+  return {
+    started,
+    events,
+    failures,
+    heartbeats,
+    finished,
+    startRun(meta) {
+      started.push(meta);
+      return nextId++;
+    },
+    appendEvents(runId, evts) {
+      events.push({ runId, events: evts });
+    },
+    heartbeat(runId, at) {
+      heartbeats.push({ runId, at });
+    },
+    recordFailure(runId, failure) {
+      failures.push({ runId, failure });
+    },
+    recordSyncDryrun() {},
+    finishRun(runId, outcome, result, finishedAt) {
+      finished.push({ runId, outcome, result, finishedAt });
+    },
+    listRuns() {
+      return [];
+    },
+    getRun() {
+      return null;
+    },
+    listEvents() {
+      return [];
+    },
+    findRunId() {
+      return null;
+    },
+    listRunTimeDirs() {
+      return [];
+    },
+    pruneRunsOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+}
 
-after(async () => {
-  await rm(root, { recursive: true, force: true });
-});
-
-function fakeCtx(): PipelineCtx {
+function fakeCtx(
+  runStore: RunStore = fakeStore(),
+  checkpointStore: CheckpointStore = fakeCheckpointStore(),
+): PipelineCtx {
   return {
     profile: 'rajni',
     signal: new AbortController().signal,
@@ -45,8 +158,17 @@ function fakeCtx(): PipelineCtx {
       },
       async removeTree() {},
     },
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
+    runStore,
+    checkpointStore,
     async notify(_event: NotifyEvent) {},
   };
 }
@@ -70,7 +192,6 @@ test('stageCommand: unknown stage name prints valid names and returns 1 (no thro
     {
       wire: async () => ({ ctx: fakeCtx(), stages, routines: [], checks: [] }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -81,10 +202,11 @@ test('stageCommand: unknown stage name prints valid names and returns 1 (no thro
   assert.ok(lines[0]?.includes('assemble'));
 });
 
-test('stageCommand: runs from the empty seed payload when no checkpoint exists, creates a fresh time folder, checkpoints at the real index, prints the funnel line', async () => {
+test('stageCommand: runs from the empty seed payload when no checkpoint exists, creates a fresh group at the current formatted time, checkpoints at the real index, prints the funnel line', async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
   const lines: string[] = [];
   let observedInput: StagePayload | undefined;
+  const checkpointStore = fakeCheckpointStore();
   const stages = [
     makeStage('reconcile', async (i) => i),
     makeStage('compress', async (i) => {
@@ -97,9 +219,13 @@ test('stageCommand: runs from the empty seed payload when no checkpoint exists, 
   const code = await stageCommand(
     { profile, stage: 'compress' },
     {
-      wire: async () => ({ ctx: fakeCtx(), stages, routines: [], checks: [] }),
+      wire: async () => ({
+        ctx: fakeCtx(fakeStore(), checkpointStore),
+        stages,
+        routines: [],
+        checks: [],
+      }),
       now: () => now,
-      root,
       write: (line: string) => lines.push(line),
     },
   );
@@ -107,30 +233,33 @@ test('stageCommand: runs from the empty seed payload when no checkpoint exists, 
   assert.equal(code, 0);
   assert.deepEqual(observedInput, { jobs: [], dropped: [] });
 
-  // No folder existed today — a fresh one is created at the current local
-  // HH-MM, per `formatRunTime`.
-  const folder = new RunFolder(
-    join(root, 'profiles', profile, 'data'),
-    '2026-07-25',
-    formatRunTime(now),
-  );
-  const raw = await readFile(folder.checkpointPath(1, 'compress'), 'utf8');
-  assert.deepEqual(JSON.parse(raw), { jobs: [{ id: 'a' }], dropped: [] });
+  // No group existed today (empty store) — a fresh one is created at the
+  // current local HH-MM, per `formatRunTime`. (Also covers: "a fresh day
+  // creates a group at the current formatted time" — the sole assertion
+  // that case needs is `written.ref.timeDir === time` below.)
+  const time = formatRunTime(now);
+  const written = checkpointStore.rows.get(`2026-07-25|${time}`);
+  assert.deepEqual(written, {
+    ref: {
+      runDate: '2026-07-25',
+      timeDir: time,
+      position: 1,
+      stage: 'compress',
+      writtenBy: 1,
+    },
+    payload: { jobs: [{ id: 'a' }], dropped: [] },
+  });
 
   assert.ok(lines.some((l) => l.startsWith('compress: 0 -> 1')));
 });
 
 test('stageCommand: resumes from the latest checkpoint rather than the empty seed', async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
-  const folder = new RunFolder(
-    join(root, 'profiles', profile, 'data'),
-    '2026-07-25',
-    '09-00',
+  const checkpointStore = fakeCheckpointStore();
+  checkpointStore.write(
+    { runDate: '2026-07-25', timeDir: '09-00', position: 0, stage: 'reconcile' },
+    { jobs: [{ id: 'seeded' }], dropped: [] },
   );
-  await folder.writeCheckpoint(0, 'reconcile', {
-    jobs: [{ id: 'seeded' }],
-    dropped: [],
-  });
 
   let observedInput: StagePayload | undefined;
   const stages = [
@@ -144,9 +273,13 @@ test('stageCommand: resumes from the latest checkpoint rather than the empty see
   const code = await stageCommand(
     { profile, stage: 'compress' },
     {
-      wire: async () => ({ ctx: fakeCtx(), stages, routines: [], checks: [] }),
+      wire: async () => ({
+        ctx: fakeCtx(fakeStore(), checkpointStore),
+        stages,
+        routines: [],
+        checks: [],
+      }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
@@ -155,38 +288,86 @@ test('stageCommand: resumes from the latest checkpoint rather than the empty see
   assert.deepEqual(observedInput, { jobs: [{ id: 'seeded' }], dropped: [] });
 });
 
-test("stageCommand: continues in TODAY's existing time folder (not the current formatted time) and writes its new checkpoint there", async () => {
+test("stageCommand: continues in TODAY's existing group (not the current formatted time) and writes its new checkpoint there — chain semantics across two sequential stageCommand calls", async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
-  const dataDir = join(root, 'profiles', profile, 'data');
-  // An earlier folder from today, at a time far from whatever
-  // `formatRunTime(now)` would produce right now.
-  const earlier = new RunFolder(dataDir, '2026-07-25', '03-17');
-  await earlier.writeCheckpoint(0, 'reconcile', { jobs: [], dropped: [] });
+  const checkpointStore = fakeCheckpointStore();
+  const now = new Date('2026-07-25T00:00:00Z');
 
-  const stages = [
-    makeStage('reconcile', async (i) => i),
-    makeStage('compress', async (i) => ({
-      jobs: [...i.jobs, { id: 'x' }] as never,
+  // First call: empty store, so it creates a fresh group at
+  // `formatRunTime(now)` and writes stage 'reconcile' at position 0.
+  const reconcileStages = [
+    makeStage('reconcile', async (i) => ({
+      jobs: [...i.jobs, { id: 'r' }] as never,
       dropped: i.dropped,
     })),
+    makeStage('compress', async (i) => i),
   ];
-
-  const code = await stageCommand(
-    { profile, stage: 'compress' },
+  const code1 = await stageCommand(
+    { profile, stage: 'reconcile' },
     {
-      wire: async () => ({ ctx: fakeCtx(), stages, routines: [], checks: [] }),
-      now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
+      wire: async () => ({
+        ctx: fakeCtx(fakeStore(), checkpointStore),
+        stages: reconcileStages,
+        routines: [],
+        checks: [],
+      }),
+      now: () => now,
       write: () => {},
     },
   );
+  assert.equal(code1, 0);
 
-  assert.equal(code, 0);
-  const raw = await readFile(earlier.checkpointPath(1, 'compress'), 'utf8');
-  assert.deepEqual(JSON.parse(raw), { jobs: [{ id: 'x' }], dropped: [] });
+  const groupAfterFirst = checkpointStore.latestCheckpointTimeDir('2026-07-25');
+  assert.equal(groupAfterFirst, formatRunTime(now));
+  const firstWrite = checkpointStore.readLatest('2026-07-25', groupAfterFirst as string);
+  assert.deepEqual(firstWrite?.payload, { jobs: [{ id: 'r' }], dropped: [] });
+
+  // Second call: 'compress' at index 1 — must resolve to the SAME group
+  // the first call wrote into (proving group-sharing is genuine), read
+  // the first call's output as input, and write its own slot at
+  // position 1 in that same group.
+  let observedInput: StagePayload | undefined;
+  const compressStages = [
+    makeStage('reconcile', async (i) => i),
+    makeStage('compress', async (i) => {
+      observedInput = i;
+      return { jobs: [...i.jobs, { id: 'c' }] as never, dropped: i.dropped };
+    }),
+  ];
+  const code2 = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({
+        ctx: fakeCtx(fakeStore(), checkpointStore),
+        stages: compressStages,
+        routines: [],
+        checks: [],
+      }),
+      now: () => now,
+      write: () => {},
+    },
+  );
+  assert.equal(code2, 0);
+
+  // (a) same group.
+  assert.equal(checkpointStore.latestCheckpointTimeDir('2026-07-25'), groupAfterFirst);
+  // (b) second call's input equals what the first call wrote.
+  assert.deepEqual(observedInput, { jobs: [{ id: 'r' }], dropped: [] });
+  // (c) second call's write lands in that same group at position 1.
+  const secondWrite = checkpointStore.readLatest('2026-07-25', groupAfterFirst as string);
+  assert.deepEqual(secondWrite, {
+    ref: {
+      runDate: '2026-07-25',
+      timeDir: groupAfterFirst as string,
+      position: 1,
+      stage: 'compress',
+      writtenBy: 1,
+    },
+    payload: { jobs: [{ id: 'r' }, { id: 'c' }], dropped: [] },
+  });
 });
 
-test('stageCommand: overrides ctx.logger with a JsonlLogger before running the stage', async () => {
+test('stageCommand: overrides ctx.logger with a RunStoreLogger before running the stage', async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
   const ctx = fakeCtx();
   const stages = [makeStage('compress', async (i) => i)];
@@ -196,18 +377,18 @@ test('stageCommand: overrides ctx.logger with a JsonlLogger before running the s
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
       now: () => new Date('2026-07-25T00:00:00Z'),
-      root,
       write: () => {},
     },
   );
 
   assert.equal(code, 0);
-  assert.equal(ctx.logger.constructor.name, 'JsonlLogger');
+  assert.equal(ctx.logger.constructor.name, 'RunStoreLogger');
 });
 
 test('stageCommand: hands guardStage a logger scoped to the target stage name', async () => {
   const profile = `p-${Math.random().toString(36).slice(2)}`;
-  const ctx = fakeCtx();
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
   const stages = [
     makeStage('compress', async (i, stageCtx) => {
       stageCtx.logger.info('hi');
@@ -221,31 +402,118 @@ test('stageCommand: hands guardStage a logger scoped to the target stage name', 
     {
       wire: async () => ({ ctx, stages, routines: [], checks: [] }),
       now: () => now,
-      root,
       write: () => {},
     },
   );
 
   assert.equal(code, 0);
   // stageCommand unconditionally replaces `ctx.logger` with a real
-  // JsonlLogger (pinned by the assignment test above), so a fake-logger spy
-  // injected here would be clobbered. The scope wrapping is asserted the
-  // same way the runtime smoke does: by reading the run.log this run
-  // actually wrote and finding the scoped line. `flush()` waits for the
-  // queued append to actually land before the file is read back.
-  await (ctx.logger as JsonlLogger).flush();
-  const folder = new RunFolder(
-    join(root, 'profiles', profile, 'data'),
-    '2026-07-25',
-    formatRunTime(now),
-  );
-  const raw = await readFile(folder.logPath(), 'utf8');
-  const lines = raw
-    .trim()
-    .split('\n')
-    .map((l) => JSON.parse(l) as { msg: string; data?: Record<string, unknown> });
-  const line = lines.find((l) => l.msg === 'hi');
+  // RunStoreLogger (pinned by the assignment test above), so a fake-logger
+  // spy injected here would be clobbered. The scope wrapping is asserted by
+  // flushing the buffered events out to the fake store and inspecting the
+  // batch it received, mirroring the old run.log-reading assertion.
+  (ctx.logger as RunStoreLogger).flush();
+  const line = store.events.flatMap((c) => c.events).find((e) => e.msg === 'hi');
   assert.equal(line?.data?.scope, 'compress');
+});
+
+test('stageCommand: opens a "stage" runs row and finishes it as passed with the funnel', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
+  const stages = [
+    makeStage('compress', async () => ({ jobs: [{ id: 'a' }] as never, dropped: [] })),
+  ];
+  const now = new Date('2026-07-25T00:00:00Z');
+
+  const code = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+      now: () => now,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(store.started.length, 1);
+  assert.equal(store.started[0]?.kind, 'stage');
+  assert.equal(store.started[0]?.timeDir, formatRunTime(now));
+
+  assert.equal(store.finished.length, 1);
+  const finished = store.finished[0];
+  assert.equal(finished?.runId, store.started.length); // the id startRun returned
+  assert.equal(finished?.outcome, 'passed');
+  const result = finished?.result as RunResult;
+  assert.equal(result.outcome, 'passed');
+  assert.equal(result.profile, 'rajni');
+  assert.equal(result.stages[0]?.name, 'compress');
+  assert.equal(result.stages[0]?.jobsIn, 0);
+  assert.equal(result.stages[0]?.jobsOut, 1);
+});
+
+test('stageCommand: heartbeats promptly after startRun, so a long-running stage never shows a NULL heartbeat_at', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
+  const stages = [
+    makeStage('compress', async () => ({ jobs: [{ id: 'a' }] as never, dropped: [] })),
+  ];
+  const now = new Date('2026-07-25T00:00:00Z');
+
+  const code = await stageCommand(
+    { profile, stage: 'compress' },
+    {
+      wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+      now: () => now,
+      write: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(store.started.length, 1);
+  const startedRunId = store.started.length; // the id startRun returned
+  assert.ok(
+    store.heartbeats.some((h) => h.runId === startedRunId),
+    'expected at least one heartbeat for the started run id',
+  );
+});
+
+test('stageCommand: a stage that throws records the failure, finishes the row as failed, and rethrows', async () => {
+  const profile = `p-${Math.random().toString(36).slice(2)}`;
+  const store = fakeStore();
+  const ctx = fakeCtx(store);
+  const stages = [
+    makeStage('compress', async () => {
+      throw new Error('boom');
+    }),
+  ];
+
+  // The rethrown error is guardStage's own wrapper (its `cause` carries the
+  // underlying "boom") — asserted generically here; the recorded
+  // `RunFailure.error` below is what preserves the underlying message.
+  await assert.rejects(() =>
+    stageCommand(
+      { profile, stage: 'compress' },
+      {
+        wire: async () => ({ ctx, stages, routines: [], checks: [] }),
+        now: () => new Date('2026-07-25T00:00:00Z'),
+        write: () => {},
+      },
+    ),
+  );
+
+  assert.equal(store.failures.length, 1);
+  assert.equal(store.failures[0]?.failure.stage, 'compress');
+  assert.match(store.failures[0]?.failure.error ?? '', /boom/);
+
+  assert.equal(store.finished.length, 1);
+  const finished = store.finished[0];
+  assert.equal(finished?.outcome, 'failed');
+  const result = finished?.result as RunResult;
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.failedStage, 'compress');
+  assert.deepEqual(result.stages, []);
 });
 
 test('stageCommand: a profile with invalid settings.logging throws before the stage runs', async () => {
@@ -268,7 +536,6 @@ test('stageCommand: a profile with invalid settings.logging throws before the st
       {
         wire: async () => ({ ctx, stages, routines: [], checks: [] }),
         now: () => new Date('2026-07-25T00:00:00Z'),
-        root,
         write: () => {},
       },
     ),

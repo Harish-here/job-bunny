@@ -1,31 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { JD } from '../../core/jd/index.ts';
-import type { Storage } from '../../ports/index.ts';
+import type { StateStore } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { assembleStage, parseDecisions } from './assemble.ts';
 import { PASSTHROUGH_PATH } from './compress.ts';
 import { DECISIONS_PATH } from './structure.ts';
 
-function fakeStorage(): Storage & { store: Map<string, unknown> } {
+function fakeStateStore(): StateStore & { store: Map<string, unknown> } {
   const store = new Map<string, unknown>();
   return {
     store,
-    async readJson<T>(relPath: string, schema: { parse(v: unknown): T }) {
-      if (!store.has(relPath)) return undefined;
-      return schema.parse(store.get(relPath));
+    async readDoc<T>(key: string, schema: { parse(v: unknown): T }) {
+      if (!store.has(key)) return undefined;
+      return schema.parse(store.get(key));
     },
-    async writeJson(relPath: string, value: unknown) {
-      store.set(relPath, value);
+    async writeDoc(key: string, value: unknown) {
+      store.set(key, value);
     },
-    async listSubdirs() {
-      return [];
-    },
-    async removeTree() {},
+    close() {},
   };
 }
 
-function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
+function fakeCtx(stateStore: ReturnType<typeof fakeStateStore>): StageContext {
   return {
     profile: 'rajni',
     signal: AbortSignal.timeout(30_000),
@@ -36,7 +33,8 @@ function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
       error() {},
     },
     beat() {},
-    storage,
+    storage: {} as StageContext['storage'],
+    stateStore,
   };
 }
 
@@ -98,17 +96,17 @@ test('parseDecisions: preserves actual cell count for column-drift detection', (
 });
 
 test('clean row -> StructuredJD joined to the right passthrough JD', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
-  storage.store.set(
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(
     DECISIONS_PATH,
     decisionsTable([
       '| li-1 | Frontend | Senior | React | Bengaluru | India | onsite | | React; TypeScript | 20-30 LPA |',
     ]),
   );
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.equal(out.jobs.length, 1);
   assert.equal(out.dropped.length, 0);
@@ -126,17 +124,17 @@ test('clean row -> StructuredJD joined to the right passthrough JD', async () =>
 });
 
 test('garbage/unparseable row (wrong shape entirely) -> DroppedRecord with rule structure.unparseable, severity hard, pass false', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
   // A garbage LLM response row: far too few cells to be a real decisions
   // row at all (id + 2 stray cells). buildCandidate is never reached —
   // this is caught by the column-count check, same as the dedicated
   // column-drift test below, but exercises the shared verdict shape
   // end-to-end from a realistically malformed input.
-  storage.store.set(DECISIONS_PATH, decisionsTable(['| li-1 | garbage |']));
+  stateStore.store.set(DECISIONS_PATH, decisionsTable(['| li-1 | garbage |']));
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.equal(out.jobs.length, 0);
   assert.equal(out.dropped.length, 1);
@@ -150,12 +148,12 @@ test('garbage/unparseable row (wrong shape entirely) -> DroppedRecord with rule 
 });
 
 test('MISSING row (passthrough id absent from decisions) -> DroppedRecord, detail "row missing from LLM output" (required safety net)', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
-  storage.store.set(DECISIONS_PATH, decisionsTable([])); // LLM silently dropped this row
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(DECISIONS_PATH, decisionsTable([])); // LLM silently dropped this row
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.equal(out.jobs.length, 0);
   assert.equal(out.dropped.length, 1);
@@ -169,33 +167,33 @@ test('MISSING row (passthrough id absent from decisions) -> DroppedRecord, detai
 });
 
 test('skills split + normalization: "React; TypeScript ; " -> [React, TypeScript] (trim + drop empties)', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
-  storage.store.set(
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(
     DECISIONS_PATH,
     decisionsTable([
       '| li-1 | Frontend | Senior | React | Bengaluru | India | onsite | | React; TypeScript ; |  |',
     ]),
   );
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.deepEqual(out.jobs[0]?.structured?.skills, ['React', 'TypeScript']);
 });
 
 test('empty city -> locations: [] (not a rejected zero-length-city entry); remote row still yields a valid StructuredJD', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
-  storage.store.set(
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(
     DECISIONS_PATH,
     decisionsTable([
       '| li-1 | Frontend | Senior | React |  |  | remote | APAC | React |  |',
     ]),
   );
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.equal(out.dropped.length, 0);
   assert.equal(out.jobs.length, 1);
@@ -205,15 +203,15 @@ test('empty city -> locations: [] (not a rejected zero-length-city entry); remot
 });
 
 test('column-count drift (row with != 10 cells) -> DroppedRecord, stage does not throw', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
-  storage.store.set(
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(
     DECISIONS_PATH,
     decisionsTable(['| li-1 | Frontend | Senior | React | Bengaluru | India |']), // 6 cells
   );
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.equal(out.jobs.length, 0);
   assert.equal(out.dropped.length, 1);
@@ -221,17 +219,17 @@ test('column-count drift (row with != 10 cells) -> DroppedRecord, stage does not
 });
 
 test('workType unknown value (e.g. "flexible") -> StructuredJD with workType undefined (NOT dropped)', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const job = fakeJob('li-1');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': job });
-  storage.store.set(
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': job });
+  stateStore.store.set(
     DECISIONS_PATH,
     decisionsTable([
       '| li-1 | Frontend | Senior | React | Bengaluru | India | flexible |  | React |  |',
     ]),
   );
 
-  const out = await assembleStage.run(emptyPayload(), fakeCtx(storage));
+  const out = await assembleStage.run(emptyPayload(), fakeCtx(stateStore));
 
   assert.equal(out.dropped.length, 0);
   assert.equal(out.jobs.length, 1);
@@ -239,11 +237,11 @@ test('workType unknown value (e.g. "flexible") -> StructuredJD with workType und
 });
 
 test('output payload preserves pre-existing input.dropped and appends new drops; jobs + dropped reconcile against passthrough size', async () => {
-  const storage = fakeStorage();
+  const stateStore = fakeStateStore();
   const jobA = fakeJob('li-1');
   const jobB = fakeJob('li-2');
-  storage.store.set(PASSTHROUGH_PATH, { 'li-1': jobA, 'li-2': jobB });
-  storage.store.set(
+  stateStore.store.set(PASSTHROUGH_PATH, { 'li-1': jobA, 'li-2': jobB });
+  stateStore.store.set(
     DECISIONS_PATH,
     decisionsTable([
       '| li-1 | Frontend | Senior | React | Bengaluru | India | onsite |  | React |  |',
@@ -254,7 +252,7 @@ test('output payload preserves pre-existing input.dropped and appends new drops;
   const preExistingDrop = { jd: fakeJob('li-99'), reasons: [] };
   const input: StagePayload = { jobs: [], dropped: [preExistingDrop] };
 
-  const out = await assembleStage.run(input, fakeCtx(storage));
+  const out = await assembleStage.run(input, fakeCtx(stateStore));
 
   assert.equal(out.jobs.length, 1);
   assert.equal(out.dropped.length, 2);
@@ -263,21 +261,21 @@ test('output payload preserves pre-existing input.dropped and appends new drops;
 });
 
 test('missing PASSTHROUGH_PATH throws (loud)', async () => {
-  const storage = fakeStorage();
-  storage.store.set(DECISIONS_PATH, decisionsTable([]));
+  const stateStore = fakeStateStore();
+  stateStore.store.set(DECISIONS_PATH, decisionsTable([]));
 
   await assert.rejects(
-    () => assembleStage.run(emptyPayload(), fakeCtx(storage)),
+    () => assembleStage.run(emptyPayload(), fakeCtx(stateStore)),
     /no passthrough found/,
   );
 });
 
 test('missing DECISIONS_PATH throws (loud)', async () => {
-  const storage = fakeStorage();
-  storage.store.set(PASSTHROUGH_PATH, {});
+  const stateStore = fakeStateStore();
+  stateStore.store.set(PASSTHROUGH_PATH, {});
 
   await assert.rejects(
-    () => assembleStage.run(emptyPayload(), fakeCtx(storage)),
+    () => assembleStage.run(emptyPayload(), fakeCtx(stateStore)),
     /no decisions found/,
   );
 });

@@ -4,7 +4,7 @@ import { LinkedInLane } from '../lane.ts';
 import { RESUME_STATE_PATH } from '../resume_state.ts';
 import {
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeCtx,
   fixtureFilterConfig,
   newScript,
@@ -78,7 +78,7 @@ test('pagination: 2 pages of distinct cards are both harvested, goto uses the co
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/7002/', 'JD text — 7002');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const sleepCalls: number[] = [];
   const infos: Array<{ msg: string; data?: unknown }> = [];
   const ctx = fakeCtx({
@@ -90,7 +90,7 @@ test('pagination: 2 pages of distinct cards are both harvested, goto uses the co
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     1_000,
     2_000,
@@ -156,14 +156,14 @@ test('pagination: stop-on-empty (minJobCards 0) — page 2 harvests 0 cards, the
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/8001/', 'JD text — 8001');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   const lane = new LinkedInLane(
     provider,
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(fakeCtx());
@@ -210,7 +210,7 @@ test('pagination: an end-of-results tail page (minJobCards 1, the real inventory
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/8101/', 'JD text — 8101');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: Array<{ msg: string; data?: unknown }> = [];
   const infos: Array<{ msg: string; data?: unknown }> = [];
   const ctx = fakeCtx({
@@ -226,7 +226,7 @@ test('pagination: an end-of-results tail page (minJobCards 1, the real inventory
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -244,7 +244,7 @@ test('pagination: an end-of-results tail page (minJobCards 1, the real inventory
   // No pagination/harvest-failure warn — this is the whole point of the
   // fix: an ordinary end-of-results tail page must not be logged as a
   // failure. (The "no Notion cache found" warn is unrelated noise from
-  // this FakeStorage not seeding cache/entries.json — filtered out here.)
+  // this FakeStateStore not seeding cache/entries.json — filtered out here.)
   const relevantWarnings = warnings.filter(
     (w) =>
       w.msg !==
@@ -261,7 +261,7 @@ test('pagination: an end-of-results tail page (minJobCards 1, the real inventory
 
   // The url still succeeded and was marked done — no SoftError, no
   // dropped/failure evidence recorded for it.
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.ok(Object.hasOwn(persisted.done, baseUrl));
 });
 
@@ -296,7 +296,7 @@ test('pagination: a page 2 whose container/mustExist selector matches nothing at
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/8201/', 'JD text — 8201');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: Array<{ msg: string; data?: unknown }> = [];
   const ctx = fakeCtx({
     logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
@@ -307,7 +307,7 @@ test('pagination: a page 2 whose container/mustExist selector matches nothing at
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -321,7 +321,7 @@ test('pagination: a page 2 whose container/mustExist selector matches nothing at
   );
   assert.deepEqual(listingGotoCalls, [baseUrl, page2Url]);
   // No pagination/harvest-failure warn (the "no Notion cache found" warn is
-  // unrelated noise from this FakeStorage not seeding cache/entries.json).
+  // unrelated noise from this FakeStateStore not seeding cache/entries.json).
   const relevantWarnings = warnings.filter(
     (w) =>
       w.msg !==
@@ -329,7 +329,7 @@ test('pagination: a page 2 whose container/mustExist selector matches nothing at
   );
   assert.deepEqual(relevantWarnings, []);
 
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.ok(Object.hasOwn(persisted.done, baseUrl));
 });
 
@@ -360,14 +360,14 @@ test('pagination: stop-on-repeat — page 2 harvests the identical card set as p
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9001/', 'JD text — 9001');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   const lane = new LinkedInLane(
     provider,
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(fakeCtx());
@@ -416,14 +416,14 @@ test('pagination: stop-on-cap — maxCardsPerUrl reached on page 1 means page 2 
   ]);
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   const lane = new LinkedInLane(
     provider,
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     2, // maxCardsPerUrl
   );
 
@@ -443,14 +443,14 @@ test('pagination: an inventory with no pagination behaviors fetches exactly one 
   const script = newScript();
   seedHappyPathScript(script);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   const lane = new LinkedInLane(
     provider,
     [noPagination],
     [{ page: noPagination.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(fakeCtx());
@@ -484,7 +484,7 @@ test('pagination: a page-2 navigation failure records a SoftError and stops pagi
   script.gotoThrows.add(page2Url);
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: Array<{ msg: string; data?: unknown }> = [];
   const ctx = fakeCtx({
     logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
@@ -495,7 +495,7 @@ test('pagination: a page-2 navigation failure records a SoftError and stops pagi
     [paged],
     [{ page: paged.page, urls: [baseUrl] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs } = await lane.source(ctx);
@@ -517,6 +517,6 @@ test('pagination: a page-2 navigation failure records a SoftError and stops pagi
 
   // A page-2+ soft failure does not fail the whole url retroactively
   // (page 1 succeeded) — the url is still marked done.
-  const persisted = storage.get(RESUME_STATE_PATH) as { done: Record<string, number> };
+  const persisted = stateStore.get(RESUME_STATE_PATH) as { done: Record<string, number> };
   assert.ok(Object.hasOwn(persisted.done, baseUrl));
 });

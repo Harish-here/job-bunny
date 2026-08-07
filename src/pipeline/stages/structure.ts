@@ -11,8 +11,8 @@ import { TABLE_PATH } from './compress.ts';
  * StructuredSchema's titleParts/locations/workType/timezone/skills/salary)
  * for the assemble stage (Task 4) to zod-parse per row.
  *
- * Run-scoped side files, JSON-wrapped strings (the Storage port is
- * JSON-only — see compress.ts's header note; there is no separate .md
+ * Run-scoped state_docs rows, JSON-wrapped strings (the StateStore port is
+ * JSON-value-only — see compress.ts's header note; there is no separate .md
  * write mechanism, so "structure_decisions.partial.md" in the plan names
  * the CONTENT, not a literal file).
  */
@@ -166,7 +166,7 @@ export function makeStructureStage(
     retries: 1,
     heartbeat: true,
     async run(input: StagePayload, ctx: StageContext): Promise<StagePayload> {
-      const tableJson = await ctx.storage.readJson(TABLE_PATH, z.string());
+      const tableJson = await ctx.stateStore.readDoc(TABLE_PATH, z.string());
       if (tableJson === undefined) {
         throw new Error(
           `structure: no input table found at ${TABLE_PATH} — structure must run after compress`,
@@ -176,7 +176,10 @@ export function makeStructureStage(
       const inputRows = extractRows(tableJson);
       const inputHeaderLine = tableJson.split('\n')[0]?.trim() ?? '';
 
-      const partialJson = await ctx.storage.readJson(DECISIONS_PARTIAL_PATH, z.string());
+      const partialJson = await ctx.stateStore.readDoc(
+        DECISIONS_PARTIAL_PATH,
+        z.string(),
+      );
       const accumulated = partialJson !== undefined ? extractRows(partialJson) : [];
       const doneIds = new Set(accumulated.map((r) => r.id));
 
@@ -223,18 +226,18 @@ export function makeStructureStage(
 
         accumulated.push(...parsedRows);
         ctx.beat();
-        await ctx.storage.writeJson(
+        await ctx.stateStore.writeDoc(
           DECISIONS_PARTIAL_PATH,
           buildDecisionsTable(accumulated),
         );
       }
 
       const finalTable = buildDecisionsTable(accumulated);
-      await ctx.storage.writeJson(DECISIONS_PATH, finalTable);
+      await ctx.stateStore.writeDoc(DECISIONS_PATH, finalTable);
       // Clear the partial now that decisions.json holds the complete table —
       // optional per the P6 plan, done here so a stale partial from a
       // finished run can never shadow a later run's resume logic.
-      await ctx.storage.writeJson(DECISIONS_PARTIAL_PATH, buildDecisionsTable([]));
+      await ctx.stateStore.writeDoc(DECISIONS_PARTIAL_PATH, buildDecisionsTable([]));
 
       ctx.logger.info('structure: done', {
         totalRows: inputRows.length,

@@ -13,8 +13,11 @@ import { type BoardDeps, boardCommand } from './board.ts';
 
 function fakeSource(profiles: BoardProfile[] = []): BoardSource {
   return {
-    listProfiles: () => profiles,
-    openStore: () => null,
+    listProfiles: async () => profiles,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close: () => {},
   };
 }
@@ -95,6 +98,17 @@ test('boardCommand: prints one line per profile, local-db vs notion-only', async
   const code = await boardCommand({ port: 4646 }, deps);
   assert.equal(code, 0);
   assert.ok(out.lines.includes('rajni — local db'));
+  assert.ok(out.lines.includes('harish — notion-only'));
+});
+
+test('boardCommand: labels by connector, not hasDb — a notion profile with a jobbunny.db file (local-DB spec D5: unconditional run-history tracking) is still "notion-only"', async () => {
+  const out = collector();
+  const deps = baseDeps({
+    wireBoard: () => fakeSource([{ name: 'harish', connector: 'notion', hasDb: true }]),
+    write: out.write,
+  });
+  const code = await boardCommand({ port: 4646 }, deps);
+  assert.equal(code, 0);
   assert.ok(out.lines.includes('harish — notion-only'));
 });
 

@@ -1,35 +1,38 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CacheEntry, JD, SyncedJD } from '../../core/jd/index.ts';
-import type { ArchivePolicy, Connector, RunContext, Storage } from '../../ports/index.ts';
+import type {
+  ArchivePolicy,
+  Connector,
+  RunContext,
+  StateStore,
+} from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { CACHE_PATH, makeReconcileStage } from './reconcile.ts';
 
-function fakeStorage(): Storage & { store: Map<string, unknown> } {
+function fakeStateStore(): StateStore & { store: Map<string, unknown> } {
   const store = new Map<string, unknown>();
   return {
     store,
-    async readJson<T>(relPath: string, schema: { parse(v: unknown): T }) {
-      if (!store.has(relPath)) return undefined;
-      return schema.parse(store.get(relPath));
+    async readDoc<T>(key: string, schema: { parse(v: unknown): T }) {
+      if (!store.has(key)) return undefined;
+      return schema.parse(store.get(key));
     },
-    async writeJson(relPath: string, value: unknown) {
-      store.set(relPath, value);
+    async writeDoc(key: string, value: unknown) {
+      store.set(key, value);
     },
-    async listSubdirs() {
-      return [];
-    },
-    async removeTree() {},
+    close() {},
   };
 }
 
-function fakeCtx(storage: ReturnType<typeof fakeStorage>): StageContext {
+function fakeCtx(stateStore: ReturnType<typeof fakeStateStore>): StageContext {
   return {
     profile: 'rajni',
     signal: AbortSignal.timeout(30_000),
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
-    storage,
+    storage: {} as StageContext['storage'],
+    stateStore,
   };
 }
 
@@ -64,8 +67,8 @@ test('makeReconcileStage: stage name/timeout/retries', () => {
 });
 
 test('writes the rebuilt cache to CACHE_PATH and threads the payload through unchanged', async () => {
-  const storage = fakeStorage();
-  const ctx = fakeCtx(storage);
+  const stateStore = fakeStateStore();
+  const ctx = fakeCtx(stateStore);
   const connector = fakeConnector();
   const stage = makeReconcileStage(connector);
   const input: StagePayload = { jobs: [], dropped: [] };
@@ -74,14 +77,14 @@ test('writes the rebuilt cache to CACHE_PATH and threads the payload through unc
 
   assert.equal(out, input);
   assert.equal(connector.rebuildCalls, 1);
-  assert.deepEqual(storage.store.get(CACHE_PATH), [
+  assert.deepEqual(stateStore.store.get(CACHE_PATH), [
     { id: 'li-1', company: 'Acme', title: 'Engineer', pageId: 'page-1' },
   ]);
 });
 
 test('a connector failure fails the stage loudly (read-only on Notion — never swallowed)', async () => {
-  const storage = fakeStorage();
-  const ctx = fakeCtx(storage);
+  const stateStore = fakeStateStore();
+  const ctx = fakeCtx(stateStore);
   const connector = fakeConnector({
     async rebuildCache() {
       throw new Error('notion outage');
@@ -90,5 +93,5 @@ test('a connector failure fails the stage loudly (read-only on Notion — never 
   const stage = makeReconcileStage(connector);
 
   await assert.rejects(() => stage.run({ jobs: [], dropped: [] }, ctx), /notion outage/);
-  assert.equal(storage.store.has(CACHE_PATH), false);
+  assert.equal(stateStore.store.has(CACHE_PATH), false);
 });

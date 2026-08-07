@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ZodType } from 'zod';
 import { type JD, JDSchema } from '../../../core/jd/index.ts';
-import type { Storage } from '../../../ports/storage.ts';
+import type { StateStore } from '../../../ports/state_store.ts';
 import { CAPTURE_PATH, CaptureStore } from './capture_store.ts';
 
-/** In-memory fake mirroring the real FsStorage contract. */
-class FakeStorage implements Storage {
+/** In-memory fake mirroring the real SqliteStateStore contract. */
+class FakeStateStore implements StateStore {
   private readonly files = new Map<string, unknown>();
 
   set(relPath: string, value: unknown): void {
@@ -17,20 +17,16 @@ class FakeStorage implements Storage {
     return this.files.get(relPath);
   }
 
-  async readJson<T>(relPath: string, schema: ZodType<T>): Promise<T | undefined> {
+  async readDoc<T>(relPath: string, schema: ZodType<T>): Promise<T | undefined> {
     if (!this.files.has(relPath)) return undefined;
     return schema.parse(this.files.get(relPath));
   }
 
-  async writeJson(relPath: string, value: unknown): Promise<void> {
+  async writeDoc(relPath: string, value: unknown): Promise<void> {
     this.files.set(relPath, value);
   }
 
-  async listSubdirs(): Promise<string[]> {
-    return [];
-  }
-
-  async removeTree(): Promise<void> {}
+  close(): void {}
 }
 
 function fakeJD(id: string): JD {
@@ -47,16 +43,16 @@ function fakeJD(id: string): JD {
 }
 
 test('load with no persisted file returns an empty store', async () => {
-  const storage = new FakeStorage();
-  const store = await CaptureStore.load(storage);
+  const stateStore = new FakeStateStore();
+  const store = await CaptureStore.load(stateStore);
   assert.deepEqual(store.all(), []);
 });
 
 test('load with a persisted captures file restores its contents', async () => {
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const seeded = [fakeJD('1'), fakeJD('2')];
-  storage.set(CAPTURE_PATH, seeded);
-  const store = await CaptureStore.load(storage);
+  stateStore.set(CAPTURE_PATH, seeded);
+  const store = await CaptureStore.load(stateStore);
   assert.deepEqual(
     store.all().map((jd) => jd.identity.id),
     ['1', '2'],
@@ -64,28 +60,28 @@ test('load with a persisted captures file restores its contents', async () => {
 });
 
 test('append adds the job to all() and persists immediately (not batched)', async () => {
-  const storage = new FakeStorage();
-  const store = await CaptureStore.load(storage);
+  const stateStore = new FakeStateStore();
+  const store = await CaptureStore.load(stateStore);
 
-  await store.append(storage, fakeJD('a'));
+  await store.append(stateStore, fakeJD('a'));
   assert.deepEqual(
     store.all().map((jd) => jd.identity.id),
     ['a'],
   );
   // Persisted synchronously after this one append — a reload right now
   // (simulating a crash right after) sees it.
-  const reloaded = await CaptureStore.load(storage);
+  const reloaded = await CaptureStore.load(stateStore);
   assert.deepEqual(
     reloaded.all().map((jd) => jd.identity.id),
     ['a'],
   );
 
-  await store.append(storage, fakeJD('b'));
+  await store.append(stateStore, fakeJD('b'));
   assert.deepEqual(
     store.all().map((jd) => jd.identity.id),
     ['a', 'b'],
   );
-  const reloadedAgain = await CaptureStore.load(storage);
+  const reloadedAgain = await CaptureStore.load(stateStore);
   assert.deepEqual(
     reloadedAgain.all().map((jd) => jd.identity.id),
     ['a', 'b'],
@@ -93,9 +89,9 @@ test('append adds the job to all() and persists immediately (not batched)', asyn
 });
 
 test('all() returns a defensive copy — mutating it does not affect the store', async () => {
-  const storage = new FakeStorage();
-  const store = await CaptureStore.load(storage);
-  await store.append(storage, fakeJD('x'));
+  const stateStore = new FakeStateStore();
+  const store = await CaptureStore.load(stateStore);
+  await store.append(stateStore, fakeJD('x'));
 
   const snapshot = store.all();
   snapshot.push(fakeJD('y'));
@@ -107,14 +103,14 @@ test('all() returns a defensive copy — mutating it does not affect the store',
 });
 
 test('reset clears both the in-memory list and the persisted file', async () => {
-  const storage = new FakeStorage();
-  const store = await CaptureStore.load(storage);
-  await store.append(storage, fakeJD('stale'));
+  const stateStore = new FakeStateStore();
+  const store = await CaptureStore.load(stateStore);
+  await store.append(stateStore, fakeJD('stale'));
   assert.equal(store.all().length, 1);
 
-  await store.reset(storage);
+  await store.reset(stateStore);
 
   assert.deepEqual(store.all(), []);
-  const reloaded = await CaptureStore.load(storage);
+  const reloaded = await CaptureStore.load(stateStore);
   assert.deepEqual(reloaded.all(), []);
 });

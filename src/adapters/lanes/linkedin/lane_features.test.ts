@@ -6,7 +6,7 @@ import { LinkedInLane } from './lane.ts';
 import {
   BREAKER_DIR,
   FakeBrowserProvider,
-  FakeStorage,
+  FakeStateStore,
   fakeBreakerFs,
   fakeCapturedJD,
   fakeCtx,
@@ -50,8 +50,8 @@ test('cache-skip: a card whose id is already in the Notion cache never gets a JD
   // which the assertions below would catch as an unexpected drop/failure.
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
-  storage.set('cache/entries.json', [
+  const stateStore = new FakeStateStore();
+  stateStore.set('cache/entries.json', [
     { id: 'li-1001', company: 'Acme', title: 'Frontend Engineer', pageId: 'page-1' },
   ]);
 
@@ -60,7 +60,7 @@ test('cache-skip: a card whose id is already in the Notion cache never gets a JD
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(fakeCtx());
@@ -97,14 +97,14 @@ test('cross-url run-dedup: the same job id harvested under two different search 
   script.jdTextByUrl.set('https://www.linkedin.com/jobs/view/9001/', 'JD text — Acme FE');
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
 
   const lane = new LinkedInLane(
     provider,
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(fakeCtx());
@@ -141,7 +141,7 @@ test('per-url cap: more gate-passed cards than maxCardsPerUrl for one url -> onl
   }
 
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const warnings: Array<{ msg: string; data?: unknown }> = [];
   const ctx = fakeCtx({
     logger: { ...noopLogger, warn: (msg, data) => warnings.push({ msg, data }) },
@@ -152,7 +152,7 @@ test('per-url cap: more gate-passed cards than maxCardsPerUrl for one url -> onl
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     2, // maxCardsPerUrl
   );
 
@@ -204,7 +204,7 @@ test('half-open: a successful probe records its own UrlStat, so a single-url fir
     'JD text — recovered by the probe',
   );
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
 
   const lane = new LinkedInLane(
@@ -212,7 +212,7 @@ test('half-open: a successful probe records its own UrlStat, so a single-url fir
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -241,11 +241,11 @@ test('half-open: a probe re-opening a card an earlier same-day fire already capt
   const script = newScript();
   seedTrivialUrl(script, URL_1, '7401');
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   // The earlier fire's flushed capture — CaptureStore seeds itself from
   // this file, and the probe always re-opens the first card of the first
   // url, i.e. exactly this job.
-  storage.set(CAPTURE_PATH, [fakeCapturedJD('li-7401')]);
+  stateStore.set(CAPTURE_PATH, [fakeCapturedJD('li-7401')]);
   const fs = fakeBreakerFs(OPENED_LONG_AGO, NOW);
 
   const lane = new LinkedInLane(
@@ -253,7 +253,7 @@ test('half-open: a probe re-opening a card an earlier same-day fire already capt
     [inv],
     [{ page: inv.page, urls: [URL_1] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
     undefined,
     0,
     0,
@@ -272,7 +272,7 @@ test('half-open: a probe re-opening a card an earlier same-day fire already capt
     result.jobs.map((j) => j.identity.id),
     ['li-7401'],
   );
-  const persisted = storage.get(CAPTURE_PATH) as JD[];
+  const persisted = stateStore.get(CAPTURE_PATH) as JD[];
   assert.equal(persisted.length, 1);
 });
 test('page-level heartbeat: ctx.beat() ticks once per harvested page even when every card on that page is gated out (no card ever reaches processCard)', async () => {
@@ -300,7 +300,7 @@ test('page-level heartbeat: ctx.beat() ticks once per harvested page even when e
     },
   ]);
   const provider = new FakeBrowserProvider(script);
-  const storage = new FakeStorage();
+  const stateStore = new FakeStateStore();
   let beats = 0;
   const ctx = fakeCtx({
     beat() {
@@ -313,7 +313,7 @@ test('page-level heartbeat: ctx.beat() ticks once per harvested page even when e
     [inv],
     [{ page: inv.page, urls: [URL_1, URL_2] }],
     fixtureFilterConfig(),
-    storage,
+    stateStore,
   );
 
   const { jobs, dropped } = await lane.source(ctx);
@@ -336,7 +336,7 @@ test('pacing: the constructor puts each pacing argument in its own slot (no tran
     [inv],
     [],
     fixtureFilterConfig(),
-    new FakeStorage(),
+    new FakeStateStore(),
     undefined,
     1_001,
     2_002,

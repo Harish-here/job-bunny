@@ -18,8 +18,6 @@ import type { RunContext } from '../../../ports/context.ts';
 import { openJobsDb, SqliteStore } from './store/index.ts';
 
 export const SqliteConnectorSettingsSchema = z.object({
-  /** Override the profile-derived default DB path (rarely needed). */
-  path: z.string().min(1).optional(),
   /** Archive dry-run default ON — parity with NotionConnector. */
   dryRun: z.boolean().default(true),
 });
@@ -52,7 +50,7 @@ export class SqliteConnector implements Connector {
     nowFn: () => string = () => new Date().toISOString(),
   ) {
     this.settings = SqliteConnectorSettingsSchema.parse(settings ?? {});
-    this.dbPath = this.settings.path ?? defaultDbPath;
+    this.dbPath = defaultDbPath;
     this.now = nowFn;
   }
 

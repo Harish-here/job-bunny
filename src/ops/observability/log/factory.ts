@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { Logger } from '../../../ports/index.ts';
-import { ConsoleLogger, JsonlLogger, LOG_LEVELS } from './loggers.ts';
+import type { Logger, RunStoreWriter } from '../../../ports/index.ts';
+import { ConsoleLogger, LOG_LEVELS, RunStoreLogger } from './loggers.ts';
 
 /** `settings.logging` — validated by `cli/wire/settings.ts`'s
  * `resolveLoggingSettings`, same fail-loud-on-present-but-invalid /
@@ -15,12 +15,19 @@ export const LoggingSettingsSchema = z.object({
 });
 export type LoggingConfig = z.infer<typeof LoggingSettingsSchema>;
 
-/** The single creation point commands call instead of `new JsonlLogger(...)`
- * directly. Defaults match `JsonlLogger`'s own class defaults (debug/debug)
- * when `cfg` is absent, so a caller that skips settings resolution entirely
- * still gets today's write-everything/mirror-everything behavior. */
-export function createRunLogger(logPath: string, cfg?: LoggingConfig): JsonlLogger {
-  return new JsonlLogger(logPath, {
+/** The single creation point commands call instead of `new RunStoreLogger(...)`
+ * directly — replaces the old `JsonlLogger`-backed sink now that run events
+ * persist to the `runs`/`run_events` tables (persist-to-db Phase 1) rather
+ * than a per-run `run.log` file. Defaults match `RunStoreLogger`'s own class
+ * defaults (debug/debug) when `cfg` is absent, so a caller that skips
+ * settings resolution entirely still gets today's write-everything/
+ * mirror-everything behavior. */
+export function createRunLogger(
+  store: RunStoreWriter,
+  runId: number,
+  cfg?: LoggingConfig,
+): RunStoreLogger {
+  return new RunStoreLogger(store, runId, {
     fileLevel: cfg?.fileLevel ?? 'debug',
     ttyLevel: cfg?.ttyLevel ?? 'debug',
   });

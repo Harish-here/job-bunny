@@ -24,22 +24,28 @@ function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
 }
 
 /** Routes throw `HttpError`; the server (Task 6) is what turns the throw
- * into a JSON envelope. Asserting the throw here — rather than a
+ * into a JSON envelope. Asserting the rejection here — rather than a
  * resolved response — keeps this slice's tests honest about that
- * boundary. */
-function assertHttpError(
+ * boundary. `fn()` returns a `Promise` (every handler is `async` now that
+ * `openStoreOrThrow` awaits the `BoardSource` port), so a synchronous
+ * `assert.throws` can never observe the throw — it surfaces only as a
+ * rejection. */
+async function assertHttpError(
   fn: () => unknown,
   status: number,
   code: string,
   message?: string,
 ) {
-  assert.throws(fn, (err: unknown) => {
-    assert.ok(err instanceof HttpError);
-    assert.equal(err.status, status);
-    assert.equal(err.code, code);
-    if (message !== undefined) assert.equal(err.message, message);
-    return true;
-  });
+  await assert.rejects(
+    async () => fn(),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpError);
+      assert.equal(err.status, status);
+      assert.equal(err.code, code);
+      if (message !== undefined) assert.equal(err.message, message);
+      return true;
+    },
+  );
 }
 
 const SAMPLE_ROW: BoardJobRow = {
@@ -102,15 +108,26 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
       patchCalls.push({ id, patch, now });
       return id === SAMPLE_ROW.id ? SAMPLE_TRACKING : null;
     },
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
     close() {},
     ...overrides,
   };
 }
 
-function fakeSource(store: BoardStore | null): BoardSource {
+/** `listProfiles()` always names its one profile 'rajni' with a `sqlite`
+ * connector when `store` is non-null — every non-null-store test below
+ * requests `name: 'rajni'`, matching `openStoreOrThrow`'s new
+ * connector-gate lookup. `store === null` (the "no profile"/"unknown
+ * profile" cases) keeps `listProfiles()` empty, same as before. */
+function fakeSource(store: BoardStore | null, connector = 'sqlite'): BoardSource {
   return {
-    listProfiles: () => [],
-    openStore: () => store,
+    listProfiles: async () => (store ? [{ name: 'rajni', connector, hasDb: true }] : []),
+    openStore: async () => store,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
 }
@@ -165,10 +182,10 @@ test('list: ?archived=true maps to boolean true', async () => {
   assert.equal(store.listCalls[0]?.archived, true);
 });
 
-test('list: ?limit=999 is a 400 validation error', () => {
+test('list: ?limit=999 is a 400 validation error', async () => {
   const store = fakeStore();
   const route = findRoute(fakeSource(store), 'GET', '/api/profiles/:name/jobs');
-  assertHttpError(
+  await assertHttpError(
     () =>
       route.handler(
         req({ params: { name: 'rajni' }, query: new URLSearchParams({ limit: '999' }) }),
@@ -179,13 +196,50 @@ test('list: ?limit=999 is a 400 validation error', () => {
   assert.equal(store.listCalls.length, 0);
 });
 
-test('list: null store (no local db) is a 404 no_local_db', () => {
+test('list: null store (no local db) is a 404 no_local_db', async () => {
   const route = findRoute(fakeSource(null), 'GET', '/api/profiles/:name/jobs');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'notion-only' } })),
     404,
     'no_local_db',
     'profile has no local database (pure-Notion profiles are read via Notion)',
+  );
+});
+
+test('list: an OPENABLE store on a notion-connector profile is still a 404 no_local_db, never an empty 200 (local-DB spec D5: hasDb no longer implies connector === sqlite)', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store, 'notion'), 'GET', '/api/profiles/:name/jobs');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'rajni' } })),
+    404,
+    'no_local_db',
+    'profile has no local database (pure-Notion profiles are read via Notion)',
+  );
+  assert.equal(store.listCalls.length, 0);
+});
+
+test('list: an UNKNOWN connector ("") falls through to the openStore/hasDb gate — an openable store is a 200, not a 404 (a corrupt profile.json must not hide an intact jobbunny.db)', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store, ''), 'GET', '/api/profiles/:name/jobs');
+  const res = await route.handler(req({ params: { name: 'rajni' } }));
+  assert.equal(res.status, 200);
+  assert.equal(store.listCalls.length, 1);
+});
+
+test('list: an UNKNOWN connector ("") with no openable store still 404s no_local_db', async () => {
+  const source: BoardSource = {
+    listProfiles: async () => [{ name: 'rajni', connector: '', hasDb: false }],
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
+    close() {},
+  };
+  const route = findRoute(source, 'GET', '/api/profiles/:name/jobs');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'rajni' } })),
+    404,
+    'no_local_db',
   );
 });
 
@@ -198,18 +252,18 @@ test('get: 200 for a known id', async () => {
   assert.deepEqual(res.body, SAMPLE_DETAIL);
 });
 
-test('get: 404 for an unknown id', () => {
+test('get: 404 for an unknown id', async () => {
   const route = findRoute(fakeSource(fakeStore()), 'GET', '/api/profiles/:name/jobs/:id');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'rajni', id: 'nope' } })),
     404,
     'not_found',
   );
 });
 
-test('get: null store is a 404 no_local_db', () => {
+test('get: null store is a 404 no_local_db', async () => {
   const route = findRoute(fakeSource(null), 'GET', '/api/profiles/:name/jobs/:id');
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'notion-only', id: 'li-1' } })),
     404,
     'no_local_db',
@@ -238,14 +292,14 @@ test('patch: happy path — fake returns row, now is an ISO string arg', async (
   assert.match(call.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 });
 
-test('patch: {} is a 400 (empty patch refinement)', () => {
+test('patch: {} is a 400 (empty patch refinement)', async () => {
   const store = fakeStore();
   const route = findRoute(
     fakeSource(store),
     'PATCH',
     '/api/profiles/:name/jobs/:id/tracking',
   );
-  assertHttpError(
+  await assertHttpError(
     () => route.handler(req({ params: { name: 'rajni', id: 'li-1' }, body: {} })),
     400,
     'validation',
@@ -253,14 +307,14 @@ test('patch: {} is a 400 (empty patch refinement)', () => {
   assert.equal(store.patchCalls.length, 0);
 });
 
-test('patch: an unknown field is a 400 (strictObject)', () => {
+test('patch: an unknown field is a 400 (strictObject)', async () => {
   const store = fakeStore();
   const route = findRoute(
     fakeSource(store),
     'PATCH',
     '/api/profiles/:name/jobs/:id/tracking',
   );
-  assertHttpError(
+  await assertHttpError(
     () =>
       route.handler(req({ params: { name: 'rajni', id: 'li-1' }, body: { bogus: 'x' } })),
     400,
@@ -269,14 +323,14 @@ test('patch: an unknown field is a 400 (strictObject)', () => {
   assert.equal(store.patchCalls.length, 0);
 });
 
-test('patch: a bare "" string field is a 400 (min(1) — clearing is null, not "")', () => {
+test('patch: a bare "" string field is a 400 (min(1) — clearing is null, not "")', async () => {
   const store = fakeStore();
   const route = findRoute(
     fakeSource(store),
     'PATCH',
     '/api/profiles/:name/jobs/:id/tracking',
   );
-  assertHttpError(
+  await assertHttpError(
     () =>
       route.handler(req({ params: { name: 'rajni', id: 'li-1' }, body: { notes: '' } })),
     400,
@@ -285,13 +339,13 @@ test('patch: a bare "" string field is a 400 (min(1) — clearing is null, not "
   assert.equal(store.patchCalls.length, 0);
 });
 
-test('patch: null store (no local db) is a 404 no_local_db', () => {
+test('patch: null store (no local db) is a 404 no_local_db', async () => {
   const route = findRoute(
     fakeSource(null),
     'PATCH',
     '/api/profiles/:name/jobs/:id/tracking',
   );
-  assertHttpError(
+  await assertHttpError(
     () =>
       route.handler(
         req({ params: { name: 'notion-only', id: 'li-1' }, body: { status: 'Applied' } }),
@@ -305,10 +359,13 @@ test('patch: null store (no local db) is a 404 no_local_db', () => {
 
 test('meta: lists both vocabularies without ever touching the store', async () => {
   const source: BoardSource = {
-    listProfiles: () => [],
-    openStore: () => {
+    listProfiles: async () => [],
+    openStore: async () => {
       throw new Error('meta must not open a store');
     },
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/meta');
@@ -321,10 +378,13 @@ test('meta: lists both vocabularies without ever touching the store', async () =
 
 test('meta: returns 200 even for an unknown profile name (vocab is profile-independent)', async () => {
   const source: BoardSource = {
-    listProfiles: () => [],
-    openStore: () => {
+    listProfiles: async () => [],
+    openStore: async () => {
       throw new Error('meta must not open a store');
     },
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
   const route = findRoute(source, 'GET', '/api/profiles/:name/meta');

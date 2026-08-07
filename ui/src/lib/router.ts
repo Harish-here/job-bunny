@@ -1,6 +1,13 @@
 import { useSyncExternalStore } from 'react';
 
-export const ROUTES = ['triage', 'tracker', 'analytics', 'onboarding'] as const;
+export const ROUTES = [
+  'triage',
+  'tracker',
+  'runs',
+  'analytics',
+  'onboarding',
+  'settings',
+] as const;
 export type RouteName = (typeof ROUTES)[number];
 export type Route = { name: RouteName } | { name: 'job'; id: string };
 

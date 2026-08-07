@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 1;
+export const LATEST_SCHEMA_VERSION = 5;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -51,6 +51,63 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
   `,
+  // v1 -> v2: runs observability (Phase 1 — see run_store port)
+  `
+  CREATE TABLE runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date      TEXT NOT NULL,
+    time_dir      TEXT,
+    kind          TEXT NOT NULL,
+    resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    status        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    heartbeat_at  TEXT,
+    result_json   TEXT,
+    failure_json  TEXT,
+    sync_dryrun_json TEXT
+  );
+  CREATE INDEX idx_runs_date ON runs(run_date);
+  CREATE TABLE run_events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id    INTEGER NOT NULL REFERENCES runs(id),
+    ts        TEXT NOT NULL,
+    level     TEXT NOT NULL,
+    msg       TEXT NOT NULL,
+    data_json TEXT
+  );
+  CREATE INDEX idx_run_events_run ON run_events(run_id);
+  `,
+  // v2 -> v3: checkpoints (Phase 2 — see checkpoint_store port)
+  `
+  CREATE TABLE checkpoints (
+    run_date   TEXT    NOT NULL,
+    time_dir   TEXT    NOT NULL,
+    position   INTEGER NOT NULL,
+    stage      TEXT    NOT NULL,
+    payload_json TEXT  NOT NULL,
+    written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    created_at TEXT    NOT NULL,
+    PRIMARY KEY (run_date, time_dir, position)
+  );
+  CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
+  `,
+  // v3 -> v4: state_docs (Phase 3 — see state_store port)
+  `
+  CREATE TABLE state_docs (
+    key        TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
+  // v4 -> v5: config_docs (Phase 4 — see config_store port)
+  `
+  CREATE TABLE config_docs (
+    key        TEXT PRIMARY KEY,
+    value_text TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];
 
 export function openJobsDb(dbPath: string): DatabaseSync {
@@ -58,30 +115,41 @@ export function openJobsDb(dbPath: string): DatabaseSync {
     mkdirSync(path.dirname(dbPath), { recursive: true });
   }
   const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA busy_timeout = 5000;');
-  db.exec('PRAGMA foreign_keys = ON;');
-  let version = (db.prepare('PRAGMA user_version').get() as { user_version: number })
-    .user_version;
-  if (version > LATEST_SCHEMA_VERSION) {
-    db.close();
-    throw new Error(
-      `jobbunny.db schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
-    );
-  }
-  while (version < LATEST_SCHEMA_VERSION) {
-    const step = MIGRATIONS[version];
-    if (!step) throw new Error(`no migration defined from schema v${version}`);
-    db.exec('BEGIN');
-    try {
-      db.exec(step);
-      db.exec(`PRAGMA user_version = ${version + 1}`);
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
+  // Everything below can throw on a garbage/corrupt/permission-denied file
+  // (e.g. the very first PRAGMA against a not-a-database file). `db` is
+  // already an OPEN native handle at that point — without this try/catch a
+  // failed open leaked it (never closed, only reclaimed by the OS on
+  // process exit), which is harmless on POSIX but makes the backing file
+  // un-removable on Windows (EBUSY/EPERM) until the process ends. Close on
+  // ANY failure path here, then rethrow unchanged.
+  try {
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA busy_timeout = 5000;');
+    db.exec('PRAGMA foreign_keys = ON;');
+    let version = (db.prepare('PRAGMA user_version').get() as { user_version: number })
+      .user_version;
+    if (version > LATEST_SCHEMA_VERSION) {
+      throw new Error(
+        `jobbunny.db schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
+      );
     }
-    version += 1;
+    while (version < LATEST_SCHEMA_VERSION) {
+      const step = MIGRATIONS[version];
+      if (!step) throw new Error(`no migration defined from schema v${version}`);
+      db.exec('BEGIN');
+      try {
+        db.exec(step);
+        db.exec(`PRAGMA user_version = ${version + 1}`);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+      version += 1;
+    }
+    return db;
+  } catch (err) {
+    db.close();
+    throw err;
   }
-  return db;
 }

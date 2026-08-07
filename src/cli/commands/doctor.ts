@@ -5,24 +5,74 @@
  * `warn` never fails the command — see `ports/doctor.ts`).
  *
  * No `src/adapters/**` import here — `wire` is injected (real default:
- * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint).
+ * `cli/wire/compose.ts`'s `wire`, the sole adapter-import chokepoint), and
+ * the wire()-failure degrade path (`runDegradedConfigChecks`, below)
+ * reaches a `ConfigStore` only via `wireConfigStore` (also re-exported from
+ * `cli/wire/index.ts` — the SAME carve-out every other command uses to
+ * reach a standalone store without a full `wire()`, e.g.
+ * `commands/profile.ts`, `commands/config.ts`), never a direct adapter
+ * import.
  */
-import type { DoctorFinding } from '../../ports/doctor.ts';
-import { wire as defaultWire, type WireResult } from '../wire/index.ts';
+import { configLegacyDivergenceCheck } from '../../ops/doctor/aggregate.ts';
+import {
+  type CoreCheckOpts,
+  emptyLanesCheck,
+  filterParsesCheck,
+  profileParsesCheck,
+  sqlitePathRetiredCheck,
+} from '../../ops/doctor/config_checks.ts';
+import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
+import {
+  wire as defaultWire,
+  type WireOverrides,
+  type WireResult,
+  wireConfigStore,
+} from '../wire/index.ts';
 
 export interface DoctorCommandOptions {
   profile: string;
 }
 
 export interface DoctorDeps {
-  wire: (profileName: string) => Promise<WireResult>;
+  wire: (profileName: string, overrides?: WireOverrides) => Promise<WireResult>;
   write: (line: string) => void;
+  /** wire()-failure degrade path: runs the doctor checks that do NOT need
+   * a successfully wired profile — the five `ops/doctor` "config" checks
+   * (`profile-parses`, `filter-parses`, `empty-lanes`, `sqlite-path-
+   * retired`, `config-legacy-divergence`), all of which read only through
+   * a `ConfigStore` — never the wired `WiredPorts`/`PipelineCtx` that a
+   * broken profile/config just failed to produce. Real default opens a
+   * fresh READONLY `ConfigStore` (`wireConfigStore`, never creates/
+   * migrates `jobbunny.db`), runs the five checks against it, closes it,
+   * and returns their findings; injected so tests never touch a real
+   * store/db. */
+  runDegradedConfigChecks: (profileName: string) => Promise<DoctorFinding[]>;
+}
+
+async function defaultRunDegradedConfigChecks(
+  profileName: string,
+): Promise<DoctorFinding[]> {
+  const store = wireConfigStore(profileName, { liftMode: 'readonly' });
+  try {
+    const opts: CoreCheckOpts = { profileName, readDoc: (key) => store.readText(key) };
+    const checks: DoctorCheck[] = [
+      profileParsesCheck(opts),
+      filterParsesCheck(opts),
+      emptyLanesCheck(opts),
+      sqlitePathRetiredCheck(opts),
+      configLegacyDivergenceCheck(opts),
+    ];
+    return await Promise.all(checks.map((c) => c.run()));
+  } finally {
+    store.close();
+  }
 }
 
 function defaultDeps(): DoctorDeps {
   return {
     wire: defaultWire,
     write: (line: string) => console.log(line),
+    runDegradedConfigChecks: defaultRunDegradedConfigChecks,
   };
 }
 
@@ -35,7 +85,36 @@ export async function doctorCommand(
   deps: Partial<DoctorDeps> = {},
 ): Promise<number> {
   const resolved: DoctorDeps = { ...defaultDeps(), ...deps };
-  const { checks } = await resolved.wire(opts.profile);
+
+  let checks: WireResult['checks'];
+  try {
+    // `configLiftMode: 'readonly'` (config→db Phase 4): doctor must never
+    // create/migrate `jobbunny.db` as a side effect of reading config.
+    ({ checks } = await resolved.wire(opts.profile, { configLiftMode: 'readonly' }));
+  } catch (err) {
+    // A broken config (e.g. a retired `settings.sqlite.path`, a missing
+    // profile.json) must degrade the diagnostic ONE step, never abort it —
+    // `main.ts`'s outer catch would otherwise turn this into a single bare
+    // stderr line. The synthesized `wire` finding names the failure; the
+    // FIVE config checks that don't need a successfully wired profile
+    // (`runDegradedConfigChecks`) still run and print alongside it, so a
+    // broken profile still gets as much of a real diagnostic as its config
+    // can support. Adapter-reachability/env/daemon/claude checks (the ones
+    // that DO need the wired result — connector, notifier settings, etc.)
+    // are genuinely unavailable here and are skipped, not synthesized.
+    const message = err instanceof Error ? err.message : String(err);
+    const wireFinding: DoctorFinding = {
+      check: 'wire',
+      status: 'red',
+      detail: `could not wire profile '${opts.profile}': ${message}`,
+    };
+    const degraded = await resolved.runDegradedConfigChecks(opts.profile);
+    const findings = [wireFinding, ...degraded];
+    for (const line of formatTable(findings)) {
+      resolved.write(line);
+    }
+    return 1;
+  }
 
   const findings = await Promise.all(checks.map((c) => c.run()));
 

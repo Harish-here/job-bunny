@@ -25,7 +25,7 @@ export function ProfileSwitcher({
         {profiles.map((p) => (
           <SelectItem key={p.name} value={p.name}>
             {p.name}
-            {p.hasDb ? '' : ' (no local db)'}
+            {p.connector === 'sqlite' ? '' : ' (no local db)'}
           </SelectItem>
         ))}
       </SelectContent>

@@ -1,13 +1,13 @@
-import { z } from 'zod';
 import { sleep } from '../../../core/async/index.ts';
 import type { FilterConfig } from '../../../core/filter/config.ts';
-import { CacheEntrySchema, type DroppedRecord, type JD } from '../../../core/jd/index.ts';
+import type { DroppedRecord, JD } from '../../../core/jd/index.ts';
 import type { BrowserProvider } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import type { FarmingLane } from '../../../ports/lane.ts';
-import type { Storage } from '../../../ports/storage.ts';
+import type { StateStore } from '../../../ports/state_store.ts';
 import type { LinkedinBreakerConfig } from './breaker_store.ts';
 import { breakerPhase, readBreaker } from './breaker_store.ts';
+import { loadCacheIds } from './cache_gate.ts';
 import { CaptureStore } from './capture_store.ts';
 import {
   buildAllUrlsFailedMessage,
@@ -27,18 +27,6 @@ import {
 import { ResumeState } from './resume_state.ts';
 import type { SearchUrlGroup } from './search_urls.ts';
 import { THROTTLE_COOLDOWN_MS, ThrottleCounter } from './throttle.ts';
-
-/** Path of the reconciled Notion cache, read here for the lane's own
- * cache-skip gate. Deliberately duplicated from `pipeline/stages/
- * reconcile.ts`'s `CACHE_PATH` rather than imported — adapters may only
- * import ports + core (`adapters-only-ports-core`), never `pipeline/**`,
- * same posture as `greenhouse/api.ts` duplicating `htmlToText` rather than
- * cross-importing Keka. Must stay byte-identical to reconcile.ts's
- * constant: this lane's `this.storage` and the reconcile stage's
- * `ctx.storage` are the same profile-rooted handle.
- */
-const CACHE_ENTRIES_PATH = 'cache/entries.json';
-const CacheEntriesSchema = z.array(CacheEntrySchema);
 
 /** Default per-URL cap on how many gate-passed, not-cached, not-already-
  * processed-this-run cards get an expensive JD open. A backstop, not the
@@ -66,7 +54,7 @@ export class LinkedInLane implements FarmingLane {
   private readonly inventories: Inventory[];
   private readonly urls: SearchUrlGroup[];
   private readonly filterCfg: FilterConfig;
-  private readonly storage: Storage;
+  private readonly stateStore: StateStore;
   private readonly maxCardsPerUrl: number;
   private readonly jitterMinMs: number;
   private readonly jitterMaxMs: number;
@@ -81,7 +69,7 @@ export class LinkedInLane implements FarmingLane {
     inventories: Inventory[],
     urls: SearchUrlGroup[],
     filterCfg: FilterConfig,
-    storage: Storage,
+    stateStore: StateStore,
     maxCardsPerUrl: number = DEFAULT_MAX_CARDS_PER_URL,
     jitterMinMs: number = DEFAULT_JITTER_MIN_MS,
     jitterMaxMs: number = DEFAULT_JITTER_MAX_MS,
@@ -101,7 +89,7 @@ export class LinkedInLane implements FarmingLane {
     this.inventories = inventories;
     this.urls = urls;
     this.filterCfg = filterCfg;
-    this.storage = storage;
+    this.stateStore = stateStore;
     this.maxCardsPerUrl = maxCardsPerUrl;
     this.jitterMinMs = jitterMinMs;
     this.jitterMaxMs = jitterMaxMs;
@@ -175,37 +163,15 @@ export class LinkedInLane implements FarmingLane {
       };
     }
 
-    const resumeState = await ResumeState.load(this.storage, todayIso());
-    const captureStore = await CaptureStore.load(this.storage);
+    const resumeState = await ResumeState.load(this.stateStore, todayIso());
+    const captureStore = await CaptureStore.load(this.stateStore);
 
     // Cache-skip gate (P9 closure register §1, Task B): a card already
     // known to the reconciled Notion cache never gets an expensive JD
-    // open. Read once per run, not per url — fail-soft on a missing/
-    // unreadable cache (e.g. this lane run standalone without a
-    // preceding reconcile) rather than throwing, same posture as
-    // `pipeline/stages/source.ts`'s cache gate.
-    let cacheIds: Set<string>;
-    try {
-      const entries = await this.storage.readJson(CACHE_ENTRIES_PATH, CacheEntriesSchema);
-      if (entries === undefined) {
-        ctx.logger.warn(
-          'linkedin lane: no Notion cache found — cache gate disabled, known jobs may reach the LLM stage',
-          { path: CACHE_ENTRIES_PATH },
-        );
-        cacheIds = new Set();
-      } else {
-        cacheIds = new Set(entries.map((e) => e.id).filter(Boolean));
-      }
-    } catch (err) {
-      ctx.logger.warn(
-        'linkedin lane: failed to read Notion cache — cache gate disabled',
-        {
-          path: CACHE_ENTRIES_PATH,
-          error: err instanceof Error ? err.message : String(err),
-        },
-      );
-      cacheIds = new Set();
-    }
+    // open — see `cache_gate.ts` for the fail-soft read (missing/
+    // unreadable cache never throws, same posture as
+    // `pipeline/stages/source.ts`'s cache gate).
+    const cacheIds = await loadCacheIds(this.stateStore, ctx);
 
     // Cross-URL run-dedup (Task B): the same job id showing up under two
     // different search URLs within this one run must only ever be
@@ -225,7 +191,7 @@ export class LinkedInLane implements FarmingLane {
     const allUrls = this.urls.flatMap((group) => group.urls);
     if (resumeState.allDone(allUrls)) {
       resumeState.rescanReset();
-      await captureStore.reset(this.storage);
+      await captureStore.reset(this.stateStore);
     }
 
     const dropped: DroppedRecord[] = [];
@@ -282,7 +248,7 @@ export class LinkedInLane implements FarmingLane {
             interUrlPause: () => this.interUrlPause(ctx),
           },
           handle,
-          { captureStore, storage: this.storage, processedIds, stats },
+          { captureStore, stateStore: this.stateStore, processedIds, stats },
           ctx,
         );
         if (probeResult.skipped) {
@@ -310,7 +276,7 @@ export class LinkedInLane implements FarmingLane {
           browserHandle: handle,
           inventories: this.inventories,
           filterCfg: this.filterCfg,
-          storage: this.storage,
+          stateStore: this.stateStore,
           maxCardsPerUrl: this.maxCardsPerUrl,
           jitter: (c) => this.jitter(c),
           interUrlPause: (c) => this.interUrlPause(c),

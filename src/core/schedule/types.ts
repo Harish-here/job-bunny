@@ -1,10 +1,13 @@
 /**
  * core/schedule/types.ts — the pure vocabulary the daemon's owed-slot
  * decision (owed.ts) is built from. Local wall-clock time throughout, never
- * UTC: run-folder names (ops/observability/run/run_folder.ts's formatRunTime)
- * are local, and using UTC here is a bug this project already hit once —
- * run.log timestamps are UTC while folder names are local, and conflating
- * the two silently misaligns "is this slot served" checks.
+ * UTC: `time_dir`-shaped strings (formatted by `formatRunTime` in
+ * ops/observability/run/time.ts, persisted as the `runs`/`checkpoints`
+ * tables' `time_dir` column) are local, and using UTC here is a bug this
+ * project already hit once — run.log timestamps are UTC while `time_dir`
+ * strings are local, and conflating the two silently misaligns "is this slot
+ * served" checks. (Historical note: `parseTimeDirSlot` below originally
+ * parsed on-disk run FOLDER names, pre-checkpoints-to-db migration.)
  */
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -19,12 +22,14 @@ export interface ProfileSchedule {
 
 /**
  * Evidence that a run happened OR was attempted for a given
- * (profile, date, time) — sourced from either an on-disk run folder
- * (actual start time, via parseRunFolderName below) or a synthetic entry
- * the daemon derives from its pidfile attempts ledger (D19: an owed slot
- * the daemon attempted to spawn but which crashed before writing a run
- * folder). Both sources produce the identical shape below; a caller
- * cannot and need not distinguish them.
+ * (profile, date, time) — sourced from either a `runs` table row in that
+ * profile's own jobbunny.db (real DURABLE evidence, keyed by `time_dir`, via
+ * `parseTimeDirSlot` below) or a synthetic entry the daemon derives from its
+ * pidfile attempts ledger (D19: an owed slot the daemon attempted to spawn
+ * but which crashed before its first checkpoint — the ledger entry closes
+ * the gap for the remainder of THIS daemon process's life, while the `runs`
+ * row is what survives a daemon restart). Both sources produce the
+ * identical shape below; a caller cannot and need not distinguish them.
  */
 export interface RunRecord {
   profile: string;
@@ -38,21 +43,24 @@ export interface OwedRun {
   slot: string; // "HH:MM" local
 }
 
-// Matches ops/observability/run/run_folder.ts's TIME_DIR_RE (`^\d{2}-\d{2}(-\d+)?$`)
-// exactly: always zero-padded HH-MM, optionally suffixed -N on a same-minute
-// collision. A folder that doesn't match (e.g. "sync_dryrun.json") is not a
-// run folder at all and yields undefined.
-const RUN_FOLDER_RE = /^(\d{2})-(\d{2})(?:-\d+)?$/;
+// Matches the same `^\d{2}-\d{2}(-\d+)?$` shape `formatRunTime` produces
+// (ops/observability/run/time.ts) and that the `runs`/`checkpoints`
+// tables persist as `time_dir`: always zero-padded HH-MM, optionally
+// suffixed -N on a same-minute collision. A string that doesn't match
+// (e.g. "sync_dryrun.json") is not a time-dir-shaped slot at all and
+// yields undefined.
+const TIME_DIR_RE = /^(\d{2})-(\d{2})(?:-\d+)?$/;
 
 /**
- * Maps a run-folder directory name to "HH:MM", stripping any -N collision
- * suffix — two folders in the same minute (e.g. "14-04" and "14-04-2")
- * therefore yield the same result, which is harmless: served-detection
- * only asks whether ANY record falls in the owed window, not how many.
- * Returns undefined for anything that is not a run-folder name.
+ * Maps a `time_dir` string (e.g. from `RunStoreReader.listRunTimeDirs`) to
+ * "HH:MM", stripping any -N collision suffix — two rows in the same minute
+ * (e.g. "14-04" and "14-04-2") therefore yield the same result, which is
+ * harmless: served-detection only asks whether ANY record falls in the
+ * owed window, not how many. Returns undefined for anything that is not a
+ * time-dir-shaped slot.
  */
-export function parseRunFolderName(name: string): string | undefined {
-  const match = RUN_FOLDER_RE.exec(name);
+export function parseTimeDirSlot(timeDir: string): string | undefined {
+  const match = TIME_DIR_RE.exec(timeDir);
   if (!match) return undefined;
   const hh = match[1] as string;
   const mm = match[2] as string;

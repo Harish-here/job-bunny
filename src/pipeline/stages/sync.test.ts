@@ -5,7 +5,17 @@ import type { ArchivePolicy, Connector, RunContext } from '../../ports/index.ts'
 import type { StageContext, StagePayload } from '../runner/stage.ts';
 import { makeSyncStage } from './sync.ts';
 
-function fakeCtx(): StageContext {
+type FakeSyncCtx = StageContext & {
+  runId?: number;
+  runStore?: { recordSyncDryrun(runId: number, report: unknown): void };
+};
+
+function fakeCtx(
+  overrides: {
+    runId?: number;
+    recordSyncDryrun?: (runId: number, report: unknown) => void;
+  } = {},
+): FakeSyncCtx {
   return {
     profile: 'rajni',
     signal: AbortSignal.timeout(30_000),
@@ -21,6 +31,14 @@ function fakeCtx(): StageContext {
       },
       async removeTree() {},
     },
+    stateStore: {} as StageContext['stateStore'],
+    ...(overrides.runId !== undefined ? { runId: overrides.runId } : {}),
+    // A real `ctx.runStore` is always present once `ctx.runId` is set (the
+    // driver sets both together) — so the fake mirrors that pairing rather
+    // than requiring every `runId`-bearing test to also pass a callback.
+    ...(overrides.runId !== undefined || overrides.recordSyncDryrun
+      ? { runStore: { recordSyncDryrun: overrides.recordSyncDryrun ?? (() => {}) } }
+      : {}),
   };
 }
 
@@ -163,7 +181,7 @@ test('multiple jobs silently dropped by the connector each get exactly one Dropp
   }
 });
 
-// --- dry-run (P8 Task 7) ---
+// --- dry-run (P8 Task 7, DB-backed as of runs-observability Phase 1 Task 6) ---
 
 test('dry-run: never calls connector.syncJobs', async () => {
   const stage = makeSyncStage(
@@ -172,40 +190,29 @@ test('dry-run: never calls connector.syncJobs', async () => {
         throw new Error('syncJobs must not be called in dry-run mode');
       },
     }),
-    { dryRunPath: 'runs/2026-07-25/sync_dryrun.json' },
+    { dryRun: true },
   );
   const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
 
-  await assert.doesNotReject(() => stage.run(input, fakeCtx()));
+  await assert.doesNotReject(() => stage.run(input, fakeCtx({ runId: 1 })));
 });
 
-test('dry-run: writes the would-write set at the given path with the right count and fields', async () => {
-  const written: Array<{ path: string; value: unknown }> = [];
-  const ctx: StageContext = {
-    ...fakeCtx(),
-    storage: {
-      async readJson() {
-        return undefined;
-      },
-      async writeJson(path: string, value: unknown) {
-        written.push({ path, value });
-      },
-      async listSubdirs() {
-        return [];
-      },
-      async removeTree() {},
+test('dry-run: records the would-write set via ctx.runStore.recordSyncDryrun with the right count and fields', async () => {
+  const recorded: Array<{ runId: number; report: unknown }> = [];
+  const ctx = fakeCtx({
+    runId: 7,
+    recordSyncDryrun(runId, report) {
+      recorded.push({ runId, report });
     },
-  };
-  const stage = makeSyncStage(fakeConnector(), {
-    dryRunPath: 'runs/2026-07-25/sync_dryrun.json',
   });
+  const stage = makeSyncStage(fakeConnector(), { dryRun: true });
   const input: StagePayload = { jobs: [fakeJob('li-1'), fakeJob('li-2')], dropped: [] };
 
   await stage.run(input, ctx);
 
-  assert.equal(written.length, 1);
-  assert.equal(written[0]?.path, 'runs/2026-07-25/sync_dryrun.json');
-  const payload = written[0]?.value as {
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.runId, 7);
+  const payload = recorded[0]?.report as {
     generatedAt: string;
     profile: string;
     count: number;
@@ -222,14 +229,27 @@ test('dry-run: writes the would-write set at the given path with the right count
   assert.ok(typeof payload.generatedAt === 'string' && payload.generatedAt.length > 0);
 });
 
+test('dry-run: ctx.runId undefined (e.g. a unit test wiring a bare StageContext) skips the write silently', async () => {
+  let called = false;
+  const ctx = fakeCtx({
+    recordSyncDryrun() {
+      called = true;
+    },
+  });
+  const stage = makeSyncStage(fakeConnector(), { dryRun: true });
+  const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [] };
+
+  await assert.doesNotReject(() => stage.run(input, ctx));
+
+  assert.equal(called, false);
+});
+
 test('dry-run: returns input unchanged — same jobs, same dropped, no sync.failed drops', async () => {
   const priorDrop = { jd: fakeJob('li-0'), reasons: [] };
-  const stage = makeSyncStage(fakeConnector(), {
-    dryRunPath: 'runs/2026-07-25/sync_dryrun.json',
-  });
+  const stage = makeSyncStage(fakeConnector(), { dryRun: true });
   const input: StagePayload = { jobs: [fakeJob('li-1')], dropped: [priorDrop] };
 
-  const out = await stage.run(input, fakeCtx());
+  const out = await stage.run(input, fakeCtx({ runId: 1 }));
 
   assert.equal(out.jobs, input.jobs);
   assert.deepEqual(out.dropped, [priorDrop]);

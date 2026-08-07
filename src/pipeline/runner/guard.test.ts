@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { Connector, Storage } from '../../ports/index.ts';
+import type { CheckpointStore, Connector, Storage } from '../../ports/index.ts';
 import type { PipelineCtx, WiredPorts } from './context.ts';
 import { guardStage } from './guard.ts';
 import type { StageContext, StageDef } from './stage.ts';
@@ -38,6 +38,32 @@ function fakePorts(): WiredPorts {
   return { lanes: [], connector: fakeConnector(), notifiers: [] };
 }
 
+/** A minimal `CheckpointStore` stub — mirrors `run.test.ts`'s own
+ * `fakeCheckpointStore()`; `guardStage` itself never touches
+ * `ctx.checkpointStore`, so this exists purely to give `fakeCtx` a
+ * real-shaped value instead of an empty-object placeholder cast. */
+function fakeCheckpointStore(): CheckpointStore {
+  return {
+    write() {},
+    readLatest() {
+      return undefined;
+    },
+    latestTimeDir() {
+      return undefined;
+    },
+    latestCheckpointTimeDir() {
+      return undefined;
+    },
+    nextTimeDir(_runDate, time) {
+      return time;
+    },
+    pruneOlderThan() {
+      return 0;
+    },
+    close() {},
+  };
+}
+
 /** Builds a fake PipelineCtx with a controllable run-level AbortController
  * and a spy `beat()`. Tests can abort `controller` to simulate a
  * run-level cancellation. */
@@ -55,6 +81,7 @@ function fakeCtx(controller: AbortController = new AbortController()): {
       beats.push(Date.now());
     },
     storage: fakeStorage(),
+    stateStore: {} as PipelineCtx['stateStore'],
     config: {
       lanes: [],
       connector: 'fake-connector',
@@ -63,6 +90,8 @@ function fakeCtx(controller: AbortController = new AbortController()): {
       settings: {},
     },
     ports: fakePorts(),
+    runStore: {} as PipelineCtx['runStore'],
+    checkpointStore: fakeCheckpointStore(),
     async notify() {},
   };
   return { ctx, controller, beats };

@@ -3,7 +3,7 @@ import type { FilterConfig } from '../../../../../core/filter/config.ts';
 import type { DroppedRecord } from '../../../../../core/jd/index.ts';
 import type { BrowserHandle, PageHandle } from '../../../../../ports/browser.ts';
 import type { RunContext } from '../../../../../ports/context.ts';
-import type { Storage } from '../../../../../ports/storage.ts';
+import type { StateStore } from '../../../../../ports/state_store.ts';
 import type { LinkedinBreakerConfig, LinkedinBreakerState } from '../../breaker_store.ts';
 import type { CaptureStore } from '../../capture_store.ts';
 import { toSoftError, type UrlStat, zodIssuesMessage } from '../../evidence.ts';
@@ -48,7 +48,7 @@ export interface UrlRunnerDeps {
   browserHandle: BrowserHandle;
   inventories: Inventory[];
   filterCfg: FilterConfig;
-  storage: Storage;
+  stateStore: StateStore;
   maxCardsPerUrl: number;
   jitter: (ctx: RunContext) => Promise<void>;
   interUrlPause: (ctx: RunContext) => Promise<void>;
@@ -310,7 +310,7 @@ export async function runUrlGroups(
       // Persisted after EVERY url (success or failure), not once at
       // the end — a mid-run SIGKILL must lose at most the in-flight
       // url's mark, never every mark made so far this run.
-      await state.resumeState.persist(deps.storage);
+      await state.resumeState.persist(deps.stateStore);
       if (state.throttleTripped) break;
     }
     if (state.throttleTripped) break;

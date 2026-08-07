@@ -86,6 +86,15 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
       patchCalls.push({ id, patch });
       return { jobId: id, updatedAt: '2026-08-02T00:00:00.000Z', status: 'Applied' };
     },
+    listRuns() {
+      return { rows: [], total: 0 };
+    },
+    getRun() {
+      return null;
+    },
+    listRunEvents() {
+      return { rows: [], total: 0 };
+    },
     close() {},
     ...overrides,
   };
@@ -96,8 +105,11 @@ function fakeSource(
 ): BoardSource {
   const { store = null, closed } = opts;
   return {
-    listProfiles: () => PROFILES,
-    openStore: () => store,
+    listProfiles: async () => PROFILES,
+    openStore: async () => store,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {
       if (closed) closed.value = true;
     },
@@ -129,6 +141,41 @@ test('GET /api/profiles returns the source data', async () => {
       profiles: [{ name: 'p1', connector: 'sqlite', hasDb: true }],
     });
     assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  });
+});
+
+test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mounted)', async () => {
+  const store = fakeStore({
+    listRuns() {
+      return {
+        rows: [
+          {
+            id: 1,
+            date: '2026-08-05',
+            timeDir: '09-00',
+            kind: 'run',
+            resumedFrom: null,
+            status: 'passed',
+            startedAt: '2026-08-05T09:00:00.000Z',
+            finishedAt: '2026-08-05T09:05:00.000Z',
+            heartbeatAt: '2026-08-05T09:04:00.000Z',
+          },
+        ],
+        total: 1,
+      };
+    },
+  });
+  const server = createBoardServer({
+    source: fakeSource({ store }),
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles/p1/runs`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: unknown[]; total: number };
+    assert.equal(body.total, 1);
+    assert.equal(body.rows.length, 1);
   });
 });
 
@@ -168,6 +215,75 @@ test('PATCH with a body reaches the fake store parsed', async () => {
   });
 });
 
+test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', async () => {
+  const writeCalls: Array<{ name: string; doc: string; rawText: string }> = [];
+  const source: BoardSource = {
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async (name, doc, rawText) => {
+      writeCalls.push({ name, doc, rawText });
+    },
+    createProfile: async () => {},
+    close() {},
+  };
+  const server = createBoardServer({
+    source,
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/profiles/p1/config/filter.json`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '{"locations":[]}' }),
+      },
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { text: string };
+    assert.deepEqual(body, { text: '{"locations":[]}' });
+    assert.deepEqual(writeCalls, [
+      { name: 'p1', doc: 'filter.json', rawText: '{"locations":[]}' },
+    ]);
+  });
+});
+
+test('POST /api/profiles reaches source.createProfile and returns 201', async () => {
+  const createCalls: string[] = [];
+  const source: BoardSource = {
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async (name) => {
+      createCalls.push(name);
+    },
+    close() {},
+  };
+  const server = createBoardServer({
+    source,
+    logger: silentLogger,
+    version: TEST_VERSION,
+  });
+  await withServer(server, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/profiles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'newprofile' }),
+    });
+    assert.equal(res.status, 201);
+    const body = (await res.json()) as { profile: BoardProfile };
+    assert.deepEqual(body.profile, {
+      name: 'newprofile',
+      connector: 'sqlite',
+      hasDb: true,
+    });
+    assert.deepEqual(createCalls, ['newprofile']);
+  });
+});
+
 test('a throwing store method is a 500 internal envelope whose message is NOT the thrown one', async () => {
   const thrownMessage = '/very/secret/path/to/jobbunny.db is corrupt';
   const store = fakeStore({
@@ -201,10 +317,13 @@ test('a throwing store method is a 500 internal envelope whose message is NOT th
 
 test('a throwing source.openStore is also a 500 internal envelope (never a crash)', async () => {
   const source: BoardSource = {
-    listProfiles: () => PROFILES,
-    openStore: () => {
+    listProfiles: async () => PROFILES,
+    openStore: async () => {
       throw new Error('db schema is newer than this build supports');
     },
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {},
   };
   const server = createBoardServer({
@@ -340,8 +459,11 @@ test('close() still calls source.close() when httpServer.close() rejects', async
   const closed = { value: false };
   let closeCallCount = 0;
   const source: BoardSource = {
-    listProfiles: () => PROFILES,
-    openStore: () => null,
+    listProfiles: async () => PROFILES,
+    openStore: async () => null,
+    readConfigDoc: async () => undefined,
+    writeConfigDoc: async () => {},
+    createProfile: async () => {},
     close() {
       closeCallCount += 1;
       closed.value = true;
