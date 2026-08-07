@@ -79,6 +79,7 @@ function renderShell() {
 
 beforeEach(() => {
   window.location.hash = '';
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -91,7 +92,7 @@ describe('Shell', () => {
     renderShell();
 
     await waitFor(() => {
-      expect(screen.getByText('Job Bunny')).toBeInTheDocument();
+      expect(screen.getByAltText('JOB BUNNY')).toBeInTheDocument();
     });
 
     expect(screen.getByAltText('Job Bunny')).toBeInTheDocument();
@@ -131,7 +132,7 @@ describe('Shell', () => {
     await userEvent.click(retryButton);
 
     await waitFor(() => {
-      expect(screen.getByText('Job Bunny')).toBeInTheDocument();
+      expect(screen.getByAltText('JOB BUNNY')).toBeInTheDocument();
     });
     expect(await screen.findByPlaceholderText('Search company…')).toBeInTheDocument();
   });
@@ -142,5 +143,27 @@ describe('Shell', () => {
     renderShell();
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  it('collapses to the rail and remembers it', async () => {
+    stubFetch({});
+    renderShell();
+
+    const toggle = await screen.findByRole('button', { name: 'Toggle sidebar' });
+    await userEvent.click(toggle);
+
+    expect(screen.getByTestId('sidebar')).toHaveAttribute('data-collapsed', 'true');
+    expect(localStorage.getItem('jobbunny.sidebar')).toBe('collapsed');
+
+    for (const label of [
+      'Triage',
+      'Tracker',
+      'Runs',
+      'Analytics',
+      'Onboarding',
+      'Settings',
+    ]) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
   });
 });

@@ -45,6 +45,6 @@ test('renders the app shell', async () => {
   );
 
   await waitFor(() => {
-    expect(screen.getByText(/job bunny/i)).toBeInTheDocument();
+    expect(screen.getByAltText('JOB BUNNY')).toBeInTheDocument();
   });
 });

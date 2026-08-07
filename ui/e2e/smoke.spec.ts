@@ -48,8 +48,8 @@ test('board loads', async ({ page }) => {
 
 test('sidebar branding', async ({ page }) => {
   await page.goto('/#/triage');
-  await expect(page.getByRole('img', { name: 'Job Bunny' })).toBeVisible();
-  await expect(page.getByText('Job Bunny', { exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Job Bunny', exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'JOB BUNNY', exact: true })).toBeVisible();
 
   const versionText = await page.getByText(/^v\d+\.\d+\.\d+$/).textContent();
   expect(versionText).toMatch(/^v\d+\.\d+\.\d+$/);

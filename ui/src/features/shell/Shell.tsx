@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { pickProfile, useStoredProfile } from '../../lib/profile';
@@ -12,6 +13,7 @@ import { TriagePage } from '../triage/TriagePage';
 import { Sidebar } from './Sidebar';
 import { useAppInfo } from './useAppInfo';
 import { useProfilesQuery } from './useProfiles';
+import { useSidebarCollapsed } from './useSidebarCollapsed';
 
 /** Full route switch (T10) — the real Triage/Tracker/Job/Analytics/Onboarding
  * feature component per route, each fed the resolved profile (and, for
@@ -60,6 +62,18 @@ export function Shell() {
   const profilesQuery = useProfilesQuery();
   const appInfo = useAppInfo();
   const [stored, setStored] = useStoredProfile();
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setCollapsed(!collapsed);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [collapsed, setCollapsed]);
 
   if (profilesQuery.isPending) return <ShellSkeleton />;
 
@@ -77,8 +91,10 @@ export function Shell() {
         profile={profile}
         profiles={profiles}
         version={appInfo.data?.version}
+        collapsed={collapsed}
         onChoose={setStored}
         onNavigate={navigate}
+        onToggleCollapsed={() => setCollapsed(!collapsed)}
       />
       <main className="flex-1">
         {profile ? (

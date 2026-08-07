@@ -1,17 +1,28 @@
+import {
+  Activity,
+  Columns3,
+  Inbox,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Play,
+  Rocket,
+  Settings,
+} from 'lucide-react';
 import logo from '../../assets/logo.svg';
+import wordmark from '../../assets/wordmark.svg';
 import { Button } from '../../components/ui/button';
 import type { BoardProfile } from '../../lib/api/types';
 import type { Route, RouteName } from '../../lib/router';
 import { cn } from '../../lib/utils';
 import { ProfileSwitcher } from './ProfileSwitcher';
 
-const NAV_ITEMS: { name: RouteName; label: string }[] = [
-  { name: 'triage', label: 'Triage' },
-  { name: 'tracker', label: 'Tracker' },
-  { name: 'runs', label: 'Runs' },
-  { name: 'analytics', label: 'Analytics' },
-  { name: 'onboarding', label: 'Onboarding' },
-  { name: 'settings', label: 'Settings' },
+const NAV_ITEMS: { name: RouteName; label: string; Icon: typeof Inbox }[] = [
+  { name: 'triage', label: 'Triage', Icon: Inbox },
+  { name: 'tracker', label: 'Tracker', Icon: Columns3 },
+  { name: 'runs', label: 'Runs', Icon: Play },
+  { name: 'analytics', label: 'Analytics', Icon: Activity },
+  { name: 'onboarding', label: 'Onboarding', Icon: Rocket },
+  { name: 'settings', label: 'Settings', Icon: Settings },
 ];
 
 export function Sidebar({
@@ -19,24 +30,61 @@ export function Sidebar({
   profile,
   profiles,
   version,
+  collapsed,
   onChoose,
   onNavigate,
+  onToggleCollapsed,
 }: {
   route: Route;
   profile: string | null;
   profiles: BoardProfile[];
   version: string | undefined;
+  collapsed: boolean;
   onChoose: (name: string) => void;
   onNavigate: (route: Route) => void;
+  onToggleCollapsed: () => void;
 }) {
   return (
-    <aside className="flex h-screen w-56 flex-col gap-4 border-r p-4">
-      <div className="flex items-center gap-2">
-        <img src={logo} alt="Job Bunny" className="size-7" />
-        <div>
-          <div className="font-bold leading-tight">Job Bunny</div>
-          {version && <div className="text-xs text-muted-foreground">v{version}</div>}
-        </div>
+    <aside
+      data-testid="sidebar"
+      data-collapsed={collapsed ? 'true' : 'false'}
+      className={cn(
+        'flex h-screen shrink-0 flex-col gap-4 border-r border-sidebar-border',
+        'bg-sidebar p-3 text-sidebar-foreground hop',
+        collapsed ? 'w-14' : 'w-56',
+      )}
+    >
+      <div
+        className={cn(
+          'flex',
+          collapsed ? 'flex-col items-center gap-2' : 'items-start justify-between',
+        )}
+      >
+        {collapsed ? (
+          <img src={logo} alt="Job Bunny" className="size-8" />
+        ) : (
+          <div className="flex flex-col items-start gap-1">
+            <img src={logo} alt="Job Bunny" className="size-14" />
+            <img src={wordmark} alt="JOB BUNNY" className="w-[158px]" />
+            {version && (
+              <div className="font-mono text-xs text-muted-foreground">v{version}</div>
+            )}
+          </div>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Toggle sidebar"
+          aria-expanded={!collapsed}
+          onClick={onToggleCollapsed}
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-4" />
+          ) : (
+            <PanelLeftClose className="size-4" />
+          )}
+        </Button>
       </div>
       <nav className="flex flex-col gap-1">
         {NAV_ITEMS.map((item) => {
@@ -46,17 +94,29 @@ export function Sidebar({
               key={item.name}
               type="button"
               variant="ghost"
-              className={cn('justify-start', active && 'bg-muted text-foreground')}
+              size={collapsed ? 'icon' : 'default'}
+              className={cn(
+                !collapsed && 'justify-start',
+                active && 'bg-sidebar-accent text-sidebar-accent-foreground',
+              )}
               aria-current={active ? 'page' : undefined}
+              aria-label={item.label}
+              title={item.label}
               onClick={() => onNavigate({ name: item.name })}
             >
-              {item.label}
+              <item.Icon className="size-4" />
+              {!collapsed && item.label}
             </Button>
           );
         })}
       </nav>
-      <div className="mt-auto">
-        <ProfileSwitcher profile={profile} profiles={profiles} onChoose={onChoose} />
+      <div className="mt-auto flex flex-col gap-2">
+        <ProfileSwitcher
+          profile={profile}
+          profiles={profiles}
+          collapsed={collapsed}
+          onChoose={onChoose}
+        />
       </div>
     </aside>
   );
