@@ -9,6 +9,7 @@ import { clearDraft, readActiveProfile, readDraft, writeDraft } from './draftSto
 import { Step1Name } from './steps/Step1Name';
 import { Step2Persona } from './steps/Step2Persona';
 import { Step3About } from './steps/Step3About';
+import { Step4Hunt } from './steps/Step4Hunt';
 import {
   emptyDraft,
   type WizardDraft,
@@ -187,7 +188,7 @@ export function WizardPage() {
       case 3:
         return <Step3About {...stepProps} />;
       case 4:
-        return <Placeholder {...stepProps} label="Where to hunt" finishable />;
+        return <Step4Hunt {...stepProps} />;
       case 5:
         return <Placeholder {...stepProps} label="Extras" finishable />;
       case 6:
