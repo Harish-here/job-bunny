@@ -65,19 +65,30 @@ test(
     const root = repoRoot();
     const before = snapshotEnvFile(root);
 
-    const res = await page.request.put('/api/secrets/NOTION_TOKEN', {
-      data: { value: 'env_guard_probe_do_not_keep_me' },
-    });
-    expect(res.ok()).toBe(true);
+    // try/finally: a crash or a failed assertion between the PUT and the
+    // restore below must still restore the repo root's real `.env` — the
+    // whole point of this test is to neutralize a real mutation against a
+    // developer's real secrets file, and an uncaught failure here must not
+    // leave that mutation in place. The stronger future variant is a
+    // temporary, per-test `JOBBUNNY_HOME` project (so there is no shared
+    // `.env` to clobber in the first place); this file/suite doesn't do
+    // that today, so try/finally is the belt-and-braces in the meantime.
+    try {
+      const res = await page.request.put('/api/secrets/NOTION_TOKEN', {
+        data: { value: 'env_guard_probe_do_not_keep_me' },
+      });
+      expect(res.ok()).toBe(true);
 
-    const afterWrite = snapshotEnvFile(root);
-    // Proves the write really happened through the real server code path
-    // (`writeSecret`, src/cli/wire/board.ts) — this is the vulnerability the
-    // finding reported, reproduced against the real running server, not a
-    // synthetic fixture.
-    expect(afterWrite?.toString('utf8')).toContain('env_guard_probe_do_not_keep_me');
+      const afterWrite = snapshotEnvFile(root);
+      // Proves the write really happened through the real server code path
+      // (`writeSecret`, src/cli/wire/board.ts) — this is the vulnerability the
+      // finding reported, reproduced against the real running server, not a
+      // synthetic fixture.
+      expect(afterWrite?.toString('utf8')).toContain('env_guard_probe_do_not_keep_me');
+    } finally {
+      restoreEnvFile(root, before);
+    }
 
-    restoreEnvFile(root, before);
     const afterRestore = snapshotEnvFile(root);
     const beforeBytes = before === null ? null : before.toString('utf8');
     const afterBytes = afterRestore === null ? null : afterRestore.toString('utf8');

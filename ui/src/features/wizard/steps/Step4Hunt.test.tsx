@@ -362,9 +362,10 @@ describe('Step4Hunt', () => {
   });
 
   it(
-    'a successful submit sets wroteHunt: true on the draft, and a second submit ' +
-      '(simulating Back then Next) skips the never-clobber guard read entirely — ' +
-      'regression: the guard used to see its own bullet line and block forever',
+    'a successful submit stores the exact written search_urls.md text on the draft, and ' +
+      'a resumed draft whose doc still reads back exactly that text is treated as our ' +
+      'own prior write — no block, still re-issues the write (simulating Back then Next, ' +
+      'including across a reload, since `writtenDocs` persists in the draft)',
     async () => {
       const capture = makeCapture();
       const draftRef: { current: WizardDraft } = { current: makeDraft() };
@@ -379,21 +380,20 @@ describe('Step4Hunt', () => {
 
       const result = await submit(capture.ref.current);
       expect(result).toBe(true);
-      expect(draftRef.current.wroteHunt).toBe(true);
+      const writtenText = vi.mocked(writeConfigDocText).mock.calls[0]?.[2];
+      expect(draftRef.current.writtenDocs).toEqual({ 'search_urls.md': writtenText });
       expect(getConfigDoc).toHaveBeenCalledTimes(1);
 
       // Unmount (WizardPage genuinely unmounts step 4 on Back to step 3),
-      // then remount from the persisted draft — the guard's own doc read
-      // would now see the bullet line THIS session itself just wrote.
+      // then remount from the persisted draft. The live doc reads back
+      // EXACTLY what this step itself wrote last time — content-aware
+      // tracking still reads it (it never skips the read), but recognizes
+      // that unchanged text as its own prior write, not real content.
       unmount();
       vi.mocked(getConfigDoc).mockClear();
       vi.mocked(writeConfigDocText).mockClear();
       vi.mocked(patchProfileConfig).mockClear();
-      vi.mocked(getConfigDoc).mockResolvedValue({
-        text:
-          '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n' +
-          '  • Frontend Roles - https://www.linkedin.com/jobs/search/?keywords=frontend\n',
-      });
+      vi.mocked(getConfigDoc).mockResolvedValue({ text: writtenText ?? '' });
 
       const capture2 = makeCapture();
       render(
@@ -402,9 +402,46 @@ describe('Step4Hunt', () => {
       const result2 = await submit(capture2.ref.current);
 
       expect(result2).toBe(true);
-      expect(getConfigDoc).not.toHaveBeenCalled();
+      expect(getConfigDoc).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('wizard-existing-config')).not.toBeInTheDocument();
       expect(writeConfigDocText).toHaveBeenCalledTimes(1);
       expect(patchProfileConfig).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it(
+    'a resumed draft whose search_urls.md now reads DIFFERENTLY from writtenDocs (an ' +
+      'external edit since our last write) blocks the save with the existing-config ' +
+      'notice and issues no PUT, even though the draft carries our own prior write',
+    async () => {
+      const externallyEditedText =
+        '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n' +
+        '  • Hand-added - https://www.linkedin.com/jobs/search/?keywords=hand-added\n';
+      vi.mocked(getConfigDoc).mockResolvedValue({ text: externallyEditedText });
+      const initial: WizardDraft = {
+        ...makeDraft(),
+        writtenDocs: {
+          'search_urls.md':
+            '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n' +
+            '  • Frontend Roles - https://www.linkedin.com/jobs/search/?keywords=frontend\n',
+        },
+      };
+      const capture = makeCapture();
+      render(<Harness initial={initial} registerSubmit={capture.registerSubmit} />);
+      await fillRow(
+        0,
+        'https://www.linkedin.com/jobs/search/?keywords=frontend',
+        'Frontend Roles',
+      );
+
+      const result = await submit(capture.ref.current);
+
+      expect(result).toBe(false);
+      expect(await screen.findByTestId('wizard-existing-config')).toHaveTextContent(
+        'This profile already has search URLs. Edit them in Settings.',
+      );
+      expect(writeConfigDocText).not.toHaveBeenCalled();
+      expect(patchProfileConfig).not.toHaveBeenCalled();
     },
   );
 });

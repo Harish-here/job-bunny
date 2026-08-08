@@ -250,26 +250,45 @@ export function Step3About({ draft, onDraftChange, registerSubmit }: WizardStepP
 
     setExistingConfig(false);
     // Never-clobber guard: read filter.json AND resume.json BEFORE either
-    // write, so a blocked save issues zero PUTs, not a half-written
-    // resume.json — this step writes both, and resume.json is written
-    // first, so either document already carrying real content must block
-    // the save. Skipped once THIS session has already written them once
-    // (`draft.wroteAbout`): re-reading after our own prior write would
-    // otherwise see our own non-empty documents and block forever, which
-    // is exactly what made Back-then-Next unable to ever advance again.
-    if (!draft.wroteAbout) {
-      const [filterDoc, resumeDoc] = await Promise.all([
-        getConfigDoc(profile, 'filter.json'),
-        getConfigDoc(profile, 'resume.json'),
-      ]);
-      if (hasExistingContent(filterDoc.text) || hasExistingContent(resumeDoc.text)) {
-        flushSync(() => setExistingConfig(true));
-        return false;
-      }
+    // write, every submit — so a blocked save issues zero PUTs, not a
+    // half-written resume.json — this step writes both, and resume.json is
+    // written first, so either document already carrying real content must
+    // block the save UNLESS that content is exactly the text `writtenDocs`
+    // says THIS wizard itself last wrote there: that's content-aware, not a
+    // one-shot flag, so a doc some OTHER tool touched since our last write
+    // (including across a reload, since the draft persists) still re-arms
+    // the block, while Back-then-Next on an untouched doc can still
+    // re-submit.
+    const [filterDoc, resumeDoc] = await Promise.all([
+      getConfigDoc(profile, 'filter.json'),
+      getConfigDoc(profile, 'resume.json'),
+    ]);
+    const filterIsOwnWrite =
+      draft.writtenDocs['filter.json'] !== undefined &&
+      filterDoc.text === draft.writtenDocs['filter.json'];
+    const resumeIsOwnWrite =
+      draft.writtenDocs['resume.json'] !== undefined &&
+      resumeDoc.text === draft.writtenDocs['resume.json'];
+    if (
+      (!filterIsOwnWrite && hasExistingContent(filterDoc.text)) ||
+      (!resumeIsOwnWrite && hasExistingContent(resumeDoc.text))
+    ) {
+      flushSync(() => setExistingConfig(true));
+      return false;
     }
-    await writeConfigDocText(profile, 'resume.json', serializeResume(about));
+
+    const resumeText = serializeResume(about);
+    await writeConfigDocText(profile, 'resume.json', resumeText);
     await writeConfigDocText(profile, 'filter.json', derivedText);
-    onDraftChange({ ...draft, about, wroteAbout: true });
+    onDraftChange({
+      ...draft,
+      about,
+      writtenDocs: {
+        ...draft.writtenDocs,
+        'resume.json': resumeText,
+        'filter.json': derivedText,
+      },
+    });
     return true;
   }, [draft, onDraftChange, profile, about, yoeText, homeLocation.city, derivedText]);
 

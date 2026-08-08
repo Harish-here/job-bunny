@@ -57,8 +57,7 @@ function baseDraft(overrides: Partial<WizardDraft> = {}): WizardDraft {
       telegramTokenSaved: false,
     },
     launch: { preset: 'morning', customTimes: [], weekdays: [1, 2, 3, 4, 5] },
-    wroteAbout: false,
-    wroteHunt: false,
+    writtenDocs: {},
     ...overrides,
   };
 }
@@ -289,9 +288,10 @@ describe('Step3About', () => {
   );
 
   it(
-    'a successful submit reports wroteAbout: true through onDraftChange, and a ' +
-      'second submit on a draft carrying wroteAbout: true skips the guard read ' +
-      'entirely (regression: Back then Next must be able to re-submit)',
+    'a successful submit reports the exact written resume.json/filter.json text through ' +
+      'onDraftChange.writtenDocs, and a resumed draft whose docs still read back exactly ' +
+      'that text is treated as our own write — no block, still re-issues the writes ' +
+      '(regression: Back then Next, including across a reload, must be able to re-submit)',
     async () => {
       const user = userEvent.setup();
       stubGuardPasses();
@@ -303,7 +303,14 @@ describe('Step3About', () => {
       const firstResult = await getHandler()?.();
       expect(firstResult).toBe(true);
       const lastCall = onDraftChange.mock.calls.at(-1)?.[0];
-      expect(lastCall?.wroteAbout).toBe(true);
+      const writtenResumeText = vi.mocked(wizardApi.writeConfigDocText).mock
+        .calls[0]?.[2];
+      const writtenFilterText = vi.mocked(wizardApi.writeConfigDocText).mock
+        .calls[1]?.[2];
+      expect(lastCall?.writtenDocs).toEqual({
+        'resume.json': writtenResumeText,
+        'filter.json': writtenFilterText,
+      });
 
       // Unmount before re-rendering: this simulates Back navigating away
       // from step 3 (WizardPage never renders two `Step3About` instances
@@ -311,26 +318,70 @@ describe('Step3About', () => {
       // copies of the same form.
       unmount();
 
-      // Simulate the real Back-then-Next round trip: the guard's own docs
-      // now contain THIS session's own write (never empty, never '{}'),
-      // which is exactly the state that used to trip the guard forever.
-      vi.mocked(configApi.getConfigDoc).mockResolvedValue({
-        text: '{"title":{}}',
-      });
+      // Simulate the real Back-then-Next round trip — including across a
+      // reload, since `writtenDocs` persists in the draft, not just this
+      // session's React state: the live docs now read back EXACTLY what
+      // this step itself wrote last time, so the guard must recognize
+      // that as its own prior write, not "real pre-existing config."
+      vi.mocked(configApi.getConfigDoc).mockImplementation((_profile, doc) =>
+        Promise.resolve({
+          text:
+            doc === 'resume.json' ? (writtenResumeText ?? '') : (writtenFilterText ?? ''),
+        }),
+      );
       vi.mocked(configApi.getConfigDoc).mockClear();
       vi.mocked(wizardApi.writeConfigDocText).mockClear();
 
       // The carried-over draft already has valid required fields from the
       // first submit (home city + a work type) — no need to re-fill them.
       const { getHandler: getSecondHandler } = renderStep({
-        draft: { ...lastCall, wroteAbout: true },
+        draft: lastCall,
         onDraftChange,
       });
       const secondResult = await getSecondHandler()?.();
 
       expect(secondResult).toBe(true);
-      expect(configApi.getConfigDoc).not.toHaveBeenCalled();
+      // The guard reads the live docs every submit — content-aware
+      // tracking never skips the read, only the block.
+      expect(configApi.getConfigDoc).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId('wizard-existing-config')).not.toBeInTheDocument();
       expect(wizardApi.writeConfigDocText).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it(
+    'a resumed draft whose resume.json now reads DIFFERENTLY from writtenDocs (an ' +
+      'external edit since our last write) blocks the save with the existing-config ' +
+      'notice and issues no PUT, even though the draft carries our own prior write',
+    async () => {
+      const user = userEvent.setup();
+      const draft = baseDraft({
+        writtenDocs: {
+          'resume.json': '{"current_yoe":5}',
+          'filter.json': '{"title":{}}',
+        },
+      });
+      // filter.json reads back exactly what we wrote (own write, would not
+      // block on its own); resume.json now reads back something else
+      // entirely — some OTHER tool touched it since our last write.
+      vi.mocked(configApi.getConfigDoc).mockImplementation((_profile, doc) =>
+        Promise.resolve({
+          text:
+            doc === 'resume.json'
+              ? '{"current_yoe":99,"hand_edited":true}'
+              : '{"title":{}}',
+        }),
+      );
+      const { getHandler } = renderStep({ draft });
+
+      await fillValidRequiredFields(user);
+      const result = await getHandler()?.();
+
+      expect(result).toBe(false);
+      expect(await screen.findByTestId('wizard-existing-config')).toHaveTextContent(
+        'This profile already has filter rules. Edit them in Settings.',
+      );
+      expect(wizardApi.writeConfigDocText).not.toHaveBeenCalled();
     },
   );
 });

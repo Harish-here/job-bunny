@@ -128,26 +128,29 @@ export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepPr
     if (hasError) return false;
 
     const entries = currentRows.filter((row) => row.url.trim() !== '');
-    let wroteHunt = current.wroteHunt;
+    let writtenDocs = current.writtenDocs;
 
     if (entries.length > 0) {
-      // Skipped once THIS session has already written search_urls.md once
-      // (`current.wroteHunt`) — mirrors Step3About's guard fix: re-reading
-      // after our own prior write would see our own bullet lines and block
-      // Back-then-Next forever.
-      if (!current.wroteHunt) {
-        const doc = await getConfigDoc(current.profile, 'search_urls.md');
-        if (hasBulletLine(doc.text)) {
-          setExistingConfig(true);
-          return false;
-        }
+      // Content-aware never-clobber guard, every submit with entries to
+      // write — mirrors Step3About's guard: re-read the live doc and
+      // compare it against `current.writtenDocs['search_urls.md']`, the
+      // exact text THIS wizard itself last wrote there (persists in the
+      // draft across reloads, not just this session). An exact match means
+      // our own prior write, still untouched — skip the block, so
+      // Back-then-Next can re-submit. Anything else (no stored text, or the
+      // doc reads differently now — a real pre-existing file, or an
+      // external edit since our last write) keeps blocking.
+      const doc = await getConfigDoc(current.profile, 'search_urls.md');
+      const ownWrite =
+        current.writtenDocs['search_urls.md'] !== undefined &&
+        doc.text === current.writtenDocs['search_urls.md'];
+      if (!ownWrite && hasBulletLine(doc.text)) {
+        setExistingConfig(true);
+        return false;
       }
-      await writeConfigDocText(
-        current.profile,
-        'search_urls.md',
-        serializeSearchUrls(entries),
-      );
-      wroteHunt = true;
+      const text = serializeSearchUrls(entries);
+      await writeConfigDocText(current.profile, 'search_urls.md', text);
+      writtenDocs = { ...current.writtenDocs, 'search_urls.md': text };
     }
 
     await patchProfileConfig(current.profile, (cfg) => {
@@ -155,7 +158,7 @@ export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepPr
         entries.length > 0 ? ['linkedin', 'greenhouse', 'keka'] : ['greenhouse', 'keka'];
     });
 
-    onDraftChange({ ...current, wroteHunt });
+    onDraftChange({ ...current, writtenDocs });
     return true;
   }, [onDraftChange]);
 

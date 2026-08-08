@@ -84,20 +84,19 @@ async function submitAboutStep(page: Page): Promise<void> {
 
 interface ExtrasFill {
   notionDbId?: string;
-  notionToken?: string;
-  telegramToken?: string;
   telegramChatId?: string;
 }
 
+// Deliberately no `notionToken`/`telegramToken` fields here: those go
+// through `PUT /api/secrets/:key`, which upserts into the data home's real
+// `.env` (`writeSecret`, `src/cli/wire/board.ts`) — this suite's
+// `JOBBUNNY_HOME` is pinned to the repo root (`wizard.helpers.ts`), the same
+// `.env` a developer's real Notion/Telegram tokens live in. That secrets-PUT
+// coverage stays exclusively in `env-guard.spec.ts`, against a throwaway
+// probe value with a guaranteed restore, not here.
 async function fillExtrasStep(page: Page, answers: ExtrasFill): Promise<void> {
   if (answers.notionDbId != null) {
     await page.getByLabel('Notion database ID').fill(answers.notionDbId);
-  }
-  if (answers.notionToken != null) {
-    await page.getByLabel('Notion token').fill(answers.notionToken);
-  }
-  if (answers.telegramToken != null) {
-    await page.getByLabel('Telegram bot token').fill(answers.telegramToken);
   }
   if (answers.telegramChatId != null) {
     await page.getByLabel('Telegram chat ID').fill(answers.telegramChatId);

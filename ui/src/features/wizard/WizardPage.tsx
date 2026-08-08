@@ -125,11 +125,20 @@ export function WizardPage() {
           // briefly show a nonexistent "step 7 of 6" (STEP_TITLES[7] is
           // undefined, Progress renders past 100%) before the route swap.
           const next = Math.min(s + 1, 6) as WizardStep;
-          setDraft((d) => {
-            const updated = { ...d, step: next };
-            if (updated.profile !== '') writeDraft(updated);
-            return updated;
-          });
+          // `next === s` only ever happens when the clamp fired, i.e. the
+          // completed step 6's own submit just ran (and, for step 6
+          // specifically, already called `clearDraft`). Skip the draft
+          // side effect entirely in that case — re-running `setDraft` /
+          // `writeDraft` here would otherwise resurrect the very draft
+          // step 6 just cleared, purely as a side effect of a Next click
+          // that structurally can't advance any further.
+          if (next !== s) {
+            setDraft((d) => {
+              const updated = { ...d, step: next };
+              if (updated.profile !== '') writeDraft(updated);
+              return updated;
+            });
+          }
           return next;
         });
       }

@@ -49,15 +49,25 @@ export interface WizardDraft {
   hunt: HuntAnswers;
   extras: ExtrasAnswers;
   launch: LaunchAnswers;
-  /** True once THIS session's Step3About submit has already written
-   * resume.json + filter.json for `profile` — set right after that write
-   * succeeds, never re-derived from the documents themselves. Lets the
-   * never-clobber guard tell "my own prior write" (skip the guard, so Back
-   * then Next again can re-submit) apart from "real pre-existing config"
-   * (keep blocking), instead of tripping on either one identically. */
-  wroteAbout: boolean;
-  /** Same idea as `wroteAbout`, for Step4Hunt's search_urls.md write. */
-  wroteHunt: boolean;
+  /** The exact serialized text this wizard itself last wrote to each
+   * never-clobber-guarded doc, keyed by doc name — set right after that
+   * write's PUT succeeds, to exactly the text sent, never re-derived from
+   * the documents themselves. This persists in the draft (localStorage),
+   * across reloads, not just for the rest of THIS session: a resumed draft
+   * still carries it. The never-clobber guard re-reads the live doc every
+   * submit and compares it against the stored text — an exact match means
+   * "my own prior write, still untouched" (skip the block, so Back then
+   * Next again can re-submit); a mismatch (no stored text, or the doc now
+   * reads differently) means either "real pre-existing config" or "some
+   * OTHER tool edited it since," and both keep blocking. A plain boolean
+   * flag can't tell those two apart — once set it would skip the guard
+   * forever, even after an external edit — which is exactly why this is
+   * content, not a flag. */
+  writtenDocs: {
+    'resume.json'?: string;
+    'filter.json'?: string;
+    'search_urls.md'?: string;
+  };
 }
 
 /** The props every wizard step component receives. `WizardPage` owns all
@@ -108,8 +118,7 @@ export function emptyDraft(profile: string): WizardDraft {
       customTimes: [],
       weekdays: [1, 2, 3, 4, 5],
     },
-    wroteAbout: false,
-    wroteHunt: false,
+    writtenDocs: {},
   };
 }
 
