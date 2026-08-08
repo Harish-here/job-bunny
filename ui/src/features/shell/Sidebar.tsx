@@ -14,6 +14,8 @@ import { Button } from '../../components/ui/button';
 import type { BoardProfile } from '../../lib/api/types';
 import type { Route, RouteName } from '../../lib/router';
 import { cn } from '../../lib/utils';
+import { RunNowButton } from '../runcontrol/RunNowButton';
+import type { RunControlHandle } from '../runcontrol/useRunControl';
 import { Mascot } from './Mascot';
 import type { MascotState } from './mascotState';
 import { ProfileSwitcher } from './ProfileSwitcher';
@@ -34,6 +36,7 @@ export function Sidebar({
   version,
   collapsed,
   mascot,
+  runControl,
   onChoose,
   onNavigate,
   onToggleCollapsed,
@@ -44,6 +47,7 @@ export function Sidebar({
   version: string | undefined;
   collapsed: boolean;
   mascot: MascotState;
+  runControl: RunControlHandle;
   onChoose: (name: string) => void;
   onNavigate: (route: Route) => void;
   onToggleCollapsed: () => void;
@@ -115,6 +119,7 @@ export function Sidebar({
         })}
       </nav>
       <div className="mt-auto flex flex-col gap-2">
+        <RunNowButton control={runControl} collapsed={collapsed} />
         <Mascot state={mascot} className="self-center" />
         <ProfileSwitcher
           profile={profile}

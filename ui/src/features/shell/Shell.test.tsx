@@ -44,6 +44,9 @@ function stubFetch(opts: {
         json: async () => ({ version: opts.version ?? '2.1.0' }),
       } as unknown as Response;
     }
+    if (url.includes('/run-intents')) {
+      return { ok: true, json: async () => ({ rows: [] }) } as unknown as Response;
+    }
     // TriagePage (the default route's real page, wired in T10) fetches its
     // own jobs/meta — Shell's own tests only care that it renders *for the
     // resolved profile*, proven below via these call URLs, not via a
@@ -109,6 +112,7 @@ describe('Shell', () => {
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
+    expect(screen.getByTestId('run-now')).toHaveTextContent('Run now');
 
     // Default hash route is triage; TriagePage rendering proves the switch
     // wired it in, and the jobs fetch targeting rajni proves pickProfile
