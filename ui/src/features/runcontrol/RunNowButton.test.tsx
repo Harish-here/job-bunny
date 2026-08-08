@@ -11,6 +11,7 @@ function makeControl(over: Partial<RunControlHandle> = {}): RunControlHandle {
     onRun: vi.fn(),
     onCancel: vi.fn(),
     isSubmitting: false,
+    error: null,
     ...over,
   };
 }
@@ -111,6 +112,20 @@ describe('RunNowButton', () => {
     });
     render(<RunNowButton control={control} collapsed={false} />);
     expect(screen.getByTestId('run-now-secondary')).toHaveTextContent('View run');
+  });
+
+  it('renders a destructive error message under the button when set', () => {
+    render(
+      <RunNowButton control={makeControl({ error: 'HTTP 500' })} collapsed={false} />,
+    );
+    expect(screen.getByTestId('run-now-error')).toHaveTextContent('HTTP 500');
+  });
+
+  it('hides the error message when the sidebar is collapsed', () => {
+    render(
+      <RunNowButton control={makeControl({ error: 'HTTP 500' })} collapsed={true} />,
+    );
+    expect(screen.queryByTestId('run-now-error')).not.toBeInTheDocument();
   });
 
   it('is icon-only with an aria-label when the sidebar is collapsed', () => {

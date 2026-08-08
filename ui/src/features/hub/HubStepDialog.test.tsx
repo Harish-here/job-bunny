@@ -13,19 +13,35 @@ beforeAll(() => {
 });
 
 // Step3About is faked ONLY to make registration timing controllable for the
-// "Save disabled until registered" assertion below — every real wizard step
-// registers its submit handler synchronously, unconditionally, on its own
-// mount (the frozen contract), so there is no observable window in which a
-// REAL step's Save button is disabled after render() returns. Step4Hunt and
-// Step5Extras are exercised as the REAL, unmocked components in every other
-// test in this file. This mock lives in a TEST file and never touches
-// anything under ui/src/features/wizard/.
+// "Save disabled until registered" assertion below, and (via `fakeOutcome`)
+// to reproduce a rejecting submit — every real wizard step registers its
+// submit handler synchronously, unconditionally, on its own mount (the
+// frozen contract), so there is no observable window in which a REAL
+// step's Save button is disabled after render() returns, and no REAL
+// step's own submit ever rejects (Step3About's own contract: only a write
+// failure propagates uncaught, and this file has no real write to fail).
+// Step4Hunt and Step5Extras are exercised as the REAL, unmocked components
+// in every other test in this file. This mock lives in a TEST file and
+// never touches anything under ui/src/features/wizard/.
+// `vi.hoisted` (not a plain `const`) because `vi.mock` factories below run
+// in a hoisted scope above normal module-level statements — this is the
+// documented way to share mutable state between a mock factory and a
+// test body without hitting the "cannot access before initialization"
+// hoisting trap.
+const fakeOutcome = vi.hoisted(() => ({ mode: 'resolve' as 'resolve' | 'reject' }));
 vi.mock('../wizard/steps/Step3About', () => ({
   Step3About: ({ registerSubmit }: WizardStepProps) => (
     <button
       type="button"
       data-testid="fake-register"
-      onClick={() => registerSubmit(async () => true)}
+      onClick={() =>
+        registerSubmit(async () => {
+          if (fakeOutcome.mode === 'reject') {
+            throw new Error('profile.json is invalid: connector is required');
+          }
+          return true;
+        })
+      }
     >
       Register
     </button>
@@ -49,6 +65,7 @@ function renderDialog(
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  fakeOutcome.mode = 'resolve';
 });
 
 describe('HubStepDialog', () => {
@@ -82,6 +99,21 @@ describe('HubStepDialog', () => {
     // any React-controlled event), so the committed DOM is already visible
     // the instant this awaited click resolves.
     expect(screen.getByText('A Telegram chat ID is a whole number.')).toBeInTheDocument();
+    expect(screen.getByTestId('hub-panel')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('a handler that rejects leaves the dialog open, does not close, and renders the message', async () => {
+    fakeOutcome.mode = 'reject';
+    const onClose = vi.fn();
+    renderDialog('persona-filters', onClose);
+
+    await userEvent.click(screen.getByTestId('fake-register'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByTestId('hub-dialog-error')).toHaveTextContent(
+      'profile.json is invalid: connector is required',
+    );
     expect(screen.getByTestId('hub-panel')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });

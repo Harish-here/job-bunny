@@ -41,6 +41,16 @@ afterEach(() => {
 });
 
 describe('ResumeSection', () => {
+  it('a failed load renders a blocking error and never a Save button', async () => {
+    vi.mocked(configApi.getConfigDoc).mockRejectedValue(new Error('network error'));
+    renderSection();
+    expect(await screen.findByTestId('settings-load-error')).toHaveTextContent(
+      "Couldn't load resume.json: network error",
+    );
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+  });
+
   it('renders current_yoe and an existing core skill from the loaded doc', async () => {
     vi.mocked(configApi.getConfigDoc).mockResolvedValue({
       text: JSON.stringify(RAJNI_RESUME),

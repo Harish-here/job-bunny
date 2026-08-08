@@ -6,6 +6,7 @@ import { Field, FieldControl, FieldError, FieldLabel } from '../../../components
 import { Input } from '../../../components/ui/input';
 import { Switch } from '../../../components/ui/switch';
 import { daemonQuery } from '../../wizard/wizard.queries';
+import { DocFormGate } from '../DocFormGate';
 import { useDocForm } from '../useDocForm';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -95,91 +96,103 @@ export function ScheduleSection({ profile }: { profile: string }) {
       : 'Next run (saved): no upcoming run';
 
   return (
-    <div className="flex flex-col gap-4">
-      <p data-testid="schedule-next-run" className="text-sm text-muted-foreground">
-        {nextRunLabel}
-      </p>
-      <Field>
-        <div className="flex items-center justify-between gap-2">
-          <FieldLabel>Enabled</FieldLabel>
+    <DocFormGate
+      doc="profile.json"
+      isLoading={docForm.isLoading}
+      loadError={docForm.loadError}
+      parseError={docForm.parseError}
+    >
+      <div className="flex flex-col gap-4">
+        <p data-testid="schedule-next-run" className="text-sm text-muted-foreground">
+          {nextRunLabel}
+        </p>
+        <Field>
+          <div className="flex items-center justify-between gap-2">
+            <FieldLabel>Enabled</FieldLabel>
+            <FieldControl>
+              <Switch checked={enabled} onCheckedChange={setEnabled} />
+            </FieldControl>
+          </div>
+        </Field>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm leading-none font-medium">Run times</span>
+          <div className="flex flex-wrap gap-1.5">
+            {times.map((time) => (
+              <Badge key={time} variant="secondary">
+                <span>{time}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${time}`}
+                  onClick={() => removeTime(time)}
+                >
+                  ×
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex gap-1.5">
+            <Input
+              aria-label="Add a run time"
+              placeholder="HH:MM"
+              value={newTime}
+              onChange={(e) => setNewTime(e.target.value)}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={addTime}>
+              Add
+            </Button>
+          </div>
+          {timeError && <p className="text-sm text-destructive">{timeError}</p>}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm leading-none font-medium">Weekdays</span>
+          <div className="flex flex-wrap gap-1.5">
+            {WEEKDAY_LABELS.map((label, day) => (
+              <Badge
+                key={label}
+                asChild
+                variant={weekdays.includes(day) ? 'default' : 'outline'}
+              >
+                <button
+                  type="button"
+                  aria-pressed={weekdays.includes(day)}
+                  onClick={() => toggleWeekday(day)}
+                >
+                  {label}
+                </button>
+              </Badge>
+            ))}
+          </div>
+        </div>
+        <Field invalid={graceError != null}>
+          <FieldLabel>Grace minutes</FieldLabel>
           <FieldControl>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
+            <Input
+              type="number"
+              value={String(graceMinutes)}
+              onChange={(e) => setGraceMinutes(Number(e.target.value))}
+            />
           </FieldControl>
-        </div>
-      </Field>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm leading-none font-medium">Run times</span>
-        <div className="flex flex-wrap gap-1.5">
-          {times.map((time) => (
-            <Badge key={time} variant="secondary">
-              <span>{time}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${time}`}
-                onClick={() => removeTime(time)}
-              >
-                ×
-              </button>
-            </Badge>
-          ))}
-        </div>
-        <div className="flex gap-1.5">
-          <Input
-            aria-label="Add a run time"
-            placeholder="HH:MM"
-            value={newTime}
-            onChange={(e) => setNewTime(e.target.value)}
-          />
-          <Button type="button" variant="outline" size="sm" onClick={addTime}>
-            Add
+          <FieldError>{graceError}</FieldError>
+        </Field>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={docForm.isSaving}
+            onClick={handleSave}
+          >
+            Save
           </Button>
+          {docForm.isSaving && (
+            <span className="text-xs text-muted-foreground">Saving…</span>
+          )}
         </div>
-        {timeError && <p className="text-sm text-destructive">{timeError}</p>}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm leading-none font-medium">Weekdays</span>
-        <div className="flex flex-wrap gap-1.5">
-          {WEEKDAY_LABELS.map((label, day) => (
-            <Badge
-              key={label}
-              asChild
-              variant={weekdays.includes(day) ? 'default' : 'outline'}
-            >
-              <button
-                type="button"
-                aria-pressed={weekdays.includes(day)}
-                onClick={() => toggleWeekday(day)}
-              >
-                {label}
-              </button>
-            </Badge>
-          ))}
-        </div>
-      </div>
-      <Field invalid={graceError != null}>
-        <FieldLabel>Grace minutes</FieldLabel>
-        <FieldControl>
-          <Input
-            type="number"
-            value={String(graceMinutes)}
-            onChange={(e) => setGraceMinutes(Number(e.target.value))}
-          />
-        </FieldControl>
-        <FieldError>{graceError}</FieldError>
-      </Field>
-      <div className="flex items-center gap-2">
-        <Button type="button" size="sm" disabled={docForm.isSaving} onClick={handleSave}>
-          Save
-        </Button>
-        {docForm.isSaving && (
-          <span className="text-xs text-muted-foreground">Saving…</span>
+        {docForm.serverError && (
+          <p data-testid="settings-error" className="text-sm text-destructive">
+            {docForm.serverError}
+          </p>
         )}
       </div>
-      {docForm.serverError && (
-        <p data-testid="settings-error" className="text-sm text-destructive">
-          {docForm.serverError}
-        </p>
-      )}
-    </div>
+    </DocFormGate>
   );
 }

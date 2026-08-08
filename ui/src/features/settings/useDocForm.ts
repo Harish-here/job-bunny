@@ -9,6 +9,7 @@ export interface UseDocFormResult {
   value: Record<string, unknown> | null;
   parseError: boolean;
   isLoading: boolean;
+  loadError: Error | null;
   isSaving: boolean;
   serverError: string | null;
   save: (mutate: (value: Record<string, unknown>) => void) => Promise<boolean>;
@@ -60,6 +61,12 @@ export function useDocForm(profile: string, doc: ConfigDocName): UseDocFormResul
   // ref's new value. A real state update guarantees the render happens.
   const [syncedFor, setSyncedFor] = useState<string | null>(null);
 
+  // Set only by `save`'s own load guard below — distinct from
+  // `mutation.error`, which only exists once a PUT has actually been
+  // attempted. Cleared the instant a `save` call gets past that guard, so
+  // it never lingers to mask a later real server error.
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
+
   // Reset only on the initial load succeeding, never a later background
   // refetch — an external `jobbunny config set` never stomps an edit.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
@@ -76,6 +83,18 @@ export function useDocForm(profile: string, doc: ConfigDocName): UseDocFormResul
   async function save(
     mutate: (value: Record<string, unknown>) => void,
   ): Promise<boolean> {
+    // Refuse rather than build a payload from an unloaded doc's blank
+    // base: until `syncedFor` matches this exact (profile, doc) pair,
+    // `rawText` is either '' (never loaded) or a PRIOR profile/doc's text
+    // (mid profile-switch) — and `parseDoc('')` is a VALID empty object,
+    // not a parse error, so nothing else catches this. See task brief.
+    if (isLoading) {
+      setBlockedMessage(
+        "This document hasn't finished loading yet — try again in a moment.",
+      );
+      return false;
+    }
+    setBlockedMessage(null);
     const parsed = parseDoc(rawText);
     if (parsed.value == null) return false;
     mutate(parsed.value);
@@ -93,8 +112,9 @@ export function useDocForm(profile: string, doc: ConfigDocName): UseDocFormResul
     value,
     parseError,
     isLoading,
+    loadError: query.error,
     isSaving: mutation.isPending,
-    serverError: mutation.error?.message ?? null,
+    serverError: blockedMessage ?? mutation.error?.message ?? null,
     save,
   };
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
+import { DocFormGate } from '../DocFormGate';
 import { useDocForm } from '../useDocForm';
 
 const CONNECTORS = ['sqlite', 'notion'] as const;
@@ -73,89 +74,101 @@ export function ProfileSection({ profile }: { profile: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm leading-none font-medium">Connector</span>
-        <select
-          aria-label="Connector"
-          value={connector}
-          onChange={(e) => setConnector(e.target.value as 'sqlite' | 'notion')}
-          className="h-8 w-fit rounded-lg border border-input bg-transparent px-2.5 text-sm"
-        >
-          {CONNECTORS.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm leading-none font-medium">Lanes</span>
-        <div className="flex flex-wrap gap-3">
-          {LANES.map((lane) => (
-            <label key={lane} className="flex items-center gap-1.5 text-sm">
-              <input
-                type="checkbox"
-                checked={lanes.includes(lane)}
-                onChange={() => toggleLane(lane)}
-              />
-              {lane}
-            </label>
-          ))}
+    <DocFormGate
+      doc="profile.json"
+      isLoading={docForm.isLoading}
+      loadError={docForm.loadError}
+      parseError={docForm.parseError}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm leading-none font-medium">Connector</span>
+          <select
+            aria-label="Connector"
+            value={connector}
+            onChange={(e) => setConnector(e.target.value as 'sqlite' | 'notion')}
+            className="h-8 w-fit rounded-lg border border-input bg-transparent px-2.5 text-sm"
+          >
+            {CONNECTORS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
-      <label className="flex items-center gap-1.5 text-sm">
-        <input
-          type="checkbox"
-          checked={telegramEnabled}
-          onChange={(e) => setTelegramEnabled(e.target.checked)}
-        />
-        Telegram notifier
-      </label>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm leading-none font-medium">Routines</span>
-        <div className="flex flex-wrap gap-1.5">
-          {routines.map((name) => (
-            <Badge key={name} variant="secondary">
-              <span>{name}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${name}`}
-                onClick={() => removeRoutine(name)}
-              >
-                ×
-              </button>
-            </Badge>
-          ))}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm leading-none font-medium">Lanes</span>
+          <div className="flex flex-wrap gap-3">
+            {LANES.map((lane) => (
+              <label key={lane} className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={lanes.includes(lane)}
+                  onChange={() => toggleLane(lane)}
+                />
+                {lane}
+              </label>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-1.5">
-          <Input
-            aria-label="Add routine"
-            value={newRoutine}
-            onChange={(e) => setNewRoutine(e.target.value)}
+        <label className="flex items-center gap-1.5 text-sm">
+          <input
+            type="checkbox"
+            checked={telegramEnabled}
+            onChange={(e) => setTelegramEnabled(e.target.checked)}
           />
-          <Button type="button" variant="outline" size="sm" onClick={addRoutine}>
-            Add
-          </Button>
+          Telegram notifier
+        </label>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm leading-none font-medium">Routines</span>
+          <div className="flex flex-wrap gap-1.5">
+            {routines.map((name) => (
+              <Badge key={name} variant="secondary">
+                <span>{name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${name}`}
+                  onClick={() => removeRoutine(name)}
+                >
+                  ×
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex gap-1.5">
+            <Input
+              aria-label="Add routine"
+              value={newRoutine}
+              onChange={(e) => setNewRoutine(e.target.value)}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={addRoutine}>
+              Add
+            </Button>
+          </div>
         </div>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Notion and Telegram settings are configured from Setup &amp; Health →
-        Integrations, or through Edit as JSON.
-      </p>
-      <div className="flex items-center gap-2">
-        <Button type="button" size="sm" disabled={docForm.isSaving} onClick={handleSave}>
-          Save
-        </Button>
-        {docForm.isSaving && (
-          <span className="text-xs text-muted-foreground">Saving…</span>
+        <p className="text-sm text-muted-foreground">
+          Notion and Telegram settings are configured from Setup &amp; Health →
+          Integrations, or through Edit as JSON.
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={docForm.isSaving}
+            onClick={handleSave}
+          >
+            Save
+          </Button>
+          {docForm.isSaving && (
+            <span className="text-xs text-muted-foreground">Saving…</span>
+          )}
+        </div>
+        {docForm.serverError && (
+          <p data-testid="settings-error" className="text-sm text-destructive">
+            {docForm.serverError}
+          </p>
         )}
       </div>
-      {docForm.serverError && (
-        <p data-testid="settings-error" className="text-sm text-destructive">
-          {docForm.serverError}
-        </p>
-      )}
-    </div>
+    </DocFormGate>
   );
 }

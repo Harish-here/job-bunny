@@ -51,6 +51,7 @@ export function HubStepDialog({
   const [draft, setDraft] = useState<WizardDraft>(() => emptyDraft(profile));
   const [submit, setSubmit] = useState<(() => Promise<boolean>) | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Wrapped in an updater, not passed as `setSubmit` directly: React treats
   // any function value passed straight to a state setter as an updater
@@ -81,6 +82,13 @@ export function HubStepDialog({
   async function handleSave() {
     if (submit === null || saving) return;
     setSaving(true);
+    setError(null);
+    // Step3About's own contract (see its `handleSubmit` doc comment): field
+    // errors and the never-clobber stop resolve `false` and stay inside the
+    // step's own inline UI; only a write failure is a "shell" failure,
+    // surfaced by letting the rejection propagate uncaught. WizardPage
+    // catches that at its own shell level — this dialog IS that shell for
+    // every hosted step, so it must catch here too, not just try/finally.
     try {
       const ok = await submit();
       if (ok) {
@@ -90,6 +98,8 @@ export function HubStepDialog({
         }
         onClose();
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setSaving(false);
     }
@@ -106,6 +116,15 @@ export function HubStepDialog({
         <DialogHeader>
           <DialogTitle>{DIALOG_TITLE[cardId]}</DialogTitle>
         </DialogHeader>
+        {error && (
+          <div
+            role="alert"
+            data-testid="hub-dialog-error"
+            className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            {error}
+          </div>
+        )}
         {cardId === 'persona-filters' && <Step3About {...stepProps} />}
         {cardId === 'search-urls' && <Step4Hunt {...stepProps} />}
         {cardId === 'integrations' && <Step5Extras {...stepProps} onSkip={onClose} />}

@@ -79,6 +79,22 @@ describe('ProfileSection', () => {
     expect(written.routines).toEqual(['cleanup']);
   });
 
+  it('a failed load never enables Save, and a click on the pre-load Save cannot write a blank-based doc', async () => {
+    vi.mocked(configApi.getConfigDoc).mockRejectedValue(new Error('network error'));
+    renderSection();
+
+    // Reproduces the critical finding: before the fix, the Save button
+    // renders (and is enabled) immediately, using the default-valued form
+    // state built on a never-loaded doc — clicking it PUTs a blank base
+    // that clobbers profile.json's real settings/schedule.
+    await waitFor(() => expect(configApi.getConfigDoc).toHaveBeenCalled());
+    const save = screen.queryByRole('button', { name: 'Save' });
+    if (save && !(save as HTMLButtonElement).disabled) {
+      await userEvent.click(save);
+    }
+    expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+  });
+
   it('renders a rejected save message inline', async () => {
     stubDoc();
     vi.mocked(configApi.putConfigDoc).mockRejectedValue(

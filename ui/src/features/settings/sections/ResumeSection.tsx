@@ -7,6 +7,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
+import { DocFormGate } from '../DocFormGate';
 import { useDocForm } from '../useDocForm';
 
 interface ResumeForm {
@@ -150,58 +151,63 @@ export function ResumeSection({ profile }: { profile: string }) {
     await doc.save((value) => applyForm(value, form));
   }
 
-  if (doc.isLoading) return null;
-
   return (
-    <div className="flex flex-col gap-4">
-      <Field invalid={Boolean(yoeError)}>
-        <FieldLabel>Current years of experience</FieldLabel>
-        <FieldControl>
-          <Input
-            value={form.currentYoeText}
-            onChange={(e) => update({ currentYoeText: e.target.value })}
-          />
-        </FieldControl>
-        <FieldError>{yoeError}</FieldError>
-      </Field>
-      <ChipEditor
-        label="Target seniority"
-        values={form.targetSeniority}
-        onChange={(v) => update({ targetSeniority: v })}
-      />
-      <ChipEditor
-        label="Core skills"
-        values={form.coreSkills}
-        onChange={(v) => update({ coreSkills: v })}
-      />
-      <ChipEditor
-        label="Secondary skills"
-        values={form.secondarySkills}
-        onChange={(v) => update({ secondarySkills: v })}
-      />
-      <ChipEditor
-        label="Preferred work type"
-        values={form.preferredWorkType}
-        onChange={(v) => update({ preferredWorkType: v })}
-      />
-      <ChipEditor
-        label="Location"
-        values={form.location}
-        onChange={(v) => update({ location: v })}
-      />
-      <ChipEditor
-        label="Domain experience"
-        values={form.domainExperience}
-        onChange={(v) => update({ domainExperience: v })}
-      />
-      <Button
-        type="button"
-        disabled={doc.isSaving || Boolean(yoeError)}
-        onClick={handleSave}
-      >
-        Save
-      </Button>
-      {doc.serverError && <p data-testid="settings-error">{doc.serverError}</p>}
-    </div>
+    <DocFormGate
+      doc="resume.json"
+      isLoading={doc.isLoading}
+      loadError={doc.loadError}
+      parseError={doc.parseError}
+    >
+      <div className="flex flex-col gap-4">
+        <Field invalid={Boolean(yoeError)}>
+          <FieldLabel>Current years of experience</FieldLabel>
+          <FieldControl>
+            <Input
+              value={form.currentYoeText}
+              onChange={(e) => update({ currentYoeText: e.target.value })}
+            />
+          </FieldControl>
+          <FieldError>{yoeError}</FieldError>
+        </Field>
+        <ChipEditor
+          label="Target seniority"
+          values={form.targetSeniority}
+          onChange={(v) => update({ targetSeniority: v })}
+        />
+        <ChipEditor
+          label="Core skills"
+          values={form.coreSkills}
+          onChange={(v) => update({ coreSkills: v })}
+        />
+        <ChipEditor
+          label="Secondary skills"
+          values={form.secondarySkills}
+          onChange={(v) => update({ secondarySkills: v })}
+        />
+        <ChipEditor
+          label="Preferred work type"
+          values={form.preferredWorkType}
+          onChange={(v) => update({ preferredWorkType: v })}
+        />
+        <ChipEditor
+          label="Location"
+          values={form.location}
+          onChange={(v) => update({ location: v })}
+        />
+        <ChipEditor
+          label="Domain experience"
+          values={form.domainExperience}
+          onChange={(v) => update({ domainExperience: v })}
+        />
+        <Button
+          type="button"
+          disabled={doc.isSaving || Boolean(yoeError)}
+          onClick={handleSave}
+        >
+          Save
+        </Button>
+        {doc.serverError && <p data-testid="settings-error">{doc.serverError}</p>}
+      </div>
+    </DocFormGate>
   );
 }

@@ -78,6 +78,27 @@ describe('useDocForm', () => {
     expect(call[2].endsWith('\n')).toBe(true);
   });
 
+  it('exposes a loadError when the GET fails, and save() refuses without ever PUTting a blank base', async () => {
+    vi.mocked(configApi.getConfigDoc).mockRejectedValue(new Error('network error'));
+    const { result } = renderHook(() => useDocForm('rajni', 'filter.json'), {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.loadError?.message).toBe('network error'));
+    // `isLoading` never clears on a rejected GET — `syncedFor` is only set
+    // by the success effect — so save() must refuse via that same signal.
+    expect(result.current.isLoading).toBe(true);
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.save((value) => {
+        value.locations = [];
+      });
+    });
+    expect(ok).toBe(false);
+    expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+    expect(result.current.serverError).toMatch(/hasn't finished loading/);
+  });
+
   it('save() returns false and surfaces the message when the PUT is rejected', async () => {
     vi.mocked(configApi.getConfigDoc).mockResolvedValue({
       text: '{"connector":"sqlite"}',

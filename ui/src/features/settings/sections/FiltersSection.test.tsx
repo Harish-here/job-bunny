@@ -63,6 +63,16 @@ describe('FiltersSection', () => {
     expect(written.timezones).toEqual({ accept: ['APAC'], severity: 'hard' });
   });
 
+  it('a failed load renders a blocking error and never a Save button', async () => {
+    vi.mocked(configApi.getConfigDoc).mockRejectedValue(new Error('network error'));
+    renderSection();
+    expect(await screen.findByTestId('settings-load-error')).toHaveTextContent(
+      "Couldn't load filter.json: network error",
+    );
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+  });
+
   it('an inline validation error blocks the request', async () => {
     stubDoc();
     const user = userEvent.setup();

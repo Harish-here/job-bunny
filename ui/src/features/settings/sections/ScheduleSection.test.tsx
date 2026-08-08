@@ -68,6 +68,17 @@ afterEach(() => {
 });
 
 describe('ScheduleSection', () => {
+  it('a failed load renders a blocking error and never a Save button', async () => {
+    vi.mocked(configApi.getConfigDoc).mockRejectedValue(new Error('network error'));
+    stubDaemon();
+    renderSection();
+    expect(await screen.findByTestId('settings-load-error')).toHaveTextContent(
+      "Couldn't load profile.json: network error",
+    );
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+  });
+
   it('adding a malformed time is rejected inline before any request', async () => {
     stubDoc();
     stubDaemon();

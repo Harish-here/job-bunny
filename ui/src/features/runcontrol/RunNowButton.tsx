@@ -38,7 +38,7 @@ export function RunNowButton({
   control: RunControlHandle;
   collapsed: boolean;
 }) {
-  const { state, label, onRun, isSubmitting } = control;
+  const { state, label, onRun, isSubmitting, error } = control;
   const disabled = isSubmitting || state.kind === 'running';
   const secondary = secondaryFor(control);
 
@@ -69,6 +69,11 @@ export function RunNowButton({
             <p className="text-xs text-muted-foreground">{secondary.hint}</p>
           )}
         </div>
+      )}
+      {!collapsed && error && (
+        <p data-testid="run-now-error" className="text-xs text-destructive">
+          {error}
+        </p>
       )}
     </div>
   );

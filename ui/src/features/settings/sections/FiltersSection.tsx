@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
+import { DocFormGate } from '../DocFormGate';
 import { useDocForm } from '../useDocForm';
 import {
   applyFilterEditorState,
@@ -225,102 +226,117 @@ export function FiltersSection({ profile }: { profile: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3">
-        <span className="text-sm leading-none font-medium">Title rules</span>
-        {TITLE_RULE_KEYS.map((key) => (
-          <TitleRuleEditor
-            key={key}
-            ruleKey={key}
-            rule={state.title[key]}
-            onChange={(rule) => updateTitleRule(key, rule)}
-          />
-        ))}
-      </div>
-      <div className="flex flex-col gap-2">
-        <span className="text-sm leading-none font-medium">Locations</span>
-        {state.locations.map((location, i) => (
-          <LocationRow
-            // biome-ignore lint/suspicious/noArrayIndexKey: FilterLocation carries no stable id in the model
-            key={i}
-            location={location}
-            onChange={(next) => updateLocation(i, next)}
-            onRemove={() => removeLocation(i)}
-            cityError={errors[`locations.${i}.city`]}
-            workTypesError={errors[`locations.${i}.workTypes`]}
-          />
-        ))}
-        <Button type="button" variant="outline" size="sm" onClick={addLocation}>
-          Add location
-        </Button>
-      </div>
-      <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-        <span className="text-sm leading-none font-medium">Skills</span>
-        <ChipRow
-          ariaLabel="Add a core skill"
-          values={state.skills.core}
-          onAdd={(v) =>
-            setState((prev) => ({
-              ...prev,
-              skills: { ...prev.skills, core: [...prev.skills.core, v] },
-            }))
-          }
-          onRemove={(v) =>
-            setState((prev) => ({
-              ...prev,
-              skills: { ...prev.skills, core: prev.skills.core.filter((c) => c !== v) },
-            }))
-          }
-        />
-        <label htmlFor="filters-min-match" className="flex items-center gap-1.5 text-sm">
-          Minimum skill matches
-          <Input
-            id="filters-min-match"
-            type="number"
-            aria-label="Minimum skill matches"
-            value={String(state.skills.minMatch)}
-            onChange={(e) =>
+    <DocFormGate
+      doc="filter.json"
+      isLoading={docForm.isLoading}
+      loadError={docForm.loadError}
+      parseError={docForm.parseError}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
+          <span className="text-sm leading-none font-medium">Title rules</span>
+          {TITLE_RULE_KEYS.map((key) => (
+            <TitleRuleEditor
+              key={key}
+              ruleKey={key}
+              rule={state.title[key]}
+              onChange={(rule) => updateTitleRule(key, rule)}
+            />
+          ))}
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-sm leading-none font-medium">Locations</span>
+          {state.locations.map((location, i) => (
+            <LocationRow
+              // biome-ignore lint/suspicious/noArrayIndexKey: FilterLocation carries no stable id in the model
+              key={i}
+              location={location}
+              onChange={(next) => updateLocation(i, next)}
+              onRemove={() => removeLocation(i)}
+              cityError={errors[`locations.${i}.city`]}
+              workTypesError={errors[`locations.${i}.workTypes`]}
+            />
+          ))}
+          <Button type="button" variant="outline" size="sm" onClick={addLocation}>
+            Add location
+          </Button>
+        </div>
+        <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+          <span className="text-sm leading-none font-medium">Skills</span>
+          <ChipRow
+            ariaLabel="Add a core skill"
+            values={state.skills.core}
+            onAdd={(v) =>
               setState((prev) => ({
                 ...prev,
-                skills: { ...prev.skills, minMatch: Number(e.target.value) },
+                skills: { ...prev.skills, core: [...prev.skills.core, v] },
+              }))
+            }
+            onRemove={(v) =>
+              setState((prev) => ({
+                ...prev,
+                skills: { ...prev.skills, core: prev.skills.core.filter((c) => c !== v) },
               }))
             }
           />
-        </label>
-        {errors['skills.minMatch'] && (
-          <p className="text-sm text-destructive">{errors['skills.minMatch']}</p>
-        )}
-        <label className="flex items-center gap-1.5 text-sm">
-          Severity
-          <select
-            aria-label="Skills severity"
-            value={state.skills.severity}
-            onChange={(e) =>
-              setState((prev) => ({
-                ...prev,
-                skills: { ...prev.skills, severity: e.target.value as Severity },
-              }))
-            }
-            className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm"
+          <label
+            htmlFor="filters-min-match"
+            className="flex items-center gap-1.5 text-sm"
           >
-            <option value="hard">hard</option>
-            <option value="soft">soft</option>
-          </select>
-        </label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Button type="button" size="sm" disabled={docForm.isSaving} onClick={handleSave}>
-          Save
-        </Button>
-        {docForm.isSaving && (
-          <span className="text-xs text-muted-foreground">Saving…</span>
+            Minimum skill matches
+            <Input
+              id="filters-min-match"
+              type="number"
+              aria-label="Minimum skill matches"
+              value={String(state.skills.minMatch)}
+              onChange={(e) =>
+                setState((prev) => ({
+                  ...prev,
+                  skills: { ...prev.skills, minMatch: Number(e.target.value) },
+                }))
+              }
+            />
+          </label>
+          {errors['skills.minMatch'] && (
+            <p className="text-sm text-destructive">{errors['skills.minMatch']}</p>
+          )}
+          <label className="flex items-center gap-1.5 text-sm">
+            Severity
+            <select
+              aria-label="Skills severity"
+              value={state.skills.severity}
+              onChange={(e) =>
+                setState((prev) => ({
+                  ...prev,
+                  skills: { ...prev.skills, severity: e.target.value as Severity },
+                }))
+              }
+              className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm"
+            >
+              <option value="hard">hard</option>
+              <option value="soft">soft</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={docForm.isSaving}
+            onClick={handleSave}
+          >
+            Save
+          </Button>
+          {docForm.isSaving && (
+            <span className="text-xs text-muted-foreground">Saving…</span>
+          )}
+        </div>
+        {docForm.serverError && (
+          <p data-testid="settings-error" className="text-sm text-destructive">
+            {docForm.serverError}
+          </p>
         )}
       </div>
-      {docForm.serverError && (
-        <p data-testid="settings-error" className="text-sm text-destructive">
-          {docForm.serverError}
-        </p>
-      )}
-    </div>
+    </DocFormGate>
   );
 }
