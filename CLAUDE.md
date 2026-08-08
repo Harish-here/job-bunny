@@ -81,7 +81,7 @@ Note: `boundaries` parses via `@swc/core` with `tsConfig` omitted — setting `t
 
 Key invariants:
 
-- **Notion is the source of truth.** `reconcile` reads the live DB every run; `sync` writes only automated fields, never user-edited ones.
+- **The profile's PRIMARY CONNECTOR's store is the source of truth** — Notion for `connector: "notion"` profiles, local sqlite for `connector: "sqlite"` profiles (see below). `reconcile` reads that store every run; `sync` writes only automated fields, never user-edited ones.
 - **Fail-soft where breadth matters, fail-loud on total outage.** One broken URL/card/probe/fetch is a `SoftError` — recorded, run continues. A stage that attempted work and captured **nothing** throws loud (e.g. the LinkedIn lane when every attempted URL yields zero JDs — shaped like an expired login).
 - **Lanes are config-driven.** Selectors and page behavior come from `src/adapters/lanes/linkedin/page_inventory/<page>.json` at runtime; DOM drift is fixed by regenerating the inventory (`/page-analyse`), never by editing lane code.
 - **Farm writes what source reads.** `farm` must run before `source`: it side-writes `registry/companies_seen.json`, which `source` folds into the company registry.
@@ -118,7 +118,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 
 ## Conventions
 
-- ESM, TypeScript 7 (strict, erasable-syntax-only — no enums/namespaces), zod for schemas, Biome for lint/format. Runtime deps stay at three: `@notionhq/client`, `playwright`, `zod` (Telegram via `fetch`, CLI via `node:util` `parseArgs`, tests via `node:test`).
+- ESM, TypeScript 7 (strict, erasable-syntax-only — no enums/namespaces), zod for schemas, Biome for lint/format. Runtime deps stay at three, plus the de-facto 4th (`dotenv`, loaded once in `main.ts`): `@notionhq/client`, `playwright`, `zod`, `dotenv` (Telegram via `fetch`, CLI via `node:util` `parseArgs`, tests via `node:test`).
 - **Two-pair rule:** every module is a folder with an `index.ts` public surface; internals aren't imported across module boundaries. A folder exceeding two implementation files (test pairs and `index.ts` excluded) gets split into subfolders first.
 - Colocated tests (`foo.ts` + `foo.test.ts`).
 - Pipeline code never names a concrete adapter — it sees only port types; `cli/wire/compose.ts` is the one file allowed to instantiate one.
