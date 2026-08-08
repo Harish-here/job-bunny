@@ -9,7 +9,6 @@ import type {
   RunSummary,
 } from '../../lib/api/types';
 import * as runsApi from '../runs/runs.api';
-import { runsKeys } from '../runs/runs.queries';
 import * as intentsApi from './intents.api';
 import { useRunControl } from './useRunControl';
 
@@ -119,7 +118,24 @@ describe('useRunControl', () => {
       kind: 'run_in_progress',
       runId: 42,
     });
-    const { qc, Wrapper } = makeWrapper();
+    // The 409 handler invalidates the runs list and reads its resolution to
+    // decide whether to auto-clear the conflict — a race with `waitFor`'s
+    // own polling if that refetch is (like `stubBaseline`'s default) an
+    // already-resolved promise: the auto-clear can complete before the
+    // assertion below ever observes the conflict state. Gate the refetch
+    // (the SECOND `listRuns` call, i.e. the one `invalidateQueries` kicks
+    // off — the first is the initial mount fetch) behind a deferred promise
+    // so conflict is asserted while that refetch is still pending, then
+    // resolve it explicitly to drive the auto-clear.
+    let resolveRefetch!: (v: ListRunsResponse) => void;
+    const refetchPromise = new Promise<ListRunsResponse>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    vi.mocked(runsApi.listRuns)
+      .mockResolvedValueOnce(emptyRuns())
+      .mockReturnValueOnce(refetchPromise);
+
+    const { Wrapper } = makeWrapper();
     const { result } = renderHook(() => useRunControl('rajni'), { wrapper: Wrapper });
 
     await waitFor(() => expect(runsApi.listRuns).toHaveBeenCalledTimes(1));
@@ -128,27 +144,24 @@ describe('useRunControl', () => {
       result.current.onRun();
     });
 
+    // `run_in_progress` must invalidate the runs list too, not just the
+    // intents list — otherwise the run that caused the 409 never surfaces.
+    // Asserting the second call happened confirms the refetch is in flight
+    // (and gated on `refetchPromise`) before we assert conflict below, so
+    // there is no window for the auto-clear to have already run.
+    await waitFor(() => expect(runsApi.listRuns).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(result.current.state).toEqual({ kind: 'conflict', runId: 42 }),
     );
-    // `run_in_progress` must invalidate the runs list too, not just the
-    // intents list — otherwise the run that caused the 409 never surfaces.
-    await waitFor(() => expect(runsApi.listRuns).toHaveBeenCalledTimes(2));
 
-    // Simulate that refetch resolving with the run finished, not running.
-    // An explicit later `updatedAt` keeps this deterministic regardless of
-    // how many real milliseconds elapsed above.
+    // Resolve the gated refetch with the run finished, not running.
     act(() => {
-      qc.setQueryData(
-        runsKeys.list('rajni'),
-        {
-          rows: [runRow({ status: 'passed', finishedAt: new Date().toISOString() })],
-          total: 1,
-          limit: 100,
-          offset: 0,
-        },
-        { updatedAt: Date.now() + 60_000 },
-      );
+      resolveRefetch({
+        rows: [runRow({ status: 'passed', finishedAt: new Date().toISOString() })],
+        total: 1,
+        limit: 100,
+        offset: 0,
+      });
     });
 
     await waitFor(() => expect(result.current.state.kind).not.toBe('conflict'));
