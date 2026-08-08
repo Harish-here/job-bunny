@@ -2,9 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { HubPage } from './HubPage';
 import type { DoctorStatus } from './hub.api';
+
+beforeAll(() => {
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.scrollIntoView = () => {};
+});
 
 function stubFetch(opts: {
   findings?: { check: string; status: DoctorStatus; detail: string }[];
@@ -44,6 +49,12 @@ function stubFetch(opts: {
         return {
           ok: true,
           json: async () => ({ text: JSON.stringify({ schedule }) }),
+        } as unknown as Response;
+      }
+      if (url.includes('/api/personas')) {
+        return {
+          ok: true,
+          json: async () => ({ version: 1, personas: [] }),
         } as unknown as Response;
       }
       throw new Error(`unexpected fetch url: ${url}`);
@@ -136,5 +147,45 @@ describe('HubPage', () => {
     window.location.hash = '';
     await userEvent.click(screen.getByRole('button', { name: 'Set up a new profile' }));
     expect(window.location.hash).toBe('#/onboarding');
+  });
+
+  it('opens the persona-filters dialog from "Set up" when its status is not ok', async () => {
+    stubFetch({
+      findings: [
+        { check: 'filter-parses', status: 'warn', detail: 'filter.json has an error' },
+      ],
+    });
+    renderHub();
+
+    const cards = await screen.findAllByTestId('hub-card');
+    const card = cards.find(
+      (el) => el.getAttribute('data-card-id') === 'persona-filters',
+    );
+    if (!card) throw new Error('persona-filters card not found');
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Set up' }));
+    const panel = await screen.findByTestId('hub-panel');
+    expect(panel).toHaveAttribute('data-card-id', 'persona-filters');
+  });
+
+  it('shows "Edit in Settings" and no dialog for an ok persona-filters card', async () => {
+    stubFetch({
+      findings: [{ check: 'filter-parses', status: 'ok', detail: 'filter.json parses.' }],
+    });
+    renderHub();
+
+    const cards = await screen.findAllByTestId('hub-card');
+    const card = cards.find(
+      (el) => el.getAttribute('data-card-id') === 'persona-filters',
+    );
+    if (!card) throw new Error('persona-filters card not found');
+
+    expect(
+      within(card).getByRole('button', { name: 'Edit in Settings' }),
+    ).toBeInTheDocument();
+    expect(
+      within(card).queryByRole('button', { name: 'Set up' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('hub-panel')).not.toBeInTheDocument();
   });
 });

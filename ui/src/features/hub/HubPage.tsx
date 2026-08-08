@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import {
   Card,
@@ -10,21 +11,22 @@ import {
 import { navigate, type Route } from '../../lib/router';
 import { configDocQuery } from '../settings/config.queries';
 import { daemonQuery } from '../wizard/wizard.queries';
+import { type HubDialogCardId, HubStepDialog } from './HubStepDialog';
 import {
   cardStatus,
   groupFindings,
   HUB_CARDS,
   type HubCardId,
+  type HubCardStatus,
   scheduleWarning,
 } from './hub.model';
 import { doctorQuery } from './hub.queries';
 
 const RUN_COMMAND = 'jobbunny serve start';
 
-interface CardAction {
-  label: string;
-  route: Route;
-}
+type CardAction =
+  | { kind: 'link'; label: string; route: Route }
+  | { kind: 'dialog'; label: string; cardId: HubDialogCardId };
 
 // One action per card, looked up by id — every action in THIS task is a
 // plain Settings/Runs deep link. Task 6 changes exactly the
@@ -32,35 +34,46 @@ interface CardAction {
 // status, between this same deep link ('ok': real config exists, editing it
 // is Settings' job) and a new dialog trigger (anything else: nothing
 // configured yet). profile, schedule-daemon, pipeline-health never change.
-function cardAction(id: HubCardId): CardAction {
+function cardAction(id: HubCardId, status: HubCardStatus): CardAction {
   switch (id) {
     case 'profile':
       return {
-        label: 'Edit in Settings',
-        route: { name: 'settings', section: 'profile' },
-      };
-    case 'persona-filters':
-      return {
-        label: 'Edit in Settings',
-        route: { name: 'settings', section: 'filters' },
-      };
-    case 'search-urls':
-      return {
-        label: 'Edit in Settings',
-        route: { name: 'settings', section: 'search-urls' },
-      };
-    case 'integrations':
-      return {
+        kind: 'link',
         label: 'Edit in Settings',
         route: { name: 'settings', section: 'profile' },
       };
     case 'schedule-daemon':
       return {
+        kind: 'link',
         label: 'Edit in Settings',
         route: { name: 'settings', section: 'schedule' },
       };
     case 'pipeline-health':
-      return { label: 'View runs', route: { name: 'runs' } };
+      return { kind: 'link', label: 'View runs', route: { name: 'runs' } };
+    case 'persona-filters':
+      return status === 'ok'
+        ? {
+            kind: 'link',
+            label: 'Edit in Settings',
+            route: { name: 'settings', section: 'filters' },
+          }
+        : { kind: 'dialog', label: 'Set up', cardId: 'persona-filters' };
+    case 'search-urls':
+      return status === 'ok'
+        ? {
+            kind: 'link',
+            label: 'Edit in Settings',
+            route: { name: 'settings', section: 'search-urls' },
+          }
+        : { kind: 'dialog', label: 'Set up', cardId: 'search-urls' };
+    case 'integrations':
+      return status === 'ok'
+        ? {
+            kind: 'link',
+            label: 'Edit in Settings',
+            route: { name: 'settings', section: 'profile' },
+          }
+        : { kind: 'dialog', label: 'Set up', cardId: 'integrations' };
   }
 }
 
@@ -87,6 +100,7 @@ export function HubPage({ profile }: { profile: string }) {
   const doctor = useQuery(doctorQuery(profile));
   const daemon = useQuery(daemonQuery());
   const profileConfig = useQuery(configDocQuery(profile, 'profile.json'));
+  const [openCardId, setOpenCardId] = useState<HubDialogCardId | null>(null);
 
   const findings = doctor.data?.findings ?? [];
   const grouped = groupFindings(findings);
@@ -132,7 +146,7 @@ export function HubPage({ profile }: { profile: string }) {
           {HUB_CARDS.map((card) => {
             const cardFindings = grouped[card.id];
             const status = cardStatus(cardFindings);
-            const action = cardAction(card.id);
+            const action = cardAction(card.id, status);
             return (
               <Card
                 key={card.id}
@@ -162,7 +176,11 @@ export function HubPage({ profile }: { profile: string }) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => navigate(action.route)}
+                    onClick={() =>
+                      action.kind === 'link'
+                        ? navigate(action.route)
+                        : setOpenCardId(action.cardId)
+                    }
                   >
                     {action.label}
                   </Button>
@@ -171,6 +189,14 @@ export function HubPage({ profile }: { profile: string }) {
             );
           })}
         </div>
+      )}
+
+      {openCardId && (
+        <HubStepDialog
+          profile={profile}
+          cardId={openCardId}
+          onClose={() => setOpenCardId(null)}
+        />
       )}
     </div>
   );
