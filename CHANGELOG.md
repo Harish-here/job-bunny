@@ -3,6 +3,71 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [3.0.0] — 2026-08-09
+
+### Added
+- **Consumer install + `~/.jobbunny` data home**: `npm install -g .` gives a real
+  `jobbunny` command that works from anywhere; all user data (`profiles/`,
+  `.env`, daemon pidfile, Chrome login profile as `chrome/`) lives in
+  `~/.jobbunny`, overridable via `JOBBUNNY_HOME`. `resolveHome()` is the single
+  resolver; program files (page inventories, `ui/dist`) resolve from the package
+  root, never the data home. New: Node ≥24 guard with a friendly one-liner,
+  `--help`/`-h`, missing-home guidance, and one-shot `jobbunny migrate-home`
+  (dry-run by default, never clobbers, refuses while the daemon runs, leaves the
+  `rajni` fixture in the repo).
+- **"Lapin" visual identity** across the whole board: plum/violet/carrot/clover
+  token system with dark mode and WCAG-AA text-grade signal colors, Nunito
+  display face, collapsible icon-rail sidebar with the README lockup, five new
+  primitives (dialog/tabs/progress/switch/form), and a four-state SVG bunny
+  mascot wired to the run state machine. Board page layouts unchanged.
+- **Board server write surface** (127.0.0.1-only, loopback-validated Host/Origin):
+  run intents (`run_intents` table, schema v6 — insert pending/cancel/list with
+  derived 10-min expiry; the daemon remains the sole run-spawner and claims
+  intents on its tick), write-only allowlisted secrets endpoints over the data
+  home `.env` (unrepresentable values rejected; fuzz-verified round-trip),
+  doctor execution, static persona catalog, daemon status with next slots, and
+  guarded profile removal.
+- **In-board onboarding wizard**: six steps (name → persona → about-you with
+  live derived filter rules → search URLs → integrations → schedule + run now),
+  first-boot redirect, localStorage draft resume, field-level validation, and
+  content-aware never-clobber guards that recognize the wizard's own writes but
+  re-arm on any external edit.
+- **Setup & Health hub + Settings rebuild + live runs**: hub status cards
+  (grouped live doctor findings) that open the real wizard step panels; Settings
+  rebuilt as five form sections with per-section Edit-as-JSON escape hatch and a
+  type-the-name danger zone; sidebar Run now with honest states
+  (Queued → Running — stage i/10 → Done: N new), live in-flight run header, and
+  2.5s polling only while something is pending or running.
+
+### Changed
+- Per-profile SQLite schema v5 → v6 (`run_intents` table + partial-unique
+  pending index). Migration is automatic on first open by v3 code.
+- The daemon autostart plist now anchors `WorkingDirectory` and `JOBBUNNY_HOME`
+  to the resolved data home, so login-launched daemons resolve the same home as
+  the shell.
+- CLAUDE.md / agent KB: data-home model, board write-surface amendment, and
+  command sweep (user-approved texts).
+
+### Fixed
+- Step-4 never-clobber guard tripped on the seed template's own format hint —
+  every fresh profile was blocked from finishing the wizard (caught by the
+  wizard e2e suite pre-ship).
+- Wizard e2e no longer overwrites the real `.env` (env-guard snapshot/finally);
+  board doctor no longer leaks a sqlite handle per request; secret writes
+  refresh the board's own `process.env` immediately.
+- Two flaky tests fixed at the root (SettingsPage profile-switch race;
+  useRunControl transient-conflict assertion).
+
+### Notes
+- Verified end-to-end on the primary machine: wizard walked in the real UI with
+  DB inspection, and a real harish production run triggered from the UI
+  (queued → daemon claim → live stage progress → passed, 1 new job synced).
+  `migrate-home` executed for real — this machine now runs from `~/.jobbunny`.
+- Known gaps (logged): `ui/dist` doesn't ship in globally installed copies
+  (board needs a checkout until npm-publish packaging); intent rows aren't
+  pruned by `routine cleanup` yet; daemon log dir is always `~/.jobbunny/logs`
+  regardless of `JOBBUNNY_HOME`.
+
 ## [2.2.0] — 2026-08-02
 
 ### Added
