@@ -1,19 +1,9 @@
 import type { RunSummary } from '../../lib/api/types';
-import { getFunnelStages } from '../runs/runResult';
+import { newMatchCount } from '../runs/runResult';
 
 export type MascotState = 'asleep' | 'ears-up' | 'hopping' | 'celebrating';
 
 const CELEBRATE_WINDOW_MS = 10 * 60 * 1000;
-
-/** Returns the last funnel stage's `jobsOut` — the only "how many new
- * matches" signal available today (`RunSummary` carries no job count).
- * `0` when the funnel blob is absent or malformed. */
-function newMatchCount(result: unknown): number {
-  const stages = getFunnelStages(result);
-  if (!stages || stages.length === 0) return 0;
-  const last = stages[stages.length - 1];
-  return last ? last.jobsOut : 0;
-}
 
 /**
  * Pure, injectable state selector for the Lapin mascot (spec §3.7/§4).

@@ -4,7 +4,9 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { pickProfile, useStoredProfile } from '../../lib/profile';
 import { navigate, type Route, useRoute } from '../../lib/router';
 import { AnalyticsPage } from '../analytics/AnalyticsPage';
+import { HubPage } from '../hub/HubPage';
 import { JobPage } from '../job/JobPage';
+import { useRunControl } from '../runcontrol/useRunControl';
 import { RunsPage } from '../runs/RunsPage';
 import { useRun, useRuns } from '../runs/useRunsData';
 import { SettingsPage } from '../settings/SettingsPage';
@@ -32,8 +34,15 @@ function Page({ route, profile }: { route: Route; profile: string }) {
       return <AnalyticsPage />;
     case 'onboarding':
       return null; // unreachable: Shell short-circuits to <WizardPage/> above
+    case 'setup':
+      return <HubPage profile={profile} />;
     case 'settings':
-      return <SettingsPage profile={profile} />;
+      return (
+        <SettingsPage
+          profile={profile}
+          section={'section' in route ? route.section : 'profile'}
+        />
+      );
     case 'job':
       return <JobPage profile={profile} id={route.id} />;
   }
@@ -58,11 +67,6 @@ function UnreachableState({ onRetry }: { onRetry: () => void }) {
     </div>
   );
 }
-
-/** Phase 4 replaces this with the pending run-intent selector (spec §2.4);
- * phase 2 has no intent table to read, so the ears-up state ships wired to
- * a constant and is exercised by mascotState.test.ts. */
-const QUEUED_STUB = false;
 
 export function Shell() {
   const route = useRoute();
@@ -106,6 +110,7 @@ export function Shell() {
     }
   }, [noProfiles, route.name]);
 
+  const control = useRunControl(profile ?? '');
   const runsQuery = useRuns(profile ?? '');
   const runs = runsQuery.data?.rows ?? [];
   const newestId = runs.reduce((max, r) => Math.max(max, r.id), -1);
@@ -113,7 +118,7 @@ export function Shell() {
   const mascot = pickMascotState({
     runs,
     newestResult: detail.data?.result,
-    queued: QUEUED_STUB,
+    queued: control.state.kind === 'queued',
     now: Date.now(),
   });
 
@@ -147,6 +152,7 @@ export function Shell() {
         version={appInfo.data?.version}
         collapsed={collapsed}
         mascot={mascot}
+        runControl={control}
         onChoose={setStored}
         onNavigate={navigate}
         onToggleCollapsed={() => setCollapsed(!collapsed)}

@@ -171,4 +171,38 @@ describe('RunsPage', () => {
     });
     expect(screen.getAllByRole('button', { name: /retry/i }).length).toBeGreaterThan(0);
   });
+
+  it('renders the live run header for an in-flight run', async () => {
+    const runningRows: RunSummary[] = [
+      {
+        id: 3,
+        date: '2026-08-06',
+        timeDir: '09-00',
+        kind: 'run',
+        resumedFrom: null,
+        status: 'running',
+        startedAt: '2026-08-06T09:00:00.000Z',
+        finishedAt: null,
+        heartbeatAt: '2026-08-06T09:00:05.000Z',
+      },
+      ...ROWS,
+    ];
+    stubFetch({ rows: runningRows });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-run-header')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('live-run-stage')).toHaveTextContent('Running — starting…');
+  });
+
+  it('renders no live run header when every run has finished', async () => {
+    stubFetch();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+    });
+    expect(screen.queryByTestId('live-run-header')).not.toBeInTheDocument();
+  });
 });

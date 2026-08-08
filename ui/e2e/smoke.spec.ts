@@ -188,65 +188,50 @@ test('runs page empty state', async ({ page }) => {
 });
 
 test('settings page: edit filter.json, save, reload, still there', async ({ page }) => {
-  await page.goto('/#/settings');
-  const filterField = page.getByLabel('filter.json');
-  await expect(filterField).toBeVisible();
-  await expect(filterField).not.toHaveValue('');
+  await page.goto('/#/settings/filters');
+  await page.getByTestId('settings-json-open').click();
+  const textarea = page.getByTestId('settings-json-textarea');
+  await expect(textarea).toBeVisible();
+  await expect(textarea).not.toHaveValue('');
 
-  // Append a schema-valid, idempotent marker to the real seeded
-  // `companies.avoid` array (rajni's actual filter.json, checked against
-  // FilterConfigSchema) rather than a hand-typed guess — a re-run of this
-  // suite against an already-mutated `config_docs` row (writeText never
-  // touches the tracked legacy file, only the gitignored sqlite db) must
-  // not grow the array unboundedly. Belt-and-braces: `seed.ts`'s
-  // `globalSetup` now also `DELETE FROM config_docs` on every e2e
-  // invocation (fix round 2), so the row this test writes never survives
-  // past the current run anyway — the NEXT invocation's first read
-  // re-lifts the pristine tracked `filter.json` fresh (`SqliteConfigStore`
-  // falls back to the legacy file whenever no row exists); no separate
-  // "restore the original doc" teardown is needed here, only this
-  // within-run idempotency guard for repeat runs of this spec file alone
-  // (e.g. `playwright test smoke.spec.ts` without a fresh global seed).
-  const current = await filterField.inputValue();
+  // Idempotent marker in the real seeded companies.avoid array (repeat-run safe).
+  const current = await textarea.inputValue();
   const parsed: { companies?: { avoid?: string[] } } = JSON.parse(current);
   parsed.companies ??= { avoid: [] };
   parsed.companies.avoid ??= [];
   if (!parsed.companies.avoid.includes('E2ESmokeAvoidCo')) {
     parsed.companies.avoid.push('E2ESmokeAvoidCo');
   }
-  const edited = JSON.stringify(parsed, null, 2);
-  await filterField.fill(edited);
+  await textarea.fill(JSON.stringify(parsed, null, 2));
+  await page.getByTestId('settings-json-save').click();
 
-  await page.getByRole('button', { name: 'Save filter.json' }).click();
-
-  // No dedicated "Saved" toast/label exists (SettingsPage.tsx) — the save
-  // succeeding is evidenced by the error region staying empty and the
-  // Save button returning to its enabled, non-pending state.
-  const saveButton = page.getByRole('button', { name: 'Save filter.json' });
-  await expect(saveButton).toBeEnabled();
-  await expect(page.getByText(/filter\.json is invalid/)).toHaveCount(0);
+  // No toast: success is evidenced by the dialog closing with no error.
+  await expect(page.getByTestId('settings-json-textarea')).toHaveCount(0);
+  await expect(page.getByTestId('settings-error')).toHaveCount(0);
 
   await page.reload();
-  await expect(page.getByLabel('filter.json')).toContainText('E2ESmokeAvoidCo');
+  await page.goto('/#/settings/filters');
+  await page.getByTestId('settings-json-open').click();
+  await expect(page.getByTestId('settings-json-textarea')).toContainText(
+    'E2ESmokeAvoidCo',
+  );
 });
 
 test("settings page: invalid JSON shows the server's error message", async ({ page }) => {
-  await page.goto('/#/settings');
-  const filterField = page.getByLabel('filter.json');
-  await expect(filterField).toBeVisible();
-  await expect(filterField).not.toHaveValue('');
+  await page.goto('/#/settings/filters');
+  await page.getByTestId('settings-json-open').click();
+  const textarea = page.getByTestId('settings-json-textarea');
+  await expect(textarea).toBeVisible();
+  await expect(textarea).not.toHaveValue('');
 
-  await filterField.fill('{not valid json');
-  await page.getByRole('button', { name: 'Save filter.json' }).click();
+  await textarea.fill('{not valid json');
+  await page.getByTestId('settings-json-save').click();
 
-  // Server's real 422 message (validateConfigDoc, core/config/validators.ts):
-  // `filter.json is invalid: ${JSON.parse's own error message}` — partial
-  // match since the JSON.parse suffix isn't guaranteed byte-stable across
-  // engine versions.
-  await expect(page.getByText(/filter\.json is invalid:/)).toBeVisible();
-
-  // A failed save must never stomp the user's in-progress (invalid) edit.
-  await expect(filterField).toHaveValue('{not valid json');
+  // Server's real 422 message (validateConfigDoc, core/config/validators.ts).
+  await expect(page.getByTestId('settings-error')).toContainText(
+    /filter\.json is invalid:/,
+  );
+  await expect(textarea).toHaveValue('{not valid json');
 });
 
 let createdProfileName: string | undefined;
