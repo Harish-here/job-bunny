@@ -5,8 +5,8 @@ import type { StateStore } from '../../../ports/state_store.ts';
 
 /** Path of the reconciled Notion cache, read here for the lane's own
  * cache-skip gate (split out of `lane.ts`, Phase 3, purely to keep that
- * file under its line cap — same posture as `harvest.ts`'s `card_gate.ts`
- * split). Deliberately duplicated from `pipeline/stages/reconcile.ts`'s
+ * file under its line cap — same posture as `cards/harvest.ts`'s
+ * `cards/gate.ts` split). Deliberately duplicated from `pipeline/stages/reconcile.ts`'s
  * `CACHE_PATH` rather than imported — adapters may only import ports +
  * core (`adapters-only-ports-core`), never `pipeline/**`, same posture as
  * `greenhouse/api.ts` duplicating `htmlToText` rather than cross-importing

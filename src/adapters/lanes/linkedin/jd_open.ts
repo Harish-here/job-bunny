@@ -78,7 +78,7 @@ const DEFAULT_EVALUATE_TIMEOUT_MS = 10_000;
  * later. `waitFor(jdRoot)` is therefore satisfied instantly by the skeleton
  * and proves nothing about content, which is what made a single-shot read
  * race hydration and report "server withheld the JD" for a pane that was
- * merely still loading (2026-07-28). Mirrors harvest.ts's HYDRATION_BUDGET_MS
+ * merely still loading (2026-07-28). Mirrors the cards module's chunk-settle budget
  * and, like it, stays well under its enclosing evaluate timeout so the poll
  * can never be what times the call out. */
 const JD_SETTLE_BUDGET_MS = 8_000;

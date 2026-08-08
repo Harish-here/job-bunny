@@ -15,7 +15,7 @@ import {
 
 /**
  * Lane-level coverage (2026-08-02 review, restored total-outage
- * loudness) for the identity-invalid card-gate fix in card_gate.ts,
+ * loudness) for the identity-invalid card-gate fix in cards/gate.ts,
  * driven end to end through `LinkedInLane.source()` rather than the
  * gateCards unit alone — the failure mode this guards was diagnosed from
  * a real run (profiles/harish/data/runs/2026-08-02/18-24/: 13
