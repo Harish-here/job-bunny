@@ -147,6 +147,38 @@ describe('Shell', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 
+  // First-boot redirect (phase 3 task 4): once the profiles query resolves
+  // successfully with zero profiles, Shell navigates to `#/onboarding` and
+  // renders `<WizardPage />` full-screen. It must never do so while the
+  // query is pending or once it has errored — `noProfiles` requires
+  // `profilesQuery.isSuccess`, so in both of those states no redirect is
+  // even reachable, which is what makes a plain post-render assertion
+  // (no `waitFor` needed for the negative cases) a reliable check here.
+  it('redirects to onboarding when the profiles query resolves with zero profiles', async () => {
+    stubFetch({ profiles: [] });
+    renderShell();
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe('#/onboarding');
+    });
+    expect(screen.getByTestId('wizard')).toBeInTheDocument();
+  });
+
+  it('does not redirect while the profiles query is still loading', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})) as unknown as typeof fetch);
+    renderShell();
+
+    expect(window.location.hash).toBe('');
+  });
+
+  it('does not redirect when the profiles query errors', async () => {
+    stubFetch({ failProfiles: 'always' });
+    renderShell();
+
+    await screen.findByRole('button', { name: 'Retry' });
+    expect(window.location.hash).toBe('');
+  });
+
   it('collapses to the rail and remembers it', async () => {
     stubFetch({});
     renderShell();

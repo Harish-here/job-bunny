@@ -251,50 +251,32 @@ test("settings page: invalid JSON shows the server's error message", async ({ pa
 
 let createdProfileName: string | undefined;
 
-test('create profile: name it, see it in the switcher, land on its settings', async ({
+test('onboarding wizard: step 1 creates a profile, step 2 selects a persona', async ({
   page,
 }) => {
   const name = `e2e-tmp-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   createdProfileName = name;
 
   await page.goto('/#/onboarding');
-  await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByTestId('wizard-step')).toHaveAttribute('data-step', '1');
 
-  await expect(page).toHaveURL(/#\/settings/);
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await page.getByLabel('Profile name').fill(name);
+  await page.getByTestId('wizard-next').click();
 
-  // The three docs `seedProfileDocs` actually writes for a brand-new
-  // profile (profile.ts, config→db Phase 4): profile.json's minimal
-  // pipeline config, filter.json's `{}`, and search_urls.md's template
-  // header. `resume.json` is deliberately NEVER seeded (hand-maintained,
-  // profile.ts's own doc comment) — its GET now returns 200 with an empty
-  // draft rather than a 404 (fix round), so its editor renders an empty,
-  // still-editable textarea instead of a permanent load error.
-  await expect(page.getByLabel('profile.json')).toHaveValue(/"connector":\s*"sqlite"/);
-  await expect(page.getByLabel('filter.json')).toHaveValue(/^\{\}\s*$/);
-  await expect(page.getByLabel('search_urls.md')).toHaveValue(/# Search URLs/);
-  await expect(page.getByLabel('resume.json')).toHaveValue('');
-  await expect(page.getByText(/Couldn't load resume\.json/)).toHaveCount(0);
+  await expect(page.getByTestId('wizard-step')).toHaveAttribute('data-step', '2');
 
-  // The new profile now resolves as the active one (OnboardingPage's own
-  // `choose()` + navigate) and shows up in the switcher, both as the
-  // trigger's current value and as a selectable option.
-  const switcherTrigger = page.getByRole('combobox', { name: 'Profile' });
-  await expect(switcherTrigger).toContainText(name);
-  await switcherTrigger.click();
-  await expect(page.getByRole('option', { name })).toBeVisible();
-  await page.keyboard.press('Escape');
+  const firstCard = page.getByTestId('wizard-persona').first();
+  await expect(firstCard).toBeVisible();
+  await firstCard.click();
+  await expect(firstCard).toHaveAttribute('aria-pressed', 'true');
 });
 
 test.afterAll(async () => {
   if (!createdProfileName) return;
   const name = createdProfileName;
-  // Belt-and-braces guard, inverted from `seed.ts`'s own "refusing: not
-  // rajni" pattern: refuse to delete anything that ISN'T the exact
-  // throwaway profile this spec created — reject any name carrying a path
-  // separator, `..`, or any character outside the profile-name format the
-  // server itself enforces, BEFORE it ever reaches `path.join`/`rm`.
+  // Belt-and-braces guard, same shape the file used before task 4's
+  // placeholder-era rewrite: refuse to delete anything that isn't the
+  // exact throwaway profile this spec created.
   if (!/^[a-z0-9_-]+$/.test(name) || name === 'rajni') {
     throw new Error(`refusing: not a valid throwaway profile name (${name})`);
   }

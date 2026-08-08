@@ -5,21 +5,21 @@ import { pickProfile, useStoredProfile } from '../../lib/profile';
 import { navigate, type Route, useRoute } from '../../lib/router';
 import { AnalyticsPage } from '../analytics/AnalyticsPage';
 import { JobPage } from '../job/JobPage';
-import { OnboardingPage } from '../onboarding/OnboardingPage';
 import { RunsPage } from '../runs/RunsPage';
 import { useRun, useRuns } from '../runs/useRunsData';
 import { SettingsPage } from '../settings/SettingsPage';
 import { TrackerPage } from '../tracker/TrackerPage';
 import { TriagePage } from '../triage/TriagePage';
+import { WizardPage } from '../wizard/WizardPage';
 import { pickMascotState } from './mascotState';
 import { Sidebar } from './Sidebar';
 import { useAppInfo } from './useAppInfo';
 import { useProfilesQuery } from './useProfiles';
 import { useSidebarCollapsed } from './useSidebarCollapsed';
 
-/** Full route switch (T10) — the real Triage/Tracker/Job/Analytics/Onboarding
- * feature component per route, each fed the resolved profile (and, for
- * `job`, the route's id). */
+/** Full route switch (T10; phase 3 task 4 drops the 'onboarding' case —
+ * `Shell` renders `<WizardPage />` full-screen for that route before
+ * `Page` is ever called, so this switch is unreachable for it. */
 function Page({ route, profile }: { route: Route; profile: string }) {
   switch (route.name) {
     case 'triage':
@@ -31,7 +31,7 @@ function Page({ route, profile }: { route: Route; profile: string }) {
     case 'analytics':
       return <AnalyticsPage />;
     case 'onboarding':
-      return <OnboardingPage />;
+      return null; // unreachable: Shell short-circuits to <WizardPage/> above
     case 'settings':
       return <SettingsPage profile={profile} />;
     case 'job':
@@ -94,6 +94,18 @@ export function Shell() {
   const profiles = profilesQuery.data?.profiles ?? [];
   const profile = pickProfile(stored, profiles);
 
+  // First-boot redirect (phase 3 task 4): once the profiles query has
+  // resolved successfully and there are zero profiles, send the user to
+  // the wizard — unless they are already there. Never while loading
+  // (`profilesQuery.isSuccess` is false then) and never on error (that
+  // stays the retry screen below, not a silently-substituted wizard).
+  const noProfiles = profilesQuery.isSuccess && profiles.length === 0;
+  useEffect(() => {
+    if (noProfiles && route.name !== 'onboarding') {
+      navigate({ name: 'onboarding' });
+    }
+  }, [noProfiles, route.name]);
+
   const runsQuery = useRuns(profile ?? '');
   const runs = runsQuery.data?.rows ?? [];
   const newestId = runs.reduce((max, r) => Math.max(max, r.id), -1);
@@ -111,6 +123,21 @@ export function Shell() {
     return <UnreachableState onRetry={() => profilesQuery.refetch()} />;
   }
 
+  // Full-screen: the wizard owns the whole viewport — no Sidebar, no
+  // profile switcher, no `<main>` wrapper. `noProfiles` also covers the
+  // one-render gap before the redirect effect above actually fires (in
+  // that gap `profile` is still `null`; falling through to the two-column
+  // branch below would hand `Page` a non-string profile).
+  if (route.name === 'onboarding' || noProfiles) {
+    return <WizardPage />;
+  }
+
+  if (profile === null) {
+    // Unreachable: `noProfiles` (the only way `pickProfile` returns null)
+    // already returned above.
+    return null;
+  }
+
   return (
     <div className="flex">
       <Sidebar
@@ -125,11 +152,7 @@ export function Shell() {
         onToggleCollapsed={() => setCollapsed(!collapsed)}
       />
       <main className="flex-1">
-        {profile ? (
-          <Page route={route} profile={profile} />
-        ) : (
-          <div className="p-4 text-muted-foreground">No profile available.</div>
-        )}
+        <Page route={route} profile={profile} />
       </main>
     </div>
   );
