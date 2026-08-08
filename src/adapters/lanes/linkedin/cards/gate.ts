@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import type { FilterConfig } from '../../../core/filter/config.ts';
-import { decide, evaluateCard } from '../../../core/filter/engine.ts';
-import { type DroppedRecord, JDSchema, type Verdict } from '../../../core/jd/index.ts';
-import { zodIssuesMessage } from './evidence.ts';
+import type { FilterConfig } from '../../../../core/filter/config.ts';
+import { decide, evaluateCard } from '../../../../core/filter/engine.ts';
+import { type DroppedRecord, JDSchema, type Verdict } from '../../../../core/jd/index.ts';
+import { zodIssuesMessage } from '../evidence.ts';
 import type { HarvestedCard } from './harvest.ts';
 
 /** Stand-in for an empty title/company (JDSchema requires both min 1) when
@@ -12,7 +12,7 @@ const UNSETTLED_FIELD_PLACEHOLDER = '(unavailable)';
 
 /**
  * Card-gate: runs the P2 evalCard rules (title, company) against each
- * harvested card (split out of harvest.ts, 2026-08-02, purely to keep
+ * harvested card (split out of cards/harvest.ts, 2026-08-02, purely to keep
  * that file under the file-size cap). Kept cards pass through unchanged;
  * dropped cards get an identity-only JD (no content/structured yet — the
  * card gate runs before JD open) so the funnel can always answer "why did

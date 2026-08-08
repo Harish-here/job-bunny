@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FilterConfigSchema } from '../../../core/filter/config.ts';
-import { gateCards } from './card_gate.ts';
+import { FilterConfigSchema } from '../../../../core/filter/config.ts';
+import { gateCards } from './gate.ts';
 import type { HarvestedCard } from './harvest.ts';
 
 test('gateCards partitions cards by the card-gate rules and records identity-only JDs for drops', () => {
