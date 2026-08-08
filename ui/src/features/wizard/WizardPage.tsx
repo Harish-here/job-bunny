@@ -8,6 +8,7 @@ import { useProfilesQuery } from '../shell/useProfiles';
 import { clearDraft, readActiveProfile, readDraft, writeDraft } from './draftStore';
 import { Step1Name } from './steps/Step1Name';
 import { Step2Persona } from './steps/Step2Persona';
+import { Step3About } from './steps/Step3About';
 import {
   emptyDraft,
   type WizardDraft,
@@ -184,7 +185,7 @@ export function WizardPage() {
       case 2:
         return <Step2Persona {...stepProps} />;
       case 3:
-        return <Placeholder {...stepProps} label="About you" finishable />;
+        return <Step3About {...stepProps} />;
       case 4:
         return <Placeholder {...stepProps} label="Where to hunt" finishable />;
       case 5:
