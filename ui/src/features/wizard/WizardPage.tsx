@@ -10,6 +10,7 @@ import { Step1Name } from './steps/Step1Name';
 import { Step2Persona } from './steps/Step2Persona';
 import { Step3About } from './steps/Step3About';
 import { Step4Hunt } from './steps/Step4Hunt';
+import { Step5Extras } from './steps/Step5Extras';
 import {
   emptyDraft,
   type WizardDraft,
@@ -190,7 +191,20 @@ export function WizardPage() {
       case 4:
         return <Step4Hunt {...stepProps} />;
       case 5:
-        return <Placeholder {...stepProps} label="Extras" finishable />;
+        return (
+          <Step5Extras
+            {...stepProps}
+            onSkip={() => {
+              setError(null);
+              setDraft((d) => {
+                const updated = { ...d, step: 6 as WizardStep };
+                if (updated.profile !== '') writeDraft(updated);
+                return updated;
+              });
+              setStep(6);
+            }}
+          />
+        );
       case 6:
         return <Placeholder {...stepProps} label="Launch" finishable={false} />;
     }
