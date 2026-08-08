@@ -2,6 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/ta
 import { navigate, type SettingsSection } from '../../lib/router';
 import type { ConfigDocName } from './config.api';
 import { JsonEscapeHatch } from './JsonEscapeHatch';
+import { FiltersSection } from './sections/FiltersSection';
 import { ProfileSection } from './sections/ProfileSection';
 import { ScheduleSection } from './sections/ScheduleSection';
 
@@ -22,9 +23,8 @@ const SECTION_DOC: Partial<Record<SettingsSection, ConfigDocName>> = {
   'search-urls': 'search_urls.md',
 };
 
-// Owned by later tasks: filters → 9, resume/search-urls → 10, danger → 11.
+// Owned by later tasks: resume/search-urls → 10, danger → 11.
 const PLACEHOLDER_COPY: Partial<Record<SettingsSection, string>> = {
-  filters: 'Filter settings — coming soon.',
   resume: 'Resume settings — coming soon.',
   'search-urls': 'Search URL settings — coming soon.',
   danger: 'Danger zone — coming soon.',
@@ -39,6 +39,7 @@ function SectionBody({
 }) {
   if (section === 'profile') return <ProfileSection profile={profile} />;
   if (section === 'schedule') return <ScheduleSection profile={profile} />;
+  if (section === 'filters') return <FiltersSection profile={profile} />;
   return <p className="text-sm text-muted-foreground">{PLACEHOLDER_COPY[section]}</p>;
 }
 
