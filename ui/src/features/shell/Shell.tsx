@@ -37,7 +37,12 @@ function Page({ route, profile }: { route: Route; profile: string }) {
     case 'setup':
       return <HubPage profile={profile} />;
     case 'settings':
-      return <SettingsPage profile={profile} />;
+      return (
+        <SettingsPage
+          profile={profile}
+          section={'section' in route ? route.section : 'profile'}
+        />
+      );
     case 'job':
       return <JobPage profile={profile} id={route.id} />;
   }

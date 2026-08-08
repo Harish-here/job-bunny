@@ -1,90 +1,82 @@
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-import { Button } from '../../components/ui/button';
-import { Skeleton } from '../../components/ui/skeleton';
-import { Textarea } from '../../components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
+import { navigate, type SettingsSection } from '../../lib/router';
 import type { ConfigDocName } from './config.api';
-import { configDocQuery } from './config.queries';
-import { useConfigMutation } from './useConfigMutation';
+import { JsonEscapeHatch } from './JsonEscapeHatch';
+import { ProfileSection } from './sections/ProfileSection';
 
-const DOCS: ConfigDocName[] = [
-  'profile.json',
-  'filter.json',
-  'resume.json',
-  'search_urls.md',
+const TABS: { section: SettingsSection; label: string }[] = [
+  { section: 'profile', label: 'Profile' },
+  { section: 'schedule', label: 'Schedule' },
+  { section: 'filters', label: 'Filters' },
+  { section: 'resume', label: 'Resume' },
+  { section: 'search-urls', label: 'Search URLs' },
+  { section: 'danger', label: 'Danger zone' },
 ];
 
-/**
- * One doc's raw-text editor. Local draft state is seeded from the query's
- * data and reset ONLY when `profile` changes or the query's initial load
- * for this (profile, doc) pair completes — never on a later background
- * refetch of the SAME pair (so typing isn't stomped by, say, an external
- * `jobbunny config set` landing mid-edit). Mirrors `TrackingPanel`'s
- * reset-on-identity-change `useEffect`, keyed here on `profile` (doc is
- * fixed per editor instance) plus `query.isSuccess`'s pending→true edge
- * rather than the raw `data` value, which is what keeps a background
- * refetch from re-firing the reset.
- */
-function ConfigDocEditor({ profile, doc }: { profile: string; doc: ConfigDocName }) {
-  const query = useQuery(configDocQuery(profile, doc));
-  const mutation = useConfigMutation(profile, doc);
-  const [draft, setDraft] = useState('');
+const SECTION_DOC: Partial<Record<SettingsSection, ConfigDocName>> = {
+  profile: 'profile.json',
+  schedule: 'profile.json',
+  filters: 'filter.json',
+  resume: 'resume.json',
+  'search-urls': 'search_urls.md',
+};
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — see doc comment above
-  useEffect(() => {
-    if (query.isSuccess) setDraft(query.data.text);
-  }, [profile, doc, query.isSuccess]);
+// Owned by later tasks: schedule → 8, filters → 9, resume/search-urls → 10, danger → 11.
+const PLACEHOLDER_COPY: Partial<Record<SettingsSection, string>> = {
+  schedule: 'Schedule settings — coming soon.',
+  filters: 'Filter settings — coming soon.',
+  resume: 'Resume settings — coming soon.',
+  'search-urls': 'Search URL settings — coming soon.',
+  danger: 'Danger zone — coming soon.',
+};
 
-  return (
-    <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-mono text-sm font-medium">{doc}</h2>
-        {mutation.isPending && (
-          <span className="text-xs text-muted-foreground">Saving…</span>
-        )}
-      </div>
-
-      {query.isPending ? (
-        <Skeleton className="h-40 w-full" />
-      ) : query.isError ? (
-        <span className="text-sm text-destructive">
-          Couldn't load {doc}: {query.error.message}
-        </span>
-      ) : (
-        <>
-          <Textarea
-            aria-label={doc}
-            className="font-mono"
-            rows={10}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              disabled={mutation.isPending}
-              onClick={() => mutation.mutate(draft)}
-            >
-              Save {doc}
-            </Button>
-          </div>
-          {mutation.isError && (
-            <span className="text-sm text-destructive">{mutation.error.message}</span>
-          )}
-        </>
-      )}
-    </section>
-  );
+function SectionBody({
+  profile,
+  section,
+}: {
+  profile: string;
+  section: SettingsSection;
+}) {
+  if (section === 'profile') return <ProfileSection profile={profile} />;
+  return <p className="text-sm text-muted-foreground">{PLACEHOLDER_COPY[section]}</p>;
 }
 
-export function SettingsPage({ profile }: { profile: string }) {
+export function SettingsPage({
+  profile,
+  section,
+}: {
+  profile: string;
+  section: SettingsSection;
+}) {
+  const doc = SECTION_DOC[section];
   return (
     <div className="flex flex-col gap-4 p-6">
       <h1 className="text-lg font-semibold font-heading">Settings</h1>
-      {DOCS.map((doc) => (
-        <ConfigDocEditor key={doc} profile={profile} doc={doc} />
-      ))}
+      <Tabs
+        data-testid="settings-tabs"
+        value={section}
+        onValueChange={(value) =>
+          navigate({ name: 'settings', section: value as SettingsSection })
+        }
+      >
+        <TabsList>
+          {TABS.map((tab) => (
+            <TabsTrigger key={tab.section} value={tab.section}>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value={section}>
+          <div
+            data-testid="settings-section"
+            data-section={section}
+            className="flex flex-col gap-4"
+          >
+            <SectionBody profile={profile} section={section} />
+            {doc && <JsonEscapeHatch profile={profile} doc={doc} />}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
