@@ -19,6 +19,13 @@ import { type CardLoopState, processCard } from './cards.ts';
  * its doc comment for why it is duplicated rather than cross-imported. */
 const DEFAULT_GOTO_TIMEOUT_MS = 30_000;
 
+/** A page whose identity loss exceeds this fraction is warned about, not
+ * failed: the loud total-outage guard below still owns the 100% case, and
+ * anything under it is a real-but-survivable page that the operator needs
+ * to see. 0.3 sits well above ordinary noise and well below the 0.45–0.72
+ * per-page loss the 2026-08-08 regression produced. */
+const IDENTITY_LOSS_WARN_FRACTION = 0.3;
+
 /** Mutated in place by `runUrlGroups` — the collected-so-far record for one
  * `source()` run. Callers (`lane.ts`) read the same object back after the
  * call to compute aggregates/evidence, since object fields (unlike a bare
@@ -202,6 +209,24 @@ export async function runUrlGroups(
             break;
           }
 
+          // Partial identity loss: survivable, so this warns and continues
+          // (the guard above owns the total-outage case). Without it a page
+          // that silently lost 72% of its cards logs as a perfectly healthy
+          // `harvested: 25, gated: 0` — which is exactly how the 2026-08-08
+          // regression stayed invisible for two runs.
+          if (
+            cards.length > 0 &&
+            identityInvalidCount / cards.length > IDENTITY_LOSS_WARN_FRACTION
+          ) {
+            ctx.logger.warn('linkedin lane: page identity loss', {
+              url,
+              page: pageIndex,
+              harvested: cards.length,
+              identityInvalid: identityInvalidCount,
+              fraction: Math.round((identityInvalidCount / cards.length) * 100) / 100,
+            });
+          }
+
           // companiesSeen = post-gate (passing) card companies, deduped
           // — recorded regardless of whether this card's JD open below
           // later succeeds (spec: card-gate decides "seen", not scrape
@@ -213,6 +238,7 @@ export async function runUrlGroups(
             page: pageIndex,
             harvested: cards.length,
             gated: pass.length,
+            identityInvalid: identityInvalidCount,
           });
 
           for (const card of pass) {
