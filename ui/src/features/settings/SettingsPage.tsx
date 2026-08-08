@@ -2,6 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/ta
 import { navigate, type SettingsSection } from '../../lib/router';
 import type { ConfigDocName } from './config.api';
 import { JsonEscapeHatch } from './JsonEscapeHatch';
+import { DangerZone } from './sections/DangerZone';
 import { FiltersSection } from './sections/FiltersSection';
 import { ProfileSection } from './sections/ProfileSection';
 import { ResumeSection } from './sections/ResumeSection';
@@ -44,6 +45,7 @@ function SectionBody({
   if (section === 'filters') return <FiltersSection profile={profile} />;
   if (section === 'resume') return <ResumeSection profile={profile} />;
   if (section === 'search-urls') return <SearchUrlsSection profile={profile} />;
+  if (section === 'danger') return <DangerZone profile={profile} />;
   return <p className="text-sm text-muted-foreground">{PLACEHOLDER_COPY[section]}</p>;
 }
 
