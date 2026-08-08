@@ -137,10 +137,14 @@ export function buildHarvestScript(inv: Inventory, opts: HarvestScriptOpts = {})
 
   // Read-as-you-go. The list is virtualized: a card mounts when it
   // INTERSECTS the viewport, not when time passes, and it is only reliably
-  // readable while it is still there. So scroll a chunk in, wait for that
+  // readable while it is still there. So scroll a chunk in (by scrolling
+  // just its first card — see bring(chunk[0]) below), wait for that
   // chunk to mount, read exactly that chunk, and never look at it again —
   // the mounted window and the window being read are the same window by
-  // construction. The old script scrolled the whole list first and read
+  // construction, PROVIDED chunkSize stays under the number of cards the
+  // viewport actually fits (scrolling every card in the chunk instead
+  // would move that window with each scroll, leaving only the last card
+  // still in it by read time). The old script scrolled the whole list first and read
   // afterwards, by which point every card past the initial ~7 had been
   // scrolled away from and no amount of waiting could mount it (diagnosis
   // 2026-08-09: 740 of 1625 cards lost in one run, always a contiguous
@@ -150,7 +154,16 @@ export function buildHarvestScript(inv: Inventory, opts: HarvestScriptOpts = {})
   for (let i = 0; i < cardEls.length; i += chunkSize) {
     const chunk = cardEls.slice(i, i + chunkSize);
     chunks += 1;
-    for (const el of chunk) bring(el);
+    // Scroll only the chunk's FIRST card: scrollIntoView's default
+    // block:'start' puts that card at the top of the viewport, which — as
+    // long as CHUNK_SIZE stays under the number of cards that actually fit
+    // on screen — brings the rest of the chunk into view along with it.
+    // Scrolling every element of the chunk (the old code) instead leaves
+    // only the LAST one scrolled-to actually in the viewport by the time
+    // the chunk is read, since each scroll moves the ones already brought
+    // in back out — recovering roughly one card in five here and silently
+    // shifting the real work onto the bounded repair pass below.
+    bring(chunk[0]);
     const chunkDeadline = Math.min(Date.now() + chunkSettleBudgetMs, totalDeadline);
     while (chunk.some((el) => !mounted(readCard(el))) && Date.now() < chunkDeadline) {
       await sleep(chunkSettlePollMs);

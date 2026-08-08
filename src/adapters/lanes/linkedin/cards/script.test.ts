@@ -276,6 +276,96 @@ function scrollTrackedDocument(
   return { document, scrollOrder };
 }
 
+/** Builds a fake document that models a WINDOW of `windowSize` consecutive
+ * cards visible at once, anchored at whichever card was most recently
+ * scrolled to (scrollIntoView's default block:'start' puts that card at the
+ * top, so the cards after it — up to windowSize — come along for free).
+ * This is what actually discriminates "scroll only chunk[0]" from "scroll
+ * every card in the chunk": the single-most-recent-card model in
+ * scrollTrackedDocument above shows only one card visible no matter which
+ * element gets scrolled, so it can't tell the two strategies apart — both
+ * end up rescuing almost everything through the repair pass. A window wide
+ * enough to hold a whole chunk (windowSize > chunkSize) makes the correct
+ * strategy mount the entire chunk on the FIRST read, with the repair pass
+ * barely touched. */
+function windowTrackedDocument(
+  inv: Inventory,
+  cards: Array<{ title: string; company: string; href: string }>,
+  windowSize: number,
+): { document: unknown } {
+  const sel = inv.selectors;
+  const windowStart = { index: 0 };
+  const visible = (i: number) =>
+    i >= windowStart.index && i < windowStart.index + windowSize;
+  const cardEls = cards.map((c, i) => {
+    const titleEl = {
+      get textContent() {
+        return visible(i) ? c.title : '';
+      },
+    };
+    const companyEl = {
+      get textContent() {
+        return visible(i) ? c.company : '';
+      },
+    };
+    const linkEl = { getAttribute: () => c.href };
+    return {
+      querySelector(s: string) {
+        if (s === sel.cardTitle) return titleEl;
+        if (s === sel.cardCompany) return companyEl;
+        if (s === sel.cardLink) return linkEl;
+        return null;
+      },
+      matches() {
+        return false;
+      },
+      getAttribute() {
+        return null;
+      },
+      scrollIntoView() {
+        windowStart.index = i;
+      },
+    };
+  });
+  const listEl = { querySelectorAll: (s: string) => (s === sel.card ? cardEls : []) };
+  const document = { querySelector: (s: string) => (s === sel.cardList ? listEl : null) };
+  return { document };
+}
+
+test('buildHarvestScript scrolls only chunk[0] per chunk, so a viewport window that fits a whole chunk mounts every card on the first read — no reliance on the repair pass', async () => {
+  const inv = fixtureInventory();
+  const cards = Array.from({ length: 12 }, (_, i) => ({
+    title: `Job ${i}`,
+    company: `Company ${i}`,
+    href: `/jobs/view/${4000 + i}/`,
+  }));
+  // Window of 7 visible cards from the last scrolled-to index — bigger than
+  // CHUNK_SIZE (5), mirroring a real results list where more cards fit on
+  // screen than one chunk holds.
+  const { document } = windowTrackedDocument(inv, cards, 7);
+  const script = buildHarvestScript(inv, {
+    chunkSettleBudgetMs: 30,
+    chunkSettlePollMs: 5,
+  });
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  ) as { cards: Array<{ title: string; company: string }>; diag: Record<string, number> };
+
+  assert.equal(result.cards.length, 12);
+  for (const c of result.cards) {
+    assert.notEqual(c.title, '');
+    assert.notEqual(c.company, '');
+  }
+  assert.ok(
+    result.diag.emptyAfterRead !== undefined && result.diag.emptyAfterRead <= 1,
+    `expected emptyAfterRead <= 1, got ${result.diag.emptyAfterRead}`,
+  );
+  assert.ok(
+    result.diag.repairAttempted !== undefined && result.diag.repairAttempted <= 1,
+    `expected repairAttempted <= 1, got ${result.diag.repairAttempted}`,
+  );
+});
+
 test('buildHarvestScript reads a chunk before scrolling past it — the regression test for the whole fix (fails against the old scroll-all-then-read design)', async () => {
   const inv = fixtureInventory();
   const cards = Array.from({ length: 12 }, (_, i) => ({
