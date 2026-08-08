@@ -11,6 +11,7 @@ import { Step2Persona } from './steps/Step2Persona';
 import { Step3About } from './steps/Step3About';
 import { Step4Hunt } from './steps/Step4Hunt';
 import { Step5Extras } from './steps/Step5Extras';
+import { Step6Launch } from './steps/Step6Launch';
 import {
   emptyDraft,
   type WizardDraft,
@@ -47,34 +48,6 @@ const STEP_TITLES: Record<WizardStep, string> = {
 
 function initialDraft(): WizardDraft {
   return { ...emptyDraft(''), step: 1 };
-}
-
-/** Every one of the six steps is wired here as a placeholder only — task
- * 10 (steps 1–2) and tasks 5, 6, 7, and 8 (steps 3–6) each replace exactly
- * one of these six `case` branches with the real step, dropped in against
- * the SAME `WizardStepProps` this task already passes; nothing else in
- * `renderStep`'s switch changes when they do. Steps 1 and 2 are real
- * components (task 10); steps 3 through 5 still register a trivial
- * always-`true` placeholder handler (nothing is written, so Next simply
- * advances); step 6 registers `null` — it is this wizard's only exit and
- * there is no honest "finish" behavior to wire until task 8 adds the real
- * one. */
-function Placeholder({
-  label,
-  finishable,
-  registerSubmit,
-}: WizardStepProps & { label: string; finishable: boolean }) {
-  useEffect(() => {
-    registerSubmit(finishable ? async () => true : null);
-    return () => registerSubmit(null);
-  }, [finishable, registerSubmit]);
-
-  return (
-    <div className="flex flex-col gap-2">
-      <h2 className="text-base font-medium">{label}</h2>
-      <p className="text-sm text-muted-foreground">This step arrives in the next task.</p>
-    </div>
-  );
 }
 
 export function WizardPage() {
@@ -206,7 +179,7 @@ export function WizardPage() {
           />
         );
       case 6:
-        return <Placeholder {...stepProps} label="Launch" finishable={false} />;
+        return <Step6Launch {...stepProps} />;
     }
   }
 
