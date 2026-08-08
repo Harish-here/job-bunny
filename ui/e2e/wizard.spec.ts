@@ -162,10 +162,19 @@ test('wizard: happy path with a frontend persona creates a runnable profile', as
   await clickNext(page);
   await expect(wizardStep(page, 5)).toBeVisible();
 
+  // Deliberately no `notionToken`/`telegramToken` here: those go through
+  // `PUT /api/secrets/:key`, which upserts into the data home's real
+  // `.env` (`writeSecret`, `src/cli/wire/board.ts`) — and this suite's
+  // `JOBBUNNY_HOME` is pinned to the repo root (`wizard.helpers.ts`), the
+  // same `.env` a developer's real Notion/Telegram tokens live in. Filling
+  // `notionDbId`/`telegramChatId` still exercises the profile.json
+  // settings write below; `putSecret` itself is already covered, against a
+  // mocked fetch, by `wizard.api.test.ts`. `ui/e2e/env-guard.ts`'s global
+  // setup/teardown is a second, independent line of defense for this same
+  // risk — this comment documents why the risk is avoided here too, not
+  // just caught there.
   await fillExtrasStep(page, {
     notionDbId: '12345678123412341234123456789012',
-    notionToken: 'secret_abc123',
-    telegramToken: `123456789:${'A'.repeat(35)}`,
     telegramChatId: '-100123456',
   });
   await submitExtrasStep(page);
@@ -413,4 +422,53 @@ test('wizard: the derived rules view matches the saved filter.json', async ({ pa
 
   const filterText = await fetchConfigText(page, name, 'filter.json');
   expect(JSON.parse(filterText)).toEqual(JSON.parse(preSaveJson ?? ''));
+});
+
+test('wizard: Back then Next past a step that already wrote its own config does not trip the never-clobber guard', async ({
+  page,
+}) => {
+  const name = uniqueProfileName();
+  createdProfiles.push(name);
+
+  await createProfileStep(page, name);
+  await pickPersonaStep(page, 'backend');
+  await fillAboutStep(page, {
+    homeCity: 'Pune',
+    country: 'India',
+    workType: 'Onsite',
+  });
+  // First arrival at step 3: writes resume.json + filter.json and
+  // advances to step 4.
+  await submitAboutStep(page);
+
+  // Back to step 3, then forward again WITHOUT changing anything — this is
+  // the exact round trip that used to see the wizard's own prior write and
+  // block forever with `wizard-existing-config`, leaving no way to ever
+  // advance past step 3 again.
+  await clickBack(page);
+  await expect(wizardStep(page, 3)).toBeVisible();
+  await clickNext(page);
+  await expect(wizardStep(page, 4)).toBeVisible();
+  await expect(page.getByTestId('wizard-existing-config')).toHaveCount(0);
+
+  // Step 4: fill a URL, submit (writes search_urls.md), advance to step 5.
+  await page
+    .getByLabel('Search URL', { exact: true })
+    .fill('https://www.linkedin.com/jobs/search/?keywords=backend');
+  await page.getByLabel('Label').fill('Backend roles');
+  await clickNext(page);
+  await expect(wizardStep(page, 5)).toBeVisible();
+
+  // Back to step 4, then forward again — same regression, for the hunt
+  // step's own search_urls.md guard.
+  await clickBack(page);
+  await expect(wizardStep(page, 4)).toBeVisible();
+  // The row typed above must still be visible and editable, not replaced
+  // by an early-return notice.
+  await expect(page.getByLabel('Search URL', { exact: true })).toHaveValue(
+    'https://www.linkedin.com/jobs/search/?keywords=backend',
+  );
+  await clickNext(page);
+  await expect(wizardStep(page, 5)).toBeVisible();
+  await expect(page.getByTestId('wizard-existing-config')).toHaveCount(0);
 });

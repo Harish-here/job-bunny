@@ -36,6 +36,16 @@ const DEFAULT_SENIORITY_OPTIONS = [
   'Principal',
 ];
 
+/** A doc counts as "real pre-existing config" once its trimmed text is
+ * neither empty nor the seeded `'{}'` placeholder — shared by the
+ * never-clobber guard's filter.json AND resume.json reads so a
+ * /setup-seeded resume.json with real content blocks the save exactly
+ * like a hand-edited filter.json would. */
+function hasExistingContent(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed !== '' && trimmed !== '{}';
+}
+
 type ChipListKey = 'coreSkills' | 'secondarySkills' | 'domainExperience';
 
 /** A removable-chip list with a free-text add row. Composed from Badge +
@@ -239,18 +249,29 @@ export function Step3About({ draft, onDraftChange, registerSubmit }: WizardStepP
     if (Object.keys(errors).length > 0) return false;
 
     setExistingConfig(false);
-    // Never-clobber guard: read filter.json BEFORE either write, so a
-    // blocked save issues zero PUTs, not a half-written resume.json.
-    const current = await getConfigDoc(profile, 'filter.json');
-    const trimmed = current.text.trim();
-    if (trimmed !== '' && trimmed !== '{}') {
-      flushSync(() => setExistingConfig(true));
-      return false;
+    // Never-clobber guard: read filter.json AND resume.json BEFORE either
+    // write, so a blocked save issues zero PUTs, not a half-written
+    // resume.json — this step writes both, and resume.json is written
+    // first, so either document already carrying real content must block
+    // the save. Skipped once THIS session has already written them once
+    // (`draft.wroteAbout`): re-reading after our own prior write would
+    // otherwise see our own non-empty documents and block forever, which
+    // is exactly what made Back-then-Next unable to ever advance again.
+    if (!draft.wroteAbout) {
+      const [filterDoc, resumeDoc] = await Promise.all([
+        getConfigDoc(profile, 'filter.json'),
+        getConfigDoc(profile, 'resume.json'),
+      ]);
+      if (hasExistingContent(filterDoc.text) || hasExistingContent(resumeDoc.text)) {
+        flushSync(() => setExistingConfig(true));
+        return false;
+      }
     }
     await writeConfigDocText(profile, 'resume.json', serializeResume(about));
     await writeConfigDocText(profile, 'filter.json', derivedText);
+    onDraftChange({ ...draft, about, wroteAbout: true });
     return true;
-  }, [profile, about, yoeText, homeLocation.city, derivedText]);
+  }, [draft, onDraftChange, profile, about, yoeText, homeLocation.city, derivedText]);
 
   useEffect(() => {
     registerSubmit(handleSubmit);

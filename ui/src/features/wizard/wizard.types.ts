@@ -49,6 +49,15 @@ export interface WizardDraft {
   hunt: HuntAnswers;
   extras: ExtrasAnswers;
   launch: LaunchAnswers;
+  /** True once THIS session's Step3About submit has already written
+   * resume.json + filter.json for `profile` — set right after that write
+   * succeeds, never re-derived from the documents themselves. Lets the
+   * never-clobber guard tell "my own prior write" (skip the guard, so Back
+   * then Next again can re-submit) apart from "real pre-existing config"
+   * (keep blocking), instead of tripping on either one identically. */
+  wroteAbout: boolean;
+  /** Same idea as `wroteAbout`, for Step4Hunt's search_urls.md write. */
+  wroteHunt: boolean;
 }
 
 /** The props every wizard step component receives. `WizardPage` owns all
@@ -99,6 +108,8 @@ export function emptyDraft(profile: string): WizardDraft {
       customTimes: [],
       weekdays: [1, 2, 3, 4, 5],
     },
+    wroteAbout: false,
+    wroteHunt: false,
   };
 }
 

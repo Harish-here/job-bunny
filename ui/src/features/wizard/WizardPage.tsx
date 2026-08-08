@@ -118,7 +118,13 @@ export function WizardPage() {
       const ok = await submit();
       if (ok) {
         setStep((s) => {
-          const next = (s + 1) as WizardStep;
+          // Clamped, not a bare `s + 1`: step 6's own submit handler
+          // (Step6Launch) already calls `navigate({ name: 'runs' })` on
+          // success, and that route change only takes effect on the async
+          // `hashchange` event — without the clamp, this render would
+          // briefly show a nonexistent "step 7 of 6" (STEP_TITLES[7] is
+          // undefined, Progress renders past 100%) before the route swap.
+          const next = Math.min(s + 1, 6) as WizardStep;
           setDraft((d) => {
             const updated = { ...d, step: next };
             if (updated.profile !== '') writeDraft(updated);

@@ -21,6 +21,9 @@ vi.mock('../settings/config.api', () => ({
 }));
 vi.mock('./wizard.api', () => ({
   getPersonas: vi.fn(),
+  getDaemonStatus: vi.fn(),
+  patchProfileConfig: vi.fn(),
+  requestRunIntent: vi.fn(),
 }));
 
 const FRONTEND: Persona = {
@@ -164,4 +167,42 @@ describe('WizardPage', () => {
     );
     expect(screen.getByTestId('wizard-step')).toHaveAttribute('data-step', '1');
   });
+
+  it(
+    'a successful submit on step 6 clamps at step 6 rather than advancing to a ' +
+      'nonexistent step 7 (STEP_TITLES[7] is undefined, renderStep has no case 7)',
+    async () => {
+      vi.mocked(draftStore.readActiveProfile).mockReturnValue('wiz-launch');
+      stubProfilesFetch([{ name: 'wiz-launch', connector: 'sqlite', hasDb: true }]);
+      vi.mocked(draftStore.readDraft).mockReturnValue({
+        ...emptyDraft('wiz-launch'),
+        step: 6,
+      });
+      vi.mocked(wizardApi.getDaemonStatus).mockResolvedValue({
+        state: 'stopped',
+        pid: null,
+        startedAt: null,
+        lastTickAt: null,
+        inFlight: null,
+        profiles: [],
+      });
+      vi.mocked(wizardApi.patchProfileConfig).mockResolvedValue(undefined);
+
+      renderWizard();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('wizard-step')).toHaveAttribute('data-step', '6');
+      });
+      expect(screen.getByText('Step 6 of 6')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId('wizard-next'));
+
+      await waitFor(() => {
+        expect(wizardApi.patchProfileConfig).toHaveBeenCalled();
+      });
+      expect(screen.getByTestId('wizard-step')).toHaveAttribute('data-step', '6');
+      expect(screen.getByText('Step 6 of 6')).toBeInTheDocument();
+      expect(screen.queryByText('Step 7 of 6')).not.toBeInTheDocument();
+    },
+  );
 });

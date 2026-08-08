@@ -13,7 +13,11 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 // plumbing later.
 export default defineConfig({
   testDir: './e2e',
-  globalSetup: './e2e/seed.ts',
+  // `env-guard.ts` runs alongside the DB seeder and snapshots the repo
+  // root's `.env` before the suite, restoring it byte-for-byte afterward
+  // via the teardown function it returns (Playwright's own convention) —
+  // see that file's doc comment for why.
+  globalSetup: ['./e2e/seed.ts', './e2e/env-guard.ts'],
   use: { baseURL: 'http://127.0.0.1:4199' },
   webServer: {
     command: 'node src/cli/main.ts board --port 4199',

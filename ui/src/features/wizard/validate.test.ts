@@ -111,6 +111,7 @@ function baseExtrasInput(
     notionToken: '',
     telegramToken: '',
     telegramChatId: '',
+    notionMirror: false,
     ...overrides,
   };
 }
@@ -159,6 +160,26 @@ describe('validateExtras', () => {
 
   it('accepts a negative whole number telegram chat ID', () => {
     expect(validateExtras(baseExtrasInput({ telegramChatId: '-123456789' }))).toEqual({});
+  });
+
+  it('rejects the mirror switched on with a blank database ID', () => {
+    expect(
+      validateExtras(baseExtrasInput({ notionDbId: '', notionMirror: true })),
+    ).toEqual({
+      notionDbId: 'Enter a Notion database ID to enable the mirror.',
+    });
+  });
+
+  it('accepts the mirror switched on with a valid database ID', () => {
+    expect(
+      validateExtras(baseExtrasInput({ notionDbId: '1'.repeat(32), notionMirror: true })),
+    ).toEqual({});
+  });
+
+  it('accepts the mirror switched off with a blank database ID', () => {
+    expect(
+      validateExtras(baseExtrasInput({ notionDbId: '', notionMirror: false })),
+    ).toEqual({});
   });
 });
 

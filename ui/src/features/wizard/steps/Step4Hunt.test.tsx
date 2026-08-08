@@ -35,11 +35,14 @@ function makeCapture() {
 function Harness({
   initial = makeDraft(),
   registerSubmit,
+  captureRef,
 }: {
   initial?: WizardDraft;
   registerSubmit: (handler: (() => Promise<boolean>) | null) => void;
+  captureRef?: { current: WizardDraft };
 }) {
   const [draft, setDraft] = useState<WizardDraft>(initial);
+  if (captureRef) captureRef.current = draft;
   return (
     <Step4Hunt draft={draft} onDraftChange={setDraft} registerSubmit={registerSubmit} />
   );
@@ -330,4 +333,78 @@ describe('Step4Hunt', () => {
     expect(writeConfigDocText).not.toHaveBeenCalled();
     expect(patchProfileConfig).not.toHaveBeenCalled();
   });
+
+  it('the existing-config notice renders alongside the form, not replacing it, so rows stay visible and editable', async () => {
+    vi.mocked(getConfigDoc).mockResolvedValue({
+      text: '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n  • Old - https://www.linkedin.com/jobs/search/?keywords=old\n',
+    });
+    const capture = makeCapture();
+    render(<Harness registerSubmit={capture.registerSubmit} />);
+    await fillRow(
+      0,
+      'https://www.linkedin.com/jobs/search/?keywords=frontend',
+      'Frontend Roles',
+    );
+
+    const result = await submit(capture.ref.current);
+
+    expect(result).toBe(false);
+    expect(await screen.findByTestId('wizard-existing-config')).toBeInTheDocument();
+    // Frozen bug: the notice used to REPLACE the whole form, discarding the
+    // row the user had just typed and leaving no control but a Next that
+    // always fails.
+    expect(screen.getByLabelText('Search URL')).toHaveValue(
+      'https://www.linkedin.com/jobs/search/?keywords=frontend',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Add another search URL' }),
+    ).toBeInTheDocument();
+  });
+
+  it(
+    'a successful submit sets wroteHunt: true on the draft, and a second submit ' +
+      '(simulating Back then Next) skips the never-clobber guard read entirely — ' +
+      'regression: the guard used to see its own bullet line and block forever',
+    async () => {
+      const capture = makeCapture();
+      const draftRef: { current: WizardDraft } = { current: makeDraft() };
+      const { unmount } = render(
+        <Harness registerSubmit={capture.registerSubmit} captureRef={draftRef} />,
+      );
+      await fillRow(
+        0,
+        'https://www.linkedin.com/jobs/search/?keywords=frontend',
+        'Frontend Roles',
+      );
+
+      const result = await submit(capture.ref.current);
+      expect(result).toBe(true);
+      expect(draftRef.current.wroteHunt).toBe(true);
+      expect(getConfigDoc).toHaveBeenCalledTimes(1);
+
+      // Unmount (WizardPage genuinely unmounts step 4 on Back to step 3),
+      // then remount from the persisted draft — the guard's own doc read
+      // would now see the bullet line THIS session itself just wrote.
+      unmount();
+      vi.mocked(getConfigDoc).mockClear();
+      vi.mocked(writeConfigDocText).mockClear();
+      vi.mocked(patchProfileConfig).mockClear();
+      vi.mocked(getConfigDoc).mockResolvedValue({
+        text:
+          '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n' +
+          '  • Frontend Roles - https://www.linkedin.com/jobs/search/?keywords=frontend\n',
+      });
+
+      const capture2 = makeCapture();
+      render(
+        <Harness initial={draftRef.current} registerSubmit={capture2.registerSubmit} />,
+      );
+      const result2 = await submit(capture2.ref.current);
+
+      expect(result2).toBe(true);
+      expect(getConfigDoc).not.toHaveBeenCalled();
+      expect(writeConfigDocText).toHaveBeenCalledTimes(1);
+      expect(patchProfileConfig).toHaveBeenCalledTimes(1);
+    },
+  );
 });

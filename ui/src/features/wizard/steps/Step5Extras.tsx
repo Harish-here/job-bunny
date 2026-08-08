@@ -123,6 +123,7 @@ export function Step5Extras({
         notionToken,
         telegramToken,
         telegramChatId,
+        notionMirror,
       });
       // flushSync: handleSubmit is invoked imperatively by WizardPage's
       // Next handler (and directly by tests), outside any React-controlled

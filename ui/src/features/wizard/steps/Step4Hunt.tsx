@@ -128,18 +128,26 @@ export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepPr
     if (hasError) return false;
 
     const entries = currentRows.filter((row) => row.url.trim() !== '');
+    let wroteHunt = current.wroteHunt;
 
     if (entries.length > 0) {
-      const doc = await getConfigDoc(current.profile, 'search_urls.md');
-      if (hasBulletLine(doc.text)) {
-        setExistingConfig(true);
-        return false;
+      // Skipped once THIS session has already written search_urls.md once
+      // (`current.wroteHunt`) — mirrors Step3About's guard fix: re-reading
+      // after our own prior write would see our own bullet lines and block
+      // Back-then-Next forever.
+      if (!current.wroteHunt) {
+        const doc = await getConfigDoc(current.profile, 'search_urls.md');
+        if (hasBulletLine(doc.text)) {
+          setExistingConfig(true);
+          return false;
+        }
       }
       await writeConfigDocText(
         current.profile,
         'search_urls.md',
         serializeSearchUrls(entries),
       );
+      wroteHunt = true;
     }
 
     await patchProfileConfig(current.profile, (cfg) => {
@@ -147,24 +155,22 @@ export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepPr
         entries.length > 0 ? ['linkedin', 'greenhouse', 'keka'] : ['greenhouse', 'keka'];
     });
 
+    onDraftChange({ ...current, wroteHunt });
     return true;
-  }, []);
+  }, [onDraftChange]);
 
   useEffect(() => {
     registerSubmit(handleSubmit);
     return () => registerSubmit(null);
   }, [registerSubmit, handleSubmit]);
 
-  if (existingConfig) {
-    return (
-      <p data-testid="wizard-existing-config" className="text-sm text-attention-strong">
-        {EXISTING_CONFIG_MESSAGE}
-      </p>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-4">
+      {existingConfig && (
+        <p data-testid="wizard-existing-config" className="text-sm text-attention-strong">
+          {EXISTING_CONFIG_MESSAGE}
+        </p>
+      )}
       <div className="flex flex-col gap-1">
         <h2 className="font-heading text-base font-medium">Where to hunt</h2>
         <p className="text-sm text-muted-foreground">

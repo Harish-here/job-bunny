@@ -36,6 +36,8 @@ function baseDraft(overrides: Partial<WizardDraft> = {}): WizardDraft {
       telegramTokenSaved: false,
     },
     launch: { preset: 'morning', customTimes: [], weekdays: [1, 2, 3, 4, 5] },
+    wroteAbout: false,
+    wroteHunt: false,
     ...overrides,
   };
 }
@@ -121,6 +123,22 @@ describe('Step5Extras', () => {
     expect(wizardApi.putSecret).not.toHaveBeenCalled();
     expect(wizardApi.patchProfileConfig).not.toHaveBeenCalled();
   });
+
+  it(
+    'the mirror switch flipped on with a blank database ID shows a field error and ' +
+      'issues no request, instead of silently saving nothing about the mirror',
+    async () => {
+      const { registerSubmit } = renderStep(baseDraft());
+      await userEvent.click(
+        screen.getByRole('switch', { name: 'Mirror runs to Notion' }),
+      );
+      await expect(latestSubmitHandler(registerSubmit)()).resolves.toBe(false);
+      expect(
+        screen.getByText('Enter a Notion database ID to enable the mirror.'),
+      ).toBeInTheDocument();
+      expect(wizardApi.patchProfileConfig).not.toHaveBeenCalled();
+    },
+  );
 
   it('a malformed Notion database id shows the exact message and resolves false', async () => {
     const { registerSubmit } = renderStep(baseDraft());

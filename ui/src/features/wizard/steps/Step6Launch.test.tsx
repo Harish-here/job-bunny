@@ -78,6 +78,8 @@ function baseDraft(overrides: Partial<WizardDraft> = {}): WizardDraft {
       telegramTokenSaved: false,
     },
     launch: { preset: 'morning', customTimes: [], weekdays: [1, 2, 3, 4, 5] },
+    wroteAbout: false,
+    wroteHunt: false,
     ...overrides,
   };
 }

@@ -57,6 +57,8 @@ function baseDraft(overrides: Partial<WizardDraft> = {}): WizardDraft {
       telegramTokenSaved: false,
     },
     launch: { preset: 'morning', customTimes: [], weekdays: [1, 2, 3, 4, 5] },
+    wroteAbout: false,
+    wroteHunt: false,
     ...overrides,
   };
 }
@@ -77,7 +79,7 @@ function renderStep(
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
-  render(
+  const { unmount } = render(
     <Step3About
       draft={overrides.draft ?? baseDraft()}
       onDraftChange={onDraftChange}
@@ -85,7 +87,7 @@ function renderStep(
     />,
     { wrapper },
   );
-  return { onDraftChange, registerSubmit, getHandler: () => submitHandler };
+  return { onDraftChange, registerSubmit, getHandler: () => submitHandler, unmount };
 }
 
 async function fillValidRequiredFields(user: ReturnType<typeof userEvent.setup>) {
@@ -260,6 +262,75 @@ describe('Step3About', () => {
         'This profile already has filter rules. Edit them in Settings.',
       );
       expect(wizardApi.writeConfigDocText).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    'a pre-existing non-empty resume.json alone (filter.json still the seeded {}) ' +
+      'also shows the wizard-existing-config notice and issues no PUT',
+    async () => {
+      const user = userEvent.setup();
+      vi.mocked(configApi.getConfigDoc).mockImplementation((_profile, doc) =>
+        Promise.resolve({
+          text: doc === 'resume.json' ? '{"current_yoe":5}' : '{}',
+        }),
+      );
+      const { getHandler } = renderStep();
+
+      await fillValidRequiredFields(user);
+      const result = await getHandler()?.();
+
+      expect(result).toBe(false);
+      expect(await screen.findByTestId('wizard-existing-config')).toHaveTextContent(
+        'This profile already has filter rules. Edit them in Settings.',
+      );
+      expect(wizardApi.writeConfigDocText).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    'a successful submit reports wroteAbout: true through onDraftChange, and a ' +
+      'second submit on a draft carrying wroteAbout: true skips the guard read ' +
+      'entirely (regression: Back then Next must be able to re-submit)',
+    async () => {
+      const user = userEvent.setup();
+      stubGuardPasses();
+      vi.mocked(wizardApi.writeConfigDocText).mockResolvedValue(undefined);
+      const onDraftChange = vi.fn();
+      const { getHandler, unmount } = renderStep({ onDraftChange });
+
+      await fillValidRequiredFields(user);
+      const firstResult = await getHandler()?.();
+      expect(firstResult).toBe(true);
+      const lastCall = onDraftChange.mock.calls.at(-1)?.[0];
+      expect(lastCall?.wroteAbout).toBe(true);
+
+      // Unmount before re-rendering: this simulates Back navigating away
+      // from step 3 (WizardPage never renders two `Step3About` instances
+      // at once) and avoids duplicate-label ambiguity from two mounted
+      // copies of the same form.
+      unmount();
+
+      // Simulate the real Back-then-Next round trip: the guard's own docs
+      // now contain THIS session's own write (never empty, never '{}'),
+      // which is exactly the state that used to trip the guard forever.
+      vi.mocked(configApi.getConfigDoc).mockResolvedValue({
+        text: '{"title":{}}',
+      });
+      vi.mocked(configApi.getConfigDoc).mockClear();
+      vi.mocked(wizardApi.writeConfigDocText).mockClear();
+
+      // The carried-over draft already has valid required fields from the
+      // first submit (home city + a work type) — no need to re-fill them.
+      const { getHandler: getSecondHandler } = renderStep({
+        draft: { ...lastCall, wroteAbout: true },
+        onDraftChange,
+      });
+      const secondResult = await getSecondHandler()?.();
+
+      expect(secondResult).toBe(true);
+      expect(configApi.getConfigDoc).not.toHaveBeenCalled();
+      expect(wizardApi.writeConfigDocText).toHaveBeenCalledTimes(2);
     },
   );
 });

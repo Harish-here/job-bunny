@@ -65,6 +65,7 @@ export interface ExtrasValidationInput {
   notionToken: string;
   telegramToken: string;
   telegramChatId: string;
+  notionMirror: boolean;
 }
 
 export function validateExtras(input: ExtrasValidationInput): Record<string, string> {
@@ -73,6 +74,13 @@ export function validateExtras(input: ExtrasValidationInput): Record<string, str
   const notionDbId = input.notionDbId.trim();
   if (notionDbId !== '' && !NOTION_DB_ID_RE.test(notionDbId.replace(/-/g, ''))) {
     errors.notionDbId = 'A Notion database ID is 32 characters (letters and digits).';
+  } else if (notionDbId === '' && input.notionMirror) {
+    // `buildConfigMutation` (Step5Extras.tsx) only writes `settings.notion`
+    // when `notionDbId` is non-empty — without this check, flipping the
+    // mirror Switch on with no database ID silently saves nothing about
+    // the mirror at all, so a save that reports success actually discards
+    // the toggle the user just set.
+    errors.notionDbId = 'Enter a Notion database ID to enable the mirror.';
   }
 
   const notionToken = input.notionToken.trim();
