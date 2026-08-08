@@ -97,7 +97,7 @@ Walk this list before considering a change finished:
    ```
    (`check` = typecheck && lint && boundaries && test — this is the same gate CI's `test` check runs.) Report the result; do not consider the task done if this fails. If `check` fails, fix the root cause — don't weaken a rule or skip a check to make it pass.
 5. Never reference `scripts/` as a live path — it's v0, deleted on this branch, kept only on `main` for history.
-6. Never run experimental or test stages against `profiles/harish/` — it holds real user data. Use `profiles/rajni/`, the committed synthetic fixture, for any runtime verification (`node src/cli/main.ts stage <name> --profile rajni`, etc.).
+6. Never run experimental or test stages against `profiles/harish/` — it holds real user data. Use `profiles/rajni/`, the committed synthetic fixture, for any runtime verification (`JOBBUNNY_HOME=$PWD node src/cli/main.ts stage <name> --profile rajni`, etc.).
 7. `main` is protected — land changes via a PR with `npm run check` green; don't push directly to `main`.
 8. When a task states its design decisions are closed ("do not redesign"), implement them as given — disagreement goes in your NOTES, never into the code.
 

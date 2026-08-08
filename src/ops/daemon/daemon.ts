@@ -30,6 +30,7 @@
 
 import type { OwedRun, ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
 import { formatLocalDate, hhMmToMinutes, isRunOwed } from '../../core/schedule/index.ts';
+import type { PendingIntent } from '../../ports/run_intents.ts';
 import type { DaemonPidfileDeps } from './pidfile.ts';
 import { readDaemonPidfile, updateDaemonPidfile } from './pidfile.ts';
 import type { ScanDeps } from './scan/index.ts';
@@ -56,6 +57,20 @@ export interface DaemonDeps {
    * on-disk run folder to scan post-Phase-2). Must never throw — a
    * profile whose db can't be opened yields no records for it. */
   readRunHistory: (profiles: readonly string[], date: string) => RunRecord[];
+  /** Board-queued run intents that are `pending` and NOT expired, oldest
+   * first, across every profile directory under `<root>/profiles` —
+   * including profiles with no schedule at all, because "Run now" has to
+   * work for a profile the user never scheduled. Must never throw: a
+   * profile whose db cannot be opened simply yields no intents. */
+  readIntents: (now: Date) => PendingIntent[];
+  /** Flips one intent from `pending` to `claimed`. `false` when the row is
+   * no longer pending — cancelled between the scan and the claim, or
+   * already claimed — in which case the daemon skips it without spawning. */
+  claimIntent: (profile: string, intentId: number) => boolean;
+  /** Back-writes the run the claim produced: the newest run row for
+   * `profile` whose `startedAt` is at or after `since`. A no-op when the
+   * child never wrote one. Must never throw. */
+  attachIntentRun: (profile: string, intentId: number, since: string) => void;
   log(
     event: string,
     data?: Record<string, unknown>,
@@ -101,6 +116,57 @@ export function createDaemon(deps: DaemonDeps): {
   async function runOwedBatch(): Promise<void> {
     const now = deps.now();
     const date = formatLocalDate(now);
+
+    // Board-queued intents run FIRST, before the schedule batch — a human
+    // is waiting on an intent, while a scheduled slot has a grace window
+    // measured in tens of minutes. Intents are deliberately kept OUT of
+    // isRunOwed, the pidfile attempts ledger, and the grace revalidation
+    // below: those three mechanisms answer "has this SCHEDULED SLOT been
+    // served?", and an intent serves no slot.
+    for (const intent of deps.readIntents(now)) {
+      if (stopping) {
+        deps.log('stop-requested-batch-halted', {
+          profile: intent.profile,
+          intentId: intent.intentId,
+        });
+        break;
+      }
+      if (!deps.claimIntent(intent.profile, intent.intentId)) {
+        deps.log('intent-vanished', {
+          profile: intent.profile,
+          intentId: intent.intentId,
+        });
+        continue;
+      }
+      const since = deps.now().toISOString();
+      deps.log('intent-spawn', { profile: intent.profile, intentId: intent.intentId });
+      const exitCode = await deps.spawnRun({
+        profile: intent.profile,
+        date: formatLocalDate(now),
+        // Not an HH:MM slot on purpose: an intent run serves no scheduled
+        // slot, is never written to the attempts ledger, and this string
+        // is never parsed as a time.
+        slot: 'intent',
+      });
+      deps.log('child-exit', {
+        profile: intent.profile,
+        slot: 'intent',
+        exitCode,
+      });
+      try {
+        deps.attachIntentRun(intent.profile, intent.intentId, since);
+      } catch (err) {
+        deps.log(
+          'intent-attach-failed',
+          {
+            profile: intent.profile,
+            intentId: intent.intentId,
+            error: String(err),
+          },
+          'warn',
+        );
+      }
+    }
 
     const schedules: ProfileSchedule[] = await scanProfileSchedules(
       deps.profilesDir,

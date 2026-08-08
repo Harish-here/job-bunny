@@ -18,19 +18,23 @@
  * ever touches `process.exitCode`, so `main` itself is safe to call from a
  * test without side effects on the real process.
  *
- * `dotenv/config` is imported FIRST, for its side effect only: `NOTION_TOKEN`
- * and `TELEGRAM_BOT_TOKEN` live in the gitignored `.env`, and a daemon-spawned
- * scheduled run (`ops/daemon/supervise`) inherits a minimal environment that
- * does not include them. Without this
- * a scheduled run would wire a throwing-stub connector, die at sync, and then
- * fail to send the digest that would have reported it — a silent daily
- * failure. v0 does the same thing per entry point (`scripts/notion/client.js`,
- * `scripts/notify/notify.js`); v2 has one bin, so it loads here and only here.
+ * `dotenv.config({ path: join(resolveHome(), '.env') })` runs inside the
+ * `isMain()` bin guard at the bottom (not at module top level — see that
+ * guard's own comment for why), loading `.env` from the resolved data home
+ * rather than a cwd-relative `./.env`: `NOTION_TOKEN` and
+ * `TELEGRAM_BOT_TOKEN` live there, and a daemon-spawned scheduled run
+ * (`ops/daemon/supervise`) inherits a minimal environment that does not
+ * include them. Without this a scheduled run would wire a throwing-stub
+ * connector, die at sync, and then fail to send the digest that would have
+ * reported it — a silent daily failure. v0 does the same thing per entry
+ * point (`scripts/notion/client.js`, `scripts/notify/notify.js`); v2 has one
+ * bin, so it loads here and only here.
  */
-import 'dotenv/config';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import dotenv from 'dotenv';
 import {
   defaultDaemonPidfileDeps,
   HEARTBEAT_STALE_MS,
@@ -50,6 +54,7 @@ import { type ConfigDocName, configCommand } from './commands/config.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { laneAddUrlCommand } from './commands/lane_add_url.ts';
 import { migrateCommand } from './commands/migrate.ts';
+import { migrateHomeCommand } from './commands/migrate_home.ts';
 import { profileBuildCommand, profileRemoveCommand } from './commands/profile.ts';
 import { reconcileCommand } from './commands/reconcile.ts';
 import { npmSwallowedFlags, releaseCommand } from './commands/release/index.ts';
@@ -60,6 +65,8 @@ import { serveCommand } from './commands/serve/index.ts';
 import { setupCommand } from './commands/setup.ts';
 import { stageCommand } from './commands/stage.ts';
 import { type StateCommandOptions, stateCommand } from './commands/state.ts';
+import { resolveHome } from './home/index.ts';
+import { nodeGuardMessage } from './node_guard/index.ts';
 
 export type CommandFn = (opts: CommandOptions) => Promise<number>;
 
@@ -84,11 +91,22 @@ export interface MainDeps {
    * useful information on that opt-in surface; a blanket per-command nag
    * for "you've never run `serve start`" would be unwelcome noise here. */
   checkDaemonLiveness?: () => string | undefined;
+  /** `process.versions.node` by default — injected so the guard is testable
+   * without a second Node install. */
+  nodeVersion?: string;
+  /** Returns the missing-home error line for this command, or `undefined`
+   * when the home exists or the command does not need one. */
+  homeCheck?: (command: string) => string | undefined;
+  /** Where `--help`/`-h` writes the USAGE string. Defaults to
+   * `(line) => console.log(line)`, mirroring how `stderr` defaults to
+   * `console.error` — injected so tests capture the help output without
+   * touching the real stdout. */
+  stdout?: (line: string) => void;
 }
 
 function defaultCheckDaemonLiveness(): string | undefined {
   const pidfileDeps = defaultDaemonPidfileDeps();
-  const file = readDaemonPidfile(process.cwd(), pidfileDeps);
+  const file = readDaemonPidfile(resolveHome(), pidfileDeps);
   if (!file) return undefined; // absent or unparseable — both silent.
   if (!pidfileDeps.pidIsAlive(file.pid)) {
     return (
@@ -147,6 +165,11 @@ function defaultCommands(): CommandRegistry {
         profile: opts.profile ?? '',
         apply: opts.apply ?? false,
       })) as CommandFn,
+    'migrate-home': (async (opts: CommandOptions) =>
+      migrateHomeCommand({
+        apply: opts.apply ?? false,
+        ...(opts.from === undefined ? {} : { from: opts.from }),
+      })) as CommandFn,
     board: (async (opts: CommandOptions) =>
       // 1994 — not random: the operator's birthday.
       boardCommand({ port: opts.port ?? 1994 })) as CommandFn,
@@ -171,9 +194,48 @@ function defaultCommands(): CommandRegistry {
   };
 }
 
+/** Commands that must run without an existing data home: `setup` and
+ * `migrate-home` create or populate it, and `release` is a maintainer
+ * command that operates on the git checkout, not on user data. Exported
+ * (fix round) so `main.test.ts` can pin this set directly, rather than only
+ * proving `main()` forwards a command name through an inline fake. */
+export const HOME_EXEMPT_COMMANDS = new Set<string>(['setup', 'migrate-home', 'release']);
+
+/** Exported (fix round) so its exact frozen message string, exemption set,
+ * and `existsSync` probe are all under direct test — the previous
+ * `main.test.ts` coverage only proved `main()` forwards the command name to
+ * an inline, test-owned `homeCheck` fake, never this function's own logic.
+ * `env`/`existsSyncFn` are injectable (mirrors `resolveHome`'s own
+ * `env`/`homedir` params) so a test can pin a fake home/existence result
+ * without touching the real `process.env`/filesystem or the ambient
+ * `JOBBUNNY_HOME` this test file sets at module load. Both default to the
+ * real thing — `main()`'s own call site is unaffected. */
+export function defaultCheckHome(
+  command: string,
+  deps: { env?: NodeJS.ProcessEnv; existsSyncFn?: typeof existsSync } = {},
+): string | undefined {
+  if (HOME_EXEMPT_COMMANDS.has(command)) return undefined;
+  const home = resolveHome(deps.env ?? process.env);
+  if ((deps.existsSyncFn ?? existsSync)(home)) return undefined;
+  return `no jobbunny home at ${home} — run 'jobbunny setup'`;
+}
+
 export async function main(argv: string[], deps: MainDeps = {}): Promise<number> {
   const commands = { ...defaultCommands(), ...deps.commands };
+
+  const stdout = deps.stdout ?? ((line: string) => console.log(line));
+  if (argv.includes('--help') || argv.includes('-h')) {
+    stdout(USAGE);
+    return 0;
+  }
+
   const stderr = deps.stderr ?? ((line: string) => console.error(line));
+
+  const guard = nodeGuardMessage(deps.nodeVersion ?? process.versions.node);
+  if (guard) {
+    stderr(guard);
+    return 1;
+  }
 
   // §6.8: every command warns, first thing, when the daemon pidfile
   // exists but shows no live daemon — before anything else runs.
@@ -191,6 +253,12 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   if (!commandName || !COMMAND_NAMES.has(commandName)) {
     stderr(USAGE);
     return 2;
+  }
+
+  const homeError = (deps.homeCheck ?? defaultCheckHome)(commandName);
+  if (homeError) {
+    stderr(homeError);
+    return 1;
   }
 
   const built = buildOptions(commandName as CommandName, positionals.slice(1), values);
@@ -231,6 +299,7 @@ function isMain(): boolean {
 }
 
 if (isMain()) {
+  dotenv.config({ path: join(resolveHome(), '.env') });
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   });

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, buildQuery, getJson, patchJson, postJson, putJson } from './client';
+import {
+  ApiError,
+  buildQuery,
+  deleteJson,
+  getJson,
+  patchJson,
+  postJson,
+  putJson,
+} from './client';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -127,5 +135,28 @@ describe('postJson', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'x' }),
     });
+  });
+});
+
+describe('deleteJson', () => {
+  it('sends DELETE with no body and no headers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { intent: { id: 3 } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await deleteJson('/api/x');
+    expect(fetchMock).toHaveBeenCalledWith('/api/x', { method: 'DELETE' });
+  });
+
+  it('throws ApiError with the envelope code/message on a non-ok response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(409, {
+          error: { code: 'intent_not_pending', message: 'intent is no longer pending' },
+        }),
+      ),
+    );
+    const err = await deleteJson('/api/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 409, code: 'intent_not_pending' });
   });
 });

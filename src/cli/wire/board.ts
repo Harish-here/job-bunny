@@ -66,20 +66,45 @@
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { chmod as fsChmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { openJobsDb, SqliteBoardStore } from '../../adapters/db/sqlite/index.ts';
-import type { BoardProfile, BoardSource, BoardStore } from '../../ports/board.ts';
+import {
+  openJobsDb,
+  SqliteBoardStore,
+  SqliteRunIntentStore,
+} from '../../adapters/db/sqlite/index.ts';
+import { hasEnvValue, upsertEnvLine } from '../../core/env_file/index.ts';
+import {
+  type BoardProfile,
+  type BoardSource,
+  type BoardStore,
+  type DaemonStatus,
+  type RemoveProfileOutcome,
+  SECRET_KEYS,
+  type SecretKey,
+  type SecretPresence,
+} from '../../ports/board.ts';
 import type { ConfigDocKey } from '../../ports/config_store.ts';
-import { seedProfileDocs } from '../commands/profile.ts';
+import type { DoctorReport } from '../../ports/doctor.ts';
+import type { RunIntentStore } from '../../ports/run_intents.ts';
+import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
+import { resolveHome } from '../home/index.ts';
+import { readBoardDaemonStatus } from './board_daemon.ts';
+import { runBoardDoctor } from './board_doctor.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
 const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
 
 export interface BoardWireOverrides {
-  /** repo root; default `process.cwd()` — same resolution as
+  /** the data home; default `resolveHome()` — same resolution as
    * `compose.ts`/`wireMigrate` in `builders.ts`. */
   root?: string;
+  /** test-only seam: overrides how `.env` is chmod'd to `0o600` after
+   * `writeSecret` writes it. Default calls the real `node:fs/promises`
+   * `chmod`. Tests use this to assert the call happened (path + mode)
+   * without depending on the host OS actually honoring the permission
+   * bits. */
+  chmodEnvFile?: (path: string, mode: number) => Promise<void>;
 }
 
 interface ProfileInfo extends BoardProfile {
@@ -90,6 +115,18 @@ interface ProfileInfo extends BoardProfile {
  * `connector` (config→db Phase 4 — `settings.sqlite.path` is retired). */
 function resolveDbPath(root: string, name: string): string {
   return canonicalDbPath(root, name);
+}
+
+/** `<root>/.env`'s current text, UTF-8. A missing file (ENOENT) reads as
+ * the empty string, not an error — same tolerant posture as every other
+ * "file may not exist yet" read in this module. */
+async function readEnvText(root: string): Promise<string> {
+  try {
+    return await readFile(path.join(root, '.env'), 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw err;
+  }
 }
 
 /** Reads `profile.json`'s `connector` field through a short-lived,
@@ -141,8 +178,10 @@ async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
 }
 
 export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
+  const chmodEnvFile = overrides.chmodEnvFile ?? fsChmod;
   const stores = new Map<string, BoardStore>();
+  const intentStores = new Map<string, RunIntentStore>();
 
   return {
     async listProfiles(): Promise<BoardProfile[]> {
@@ -224,9 +263,126 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       });
     },
 
+    async runDoctor(name: string): Promise<DoctorReport | null> {
+      // Same membership gate as `openStore`/`readConfigDoc` — re-derived
+      // against the CURRENT directory names, never path math. The actual
+      // check-running (and its own short-lived `configStore` close) lives
+      // in `board_doctor.ts` — split out purely for the file-size cap.
+      const infos = await listProfileInfos(root);
+      if (!infos.some((p) => p.name === name)) return null;
+      return runBoardDoctor(name, root);
+    },
+
+    readDaemonStatus(): Promise<DaemonStatus> {
+      return readBoardDaemonStatus({ root });
+    },
+
+    async openIntents(name: string): Promise<RunIntentStore | null> {
+      // Same membership gate as `openStore` (gate 1) — re-derived against
+      // the CURRENT directory names, never path math. Unlike `openStore`,
+      // there is no `hasDb` gate: an intent is durable state a never-run
+      // profile must still be able to record, so opening the store is
+      // allowed to create-and-migrate the db as a side effect.
+      const infos = await listProfileInfos(root);
+      const info = infos.find((p) => p.name === name);
+      if (!info) return null;
+
+      const existing = intentStores.get(name);
+      if (existing) return existing;
+
+      const store = new SqliteRunIntentStore(info.dbPath);
+      intentStores.set(name, store);
+      return store;
+    },
+
+    async listSecrets(): Promise<SecretPresence> {
+      const text = await readEnvText(root);
+      return Object.fromEntries(
+        SECRET_KEYS.map((key) => [key, hasEnvValue(text, key) ? 'present' : 'absent']),
+      ) as SecretPresence;
+    },
+
+    async writeSecret(key: SecretKey, value: string): Promise<void> {
+      const text = await readEnvText(root);
+      const updated = upsertEnvLine(text, key, value);
+      const envPath = path.join(root, '.env');
+      // `mode` on `writeFile` only applies when the file is CREATED — an
+      // already-existing `.env` (the common case: most calls are updates
+      // to a file `setup` already created) keeps whatever permissions it
+      // already had unless chmod'd explicitly, so every write chmods the
+      // file to `0o600` afterward regardless of whether it already existed.
+      await writeFile(envPath, updated, { mode: 0o600 });
+      await chmodEnvFile(envPath, 0o600);
+      // `.env` is loaded exactly once, at CLI startup (`main.ts`'s
+      // `dotenv.config`) — the long-lived board process never re-reads
+      // it. Without this, `GET /api/profiles/:name/doctor` (which reads
+      // `process.env` via `ops/doctor/aggregate.ts`'s `resolveEnv`) keeps
+      // reporting the token missing until the server restarts, even
+      // though `GET /api/secrets` (which re-reads the file) already says
+      // 'present' — process-visible so the two endpoints agree.
+      process.env[key] = value;
+    },
+
+    // Guard order is the design (Task 8) — membership, protected, running
+    // run, pending intent, handle release, delete. See the port's own doc
+    // comment for the rationale.
+    async removeProfile(name: string): Promise<RemoveProfileOutcome> {
+      // Gate 1 — membership, not path math: re-derived against the
+      // CURRENT directory names, same as every other traversal-sensitive
+      // method above. This is what makes an attacker-supplied name safe
+      // to use in a path below.
+      const infos = await listProfileInfos(root);
+      if (!infos.some((p) => p.name === name)) return { outcome: 'not_found' };
+
+      // Gate 2 — protected fixture profile, no I/O. Imported from the CLI
+      // command so the two can never disagree.
+      if (PROTECTED_PROFILES.has(name)) return { outcome: 'protected' };
+
+      // Gate 3 — a running run blocks; a crashed (stale-heartbeat) one
+      // does not, so one wedged run can never make a profile permanently
+      // undeletable.
+      const store = await this.openStore(name);
+      if (store) {
+        const { rows } = store.listRuns({ limit: 1, offset: 0 });
+        if (rows[0]?.status === 'running') {
+          return { outcome: 'run_in_progress', runId: rows[0].id };
+        }
+      }
+
+      // Gate 4 — a pending intent blocks; an expired one does not, so a
+      // dead daemon can never strand the profile.
+      const intents = await this.openIntents(name);
+      if (intents) {
+        const intent = intents.latest(new Date().toISOString());
+        if (intent?.status === 'pending') {
+          return { outcome: 'intent_pending', intentId: intent.id };
+        }
+      }
+
+      // Gate 5 — release memoized handles before deleting anything: an
+      // open sqlite handle makes the directory undeletable on Windows and
+      // leaves a stale handle pointing at a deleted file everywhere else.
+      const openBoardStore = stores.get(name);
+      if (openBoardStore) {
+        openBoardStore.close();
+        stores.delete(name);
+      }
+      const openIntentStore = intentStores.get(name);
+      if (openIntentStore) {
+        openIntentStore.close();
+        intentStores.delete(name);
+      }
+
+      // Gate 6 — delete. Never touches Notion or the network.
+      await rm(path.join(root, 'profiles', name), { recursive: true, force: true });
+      return { outcome: 'removed' };
+    },
+
     close(): void {
       for (const store of stores.values()) store.close();
       stores.clear();
+      for (const store of intentStores.values()) store.close();
+      intentStores.clear();
     },
   };
 }

@@ -1,4 +1,11 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
+
+// Repo root, resolved from this config file's own location (not
+// process.cwd(), which varies by how `ui:e2e` is invoked) — `ui/` sits one
+// level below the repo root.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Port 4199 is deliberate (not ephemeral): the seeded board server and
 // baseURL must agree cross-platform, and CI runs one suite at a time. If
@@ -6,11 +13,21 @@ import { defineConfig } from '@playwright/test';
 // plumbing later.
 export default defineConfig({
   testDir: './e2e',
-  globalSetup: './e2e/seed.ts',
+  // `env-guard.ts` runs alongside the DB seeder and snapshots the repo
+  // root's `.env` before the suite, restoring it byte-for-byte afterward
+  // via the teardown function it returns (Playwright's own convention) —
+  // see that file's doc comment for why.
+  globalSetup: ['./e2e/seed.ts', './e2e/env-guard.ts'],
   use: { baseURL: 'http://127.0.0.1:4199' },
   webServer: {
     command: 'node src/cli/main.ts board --port 4199',
     cwd: '..',
+    // JOBBUNNY_HOME must point at the repo root so the board server finds
+    // the committed profiles/rajni fixture — without it the spawned
+    // process falls back to the real OS home, which has no jobbunny home
+    // at all in CI (Playwright merges this into process.env, it doesn't
+    // replace it).
+    env: { JOBBUNNY_HOME: repoRoot },
     url: 'http://127.0.0.1:4199/api/profiles',
     reuseExistingServer: false,
     timeout: 30_000,

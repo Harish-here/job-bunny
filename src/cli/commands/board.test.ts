@@ -8,8 +8,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { BoardServer, BoardServerOptions } from '../../app/server/index.ts';
-import type { BoardProfile, BoardSource } from '../../ports/board.ts';
+import type { BoardProfile, BoardSource, DaemonStatus } from '../../ports/board.ts';
 import { type BoardDeps, boardCommand } from './board.ts';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 function fakeSource(profiles: BoardProfile[] = []): BoardSource {
   return {
@@ -18,6 +27,12 @@ function fakeSource(profiles: BoardProfile[] = []): BoardSource {
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close: () => {},
   };
 }

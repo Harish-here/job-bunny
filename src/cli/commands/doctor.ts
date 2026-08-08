@@ -22,6 +22,7 @@ import {
   sqlitePathRetiredCheck,
 } from '../../ops/doctor/config_checks.ts';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
+import { resolveHome } from '../home/index.ts';
 import {
   wire as defaultWire,
   type WireOverrides,
@@ -49,12 +50,17 @@ export interface DoctorDeps {
   runDegradedConfigChecks: (profileName: string) => Promise<DoctorFinding[]>;
 }
 
-async function defaultRunDegradedConfigChecks(
+export async function defaultRunDegradedConfigChecks(
   profileName: string,
+  root: string = resolveHome(),
 ): Promise<DoctorFinding[]> {
   const store = wireConfigStore(profileName, { liftMode: 'readonly' });
   try {
-    const opts: CoreCheckOpts = { profileName, readDoc: (key) => store.readText(key) };
+    const opts: CoreCheckOpts = {
+      profileName,
+      root,
+      readDoc: (key) => store.readText(key),
+    };
     const checks: DoctorCheck[] = [
       profileParsesCheck(opts),
       filterParsesCheck(opts),
@@ -80,11 +86,33 @@ function formatTable(findings: DoctorFinding[]): string[] {
   return findings.map((f) => `${f.check} | ${f.status} | ${f.detail}`);
 }
 
+/** The synthesized `wire` finding, shared verbatim between the CLI's own
+ * wire()-failure degrade path and the board server's `runDoctor`
+ * (`cli/wire/board.ts`) — one exported string constructor instead of two
+ * independently-worded copies that could drift on the next edit. */
+export function wireFailureFinding(profileName: string, err: unknown): DoctorFinding {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    check: 'wire',
+    status: 'red',
+    detail: `could not wire profile '${profileName}': ${message}`,
+  };
+}
+
 export async function doctorCommand(
   opts: DoctorCommandOptions,
   deps: Partial<DoctorDeps> = {},
 ): Promise<number> {
   const resolved: DoctorDeps = { ...defaultDeps(), ...deps };
+
+  // Always `ok`: `main()` already refuses to dispatch `doctor` at all when
+  // the home is missing (the missing-home check runs before any command
+  // does), so by the time this code runs the home exists.
+  const homeFinding: DoctorFinding = {
+    check: 'home',
+    status: 'ok',
+    detail: resolveHome(),
+  };
 
   let checks: WireResult['checks'];
   try {
@@ -102,21 +130,16 @@ export async function doctorCommand(
     // can support. Adapter-reachability/env/daemon/claude checks (the ones
     // that DO need the wired result — connector, notifier settings, etc.)
     // are genuinely unavailable here and are skipped, not synthesized.
-    const message = err instanceof Error ? err.message : String(err);
-    const wireFinding: DoctorFinding = {
-      check: 'wire',
-      status: 'red',
-      detail: `could not wire profile '${opts.profile}': ${message}`,
-    };
+    const wireFinding = wireFailureFinding(opts.profile, err);
     const degraded = await resolved.runDegradedConfigChecks(opts.profile);
-    const findings = [wireFinding, ...degraded];
+    const findings = [homeFinding, wireFinding, ...degraded];
     for (const line of formatTable(findings)) {
       resolved.write(line);
     }
     return 1;
   }
 
-  const findings = await Promise.all(checks.map((c) => c.run()));
+  const findings = [homeFinding, ...(await Promise.all(checks.map((c) => c.run())))];
 
   for (const line of formatTable(findings)) {
     resolved.write(line);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getFailedStage, getFailureError, getFunnelStages } from './runResult';
+import {
+  getFailedStage,
+  getFailureError,
+  getFunnelStages,
+  newMatchCount,
+} from './runResult';
 
 describe('getFunnelStages', () => {
   it('parses a well-formed result blob', () => {
@@ -36,5 +41,31 @@ describe('getFailedStage / getFailureError', () => {
     expect(getFailedStage(null)).toBeNull();
     expect(getFailedStage({})).toBeNull();
     expect(getFailureError(undefined)).toBeNull();
+  });
+});
+
+describe('newMatchCount', () => {
+  it("returns the last funnel stage's jobsOut on a good funnel", () => {
+    const result = {
+      stages: [
+        { name: 'filter', jobsIn: 10, jobsOut: 7, dropsByRule: {} },
+        { name: 'rank', jobsIn: 7, jobsOut: 4, dropsByRule: {} },
+      ],
+    };
+    expect(newMatchCount(result)).toBe(4);
+  });
+
+  it('returns 0 for an empty stages array', () => {
+    expect(newMatchCount({ stages: [] })).toBe(0);
+  });
+
+  it('returns 0 for a missing blob', () => {
+    expect(newMatchCount(undefined)).toBe(0);
+    expect(newMatchCount(null)).toBe(0);
+  });
+
+  it('returns 0 for a malformed blob', () => {
+    expect(newMatchCount({ stages: [{ name: 'filter', jobsIn: 10 }] })).toBe(0);
+    expect(newMatchCount('not an object')).toBe(0);
   });
 });

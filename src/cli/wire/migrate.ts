@@ -18,6 +18,7 @@ import { openJobsDb, SqliteStore } from '../../adapters/db/sqlite/index.ts';
 import type { MigratedRecord, TrackingFields } from '../../core/tracking/index.ts';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import type { RunContext } from '../../ports/context.ts';
+import { resolveHome } from '../home/index.ts';
 import { canonicalDbPath, missingTokenNotionClient } from './builders.ts';
 import { loadPipelineConfig } from './config.ts';
 
@@ -45,7 +46,7 @@ export async function wireMigrate(
   profileName: string,
   overrides: { root?: string; configStore?: ConfigStore } = {},
 ): Promise<MigrateWire> {
-  const root = overrides.root ?? process.cwd();
+  const root = overrides.root ?? resolveHome();
   const dbPath = canonicalDbPath(root, profileName);
   const profileRoot = path.join(root, 'profiles', profileName);
   const configStore =

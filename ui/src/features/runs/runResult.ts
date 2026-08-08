@@ -48,3 +48,13 @@ export function getFailureError(failure: unknown): string | null {
   if (!isRecord(failure)) return null;
   return typeof failure.error === 'string' ? failure.error : null;
 }
+
+/** Returns the last funnel stage's `jobsOut` — the only "how many new
+ * matches" signal available today (`RunSummary` carries no job count).
+ * `0` when the funnel blob is absent, empty, or malformed. */
+export function newMatchCount(result: unknown): number {
+  const stages = getFunnelStages(result);
+  if (!stages || stages.length === 0) return 0;
+  const last = stages[stages.length - 1];
+  return last ? last.jobsOut : 0;
+}

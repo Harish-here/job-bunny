@@ -8,7 +8,9 @@ export function JobHeader({ job }: { job: BoardJobRow }) {
     <div className={cn('flex flex-col gap-1', job.archived && 'opacity-60')}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold leading-tight">{job.title}</h1>
+          <h1 className="text-lg font-semibold font-heading leading-tight">
+            {job.title}
+          </h1>
           <a
             href={job.url}
             target="_blank"

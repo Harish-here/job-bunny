@@ -31,6 +31,7 @@ import path from 'node:path';
 import { PipelineConfigSchema } from '../../core/config/schema.ts';
 import { FilterConfigSchema } from '../../core/filter/config.ts';
 import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
+import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
 
 export interface ProfileFsDeps {
@@ -44,7 +45,7 @@ export interface ProfileFsDeps {
 
 export function defaultProfileFsDeps(): ProfileFsDeps {
   return {
-    root: process.cwd(),
+    root: resolveHome(),
     exists: (p) =>
       access(p, constants.F_OK)
         .then(() => true)
@@ -103,7 +104,7 @@ export interface ProfileDocsDeps {
  * overrides — same posture as `config.ts`/`setup.ts`). */
 function defaultProfileDocsFsDeps(): Omit<ProfileDocsDeps, 'configStore'> {
   return {
-    root: process.cwd(),
+    root: resolveHome(),
     mkdir: (p) => mkdir(p, { recursive: true }),
     write: (line) => console.log(line),
   };
@@ -234,8 +235,11 @@ function defaultRemoveDeps(): ProfileRemoveDeps {
 }
 
 // The committed fixture profile used by /verify — never removable via
-// this command (mirrors v0 remove_profile.js's guard).
-const PROTECTED_PROFILES = new Set(['rajni']);
+// this command (mirrors v0 remove_profile.js's guard). Exported so
+// `cli/wire/board.ts`'s `removeProfile` guard imports this SAME set rather
+// than re-declaring it — the CLI and the board must never disagree about
+// which profiles are protected.
+export const PROTECTED_PROFILES = new Set(['rajni']);
 
 export async function profileRemoveCommand(
   opts: ProfileRemoveOptions,

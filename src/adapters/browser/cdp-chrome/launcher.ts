@@ -5,7 +5,8 @@ import {
   rmSync as nodeRmSync,
   writeFileSync as nodeWriteFileSync,
 } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { resolveCandidates } from './discovery/index.ts';
 import {
   type ChromePidfileDeps,
@@ -22,7 +23,7 @@ import {
 /**
  * Chrome-over-CDP process lifecycle: find the local Chrome binary, build its
  * launch argv, spawn/probe/age/kill it. Ported from scripts/lib/browser.js's
- * know-how (CHROME_BIN, CDP_PORT flag, .chrome-debug/ user-data-dir,
+ * know-how (CHROME_BIN, CDP_PORT flag, <data home>/chrome user-data-dir,
  * always-kill-unless-JOBBUNNY_KEEP_BROWSER, SIGTERM-then-poll-then-SIGKILL).
  * fs/spawn/kill/sleep are all injectable so tests never touch a real
  * filesystem, process, or timer.
@@ -60,13 +61,13 @@ export const CHROME_PATH_CANDIDATES: readonly string[] = [
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
 ];
 
-/** repo-root/.chrome-debug — persistent Chrome profile dir; the persistent
- * LinkedIn login lives in its cookies/local-storage (ported 1:1 from
- * scripts/lib/browser.js's CHROME_DATA_DIR). Derived from this file's own
- * location so it doesn't depend on process.cwd(). */
-export const DEFAULT_USER_DATA_DIR = fileURLToPath(
-  new URL('../../../../.chrome-debug', import.meta.url),
-);
+/** Inert fallback for the persistent Chrome profile dir (the LinkedIn login
+ * lives in its cookies/local-storage). `cli/wire` ALWAYS passes the real
+ * value — `join(<data home>, 'chrome')` — so this constant is only ever
+ * reached by a caller that constructed the provider with no `userDataDir`
+ * at all. It deliberately no longer derives from this file's own on-disk
+ * location: user data must never be anchored inside the installed package. */
+export const DEFAULT_USER_DATA_DIR = join(homedir(), '.jobbunny', 'chrome');
 
 export interface FsDeps {
   existsSync: (path: string) => boolean;
@@ -92,8 +93,8 @@ export interface LauncherDeps {
   readFileSync?: SessionClearFsDeps['readFileSync'];
   writeFileSync?: SessionClearFsDeps['writeFileSync'];
   /** Injectable Chrome pid-file deps — used by launchChrome to write, and
-   * by killChrome to clear, .chrome-debug/.jobbunny-chrome.json. Default:
-   * defaultChromePidfileDeps(). */
+   * by killChrome to clear, <data home>/chrome/.jobbunny-chrome.json.
+   * Default: defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;
 }
 
@@ -125,7 +126,7 @@ export interface LaunchArgvOptions {
  * duplicate tabs, an invalidated extension retrying a failed fetch every
  * ~1s, and tracker iframes — which is what blew the connectWithRetry
  * timeout in provider.ts. None of these touch cookies, storage, or the
- * user-data-dir itself — the persistent LinkedIn login in .chrome-debug/
+ * user-data-dir itself — the persistent LinkedIn login in <data home>/chrome
  * MUST survive a launch, only the leftover TABS/SESSION must not come
  * back:
  *  - --restore-last-session=false: don't reopen the previous session's tabs.

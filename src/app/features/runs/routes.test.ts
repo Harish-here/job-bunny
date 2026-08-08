@@ -6,11 +6,20 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource, BoardStore } from '../../../ports/board.ts';
+import type { BoardSource, BoardStore, DaemonStatus } from '../../../ports/board.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
 import { makeRunsRoutes } from './routes.ts';
+
+const FAKE_DAEMON_STATUS: DaemonStatus = {
+  state: 'stopped',
+  pid: null,
+  startedAt: null,
+  lastTickAt: null,
+  inFlight: null,
+  profiles: [],
+};
 
 function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
@@ -100,6 +109,12 @@ function fakeSource(store: BoardStore | null): BoardSource {
     readConfigDoc: async () => undefined,
     writeConfigDoc: async () => {},
     createProfile: async () => {},
+    openIntents: async () => null,
+    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+    writeSecret: async () => {},
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
 }

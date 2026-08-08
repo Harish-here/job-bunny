@@ -5,12 +5,13 @@ import type { DoctorCheck, DoctorFinding, Storage } from '../../../ports/index.t
  * v2 page-inventory schema (spec: DOM drift is fixed by regenerating the
  * inventory via /page-analyse, never by editing lane code). Inventories are
  * machine-shared JSON at `src/adapters/lanes/linkedin/page_inventory/<page>.json`
- * (repo-root-relative, read via the repo-root storage handle).
+ * (package-root-relative, read via the package-rooted storage handle — see
+ * `compose.ts`'s `packageRoot`).
  *
  * Deliberately stays on the `Storage` port (Phase 3, persist-to-db): unlike
  * the rest of this package's resume/capture state (see `lane.ts`,
  * `capture_store.ts`, `resume_state.ts`, `fire/probe.ts`,
- * `fire/loop/url_runner.ts`), inventories are machine-shared, repo-root-
+ * `fire/loop/url_runner.ts`), inventories are machine-shared, package-root-
  * relative files, not per-profile pipeline state — they never move to
  * `StateStore`.
  */

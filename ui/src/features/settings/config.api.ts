@@ -1,4 +1,4 @@
-import { getJson, postJson, putJson } from '../../lib/api/client';
+import { deleteJson, getJson, postJson, putJson } from '../../lib/api/client';
 import type { ConfigGetResponse, CreateProfileResponse } from '../../lib/api/types';
 
 /**
@@ -34,4 +34,8 @@ export function putConfigDoc(
 
 export function createProfile(name: string): Promise<CreateProfileResponse> {
   return postJson('/api/profiles', { name });
+}
+
+export function deleteProfile(name: string): Promise<{ removed: true; name: string }> {
+  return deleteJson(`/api/profiles/${encodeURIComponent(name)}`);
 }

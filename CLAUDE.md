@@ -24,21 +24,27 @@ Node ≥ 24 required (native type-stripping, no build step); the repo pins it vi
 ```bash
 npm run check                                     # THE gate: typecheck + lint + boundaries + tests; CI runs it as a 3-OS `check` matrix (macos/ubuntu/windows) plus a ubuntu-only `ui` job (`ui:check` + `ui:build` + Playwright e2e via `ui:e2e`), behind a `needs`-wrapper job named `test`, which keeps the branch-protection check name
 node --test src/core/filter/engine.test.ts        # single test file
-node src/cli/main.ts run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]
-node src/cli/main.ts doctor --profile <name>
-node src/cli/main.ts stage <stage-name> --profile <name>
-node src/cli/main.ts routine <routine-name> --profile <name>
-node src/cli/main.ts migrate --profile <name> [--apply]  # Notion → local sqlite import; dry-run by default
-node src/cli/main.ts board [--port <n>]           # job-board UI + API, all profiles, 127.0.0.1 only (default port 1994)
-node src/cli/main.ts runs --profile <name> [show <id>]   # run history from the DB
+npm install -g .                                  # link the `jobbunny` bin (Node ≥ 24, no build step)
+jobbunny run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]
+jobbunny doctor --profile <name>                  # also reports the resolved data home
+jobbunny stage <stage-name> --profile <name>
+jobbunny routine <routine-name> --profile <name>
+jobbunny migrate --profile <name> [--apply]       # Notion → local sqlite import; dry-run by default
+jobbunny migrate-home [--from <path>] [--apply]   # one-shot legacy repo-local install → ~/.jobbunny bridge; dry-run by default
+jobbunny board [--port <n>]                       # job-board UI + API, all profiles, 127.0.0.1 only (default port 1994)
+jobbunny runs --profile <name> [show <id>]        # run history from the DB
 npm run ui:build                                  # build the board SPA into ui/dist (its gate: npm run ui:check; e2e smoke: npm run ui:e2e)
-node src/cli/main.ts serve start|stop|status
-node src/cli/main.ts autostart enable|disable     # darwin only
+jobbunny serve start|stop|status
+jobbunny autostart enable|disable                 # darwin only
 ```
 
 `jobbunny` (`package.json` `bin`) is `src/cli/main.ts` — full usage in its `USAGE` string. Releases: `npm run release -- <X.Y.Z> [--dry-run] [--no-merge] [--yes]` — the `--` separator is mandatory (without it npm eats the flags; the CLI detects that and refuses).
 
-**Runtime verification:** use the committed fixture profile `profiles/rajni/` (synthetic data) — see the `verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
+**Runtime verification:** `JOBBUNNY_HOME=$PWD node src/cli/main.ts <cmd> --profile rajni` from the checkout (repo-as-home keeps the committed `profiles/rajni/` fixture working, and running the checkout entry — not the globally installed packed copy — guarantees you exercise the working tree) — see the `verify` skill. Never run test/experimental stages against `profiles/harish/`; it holds real user data.
+
+## Data home
+
+All user data — `profiles/<name>/` (including each per-profile SQLite DB), `.env`, the daemon pidfile, and the persistent Chrome profile (`chrome/`) — lives in `~/.jobbunny/`, overridable via the `JOBBUNNY_HOME` shell env var (real environment only, never `.env` — the `.env` location itself depends on the resolved home). `src/cli/home/` (`resolveHome()`) is the single resolver; every `overrides.root` default resolves through it. Deliberate exception: `release` stays `process.cwd()`-based (maintainer command, operates on the checkout). A repo checkout is itself a valid home. Program files (LinkedIn `page_inventory/*.json`, `ui/dist`) resolve from the package root via `import.meta.url`, never from the data home. Missing home → every command except `setup`/`migrate-home` prints `no jobbunny home at <path> — run 'jobbunny setup'` and exits non-zero. `jobbunny migrate-home` bridges legacy repo-local installs (dry-run by default, refuses while the daemon runs, never clobbers, leaves `rajni` in the repo); it is one-shot and slated for removal.
 
 ## Profiles
 
@@ -46,7 +52,7 @@ node src/cli/main.ts autostart enable|disable     # darwin only
 
 Per profile (rows in the per-profile DB's `config_docs`, edited via `jobbunny config get|set` or the board Settings page; legacy files are one-time lift sources, never written back): `profile.json`, `filter.json` (the sole geo/skills/rank authority), `resume.json` (human-maintained), `search_urls.md` (drives `lane add-url`/`/page-analyse`). `avoid.md` is no longer seeded and read by no runtime code — use `filter.json`'s `title`/`companies` blocks instead. Greenhouse/Keka company state is auto-managed in the per-profile DB (`state_docs` key `registry/companies.json`); there are no hand-maintained board watchlists. Per-run intermediates in `profiles/<name>/data/` are gitignored except the two tracked rajni fixture files.
 
-Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in `.env`, loaded once at `src/cli/main.ts` via `dotenv/config` (the one bin entry point — don't duplicate the load). Notion DB/page IDs live in `profile.json`, never in `.env`. `NOTION_TOKEN` is required only for `connector: "notion"` profiles or sqlite profiles with the mirror enabled — `jobbunny setup` reports it `skipped` otherwise. New profiles scaffold local-first (`connector: "sqlite"`).
+Secrets: `NOTION_TOKEN` and `TELEGRAM_BOT_TOKEN` live in the data home's `.env`, loaded once at `src/cli/main.ts` via explicit `dotenv.config({ path: join(resolveHome(), '.env') })` before command dispatch (the one bin entry point — don't duplicate the load). Notion DB/page IDs live in `profile.json`, never in `.env`. `NOTION_TOKEN` is required only for `connector: "notion"` profiles or sqlite profiles with the mirror enabled — `jobbunny setup` reports it `skipped` otherwise. New profiles scaffold local-first (`connector: "sqlite"`).
 
 ## Pipeline architecture
 
@@ -108,7 +114,7 @@ Plus the `verify` skill for exercising stages against `profiles/rajni/`. Telegra
 - **`profile remove` is dry-run by default and refuses `rajni`** (the committed fixture); `--force` actually deletes `profiles/<name>/`. It never touches Notion.
 - **`AbortSignal` is the deadline mechanism everywhere.** Every CDP/network/LLM call is bound by `ctx.signal`; no unbounded await in an adapter.
 - **The LinkedIn lane paces itself and trips a throttle breaker.** 5–12s jitter per navigation plus a 20–45s pause between saved-search URLs (`settings.linkedin.jitterMinMs/jitterMaxMs/interUrlDelayMinMs/interUrlDelayMaxMs`, defaults in `cli/wire/settings.ts`). Consecutive server-withheld JD shells (`jdRoot` present, text empty — a soft-block, never selector drift) open a time-boxed, session-scoped circuit breaker shared by every profile; thresholds, duration, and state location are lane constants — see `src/adapters/lanes/linkedin/`. An open breaker makes the lane return a **skipped** result without launching Chrome; `farm` excludes skipped lanes from its total-outage denominator, so the rest of the pipeline still runs.
-- **The board server binds `127.0.0.1` and writes only the `tracking` and config tables.** `jobs` and the runs tables stay pipeline/runner-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
+- **The board server binds `127.0.0.1`; its write surface is: the `tracking` and config tables, run intents (insert `pending`, cancel own `pending`), secrets (write-only `.env` upsert, allowlisted keys `NOTION_TOKEN`/`TELEGRAM_BOT_TOKEN`, presence-only reads), doctor execution (read-only diagnostics), profile creation, and guarded profile removal (mirrors CLI semantics: refuses `rajni`, never touches Notion).** The board never spawns runs — it inserts a `run_intents` row; the daemon (sole spawner, one-Chrome invariant) claims it on its ≤30s tick. `jobs` and the runs tables stay pipeline/runner-only — the split is structural (`ports/board.ts`). The `ui/` workspace stays outside the root gate; `biome`/`depcruise`/file-size caps scope to `src/**` only.
 
 ## Conventions
 

@@ -1,12 +1,17 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
+import type { RunSummary } from '../../lib/api/types';
+import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
 import { RunsList } from './RunsList';
+import { runsKeys } from './runs.queries';
 import { useRun, useRunEvents, useRuns } from './useRunsData';
 
 const SKELETON_ROW_KEYS = ['s1', 's2', 's3'];
+const LIVE_POLL_MS = 2500;
 
 function isNoLocalDb(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'no_local_db';
@@ -37,8 +42,15 @@ function ErrorRetry({
  * right. No polling — a manual Refresh button is the only way to see new
  * rows, matching the brief's "no polling beyond manual refresh". */
 export function RunsPage({ profile }: { profile: string }) {
-  const runsQuery = useRuns(profile);
+  const qc = useQueryClient();
+  const cachedRows =
+    qc.getQueryData<{ rows: RunSummary[] }>(runsKeys.list(profile))?.rows ?? [];
+  const pollInterval = cachedRows.some((r) => r.status === 'running')
+    ? LIVE_POLL_MS
+    : false;
+  const runsQuery = useRuns(profile, pollInterval);
   const rows = runsQuery.data?.rows ?? [];
+  const runningRow = rows.find((r) => r.status === 'running') ?? null;
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   // Default-select the newest run once the list resolves, mirroring
@@ -63,7 +75,7 @@ export function RunsPage({ profile }: { profile: string }) {
   return (
     <div className="flex h-screen flex-col">
       <div className="flex items-center justify-between border-b p-3">
-        <h1 className="text-sm font-medium">Runs</h1>
+        <h1 className="text-lg font-semibold font-heading">Runs</h1>
         <Button
           type="button"
           variant="secondary"
@@ -73,6 +85,7 @@ export function RunsPage({ profile }: { profile: string }) {
           Refresh
         </Button>
       </div>
+      {runningRow && <LiveRunHeader profile={profile} run={runningRow} />}
       <div className="grid flex-1 grid-cols-[minmax(280px,360px)_1fr] overflow-hidden">
         <section className="overflow-y-auto border-r">
           {noLocalDb ? (
