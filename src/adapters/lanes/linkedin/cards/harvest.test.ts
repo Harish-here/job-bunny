@@ -4,6 +4,26 @@ import type { PageHandle } from '../../../../ports/browser.ts';
 import type { Logger, RunContext } from '../../../../ports/context.ts';
 import type { Inventory } from '../inventory.ts';
 import { harvestCards } from './harvest.ts';
+import type { HarvestDiag } from './script.ts';
+
+/** Every test's fake `page.evaluate` must now return `{ cards, diag }` —
+ * buildHarvestScript's return shape changed (task 2), but harvestCards'
+ * observable behavior here is identical; only the fake's return shape
+ * changes. */
+function readResult(cards: unknown[]): { cards: unknown[]; diag: HarvestDiag } {
+  return {
+    cards,
+    diag: {
+      cardCount: cards.length,
+      chunks: 1,
+      emptyAfterRead: 0,
+      repairAttempted: 0,
+      repairRecovered: 0,
+      emptyAfterRepair: 0,
+      elapsedMs: 1,
+    },
+  };
+}
 
 /** Real selectors from src/adapters/lanes/linkedin/page_inventory/
  * linkedin__jobs-search.json (pinned at phase start) — buildHarvestScript
@@ -91,14 +111,14 @@ test('harvestCards maps raw cards to HarvestedCard: id parsed from href, relativ
   const inv = fixtureInventory();
   const page = fakePage({
     evaluate: async () =>
-      [
+      readResult([
         {
           title: 'Senior Backend Engineer',
           company: 'Acme Corp',
           location: 'Remote',
           href: '/jobs/view/4021337/',
         },
-      ] as never,
+      ]) as never,
   });
 
   const cards = await harvestCards(page, inv, fakeCtx());
@@ -127,7 +147,7 @@ test('harvestCards resolves an already-absolute href unchanged and skips a card 
   });
   const page = fakePage({
     evaluate: async () =>
-      [
+      readResult([
         {
           title: 'Absolute URL Card',
           company: 'Foo',
@@ -140,7 +160,7 @@ test('harvestCards resolves an already-absolute href unchanged and skips a card 
           location: '',
           href: '/jobs/collections/whatever',
         },
-      ] as never,
+      ]) as never,
   });
 
   const cards = await harvestCards(page, inv, ctx);
@@ -157,9 +177,9 @@ test('harvestCards passes a timeoutMs through to page.evaluate opts', async () =
   const page = fakePage({
     evaluate: async (_fn, opts) => {
       seenTimeout = (opts as { timeoutMs: number }).timeoutMs;
-      return [
+      return readResult([
         { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/1/' },
-      ] as never;
+      ]) as never;
     },
   });
   await harvestCards(page, inv, fakeCtx(), { timeoutMs: 5000 });
@@ -170,7 +190,7 @@ test('harvestCards, for the componentkey inventory shape (no href), derives the 
   const inv = componentkeyInventory();
   const page = fakePage({
     evaluate: async () =>
-      [
+      readResult([
         {
           title: 'Senior Backend Engineer',
           company: 'Acme Corp',
@@ -178,7 +198,7 @@ test('harvestCards, for the componentkey inventory shape (no href), derives the 
           href: '',
           idAttr: 'job-card-component-ref-4021337',
         },
-      ] as never,
+      ]) as never,
   });
 
   const cards = await harvestCards(page, inv, fakeCtx());
@@ -212,7 +232,7 @@ test('harvestCards skips a card with neither a parseable href nor an idAttr, war
   });
   const page = fakePage({
     evaluate: async () =>
-      [
+      readResult([
         {
           title: 'No Id Card',
           company: 'Foo',
@@ -220,7 +240,7 @@ test('harvestCards skips a card with neither a parseable href nor an idAttr, war
           href: '',
           idAttr: null,
         },
-      ] as never,
+      ]) as never,
   });
 
   const cards = await harvestCards(page, inv, ctx);
@@ -255,7 +275,7 @@ test('harvestCards skips a card with an idAttr but no url pattern and no href, w
   });
   const page = fakePage({
     evaluate: async () =>
-      [
+      readResult([
         {
           title: 'No Pattern Card',
           company: 'Foo',
@@ -263,7 +283,7 @@ test('harvestCards skips a card with an idAttr but no url pattern and no href, w
           href: '',
           idAttr: 'job-card-component-ref-777',
         },
-      ] as never,
+      ]) as never,
   });
 
   const cards = await harvestCards(page, inv, ctx);
@@ -281,7 +301,7 @@ test('harvestCards prefers an href-derived id over the idAttr when both are pres
   const inv = componentkeyInventory();
   const page = fakePage({
     evaluate: async () =>
-      [
+      readResult([
         {
           title: 'Both Present',
           company: 'Acme Corp',
@@ -289,7 +309,7 @@ test('harvestCards prefers an href-derived id over the idAttr when both are pres
           href: '/jobs/view/999/',
           idAttr: 'job-card-component-ref-4021337',
         },
-      ] as never,
+      ]) as never,
   });
 
   const cards = await harvestCards(page, inv, fakeCtx());
@@ -322,9 +342,9 @@ test('harvestCards waits for the mustExist selector before reading the DOM', asy
     },
     evaluate: async () => {
       evaluatedAfterWait = waited.length > 0;
-      return [
+      return readResult([
         { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/1/' },
-      ] as never;
+      ]) as never;
     },
   });
 
@@ -342,9 +362,9 @@ test('harvestCards falls back to the cardList selector when no mustExist behavio
       waited.push(selector);
     },
     evaluate: async () =>
-      [
+      readResult([
         { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/1/' },
-      ] as never,
+      ]) as never,
   });
 
   await harvestCards(page, inv, fakeCtx());
@@ -368,7 +388,7 @@ test('harvestCards throws when the mustExist selector never attaches', async () 
 
 test('harvestCards throws when the page yields fewer cards than minJobCards', async () => {
   const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
-  const page = fakePage({ evaluate: async () => [] as never });
+  const page = fakePage({ evaluate: async () => readResult([]) as never });
 
   await assert.rejects(() => harvestCards(page, inv, fakeCtx()), /0 card\(s\).*min/);
 });
@@ -377,7 +397,7 @@ test('harvestCards throws when the page yields fewer cards than minJobCards', as
 
 test('harvestCards with allowEmpty: true returns [] instead of throwing when the page yields zero cards', async () => {
   const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
-  const page = fakePage({ evaluate: async () => [] as never });
+  const page = fakePage({ evaluate: async () => readResult([]) as never });
 
   const cards = await harvestCards(page, inv, fakeCtx(), { allowEmpty: true });
 
@@ -386,7 +406,7 @@ test('harvestCards with allowEmpty: true returns [] instead of throwing when the
 
 test('harvestCards with allowEmpty: false (the default) still throws when the page yields zero cards', async () => {
   const inv = fixtureInventory({ behaviors: { minJobCards: '1' } });
-  const page = fakePage({ evaluate: async () => [] as never });
+  const page = fakePage({ evaluate: async () => readResult([]) as never });
 
   await assert.rejects(() => harvestCards(page, inv, fakeCtx()), /0 card\(s\).*min/);
 });
@@ -436,7 +456,7 @@ test('harvestCards tolerates an empty page when minJobCards is 0, but says so lo
       error() {},
     },
   });
-  const page = fakePage({ evaluate: async () => [] as never });
+  const page = fakePage({ evaluate: async () => readResult([]) as never });
 
   const cards = await harvestCards(page, inv, ctx);
 

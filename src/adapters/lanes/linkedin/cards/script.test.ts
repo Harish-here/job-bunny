@@ -82,10 +82,9 @@ function fakeElement(props: Record<string, string | null | undefined> = {}): unk
 
 /** Builds a fake `document` whose card-list -> card -> sub-selector chain
  * mirrors the real inventory selectors, backed by a fixture list of cards.
- * When cardLink === card (linkedin__jobs-search-results' shape: no href on
- * any descendant), the card element's own getAttribute('href') is used
- * instead of a sub-element lookup — mirrors buildHarvestScript's
- * `el.matches(linkSel) ? el : el.querySelector(linkSel)` fallback. */
+ * Every card is already fully "mounted" (text present from the first
+ * read), so this helper is for tests about mapping and chunk counting, not
+ * about the mount/settle/repair loops. */
 function fakeDocument(inv: Inventory, cards: FakeElSpec[]): unknown {
   const sel = inv.selectors;
   const selfLinksToCard = sel.cardLink === sel.card;
@@ -111,6 +110,7 @@ function fakeDocument(inv: Inventory, cards: FakeElSpec[]): unknown {
         if (idAttrName && name === idAttrName) return c.idAttr ?? null;
         return null;
       },
+      scrollIntoView() {},
     };
   });
   const listEl = {
@@ -143,17 +143,11 @@ test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read vi
   ];
   const document = fakeDocument(inv, cards);
   const script = buildHarvestScript(inv);
-  // The script is now an async IIFE (hydration pass awaits between
-  // chunks), so runInNewContext returns a promise — await it before
-  // cloning. structuredClone: the vm context is a separate realm, so its
-  // Array/Object aren't reference-equal to this realm's — clone into plain
-  // values before a strict deepEqual (node:assert/strict's deepEqual IS
-  // deepStrictEqual).
   const result = structuredClone(
     await vm.runInNewContext(script, { document, setTimeout }),
-  );
+  ) as { cards: unknown[]; diag: Record<string, number> };
 
-  assert.deepEqual(result, [
+  assert.deepEqual(result.cards, [
     {
       title: 'Senior Backend Engineer',
       company: 'Acme Corp',
@@ -169,6 +163,10 @@ test('buildHarvestScript, evaluated in a fake DOM, returns the raw cards read vi
       idAttr: null,
     },
   ]);
+  assert.equal(result.diag.cardCount, 2);
+  assert.equal(result.diag.emptyAfterRead, 0);
+  assert.equal(result.diag.repairAttempted, 0);
+  assert.equal(result.diag.emptyAfterRepair, 0);
 });
 
 test('buildHarvestScript, evaluated against the componentkey inventory shape, reads the id off the card element itself (no descendant href)', async () => {
@@ -186,9 +184,9 @@ test('buildHarvestScript, evaluated against the componentkey inventory shape, re
   const script = buildHarvestScript(inv);
   const result = structuredClone(
     await vm.runInNewContext(script, { document, setTimeout }),
-  );
+  ) as { cards: unknown[] };
 
-  assert.deepEqual(result, [
+  assert.deepEqual(result.cards, [
     {
       title: 'Senior Backend Engineer',
       company: 'Acme Corp',
@@ -199,123 +197,18 @@ test('buildHarvestScript, evaluated against the componentkey inventory shape, re
   ]);
 });
 
-test('buildHarvestScript returns [] when the card list container is absent', async () => {
+test('buildHarvestScript returns an empty cards array when the card list container is absent', async () => {
   const inv = fixtureInventory();
   const document = { querySelector: () => null };
   const script = buildHarvestScript(inv);
   const result = structuredClone(
     await vm.runInNewContext(script, { document, setTimeout }),
-  );
-  assert.deepEqual(result, []);
+  ) as { cards: unknown[]; diag: Record<string, number> };
+  assert.deepEqual(result.cards, []);
+  assert.equal(result.diag.cardCount, 0);
 });
 
-// --- hydration pass: the async IIFE, the budget constant, the scroll call ---
-
-test('buildHarvestScript emits an async IIFE (hydration awaits between chunks, and page.evaluate awaits the returned promise automatically)', () => {
-  const inv = fixtureInventory();
-  const script = buildHarvestScript(inv);
-  assert.match(script, /^\(async \(\) => \{/);
-});
-
-test('buildHarvestScript emits a hydration pass that scrolls each card into view before the read, bounded by an explicit deadline', () => {
-  const inv = fixtureInventory();
-  const script = buildHarvestScript(inv);
-  assert.match(script, /scrollIntoView/);
-  assert.match(script, /hydrationDeadline/);
-  assert.match(script, /Date\.now\(\)/);
-  // The budget constant itself is inlined into the script as a literal.
-  assert.match(script, /hydrationBudgetMs = 8000/);
-});
-
-test('buildHarvestScript emits a settle-poll phase bounded by its own deadline, distinct from the hydration deadline', () => {
-  const inv = fixtureInventory();
-  const script = buildHarvestScript(inv);
-  assert.match(script, /needsSettle/);
-  assert.match(script, /settleDeadline/);
-  assert.match(script, /cardSettleBudgetMs = 8000/);
-});
-
-test('buildHarvestScript, evaluated with a card whose title/company populate a bit late, still returns non-empty text once it settles within the budget', async () => {
-  const inv = fixtureInventory();
-  // A fake element whose textContent starts empty and flips to real text
-  // after a few polls — mirrors a card still hydrating when the hydration
-  // pass's own deadline already elapsed.
-  function lateElement(finalText: string, readyAfterReads: number): unknown {
-    let reads = 0;
-    return {
-      get textContent() {
-        reads += 1;
-        return reads > readyAfterReads ? finalText : '';
-      },
-      getAttribute() {
-        return null;
-      },
-    };
-  }
-  const sel = inv.selectors;
-  const titleEl = lateElement('Late Title', 2);
-  const companyEl = lateElement('Late Co', 3);
-  const cardEl = {
-    querySelector(s: string) {
-      if (s === sel.cardTitle) return titleEl;
-      if (s === sel.cardCompany) return companyEl;
-      if (s === sel.cardLocation) return null;
-      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/1/' };
-      return null;
-    },
-    matches() {
-      return false;
-    },
-  };
-  const listEl = { querySelectorAll: () => [cardEl] };
-  const document = {
-    querySelector: (s: string) => (s === sel.cardList ? listEl : null),
-  };
-  const script = buildHarvestScript(inv, 2_000, 10);
-  const result = structuredClone(
-    await vm.runInNewContext(script, { document, setTimeout }),
-  );
-
-  assert.deepEqual(result, [
-    {
-      title: 'Late Title',
-      company: 'Late Co',
-      location: '',
-      href: '/jobs/view/1/',
-      idAttr: null,
-    },
-  ]);
-});
-
-test('buildHarvestScript, evaluated with a card whose title/company never settle, returns whatever is present without throwing', async () => {
-  const inv = fixtureInventory();
-  const sel = inv.selectors;
-  const cardEl = {
-    querySelector(s: string) {
-      if (s === sel.cardTitle) return { textContent: '', getAttribute: () => null };
-      if (s === sel.cardCompany) return null; // never present at all
-      if (s === sel.cardLocation) return null;
-      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/2/' };
-      return null;
-    },
-    matches() {
-      return false;
-    },
-  };
-  const listEl = { querySelectorAll: () => [cardEl] };
-  const document = {
-    querySelector: (s: string) => (s === sel.cardList ? listEl : null),
-  };
-  const script = buildHarvestScript(inv, 30, 10);
-
-  const result = await vm.runInNewContext(script, { document, setTimeout });
-
-  assert.deepEqual(structuredClone(result), [
-    { title: '', company: '', location: '', href: '/jobs/view/2/', idAttr: null },
-  ]);
-});
-
-test('buildHarvestScript, evaluated in a fake DOM with a card list larger than one hydration chunk, still returns every card (hydration loop covers the whole list)', async () => {
+test('buildHarvestScript, evaluated in a fake DOM with a card list larger than one chunk, still returns every card, chunked in groups of 5', async () => {
   const inv = fixtureInventory();
   const cards: FakeElSpec[] = Array.from({ length: 12 }, (_, i) => ({
     title: `Job ${i}`,
@@ -327,6 +220,232 @@ test('buildHarvestScript, evaluated in a fake DOM with a card list larger than o
   const script = buildHarvestScript(inv);
   const result = structuredClone(
     await vm.runInNewContext(script, { document, setTimeout }),
-  );
-  assert.equal(result.length, 12);
+  ) as { cards: unknown[]; diag: Record<string, number> };
+  assert.equal(result.cards.length, 12);
+  assert.equal(result.diag.chunks, 3);
+});
+
+/** Builds a fake document whose cards mirror LinkedIn's real virtualized
+ * behavior for the purpose of this regression test: a card's title/company
+ * only read as real text while it is the MOST RECENTLY scrolled-to card —
+ * scrolling any later card blanks every earlier one. This is what makes
+ * "scroll everything, then read everything" (the old design) lose every
+ * card but the last one it touched, while "read a chunk immediately after
+ * scrolling it, then individually re-scroll-and-read stragglers in the
+ * repair pass" (the new design) recovers all of them. */
+function scrollTrackedDocument(
+  inv: Inventory,
+  cards: Array<{ title: string; company: string; href: string }>,
+): { document: unknown; scrollOrder: number[] } {
+  const sel = inv.selectors;
+  const active = { index: -1 };
+  const scrollOrder: number[] = [];
+  const cardEls = cards.map((c, i) => {
+    const titleEl = {
+      get textContent() {
+        return active.index === i ? c.title : '';
+      },
+    };
+    const companyEl = {
+      get textContent() {
+        return active.index === i ? c.company : '';
+      },
+    };
+    const linkEl = { getAttribute: () => c.href };
+    return {
+      querySelector(s: string) {
+        if (s === sel.cardTitle) return titleEl;
+        if (s === sel.cardCompany) return companyEl;
+        if (s === sel.cardLink) return linkEl;
+        return null;
+      },
+      matches() {
+        return false;
+      },
+      getAttribute() {
+        return null;
+      },
+      scrollIntoView() {
+        active.index = i;
+        scrollOrder.push(i);
+      },
+    };
+  });
+  const listEl = { querySelectorAll: (s: string) => (s === sel.card ? cardEls : []) };
+  const document = { querySelector: (s: string) => (s === sel.cardList ? listEl : null) };
+  return { document, scrollOrder };
+}
+
+test('buildHarvestScript reads a chunk before scrolling past it — the regression test for the whole fix (fails against the old scroll-all-then-read design)', async () => {
+  const inv = fixtureInventory();
+  const cards = Array.from({ length: 12 }, (_, i) => ({
+    title: `Job ${i}`,
+    company: `Company ${i}`,
+    href: `/jobs/view/${2000 + i}/`,
+  }));
+  const { document } = scrollTrackedDocument(inv, cards);
+  // Budgets shrunk purely so the settle loop (which cannot itself recover
+  // anything here — only the repair pass's per-card re-scroll can) doesn't
+  // burn its full real-time allowance; the assertion this makes is
+  // unaffected by the shrink.
+  const script = buildHarvestScript(inv, {
+    chunkSettleBudgetMs: 30,
+    chunkSettlePollMs: 5,
+  });
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  ) as { cards: Array<{ title: string; company: string }> };
+
+  assert.equal(result.cards.length, 12);
+  for (const c of result.cards) {
+    assert.notEqual(c.title, '');
+    assert.notEqual(c.company, '');
+  }
+});
+
+/** A fake element whose textContent starts empty and flips to real text
+ * once `Date.now()` passes a deadline computed at construction — models a
+ * card genuinely mounting shortly after being scrolled into view, without
+ * depending on how many times it happens to be read. */
+function timedElement(finalText: string, delayMs: number): unknown {
+  const readyAt = Date.now() + delayMs;
+  return {
+    get textContent() {
+      return Date.now() >= readyAt ? finalText : '';
+    },
+  };
+}
+
+test('buildHarvestScript: a late-mounting card settles within its chunk budget, without needing the repair pass', async () => {
+  const inv = fixtureInventory();
+  const sel = inv.selectors;
+  const titleEl = timedElement('Late Title', 150);
+  const companyEl = timedElement('Late Co', 150);
+  const cardEl = {
+    querySelector(s: string) {
+      if (s === sel.cardTitle) return titleEl;
+      if (s === sel.cardCompany) return companyEl;
+      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/1/' };
+      return null;
+    },
+    matches() {
+      return false;
+    },
+    scrollIntoView() {},
+  };
+  const listEl = { querySelectorAll: () => [cardEl] };
+  const document = { querySelector: (s: string) => (s === sel.cardList ? listEl : null) };
+  const script = buildHarvestScript(inv, {
+    chunkSettleBudgetMs: 1_000,
+    chunkSettlePollMs: 10,
+  });
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  ) as { cards: Array<{ title: string; company: string }>; diag: Record<string, number> };
+
+  assert.equal(result.cards[0]?.title, 'Late Title');
+  assert.equal(result.cards[0]?.company, 'Late Co');
+  assert.equal(result.diag.repairAttempted, 0);
+});
+
+test('buildHarvestScript: a card that never mounts is reported in diag, not thrown', async () => {
+  const inv = fixtureInventory();
+  const sel = inv.selectors;
+  const cardEl = {
+    querySelector(s: string) {
+      if (s === sel.cardTitle) return { textContent: '' };
+      if (s === sel.cardCompany) return null; // never present at all
+      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/2/' };
+      return null;
+    },
+    matches() {
+      return false;
+    },
+    scrollIntoView() {},
+  };
+  const listEl = { querySelectorAll: () => [cardEl] };
+  const document = { querySelector: (s: string) => (s === sel.cardList ? listEl : null) };
+  const script = buildHarvestScript(inv, {
+    chunkSettleBudgetMs: 20,
+    chunkSettlePollMs: 5,
+    repairPerCardBudgetMs: 20,
+    repairPageBudgetMs: 50,
+    totalBudgetMs: 300,
+  });
+
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  ) as { cards: Array<{ title: string; company: string }>; diag: Record<string, number> };
+
+  assert.deepEqual(result.cards, [
+    { title: '', company: '', location: '', href: '/jobs/view/2/', idAttr: null },
+  ]);
+  assert.equal(result.diag.emptyAfterRead, 1);
+  assert.equal(result.diag.repairAttempted, 1);
+  assert.equal(result.diag.repairRecovered, 0);
+  assert.equal(result.diag.emptyAfterRepair, 1);
+});
+
+test('buildHarvestScript: the repair pass recovers a card that only mounts on its second scroll', async () => {
+  const inv = fixtureInventory();
+  const sel = inv.selectors;
+  let scrollCount = 0;
+  const titleEl = {
+    get textContent() {
+      return scrollCount >= 2 ? 'Recovered Title' : '';
+    },
+  };
+  const companyEl = {
+    get textContent() {
+      return scrollCount >= 2 ? 'Recovered Co' : '';
+    },
+  };
+  const cardEl = {
+    querySelector(s: string) {
+      if (s === sel.cardTitle) return titleEl;
+      if (s === sel.cardCompany) return companyEl;
+      if (s === sel.cardLink) return { getAttribute: () => '/jobs/view/3/' };
+      return null;
+    },
+    matches() {
+      return false;
+    },
+    scrollIntoView() {
+      scrollCount += 1;
+    },
+  };
+  const listEl = { querySelectorAll: () => [cardEl] };
+  const document = { querySelector: (s: string) => (s === sel.cardList ? listEl : null) };
+  const script = buildHarvestScript(inv, {
+    chunkSettleBudgetMs: 20,
+    chunkSettlePollMs: 5,
+  });
+
+  const result = structuredClone(
+    await vm.runInNewContext(script, { document, setTimeout }),
+  ) as { cards: Array<{ title: string; company: string }>; diag: Record<string, number> };
+
+  assert.equal(result.cards[0]?.title, 'Recovered Title');
+  assert.equal(result.cards[0]?.company, 'Recovered Co');
+  assert.equal(result.diag.repairRecovered, 1);
+  assert.equal(result.diag.emptyAfterRepair, 0);
+});
+
+test('buildHarvestScript emits an async IIFE, with no trace of the deleted whole-list hydrate-then-settle design, and interpolates opts-provided budgets', () => {
+  const inv = fixtureInventory();
+  const defaultScript = buildHarvestScript(inv);
+  assert.match(defaultScript, /^\(async \(\) => \{/);
+  // Built via concatenation rather than a literal regex so this assertion
+  // doesn't itself keep the deleted identifiers alive as greppable text.
+  const deletedHydrationDeadline = ['hydration', 'Deadline'].join('');
+  const deletedSettleDeadline = ['settle', 'Deadline'].join('');
+  assert.equal(defaultScript.includes(deletedHydrationDeadline), false);
+  assert.equal(defaultScript.includes(deletedSettleDeadline), false);
+
+  const customScript = buildHarvestScript(inv, {
+    totalBudgetMs: 5_000,
+    chunkSettleBudgetMs: 250,
+  });
+  assert.match(customScript, /totalBudgetMs = 5000/);
+  assert.match(customScript, /chunkSettleBudgetMs = 250/);
 });

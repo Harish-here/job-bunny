@@ -160,7 +160,18 @@ export class FakePage implements PageHandle {
     if (fn.includes('cardListSel')) {
       const cards = this.script.harvestByUrl.get(this.lastUrl);
       if (!cards) throw new Error(`no harvest scripted for ${this.lastUrl}`);
-      return cards as unknown as T;
+      return {
+        cards,
+        diag: {
+          cardCount: cards.length,
+          chunks: 1,
+          emptyAfterRead: 0,
+          repairAttempted: 0,
+          repairRecovered: 0,
+          emptyAfterRepair: 0,
+          elapsedMs: 1,
+        },
+      } as unknown as T;
     }
     // Missing scripted JD text resolves to '' — openJd treats an empty
     // extracted text as a SoftError, which is exactly how the

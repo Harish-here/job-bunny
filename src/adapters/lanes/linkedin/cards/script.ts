@@ -6,8 +6,7 @@ import type { Inventory } from '../inventory.ts';
  * href; linkedin__jobs-search-results's cardLink duplicates the card
  * selector itself (no href at all) and the id lives in an attribute named
  * by behaviors.jobCardIdAttr (e.g. componentkey) — see cardLinkNote /
- * jobCardIdAttr / jobCardIdAttrPrefix / urlPatternOfJob in that page's
- * inventory JSON. */
+ * jobCardIdAttrPrefix / urlPatternOfJob in that page's inventory JSON. */
 export interface RawCard {
   title: string;
   company: string;
@@ -16,36 +15,51 @@ export interface RawCard {
   idAttr: string | null;
 }
 
-/** In-page deadline for the hydration pass inside buildHarvestScript's
- * evaluate call (2026-07-25 fix: LinkedIn's results list is virtualized —
- * only ~7 of ~25 cards mount content on load, the rest are empty <li>
- * shells until scrollIntoView()'d into the IntersectionObserver). Kept well
- * under DEFAULT_HARVEST_TIMEOUT_MS (the whole evaluate's own timeout, 15s)
- * so hydration always leaves headroom for the read itself and can never be
- * what times out the call; the pass self-stops at this deadline and reads
- * whatever hydrated so far rather than throwing. */
-const HYDRATION_BUDGET_MS = 8_000;
-/** Cards scrolled into view per chunk before yielding to the browser —
- * batching (vs. one scrollIntoView + yield per card) keeps the number of
- * yields, and therefore wall-clock cost, low for a ~25-card page. */
-const HYDRATION_CHUNK_SIZE = 5;
-/** Yield between chunks so the IntersectionObserver actually fires and the
- * framework renders before the next chunk scrolls. */
-const HYDRATION_CHUNK_DELAY_MS = 120;
-/** In-page budget for the post-hydration settle poll: the hydration scroll
- * pass above only nudges the IntersectionObserver into mounting a card's
- * content, it doesn't guarantee title/company text has actually painted by
- * the time the loop ends — a single unconditional read right after
- * hydration can still race the paint and record an empty title/company,
- * which then fails JDSchema.parse downstream. Same pattern as jd_open.ts's
- * `JD_SETTLE_BUDGET_MS`/`JD_SETTLE_POLL_MS` (settle-and-read instead of a
- * single-shot read), applied to list cards here instead of the JD detail
- * pane there. Self-stopping deadline: never throws on budget exhaustion,
- * just returns whatever settled (possibly still empty). */
-const CARD_SETTLE_BUDGET_MS = 8_000;
-/** Gap between re-reads during the settle poll — mirrors jd_open.ts's
- * `JD_SETTLE_POLL_MS`. */
-const CARD_SETTLE_POLL_MS = 250;
+/** Optional overrides for buildHarvestScript's in-page budgets — exist so
+ * tests can shrink them instead of genuinely waiting; production call sites
+ * pass nothing and get the module constants below. */
+export interface HarvestScriptOpts {
+  chunkSettleBudgetMs?: number;
+  chunkSettlePollMs?: number;
+  repairPerCardBudgetMs?: number;
+  repairPageBudgetMs?: number;
+  totalBudgetMs?: number;
+}
+
+/** Per-page diagnostics emitted alongside the cards, logged by harvestCards
+ * at debug level — this is how the residual "why did a page fail to mount
+ * at all?" question gets answered from production data instead of another
+ * live probe. */
+export interface HarvestDiag {
+  cardCount: number;
+  chunks: number;
+  emptyAfterRead: number;
+  repairAttempted: number;
+  repairRecovered: number;
+  emptyAfterRepair: number;
+  elapsedMs: number;
+}
+
+/** Cards scrolled into view — and then read — per batch. One in-page
+ * evaluate covers the whole page; never a per-card Playwright round trip
+ * (2026-07-17 stall lesson). */
+const CHUNK_SIZE = 5;
+/** How long one chunk may take to mount before we read it anyway. Short
+ * because a chunk that is genuinely in the viewport mounts in well under a
+ * second; the repair pass, not this budget, is what handles a straggler. */
+const CHUNK_SETTLE_BUDGET_MS = 1_500;
+/** Gap between re-reads while waiting for a chunk to mount. */
+const CHUNK_SETTLE_POLL_MS = 100;
+/** Per-card ceiling in the repair pass. */
+const REPAIR_PER_CARD_BUDGET_MS = 1_500;
+/** Whole-page ceiling for the repair pass. Deliberately too small to
+ * rescue a wholly-unmounted page: that is a systemic failure to report,
+ * not one to grind through. */
+const REPAIR_PAGE_BUDGET_MS = 10_000;
+/** Hard ceiling for the entire in-page evaluate, binding over both budgets
+ * above, and kept under `DEFAULT_HARVEST_TIMEOUT_MS` (20 s in harvest.ts)
+ * so this script can never be what times the call out. */
+const SCRIPT_TOTAL_BUDGET_MS = 15_000;
 
 /**
  * Builds the in-page harvest function as a SOURCE STRING (an async IIFE
@@ -53,29 +67,31 @@ const CARD_SETTLE_POLL_MS = 250;
  * string so it can be sent to the page over CDP; page.evaluate awaits
  * whatever promise the string's top-level expression resolves to, so an
  * async IIFE needs no call-site change. Pure and unit-testable in isolation
- * via node:vm against a fake `document` (+ `setTimeout`, for the hydration
- * pass's yields).
+ * via node:vm against a fake `document` (+ `setTimeout`, for the read/repair
+ * loops' yields).
  *
- * Before the read, a hydration pass scrolls each card into view (in-page,
- * single evaluate — never a per-card Playwright round trip, see the
- * 2026-07-17 stall lesson in harvestCards' doc comment) so LinkedIn's
- * virtualized results list actually mounts every card's content, bounded by
- * HYDRATION_BUDGET_MS so a pathological page can't hang the call.
+ * Read-as-you-go: LinkedIn's results list is virtualized — a card mounts
+ * when it INTERSECTS the viewport, not when time passes. So this scrolls
+ * one chunk of cards into view, waits (briefly) for that chunk to mount,
+ * reads exactly that chunk, and moves on — never scrolling the whole list
+ * first and reading afterwards, which leaves every card past the initial
+ * chunk unreadable no matter how long a subsequent wait runs (diagnosis
+ * 2026-08-09: 740 of 1625 cards lost in one run, always a contiguous
+ * suffix from position 7). A bounded repair pass then gives any still-empty
+ * card another scroll — re-entering the viewport is the actual mount
+ * trigger — rather than another second of waiting.
  *
- * `cardSettleBudgetMs`/`cardSettlePollMs` default to
- * CARD_SETTLE_BUDGET_MS/CARD_SETTLE_POLL_MS and exist as overridable
- * parameters purely so tests can shrink the settle budget instead of
- * genuinely waiting out 8 real seconds (mirrors buildJdSettleScript's
- * `budgetMs`/`pollMs` params in jd_open.ts) — production call sites never
- * pass them.
+ * The five `opts` fields exist so tests can shrink budgets instead of
+ * genuinely waiting; production call sites pass nothing.
  */
-export function buildHarvestScript(
-  inv: Inventory,
-  cardSettleBudgetMs: number = CARD_SETTLE_BUDGET_MS,
-  cardSettlePollMs: number = CARD_SETTLE_POLL_MS,
-): string {
+export function buildHarvestScript(inv: Inventory, opts: HarvestScriptOpts = {}): string {
   const sel = inv.selectors;
   const idAttrName = inv.behaviors.jobCardIdAttr ?? null;
+  const chunkSettleBudgetMs = opts.chunkSettleBudgetMs ?? CHUNK_SETTLE_BUDGET_MS;
+  const chunkSettlePollMs = opts.chunkSettlePollMs ?? CHUNK_SETTLE_POLL_MS;
+  const repairPerCardBudgetMs = opts.repairPerCardBudgetMs ?? REPAIR_PER_CARD_BUDGET_MS;
+  const repairPageBudgetMs = opts.repairPageBudgetMs ?? REPAIR_PAGE_BUDGET_MS;
+  const totalBudgetMs = opts.totalBudgetMs ?? SCRIPT_TOTAL_BUDGET_MS;
   return `(async () => {
   const cardListSel = ${JSON.stringify(sel.cardList)};
   const cardSel = ${JSON.stringify(sel.card)};
@@ -84,53 +100,24 @@ export function buildHarvestScript(
   const locationSel = ${JSON.stringify(sel.cardLocation)};
   const linkSel = ${JSON.stringify(sel.cardLink)};
   const idAttrName = ${JSON.stringify(idAttrName)};
-  const hydrationBudgetMs = ${HYDRATION_BUDGET_MS};
-  const hydrationChunkSize = ${HYDRATION_CHUNK_SIZE};
-  const hydrationChunkDelayMs = ${HYDRATION_CHUNK_DELAY_MS};
-  const cardSettleBudgetMs = ${cardSettleBudgetMs};
-  const cardSettlePollMs = ${cardSettlePollMs};
+  const chunkSize = ${CHUNK_SIZE};
+  const chunkSettleBudgetMs = ${chunkSettleBudgetMs};
+  const chunkSettlePollMs = ${chunkSettlePollMs};
+  const repairPerCardBudgetMs = ${repairPerCardBudgetMs};
+  const repairPageBudgetMs = ${repairPageBudgetMs};
+  const totalBudgetMs = ${totalBudgetMs};
+  const startedAt = Date.now();
+  const totalDeadline = startedAt + totalBudgetMs;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const text = (el) => (el && el.textContent ? el.textContent.trim() : '');
   const listEl = document.querySelector(cardListSel);
   const cardEls = listEl ? Array.from(listEl.querySelectorAll(cardSel)) : [];
 
-  // Hydration: LinkedIn's results list is virtualized behind an
-  // IntersectionObserver — only the first ~7 of ~25 cards have content
-  // mounted on load, the rest are empty <li> shells with no lockup/title/
-  // company markup at all. scrollIntoView() on each card nudges the
-  // observer to mount it; a bulk scrollTop jump does NOT (per-element
-  // intersection, not scroll position — verified live 2026-07-25).
-  // Chunked + yielded (await sleep) so the observer/framework get an actual
-  // turn between chunks, and deadline-bounded so a pathological page can't
-  // hang this evaluate: if the budget runs out we stop hydrating and read
-  // whatever is there rather than throwing.
-  const hydrationDeadline = Date.now() + hydrationBudgetMs;
-  for (let i = 0; i < cardEls.length && Date.now() < hydrationDeadline; i += hydrationChunkSize) {
-    const chunk = cardEls.slice(i, i + hydrationChunkSize);
-    for (const el of chunk) {
-      if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView();
-    }
-    await sleep(hydrationChunkDelayMs);
-  }
-
-  // Settle poll: the hydration pass above only nudges cards into mounting,
-  // it does not guarantee title/company text has actually painted by the
-  // time it ends. Re-read only the cards still missing either field, until
-  // every card has both non-empty or the budget runs out — self-stopping,
-  // so a card that never settles just returns whatever text is present
-  // (possibly still empty) rather than hanging this evaluate.
-  const needsSettle = (el) =>
-    !text(el.querySelector(titleSel)) || !text(el.querySelector(companySel));
-  const settleDeadline = Date.now() + cardSettleBudgetMs;
-  while (cardEls.some(needsSettle) && Date.now() < settleDeadline) {
-    await sleep(cardSettlePollMs);
-  }
-
-  return cardEls.map((el) => {
-    // cardLink sometimes duplicates the card selector itself (no href on
-    // any descendant, e.g. linkedin__jobs-search-results) — querySelector
-    // only searches descendants, so check el.matches(linkSel) first and
-    // fall back to reading the id off an attribute on the card element.
+  // cardLink sometimes duplicates the card selector itself (no href on any
+  // descendant, e.g. linkedin__jobs-search-results) — querySelector only
+  // searches descendants, so check el.matches(linkSel) first and fall back
+  // to reading the id off an attribute on the card element.
+  const readCard = (el) => {
     const linkEl = el.matches && el.matches(linkSel) ? el : el.querySelector(linkSel);
     return {
       title: text(el.querySelector(titleSel)),
@@ -139,6 +126,89 @@ export function buildHarvestScript(
       href: linkEl ? linkEl.getAttribute('href') || '' : '',
       idAttr: idAttrName ? el.getAttribute(idAttrName) : null,
     };
-  });
+  };
+  // "Mounted" is the ONLY readable-card test in this script: both identity
+  // fields non-empty. A card missing either is rejected by gateCards
+  // downstream, so there is nothing else worth waiting for.
+  const mounted = (c) => Boolean(c.title) && Boolean(c.company);
+  const bring = (el) => {
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView();
+  };
+
+  // Read-as-you-go. The list is virtualized: a card mounts when it
+  // INTERSECTS the viewport, not when time passes, and it is only reliably
+  // readable while it is still there. So scroll a chunk in, wait for that
+  // chunk to mount, read exactly that chunk, and never look at it again —
+  // the mounted window and the window being read are the same window by
+  // construction. The old script scrolled the whole list first and read
+  // afterwards, by which point every card past the initial ~7 had been
+  // scrolled away from and no amount of waiting could mount it (diagnosis
+  // 2026-08-09: 740 of 1625 cards lost in one run, always a contiguous
+  // suffix from position 7).
+  const out = new Array(cardEls.length);
+  let chunks = 0;
+  for (let i = 0; i < cardEls.length; i += chunkSize) {
+    const chunk = cardEls.slice(i, i + chunkSize);
+    chunks += 1;
+    for (const el of chunk) bring(el);
+    const chunkDeadline = Math.min(Date.now() + chunkSettleBudgetMs, totalDeadline);
+    while (chunk.some((el) => !mounted(readCard(el))) && Date.now() < chunkDeadline) {
+      await sleep(chunkSettlePollMs);
+    }
+    for (let j = 0; j < chunk.length; j += 1) out[i + j] = readCard(chunk[j]);
+    if (Date.now() >= totalDeadline) {
+      // Total budget spent mid-sweep: read whatever the remaining cards
+      // hold right now rather than returning holes. Self-stopping — a
+      // short read is a recorded casualty, a hung evaluate is a failed url.
+      for (let k = i + chunk.length; k < cardEls.length; k += 1) {
+        out[k] = readCard(cardEls[k]);
+      }
+      break;
+    }
+  }
+
+  let emptyAfterRead = 0;
+  for (const c of out) if (!mounted(c)) emptyAfterRead += 1;
+
+  // Bounded repair pass. Re-entering the viewport is the actual mount
+  // trigger, so a straggler gets another scroll rather than another
+  // second — precisely what the deleted whole-list settle loop could not
+  // do, because it only ever waited while every straggler sat off-screen.
+  let repairAttempted = 0;
+  let repairRecovered = 0;
+  const repairDeadline = Math.min(Date.now() + repairPageBudgetMs, totalDeadline);
+  for (let i = 0; i < out.length && Date.now() < repairDeadline; i += 1) {
+    if (mounted(out[i])) continue;
+    repairAttempted += 1;
+    bring(cardEls[i]);
+    const cardDeadline = Math.min(Date.now() + repairPerCardBudgetMs, repairDeadline);
+    let next = readCard(cardEls[i]);
+    while (!mounted(next) && Date.now() < cardDeadline) {
+      await sleep(chunkSettlePollMs);
+      next = readCard(cardEls[i]);
+    }
+    // Only a fully-mounted re-read replaces the stored record: never trade
+    // a partial read for a worse one.
+    if (mounted(next)) {
+      out[i] = next;
+      repairRecovered += 1;
+    }
+  }
+
+  let emptyAfterRepair = 0;
+  for (const c of out) if (!mounted(c)) emptyAfterRepair += 1;
+
+  return {
+    cards: out,
+    diag: {
+      cardCount: cardEls.length,
+      chunks: chunks,
+      emptyAfterRead: emptyAfterRead,
+      repairAttempted: repairAttempted,
+      repairRecovered: repairRecovered,
+      emptyAfterRepair: emptyAfterRepair,
+      elapsedMs: Date.now() - startedAt,
+    },
+  };
 })()`;
 }

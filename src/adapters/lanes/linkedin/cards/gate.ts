@@ -20,7 +20,7 @@ const UNSETTLED_FIELD_PLACEHOLDER = '(unavailable)';
  *
  * Building that identity-only JD can itself fail JDSchema.parse when the
  * card's title/company is still empty (the intermittent paint race
- * `CARD_SETTLE_BUDGET_MS` in harvest.ts shrinks but can't eliminate) —
+ * the cards module's chunk-settle budget shrinks but can't eliminate) —
  * this must stay a per-card casualty, not escape and take the whole url
  * down with it (url_runner.ts's whole-url catch stays as a backstop for
  * other error shapes, unrelated to this one). On that ZodError, retry the

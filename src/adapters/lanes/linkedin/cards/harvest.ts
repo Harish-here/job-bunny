@@ -3,7 +3,7 @@ import type { DroppedRecord } from '../../../../core/jd/index.ts';
 import type { PageHandle } from '../../../../ports/browser.ts';
 import type { RunContext } from '../../../../ports/context.ts';
 import type { Inventory } from '../inventory.ts';
-import { buildHarvestScript, type RawCard } from './script.ts';
+import { buildHarvestScript, type HarvestDiag, type RawCard } from './script.ts';
 
 /**
  * Batch card harvest + card gate (P4 Task 4, spec §"Card harvest is batch
@@ -116,9 +116,14 @@ export async function harvestCards(
   }
 
   const script = buildHarvestScript(inv);
-  const raw = await page.evaluate<RawCard[]>(script, {
+  const read = await page.evaluate<{ cards: RawCard[]; diag: HarvestDiag }>(script, {
     timeoutMs: opts.timeoutMs ?? DEFAULT_HARVEST_TIMEOUT_MS,
   });
+  // One line per page, debug level: this is how the residual "why did a
+  // page fail to mount at all?" question gets answered from production
+  // data instead of another live probe.
+  ctx.logger.debug('harvest: card read diagnostics', { page: inv.page, ...read.diag });
+  const raw = read.cards;
 
   const cards: HarvestedCard[] = [];
   for (const item of raw) {
