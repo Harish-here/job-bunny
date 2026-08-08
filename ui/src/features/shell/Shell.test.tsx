@@ -66,6 +66,25 @@ function stubFetch(opts: {
     if (url.includes('/config/')) {
       return { ok: true, json: async () => ({ text: '' }) } as unknown as Response;
     }
+    if (url.includes('/doctor')) {
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok', findings: [] }),
+      } as unknown as Response;
+    }
+    if (url.includes('/api/daemon')) {
+      return {
+        ok: true,
+        json: async () => ({
+          state: 'running',
+          pid: null,
+          startedAt: null,
+          lastTickAt: null,
+          inFlight: null,
+          profiles: [],
+        }),
+      } as unknown as Response;
+    }
     throw new Error(`unexpected fetch url: ${url}`);
   });
   vi.stubGlobal('fetch', impl as unknown as typeof fetch);
@@ -107,7 +126,7 @@ describe('Shell', () => {
       'Tracker',
       'Runs',
       'Analytics',
-      'Onboarding',
+      'Setup & Health',
       'Settings',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
@@ -149,6 +168,14 @@ describe('Shell', () => {
     renderShell();
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  it('renders HubPage on the setup route', async () => {
+    stubFetch({});
+    window.location.hash = '#/setup';
+    renderShell();
+
+    expect(await screen.findByTestId('hub')).toBeInTheDocument();
   });
 
   // First-boot redirect (phase 3 task 4): once the profiles query resolves
@@ -198,7 +225,7 @@ describe('Shell', () => {
       'Tracker',
       'Runs',
       'Analytics',
-      'Onboarding',
+      'Setup & Health',
       'Settings',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();

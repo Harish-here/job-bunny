@@ -25,7 +25,7 @@ const NAV_ITEMS: { name: RouteName; label: string; Icon: typeof Inbox }[] = [
   { name: 'tracker', label: 'Tracker', Icon: Columns3 },
   { name: 'runs', label: 'Runs', Icon: Play },
   { name: 'analytics', label: 'Analytics', Icon: Activity },
-  { name: 'onboarding', label: 'Onboarding', Icon: Rocket },
+  { name: 'setup', label: 'Setup & Health', Icon: Rocket },
   { name: 'settings', label: 'Settings', Icon: Settings },
 ];
 

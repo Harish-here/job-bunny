@@ -102,7 +102,7 @@ test('shell: nav items stay reachable by name at rail width', async ({ page }) =
     'Tracker',
     'Runs',
     'Analytics',
-    'Onboarding',
+    'Setup & Health',
     'Settings',
   ]) {
     await expect(page.getByRole('button', { name: label })).toBeVisible();
