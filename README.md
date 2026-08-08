@@ -10,69 +10,42 @@
   <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="version" />
 </p>
 
-A personal job-search companion that runs on your own Mac. Several times a day it scrapes your saved LinkedIn job searches, pulls fresh postings from company career APIs (Greenhouse, Keka), filters and ranks everything against your resume, and syncs the survivors to a Notion board — with an optional Telegram digest so you know what landed.
+## What it is
 
-This is a clean-room TypeScript rewrite (v2, under `src/`) of the original plain-JavaScript pipeline (v0); v0 has been deleted from this branch and lives on `main` for history only. `src/` is the pipeline, full stop — see [CLAUDE.md](CLAUDE.md) for the full architecture detail.
+Job Bunny is a personal job-search pipeline that runs on your own machine. It scrapes your saved LinkedIn job searches (over CDP, using your own logged-in Chrome — no headless bot login), pulls fresh postings straight from company career APIs (Greenhouse, Keka), then filters and ranks everything against your profile. Results land in a local-first SQLite job board you browse and triage in the same browser tab you used to set it up, with an optional one-way Notion mirror and Telegram digests for anyone who wants them.
 
-Built to be driven by [Claude Code](https://claude.com/claude-code): a few workflow steps (onboarding, page-selector maintenance, the LLM structuring stage, session close-out) run as Claude Code slash commands; the rest is a single `jobbunny` CLI.
-
-## How it works
-
-```
-LinkedIn (Playwright over Chrome CDP) ─┐
-Greenhouse / Keka APIs ────────────────┼─► reconcile ─► farm ─► source ─► compress ─► structure (LLM)
-                                        ┘                                                    │
-                                                                                              ▼
-        Notion board ◄─ sync ◄─ rank ◄─ dedup ◄──────────────────────────────── filter ◄─ assemble
-                                                          │
-                                              Telegram digest (optional)
-```
-
-Ten stages, one process, one `jobbunny run` invocation. Full stage-by-stage detail is in [CLAUDE.md](CLAUDE.md).
-
-- **Config-driven scraping.** Selectors are config, not code. When LinkedIn changes its DOM, regenerate the page inventory with `/page-analyse` — no code changes needed.
-- **Fail-soft, but loud on total outage.** A broken search page, a dead careers API, or one bad job card is skipped and logged; the run keeps going. But if a whole lane comes back completely empty (e.g. an expired LinkedIn login), that's treated as a real failure, not silence.
-- **Notion is the source of truth.** The local cache is rebuilt from your Notion database on every run, and sync only ever touches automated fields — your notes and statuses are safe.
-- **Multi-profile.** Each person gets a `profiles/<name>/` directory with their own resume, search URLs, filters, Notion database, and schedule. One machine can run several profiles back to back.
-
-## Requirements
-
-- macOS, Windows, or Linux — scheduling is a cross-platform in-process daemon, not an OS-level scheduler, and Chrome discovery resolves per-OS candidate paths automatically; see "Scheduled runs" below for autostart-at-login support per OS.
-- **Node.js ≥ 24** (pinned by `.nvmrc`; `nvm install 24 && nvm alias default 24` on a fresh machine) — v2 runs TypeScript natively with zero build step; older Node fails immediately.
-- Google Chrome with a logged-in LinkedIn session (kept in a dedicated `~/.jobbunny/chrome/` browser profile) — driven via CDP, not `playwright install`
-- [Claude Code](https://claude.com/claude-code) CLI — the `claude` binary must resolve on `PATH`; `jobbunny doctor` checks this directly. Claude Code itself is cross-platform, so this is a prerequisite to install, not an OS blocker.
-- A [Notion internal integration](https://www.notion.so/my-integrations) token
-- Optional: a Telegram bot (via @BotFather) for run digests
-
-## Getting started
+## Get started
 
 ```bash
 git clone <repo> && cd job-bunny
-npm install          # no build step — Node 24 runs the TypeScript directly
-npm install -g .     # installs the jobbunny command (a packed copy — re-run after pulling changes)
-jobbunny setup --profile <name>
+npm install -g .        # Node ≥ 24, no build step — installs the jobbunny command (a packed copy)
+jobbunny board
 ```
 
-Then, from anywhere:
+`board` starts the local server and prints a URL. Open it — with no profiles yet, you land straight on a six-step onboarding wizard, no config files to hand-edit:
 
-```bash
-jobbunny doctor --profile <name>   # preflight: secrets, Chrome/CDP, page inventories, cache, data home
-jobbunny run --profile <name>      # full pipeline, end to end
-```
+1. **Name it** — pick a profile name.
+2. **Pick a persona** — a preset pre-fills starter skills and title-matching rules you can edit later.
+3. **About you** — answer a few questions; your title and location filter rules are derived live as you go.
+4. **Where to hunt** — add your LinkedIn saved-search URLs.
+5. **Extras** *(optional, skippable in one click)* — wire up a Notion mirror and/or a Telegram digest, tokens included; both write straight into the data home, no `.env` editing.
+6. **Launch** — pick a schedule preset (or manual), then **Run now** if you want results immediately.
 
-Prefer an interactive walkthrough? In Claude Code, `/setup <your-name>` wraps `jobbunny setup` with the parts it can't do non-interactively: Notion adopt-or-create, a secrets prompt, and resume parsing. It's idempotent — rerun any time to resume where you left off.
+For scheduled runs after that: `jobbunny serve start` starts the in-process daemon that fires runs at your configured times; on macOS, `jobbunny autostart enable` registers it to start at login too.
 
-Useful day-2 commands:
+**Requirements:** Node.js ≥ 24 (pinned by `.nvmrc`); Google Chrome with a logged-in LinkedIn session (kept in a dedicated `~/.jobbunny/chrome/` profile, driven via CDP — not `playwright install`); the [Claude Code](https://claude.com/claude-code) CLI on `PATH`, used by the pipeline's structuring stage (`jobbunny doctor` checks for it). Notion and Telegram are both optional and configured through the wizard, not required to install.
 
-| Command | What it does |
-|---|---|
-| `jobbunny lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
-| `/page-analyse` | Rebuild a page inventory from live DOM analysis |
-| `jobbunny serve start\|stop\|status` | Start/stop/check the in-process scheduling daemon (cross-profile) |
-| `jobbunny autostart enable\|disable` | Register/remove a login LaunchAgent that runs `serve start` at login (darwin only) |
-| `jobbunny reconcile --profile <name>` | Rebuild the local cache from your Notion database |
-| `jobbunny routine cleanup --profile <name>` | Archive stale Notion entries (dry-run by default) |
-| `jobbunny profile build --profile <name>` | Regenerate filter/rank config from an edited `resume.json` |
+## The board
+
+`jobbunny board` (profile-less, binds `127.0.0.1` only) serves the whole app:
+
+- **Triage** — a keyboard-first queue for deciding on new matches.
+- **Tracker** — a kanban board of everything you've moved past triage.
+- **Runs** — run history with a live in-flight progress header while a run is going.
+- **Analytics** — run stats and match-quality trends (arriving soon — currently a placeholder).
+- **Setup & Health** — a hub of live `doctor` findings and integration checks, with guided fixes for anything red.
+- **Settings** — forms for every config doc, plus an Edit-as-JSON escape hatch for anything the forms don't cover yet.
+- **Sidebar Run now** — fires a run from anywhere in the app, with honest running/queued/error states and the Job Bunny mascot reacting to what's going on.
 
 ## Where your data lives
 
@@ -80,17 +53,17 @@ Everything the tool writes — your data, not the program — lives in `~/.jobbu
 
 - `profiles/<name>/` — per-profile config and the profile's own SQLite database
 - `.env` — secrets (`NOTION_TOKEN`, `TELEGRAM_BOT_TOKEN`)
-- the daemon pidfile
+- the daemon pidfile and logs
 - `chrome/` — the persistent Chrome profile holding your LinkedIn login
 
-The clone is only the program; nothing user-specific is ever written into it. Two error messages you may see, verbatim:
+The clone is only the program; nothing user-specific is ever written into it. For local development, a checkout's own layout doubles as a valid data home (see Development below). Two error messages you may see, verbatim:
 
 ```
 no jobbunny home at <path> — run 'jobbunny setup'
 jobbunny needs Node >= 24 (found <version>)
 ```
 
-## Existing installs
+### Existing installs
 
 **One-time bridge — skip this if you're installing fresh.** If you have an older machine with a repo-local install (data living inside the checkout instead of `~/.jobbunny/`), move it with `jobbunny migrate-home`. This command will be removed once migration-era machines are done.
 
@@ -105,33 +78,28 @@ jobbunny doctor --profile <name>
 
 It moves every `profiles/<name>/` except the committed `rajni` fixture, `.env`, and `.chrome-debug/` (renamed to `chrome/`). Two refusals to know about: it will not run while the daemon is alive, and it refuses rather than overwriting anything that already exists at the destination.
 
-## Telegram digest (optional)
+## CLI reference
 
-There's no setup wizard for this — wire it by hand:
+`jobbunny <command> [options]` — the wizard covers day-1 setup, but every knob is also reachable from the CLI:
 
-1. **Bot token (one-time, shared across profiles).** Message `@BotFather` on Telegram, run `/newbot`, and add the token it gives you to the `.env` in your data home (`~/.jobbunny/.env`) as `TELEGRAM_BOT_TOKEN` (never in chat).
-2. **Your chat id.** Message `@userinfobot` — it replies with your numeric id immediately.
-3. **Wire it into the profile.** In `profiles/<name>/profile.json`: add `"telegram"` to the top-level `notifiers` array, and under `settings` add `"telegram": { "chatId": <number> }` (a number, not a quoted string) — leave every other key untouched. Profile config is normally edited with `jobbunny config get|set` or the board's Settings page rather than by hand.
-4. **Verify.** `jobbunny doctor --profile <name>` checks `TELEGRAM_BOT_TOKEN` against Telegram's `getMe` endpoint (it can't validate `chatId` itself — a live digest at the next run is the real test).
+| Command | What it does |
+|---|---|
+| `run --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]` | Full pipeline, end to end |
+| `doctor --profile <name>` | Preflight: secrets, Chrome/CDP, page inventories, cache, data home |
+| `stage <stage-name> --profile <name>` | Run a single pipeline stage |
+| `routine <routine-name> --profile <name>` | Run a named routine (e.g. `cleanup`) |
+| `migrate --profile <name> [--apply]` | One-time Notion → local sqlite import (dry-run by default) |
+| `migrate-home [--from <path>] [--apply]` | One-shot move of a legacy repo-local install into the data home (dry-run by default) |
+| `board [--port <n>]` | The job-board UI + API, all profiles, `127.0.0.1` only (default port 1994) |
+| `runs --profile <name>` / `runs show <id> --profile <name>` | Run history from the DB |
+| `serve start\|stop\|status` | Start/stop/check the in-process scheduling daemon (cross-profile) |
+| `autostart enable\|disable` | Register/remove a login LaunchAgent for `serve start` (darwin only) |
+| `config get\|set <doc> --profile <name>` / `config export\|import --profile <name> [--dir <d>]` | Read/write a config doc, or export/import the whole set |
+| `lane add-url <url> [label] --profile <name>` | Add a LinkedIn saved-search URL |
+| `profile build --profile <name>` / `profile remove --profile <name> [--force]` | Regenerate filter/rank config from `resume.json`, or delete a profile |
+| `setup --profile <name>` | Non-interactive onboarding steps (scaffold, resume/search-url/page-inventory checks) — the board's wizard is the recommended path for a new profile |
 
-## Scheduled runs
-
-Set times in your profile's `profile.json`:
-
-```json
-"schedule": { "times": ["09:00", "14:00", "19:00"] }
-```
-
-then start the daemon once: `jobbunny serve start`. It ticks a wall clock every 30 seconds and reasons about "is a run owed right now" against local time — so a reboot or a sleeping laptop produces a *late* run within `schedule.graceMinutes` (default 90) of the missed slot, never a silently skipped one (and, since the daemon checks each profile's own database for already-served slots rather than the filesystem, a daemon restart within that window never fires a duplicate run either). Each firing runs `jobbunny run --profile <name> --headless` with the same per-stage timeout/stall watchdogs as any other invocation, plus an external SIGTERM/SIGKILL backstop; profiles sharing a time slot run strictly sequentially (they share one Chrome/CDP session). A Telegram digest is sent at the end of every run, success or failure. Mid-day reruns pick up newly posted jobs instead of redoing the day's work — the LinkedIn lane skips job ids already present in the Notion-backed cache. Per-profile run/checkpoint history lives in that profile's own `~/.jobbunny/profiles/<name>/data/jobbunny.db` (a `runs`/`checkpoints` row per invocation and per-stage snapshot, local start time), browsable via `jobbunny runs`; the daemon's own log and every spawned run's captured stdout/stderr land in `~/.jobbunny/logs/`.
-
-- `jobbunny serve status` reports whether the daemon is running, its uptime, whether it appears wedged, and the next scheduled slot.
-- `jobbunny serve stop` shuts it down cleanly.
-- **macOS**: `jobbunny autostart enable` registers a login LaunchAgent that runs `jobbunny serve start` at login — the LaunchAgent carries no schedule knowledge itself; the daemon's own tick loop decides when a run actually fires. `jobbunny autostart disable` removes it.
-- **Windows / Linux**: autostart-at-login isn't automated yet — run `jobbunny serve start` once after each login/boot, or register the OS-native "run at login" mechanism by hand (Task Scheduler on Windows, a systemd `--user` unit on Linux) pointing at `jobbunny serve start` with no arguments.
-
-Every `jobbunny` command warns to stderr when the daemon pidfile shows no live daemon, so a down daemon is loud the next time you run anything, on any platform.
-
-If your Mac regularly sleeps through a scheduled time, pre-wake it: `sudo pmset repeat wakeorpoweron MTWRF <HH:MM:SS>` a few minutes early (requires you to already be logged in — screen-locked is fine, logged out is not — and is most reliable on AC power with the lid closed).
+Run `jobbunny --help` for the exact usage string. Releases are `npm run release -- <X.Y.Z>` — maintainer-only, cross-profile.
 
 ## Development
 
@@ -139,20 +107,26 @@ If your Mac regularly sleeps through a scheduled time, pre-wake it: `sudo pmset 
 npm run check                                # the gate: typecheck + lint + boundaries + tests
 node --test src/core/filter/engine.test.ts   # one file
 
+npm run ui:check                             # ui/'s own gate (biome + tsc + vitest)
+npm run ui:build                             # build the board SPA into ui/dist
+npm run ui:e2e                               # Playwright e2e smoke against the built UI
+
 # Verify a stage against the committed synthetic fixture profile, using the
 # checkout itself as the data home. Run through the checkout's own entry
 # point (node src/cli/main.ts), not the globally installed `jobbunny` —
 # `npm install -g .` installs a packed COPY, not a symlink, so the global
-# binary does not pick up local changes; CLAUDE.md and the `verify` skill
-# both verify this same way for exactly that reason.
+# binary does not pick up local changes; re-run it after pulling.
 JOBBUNNY_HOME=$PWD node src/cli/main.ts stage source --profile rajni
 JOBBUNNY_HOME=$PWD node src/cli/main.ts doctor --profile rajni
 ```
 
-A data home's internal layout is identical to the repo's own layout, so the checkout itself is a valid data home — that's what keeps `profiles/rajni/` usable for verification without a separate install.
-
 - `profiles/rajni/` is a committed synthetic fixture profile for runtime verification — use it instead of real profiles when testing stages, never `profiles/harish/` (real user data).
 - Architecture, internals, and per-stage detail live in [CLAUDE.md](CLAUDE.md) and `.claude/agents/explainer.md`.
 - Release history: [CHANGELOG.md](CHANGELOG.md).
+
+## Honest caveats
+
+- **Globally-installed copies don't ship the built board UI yet.** `ui/dist` is gitignored and not built as part of a plain `npm install -g .`. Run `jobbunny board` from a checkout instead (after `npm run ui:build`) until packaging ships the built UI.
+- **LinkedIn scraping needs your own logged-in Chrome** and paces itself deliberately (jittered navigation delays, a pause between saved searches, and a circuit breaker on repeated soft-blocks) — it is not built for speed, it's built to not get your account flagged.
 
 Private project — not published to npm.
