@@ -47,10 +47,14 @@ function isDifferentPageType(rawUrl: string): boolean {
   }
 }
 
-/** Mirrors the frozen never-clobber guard exactly: the seeded template has
- * no bullet line at all, so any line containing one means real content. */
+/** Mirrors the frozen never-clobber guard exactly: the seeded template
+ * mentions the bullet only mid-sentence, in its format hint ("Format:
+ * `  • <label> - <url>`") — it never starts a LINE with the bullet. A
+ * real entry always starts its line with it, so checking the line start
+ * (not a substring match anywhere in the line) is what distinguishes
+ * seeded-but-empty from real content. */
 function hasBulletLine(text: string): boolean {
-  return text.split('\n').some((line) => line.includes('  • '));
+  return text.split('\n').some((line) => line.trimStart().startsWith('• '));
 }
 
 export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepProps) {

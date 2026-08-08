@@ -285,6 +285,30 @@ describe('Step4Hunt', () => {
     expect(patchProfileConfig).not.toHaveBeenCalled();
   });
 
+  it('the freshly seeded template (bullet only mid-sentence, in the format hint) does not trip the never-clobber guard', async () => {
+    vi.mocked(getConfigDoc).mockResolvedValue({
+      text:
+        '# Search URLs\n\n' +
+        'Hierarchical: Channel -> page -> labeled URLs. One page-type = one inventory in ' +
+        '`src/adapters/lanes/linkedin/page_inventory/<page>.json`; many URLs may live beneath it.\n' +
+        'Add URLs with `lane add-url` (strips ephemeral params). Format: `  • <label> - <url>`\n',
+    });
+    const capture = makeCapture();
+    render(<Harness registerSubmit={capture.registerSubmit} />);
+    await fillRow(
+      0,
+      'https://www.linkedin.com/jobs/search/?keywords=frontend',
+      'Frontend Roles',
+    );
+
+    const result = await submit(capture.ref.current);
+
+    expect(result).toBe(true);
+    expect(screen.queryByTestId('wizard-existing-config')).not.toBeInTheDocument();
+    expect(writeConfigDocText).toHaveBeenCalled();
+    expect(patchProfileConfig).toHaveBeenCalled();
+  });
+
   it('a pre-existing search_urls.md containing a bullet line shows wizard-existing-config, resolves false, and issues no write request', async () => {
     vi.mocked(getConfigDoc).mockResolvedValue({
       text: '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n  • Old - https://www.linkedin.com/jobs/search/?keywords=old\n',
