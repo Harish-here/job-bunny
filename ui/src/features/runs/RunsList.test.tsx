@@ -222,3 +222,46 @@ describe('RunsList — 7-way outcome treatment (B21, AC3)', () => {
     expect(numbers.get('empty')).toBe('0');
   });
 });
+
+// `RunsPage.tsx`'s `/api/profiles/:name/runs` list fetch only ever returns
+// bare `RunSummary` rows (no `result`/`failure`) — RunsPage hydrates
+// passed/crashed rows with fetched `RunDetail` before handing them to this
+// component (see RunsPage.test.tsx's own regression test for that
+// integration), but while a hydration fetch is still in flight — or for any
+// other bare-`RunSummary` caller — `RunsList` genuinely does receive rows
+// shaped exactly like these fixtures. `classifyOutcome` (B13,
+// runOutcome.ts) documents its own fail-safe for this case: a bare
+// `RunSummary` can never resolve 'unrecorded' (falls to generic 'crashed')
+// and never resolves 'produced'/'empty' for a 'passed' row (falls to
+// 'degraded'). These tests make that documented fallback visible in this
+// component's own suite, per this fix round's [important] finding, rather
+// than only ever being exercised through RunDetail-shaped fixtures that the
+// real API never actually serves at list scope.
+const BARE_SUMMARY_BASE = {
+  date: '2026-08-05',
+  timeDir: '09-00',
+  kind: 'run' as const,
+  resumedFrom: null,
+  startedAt: '2026-08-05T09:00:00.000Z',
+  finishedAt: '2026-08-05T09:05:00.000Z',
+  heartbeatAt: '2026-08-05T09:05:00.000Z',
+  progress: null,
+};
+
+describe('RunsList — bare RunSummary rows (the real /runs list contract)', () => {
+  it('a bare "passed" RunSummary — no result to read jobsOut/health from — fails safe to degraded, never produced/empty', () => {
+    const row: RunSummary = { id: 20, ...BARE_SUMMARY_BASE, status: 'passed' };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'degraded');
+    expect(rowEl).toHaveTextContent('Ran with warnings');
+  });
+
+  it('a bare "crashed" RunSummary — no result/failure to confirm the A6 unrecorded shape — falls to generic crashed, never unrecorded', () => {
+    const row: RunSummary = { id: 21, ...BARE_SUMMARY_BASE, status: 'crashed' };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'crashed');
+    expect(rowEl).toHaveTextContent('Lost contact');
+  });
+});

@@ -1,13 +1,13 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
-import type { RunSummary } from '../../lib/api/types';
+import type { RunDetail, RunSummary } from '../../lib/api/types';
 import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
 import { RunsList } from './RunsList';
-import { runsKeys } from './runs.queries';
+import { runQuery, runsKeys } from './runs.queries';
 import { useRun, useRunEvents, useRuns, useSoftErrors } from './useRunsData';
 
 const SKELETON_ROW_KEYS = ['s1', 's2', 's3'];
@@ -52,6 +52,25 @@ export function RunsPage({ profile }: { profile: string }) {
   const rows = runsQuery.data?.rows ?? [];
   const runningRow = rows.find((r) => r.status === 'running') ?? null;
   const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // `classifyOutcome` (runOutcome.ts) can only resolve produced/empty/
+  // degraded/unrecorded from a RunDetail's `result`/`failure` blobs, which
+  // `listRuns()` never returns — a bare `RunSummary` fails safe to
+  // 'degraded' (passed) or generic 'crashed' (crashed-but-truly-unrecorded).
+  // `running`/`failed` rows classify correctly from `status` alone, so only
+  // `passed`/`crashed` rows need hydrating. Reuses `runQuery`'s cache key,
+  // so this shares data with the detail pane's own `useRun` fetch for
+  // whichever row is selected — no duplicate request for that one.
+  const detailQueries = useQueries({
+    queries: rows
+      .filter((r) => r.status === 'passed' || r.status === 'crashed')
+      .map((r) => runQuery(profile, r.id)),
+  });
+  const detailById = new Map<number, RunDetail>();
+  for (const q of detailQueries) {
+    if (q.data) detailById.set(q.data.id, q.data);
+  }
+  const listRows: (RunSummary | RunDetail)[] = rows.map((r) => detailById.get(r.id) ?? r);
 
   // Default-select the newest run once the list resolves, mirroring
   // TriagePage's first-row default — never overrides a user's own pick.
@@ -106,7 +125,7 @@ export function RunsPage({ profile }: { profile: string }) {
               ))}
             </div>
           ) : (
-            <RunsList rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+            <RunsList rows={listRows} selectedId={selectedId} onSelect={setSelectedId} />
           )}
         </section>
 
