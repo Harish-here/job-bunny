@@ -1,5 +1,10 @@
 import { useDraggable } from '@dnd-kit/core';
 import {
+  formatDate,
+  formatInstant,
+  formatInstantTitle,
+} from '../../../../src/core/datetime/index.ts';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -47,7 +52,18 @@ export function KanbanCard({
 
   const today = new Date().toISOString().slice(0, 10);
   const overdue = isOverdue(row.tracking?.nextActionDate, today);
-  const dateLabel = row.tracking?.dateApplied ?? row.dateFound.slice(0, 10);
+  const now = new Date();
+  // dateApplied (date-only, user-tracked) wins when present; the fallback
+  // is dateFound, a real instant — only the fallback gets an hour/minute
+  // and a hover title.
+  const dateLabel =
+    row.tracking?.dateApplied != null
+      ? formatDate(row.tracking.dateApplied, now)
+      : formatInstant(row.dateFound, now);
+  const dateTitle =
+    row.tracking?.dateApplied != null
+      ? undefined
+      : formatInstantTitle(row.dateFound, now);
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: must stay a div — it's dnd-kit's drag handle and wraps the status Select, a nested interactive control that can't live inside a real <button>.
@@ -74,7 +90,9 @@ export function KanbanCard({
     >
       <div className="truncate font-medium">{row.company}</div>
       <div className="truncate text-xs text-muted-foreground">{row.title}</div>
-      <div className="text-xs text-muted-foreground">{dateLabel}</div>
+      <div className="text-xs text-muted-foreground" title={dateTitle}>
+        {dateLabel}
+      </div>
       {row.tracking?.nextAction && (
         <div
           className={cn(
@@ -83,7 +101,8 @@ export function KanbanCard({
           )}
         >
           {row.tracking.nextAction}
-          {row.tracking.nextActionDate && ` (${row.tracking.nextActionDate})`}
+          {row.tracking.nextActionDate &&
+            ` (${formatDate(row.tracking.nextActionDate, now)})`}
         </div>
       )}
       <Select

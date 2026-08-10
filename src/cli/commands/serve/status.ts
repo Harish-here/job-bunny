@@ -5,6 +5,7 @@
  * split plan); see `./index.ts` for the shared `ServeDeps` bag and
  * dispatch.
  */
+import { formatInstantFull } from '../../../core/datetime/index.ts';
 import { formatLocalDate, isRunOwed, nextFireAt } from '../../../core/schedule/index.ts';
 import { HEARTBEAT_STALE_MS, readDaemonPidfile } from '../../../ops/daemon/index.ts';
 import { scanProfileSchedules } from '../../../ops/daemon/scan/index.ts';
@@ -42,7 +43,7 @@ export async function runServeStatus(deps: ServeDeps): Promise<number> {
   } else {
     const wedged = heartbeatAgeMs > HEARTBEAT_STALE_MS;
     deps.write(
-      `  last tick: ${file.lastTickAt} (${formatDuration(heartbeatAgeMs)} ago)` +
+      `  last tick: ${formatInstantFull(file.lastTickAt)} (${formatDuration(heartbeatAgeMs)} ago)` +
         (wedged ? ' — appears wedged' : ''),
     );
   }
@@ -60,7 +61,7 @@ export async function runServeStatus(deps: ServeDeps): Promise<number> {
   const next = nextFireAt(now, schedules);
   deps.write(
     next
-      ? `  next fire: ${next.at.toISOString()} (${next.runs.map((r) => r.profile).join(', ')})`
+      ? `  next fire: ${formatInstantFull(next.at.toISOString())} (${next.runs.map((r) => r.profile).join(', ')})`
       : '  next fire: none scheduled',
   );
 

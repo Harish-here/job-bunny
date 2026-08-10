@@ -12,13 +12,6 @@ export function formatDuration(startedAt: string, finishedAt: string | null): st
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
-/** date + timeDir correlate to the checkpoint folder (Phase 2 note in
- * ports/run_store.ts) — `timeDir` is null only for a pre-Phase-1-migration
- * row shape, which shouldn't occur in practice but the type allows it. */
-export function formatWhen(row: Pick<RunSummary, 'date' | 'timeDir'>): string {
-  return row.timeDir == null ? row.date : `${row.date} ${row.timeDir}`;
-}
-
 export type BadgeVariant =
   | 'default'
   | 'secondary'
