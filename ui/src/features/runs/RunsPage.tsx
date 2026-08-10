@@ -105,7 +105,15 @@ export function RunsPage({ profile }: { profile: string }) {
           Refresh
         </Button>
       </div>
-      {runningRow && <LiveRunHeader profile={profile} run={runningRow} />}
+      {runningRow && (
+        <LiveRunHeader
+          profile={profile}
+          run={runningRow}
+          pollError={isError}
+          lastUpdatedAt={runsQuery.dataUpdatedAt}
+          onRetry={() => runsQuery.refetch()}
+        />
+      )}
       <div className="grid flex-1 grid-cols-[minmax(280px,360px)_1fr] overflow-hidden">
         <section className="overflow-y-auto border-r">
           {noLocalDb ? (

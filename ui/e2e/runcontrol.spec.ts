@@ -235,11 +235,12 @@ test('run control: a stubbed running run with a stale heartbeat renders the stal
 
   await page.goto('/#/runs');
   await expect(page.getByTestId('live-run-heartbeat')).toBeVisible();
-  // The frozen HEARTBEAT_LABEL copy for 'stale' is "No heartbeat for over 10
-  // minutes" — it never contains the literal word "stale". Adjusted from the
-  // brief's /stale/i regex to the real rendered wording, preserving the
-  // assertion's intent (the stale-heartbeat state is shown) exactly.
+  // B22 rewrote the copy from the fixed "No heartbeat for over 10 minutes"
+  // to the exact-minutes ux-notes §9 wording — it never contains the
+  // literal word "stale". Adjusted from the brief's /stale/i regex to the
+  // real rendered wording, preserving the assertion's intent (the
+  // stale-heartbeat state is shown) exactly.
   await expect(page.getByTestId('live-run-heartbeat')).toContainText(
-    'No heartbeat for over 10 minutes',
+    /No heartbeat for \d+m/,
   );
 });
