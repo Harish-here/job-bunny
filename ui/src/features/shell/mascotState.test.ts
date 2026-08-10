@@ -25,8 +25,15 @@ function makeRun(
 function funnel(jobsOut: number): unknown {
   return {
     stages: [
-      { name: 'source', jobsIn: 10, jobsOut: 8, dropsByRule: {} },
-      { name: 'filter', jobsIn: 8, jobsOut, dropsByRule: {} },
+      {
+        name: 'source',
+        jobsIn: 10,
+        jobsOut: 8,
+        dropsByRule: {},
+        elapsedMs: 100,
+        attempts: 1,
+      },
+      { name: 'filter', jobsIn: 8, jobsOut, dropsByRule: {}, elapsedMs: 30, attempts: 1 },
     ],
   };
 }

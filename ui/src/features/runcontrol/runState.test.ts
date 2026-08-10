@@ -123,7 +123,16 @@ describe('pickRunControlState precedence', () => {
 
   it('a passed run within the window is done, with newCount from the funnel tail', () => {
     const result = {
-      stages: [{ name: 'filter', jobsIn: 10, jobsOut: 3, dropsByRule: {} }],
+      stages: [
+        {
+          name: 'filter',
+          jobsIn: 10,
+          jobsOut: 3,
+          dropsByRule: {},
+          elapsedMs: 100,
+          attempts: 1,
+        },
+      ],
     };
     const state = pickRunControlState(
       baseInput({

@@ -36,7 +36,16 @@ function detailFor(row: RunSummary): RunDetail {
   return {
     ...row,
     result: {
-      stages: [{ name: 'filter', jobsIn: 10, jobsOut: 7, dropsByRule: { title: 3 } }],
+      stages: [
+        {
+          name: 'filter',
+          jobsIn: 10,
+          jobsOut: 7,
+          dropsByRule: { title: 3 },
+          elapsedMs: 100,
+          attempts: 1,
+        },
+      ],
     },
     failure: row.status === 'failed' ? { stage: 'structure', error: 'boom' } : null,
     syncDryrun: null,
