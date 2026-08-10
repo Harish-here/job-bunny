@@ -55,6 +55,7 @@ Every function that produces relative output takes an explicit `now: Date`. No f
 | `formatInstantFull(iso: string)` | ISO datetime | `10 Aug 2026 2:36:12 PM` — absolute, with seconds, never relative |
 | `formatDate(ymd: string, now: Date)` | `YYYY-MM-DD` | `Today` / `Yesterday` / `Tomorrow` / `10 Aug 2026` |
 | `formatRelative(iso: string, now: Date)` | ISO datetime | `just now` / `2 hours ago` / `in 3 days` |
+| `formatInstantTitle(iso: string, now: Date)` | ISO datetime | `10 Aug 2026 2:36:12 PM · 2 hours ago` — the hover string, composed from the two above |
 
 `formatRelative` buckets: under 60s `just now`; under 60m `N minutes ago`; under 24h `N hours ago`; otherwise `N days ago`. Future instants use the `in N …` form. Singular and plural are both handled (`1 hour ago`, not `1 hours ago`).
 
@@ -69,7 +70,7 @@ The hint is computed by comparing local calendar days, not by a 24-hour delta. A
 Two requirements had to be reconciled: a relative hint inline for recent values, and an absolute value inline with relative on hover. The resolution:
 
 - **Inline** = `formatInstant` — a hint when the value is recent, the absolute format otherwise.
-- **Hover** = `formatInstantFull(iso) + ' · ' + formatRelative(iso, now)`, e.g. `10 Aug 2026 2:36:12 PM · 2 hours ago`.
+- **Hover** = `formatInstantTitle(iso, now)`, which composes `formatInstantFull(iso) + ' · ' + formatRelative(iso, now)` — e.g. `10 Aug 2026 2:36:12 PM · 2 hours ago`.
 
 Hover therefore always reveals what inline hides: the date behind `Today`, and the seconds behind an old absolute timestamp.
 
@@ -88,6 +89,8 @@ Hover uses the **native `title` attribute**. `ui/` has no tooltip component, no 
 | `ui/src/features/tracker/DueStrip.tsx:27` | raw `nextActionDate` | `formatDate(nextActionDate, now)` |
 | `ui/src/features/runs/RunDetailView.tsx:97` | `{event.ts}` (raw ISO) | `formatInstantFull(event.ts)` |
 | run list row (the caller of `formatWhen`) | `formatWhen(row)` → `2026-08-05 09-00` | `formatInstant(row.startedAt, now)` |
+
+`formatWhen` turned out to have two callers, not one: `ui/src/features/runs/RunsList.tsx` and the run-detail header in `ui/src/features/runs/RunDetailView.tsx`. Both use `formatInstant(startedAt, now)`.
 
 Job cards gain a time they never displayed. This is intended: the value carries a time, so the time is shown.
 
