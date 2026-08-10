@@ -93,6 +93,7 @@ function fakeRunStore(): {
     },
     appendEvents() {},
     heartbeat() {},
+    recordProgress() {},
     recordFailure() {},
     recordSyncDryrun() {},
     finishRun(runId, outcome, result, finishedAt) {

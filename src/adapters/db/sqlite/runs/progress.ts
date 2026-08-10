@@ -55,7 +55,20 @@ export function progressRowValues(
   ];
 }
 
-interface RawProgressRow {
+/** `runs` LEFT JOINed to its (at most one) `run_progress` row — the
+ * columns-plus-join fragment `store.ts`'s `listRuns`/`getRun` append to
+ * `SELECT runs.*, ` so `RunSummary.progress` is populated uniformly (null
+ * when no `run_progress` row matches). Lives here, not `store.ts`, for the
+ * same file-size-cap reason as the rest of this file (see header comment). */
+export const PROGRESS_JOIN =
+  'run_progress.stage, run_progress.stage_index, run_progress.stage_total, ' +
+  'run_progress.stage_started_at, run_progress.updated_at, run_progress.item_current, ' +
+  'run_progress.item_total FROM runs LEFT JOIN run_progress ON run_progress.run_id = runs.id';
+
+/** The raw `run_progress` columns as `store.ts`'s `RunRow` extends them
+ * (via a `LEFT JOIN`) — every field null when no `run_progress` row
+ * matches the joined `runs.id`. */
+export interface RawProgressRow {
   stage: string | null;
   stage_index: number | null;
   stage_total: number | null;

@@ -135,6 +135,9 @@ function toRunSummary(row: RawRunRow): RunSummary {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     heartbeatAt: row.heartbeat_at,
+    // The board reads `runs` read-only via its own RawRunRow (no
+    // run_progress join here) — progress display is a later task.
+    progress: null,
   };
 }
 

@@ -81,6 +81,7 @@ function fakeRunStore(): {
     heartbeat(_runId, at) {
       heartbeats.push(at);
     },
+    recordProgress() {},
     recordFailure(_runId, failure) {
       failures.push(failure);
     },

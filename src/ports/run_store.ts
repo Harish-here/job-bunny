@@ -73,7 +73,12 @@ export interface RunStoreWriter {
    * every other writer method on this port (file header). */
   recordProgress(
     runId: number,
-    progress: { stage: string; stageIndex: number; stageTotal: number; stageStartedAt: string },
+    progress: {
+      stage: string;
+      stageIndex: number;
+      stageTotal: number;
+      stageStartedAt: string;
+    },
   ): void;
   recordFailure(runId: number, failure: RunFailure): void;
   recordSyncDryrun(runId: number, report: unknown): void;

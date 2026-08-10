@@ -66,6 +66,7 @@ function fakeCtx(store: Map<string, unknown>): PipelineCtx {
       startRun: () => 1,
       appendEvents: () => {},
       heartbeat: () => {},
+      recordProgress: () => {},
       recordFailure: () => {},
       recordSyncDryrun: () => {},
       finishRun: () => {},

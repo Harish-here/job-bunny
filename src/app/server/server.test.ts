@@ -236,6 +236,7 @@ test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mount
             startedAt: '2026-08-05T09:00:00.000Z',
             finishedAt: '2026-08-05T09:05:00.000Z',
             heartbeatAt: '2026-08-05T09:04:00.000Z',
+            progress: null,
           },
         ],
         total: 1,

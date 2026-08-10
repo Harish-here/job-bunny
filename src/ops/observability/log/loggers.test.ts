@@ -32,6 +32,9 @@ function fakeStore(): RunStoreWriter & {
     heartbeat: () => {
       throw new Error('unexpected heartbeat call');
     },
+    recordProgress: () => {
+      throw new Error('unexpected recordProgress call');
+    },
     recordFailure: () => {
       throw new Error('unexpected recordFailure call');
     },

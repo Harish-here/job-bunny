@@ -65,9 +65,7 @@ test('progressRowValues leaves item_current/item_total NULL and fills updated_at
     }),
   );
 
-  const row = db
-    .prepare('SELECT * FROM run_progress WHERE run_id = ?')
-    .get(runId) as {
+  const row = db.prepare('SELECT * FROM run_progress WHERE run_id = ?').get(runId) as {
     updated_at: string;
     item_current: number | null;
     item_total: number | null;

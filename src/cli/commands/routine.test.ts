@@ -48,6 +48,7 @@ function fakeRunStore(): RunStore {
     },
     appendEvents() {},
     heartbeat() {},
+    recordProgress() {},
     recordFailure() {},
     recordSyncDryrun() {},
     finishRun() {},

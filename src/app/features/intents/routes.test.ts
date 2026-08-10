@@ -188,6 +188,7 @@ test('POST: a running run is a 409 carrying the run id', async () => {
       startedAt: '2026-08-07T09:00:00.000Z',
       finishedAt: null,
       heartbeatAt: '2026-08-07T09:00:00.000Z',
+      progress: null,
     },
   ]);
   const source = fakeSource({ store: runningStore });
@@ -218,6 +219,7 @@ test('POST: a crashed newest run does not block', async () => {
       startedAt: '2026-08-07T08:00:00.000Z',
       finishedAt: null,
       heartbeatAt: '2026-08-07T08:01:00.000Z',
+      progress: null,
     },
   ]);
   const source = fakeSource({ store: crashedStore });

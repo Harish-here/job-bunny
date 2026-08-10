@@ -72,6 +72,7 @@ const PASSED_SUMMARY: RunSummary = {
   startedAt: '2026-08-05T09:00:00.000Z',
   finishedAt: '2026-08-05T09:00:42.000Z',
   heartbeatAt: '2026-08-05T09:00:40.000Z',
+  progress: null,
 };
 
 const FAILED_SUMMARY: RunSummary = {
@@ -84,6 +85,7 @@ const FAILED_SUMMARY: RunSummary = {
   startedAt: '2026-08-05T10:00:00.000Z',
   finishedAt: '2026-08-05T10:01:30.000Z',
   heartbeatAt: '2026-08-05T10:01:00.000Z',
+  progress: null,
 };
 
 const RUNNING_SUMMARY: RunSummary = {
@@ -96,6 +98,7 @@ const RUNNING_SUMMARY: RunSummary = {
   startedAt: '2026-08-05T11:00:00.000Z',
   finishedAt: null,
   heartbeatAt: '2026-08-05T11:00:05.000Z',
+  progress: null,
 };
 
 const FAILED_RESULT = {
