@@ -1,5 +1,7 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { WifiOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { formatRelative } from '../../../../src/core/datetime/index.ts';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
@@ -15,6 +17,37 @@ const LIVE_POLL_MS = 2500;
 
 function isNoLocalDb(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'no_local_db';
+}
+
+/** Header freshness chip (R11, B23): reads `dataUpdatedAt`/`isError` off the
+ * runs-list query the page already polls — no dedicated poll of its own.
+ * Mirrors ux-notes §9's "Stalled ≠ disconnected" split at the strip level:
+ * an `isError` poll is "we cannot tell" and gets its own wording, never
+ * folded into the same "Updated Ns ago" sentence a healthy poll renders. */
+function FreshnessChip({
+  dataUpdatedAt,
+  isError,
+}: {
+  dataUpdatedAt: number;
+  isError: boolean;
+}) {
+  if (isError) {
+    return (
+      <span
+        data-testid="freshness-chip"
+        className="flex items-center gap-1 text-xs text-amber"
+      >
+        <WifiOff aria-hidden className="size-3.5 shrink-0" />
+        Disconnected
+      </span>
+    );
+  }
+  if (dataUpdatedAt === 0) return null;
+  return (
+    <span data-testid="freshness-chip" className="text-xs text-muted-foreground">
+      Updated {formatRelative(new Date(dataUpdatedAt).toISOString(), new Date())}
+    </span>
+  );
 }
 
 /** Shared list-pane/detail-pane error state — same shape TriagePage uses. */
@@ -96,14 +129,17 @@ export function RunsPage({ profile }: { profile: string }) {
     <div className="flex h-screen flex-col">
       <div className="flex items-center justify-between border-b p-3">
         <h1 className="text-lg font-semibold font-heading">Runs</h1>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => runsQuery.refetch()}
-        >
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          <FreshnessChip dataUpdatedAt={runsQuery.dataUpdatedAt} isError={isError} />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => runsQuery.refetch()}
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
       {runningRow && (
         <LiveRunHeader

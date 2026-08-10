@@ -190,6 +190,30 @@ describe('RunsPage', () => {
     expect(screen.getByText('stage started')).toBeInTheDocument();
   });
 
+  it('renders a freshness chip derived from the runs-list query dataUpdatedAt (B23)', async () => {
+    stubFetch();
+    renderPage();
+
+    // dataUpdatedAt lands within the same test tick as the resolved fetch,
+    // so formatRelative's own <60s bucket ("just now") is what a fresh
+    // successful poll always renders — no fake timers needed.
+    await waitFor(() => {
+      expect(screen.getByTestId('freshness-chip')).toHaveTextContent(/updated just now/i);
+    });
+  });
+
+  it('shows a disconnected freshness chip on a server failure (B23, R11)', async () => {
+    stubFetch({ serverError: true });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('freshness-chip')).toHaveTextContent(/disconnected/i);
+    });
+    // Stalled ≠ disconnected (ux-notes §9, R11) — the chip's wording must
+    // not read as a generic freshness update once the poll itself fails.
+    expect(screen.getByTestId('freshness-chip')).not.toHaveTextContent(/updated/i);
+  });
+
   it('clicking a row selects it and shows its failed-stage banner', async () => {
     stubFetch();
     renderPage();
