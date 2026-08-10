@@ -399,6 +399,8 @@ test('a recordProgress throw does not fail or stall the run', async () => {
     throwOnRecordProgress: true,
   });
   const { ctx } = fakeCtx(undefined, { runStore: store, runId: 5 });
+  const warnCalls: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+  ctx.logger = { ...ctx.logger, warn: (msg, data) => warnCalls.push({ msg, data }) };
 
   let stage2Called = false;
 
@@ -433,6 +435,11 @@ test('a recordProgress throw does not fail or stall the run', async () => {
     2,
     'expected recordProgress to be called once per stage, proving the throwing stub was actually exercised',
   );
+  // The catch must not silently discard the fault — it stays observable via
+  // ctx.logger.warn (one per throw), so a real violation of the adapter's
+  // documented fail-soft contract would still surface a diagnostic.
+  assert.equal(warnCalls.length, 2, 'expected one warn per recordProgress throw');
+  assert.ok(warnCalls.every((call) => call.msg === 'recordProgress threw'));
 });
 
 test('resume: seeded from an earlier group, fast-forwards past its latest checkpoint, reuses its payload, and writes into its OWN group', async () => {
