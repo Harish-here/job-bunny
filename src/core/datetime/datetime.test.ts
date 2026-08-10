@@ -117,13 +117,26 @@ test('formatDate: invalid inputs return em dash', () => {
   assert.equal(formatDate('2026-02-31', NOW), '—'); // Feb has 28/29 days; must not roll over to Mar 3
 });
 
-test('formatDate: the UTC-midnight parsing trap — a manual local parse, not new Date(ymd)', () => {
+test('formatDate: the UTC-midnight parsing trap — a manual local parse, not new Date(ymd)', (t) => {
   // In a negative-offset host timezone, `new Date('2026-08-10')` (parsed as
   // UTC midnight) reads back as Aug 9 local — one day early. formatDate
   // must not exhibit this, regardless of host offset.
   const original = process.env.TZ;
   try {
+    // Capability probe: check if TZ reassignment works on this platform.
+    // LA standard time offset is -480 min; daylight time is -420 min.
+    const probe = new Date(2026, 6, 1); // July 1 — daylight time in LA
+    const beforeOffset = probe.getTimezoneOffset();
     process.env.TZ = 'America/Los_Angeles';
+    const probeAfter = new Date(2026, 6, 1);
+    const afterOffset = probeAfter.getTimezoneOffset();
+
+    // Skip if TZ reassignment had no effect AND the host was not already in LA.
+    if (afterOffset === beforeOffset && beforeOffset !== -420 && beforeOffset !== -480) {
+      t.skip('runtime TZ reassignment unsupported on this platform');
+      return;
+    }
+
     // Sanity check the trap actually exists for the naive approach in this
     // TZ, so this test can't pass vacuously.
     assert.notEqual(new Date('2026-08-10').getDate(), 10);

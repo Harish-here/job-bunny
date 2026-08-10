@@ -56,7 +56,10 @@ export function KanbanCard({
   // dateApplied (date-only, user-tracked) wins when present; the fallback
   // is dateFound, a real instant — only the fallback gets an hour/minute
   // and a hover title.
-  const dateLabel = row.tracking?.dateApplied ?? formatInstant(row.dateFound, now);
+  const dateLabel =
+    row.tracking?.dateApplied != null
+      ? formatDate(row.tracking.dateApplied, now)
+      : formatInstant(row.dateFound, now);
   const dateTitle =
     row.tracking?.dateApplied != null
       ? undefined
