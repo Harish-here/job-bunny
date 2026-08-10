@@ -8,7 +8,7 @@ import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
 import { RunsList } from './RunsList';
 import { runsKeys } from './runs.queries';
-import { useRun, useRunEvents, useRuns } from './useRunsData';
+import { useRun, useRunEvents, useRuns, useSoftErrors } from './useRunsData';
 
 const SKELETON_ROW_KEYS = ['s1', 's2', 's3'];
 const LIVE_POLL_MS = 2500;
@@ -63,6 +63,7 @@ export function RunsPage({ profile }: { profile: string }) {
 
   const detailQuery = useRun(profile, selectedId ?? -1);
   const eventsQuery = useRunEvents(profile, selectedId ?? -1);
+  const softErrorsQuery = useSoftErrors(profile, selectedId ?? -1);
 
   const noLocalDb = isNoLocalDb(runsQuery.error);
   const isError = runsQuery.isError && !noLocalDb;
@@ -126,7 +127,11 @@ export function RunsPage({ profile }: { profile: string }) {
               }}
             />
           ) : detail ? (
-            <RunDetailView run={detail} events={events} />
+            <RunDetailView
+              run={detail}
+              events={events}
+              softErrors={softErrorsQuery.data}
+            />
           ) : (
             <div className="text-muted-foreground">
               {rows.length === 0 ? 'No run selected.' : 'Select a run to see details.'}

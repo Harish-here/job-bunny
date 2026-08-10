@@ -71,6 +71,13 @@ function stubFetch(
           json: async () => ({ rows: EVENTS, total: 2 }),
         } as unknown as Response;
       }
+      const softErrorsMatch = url.match(/\/runs\/(\d+)\/soft-errors/);
+      if (softErrorsMatch) {
+        return {
+          ok: true,
+          json: async () => ({ total: 0, groups: [] }),
+        } as unknown as Response;
+      }
       const detailMatch = url.match(/\/runs\/(\d+)$/);
       if (detailMatch?.[1]) {
         const rows = opts.rows ?? ROWS;
@@ -136,6 +143,11 @@ describe('RunsPage', () => {
     });
     expect(screen.getByText('10 → 7')).toBeInTheDocument();
     expect(screen.getByText('title: 3')).toBeInTheDocument();
+
+    // Events live behind EvidenceSection's disclosure, closed by default (B19).
+    await userEvent.click(
+      screen.getByTestId('evidence-disclosure-trigger') as HTMLElement,
+    );
     expect(screen.getByText('stage started')).toBeInTheDocument();
   });
 
