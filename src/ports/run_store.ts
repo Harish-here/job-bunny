@@ -23,6 +23,21 @@ export interface RunSummary {
   startedAt: string; // ISO 8601 UTC
   finishedAt: string | null;
   heartbeatAt: string | null;
+  progress: RunProgress | null;
+}
+
+/** Per-run, per-stage progress (persist-to-db R3). One row per run, upserted
+ * on every stage transition. `itemCurrent`/`itemTotal` are nullable from day
+ * one — future within-stage counters fill these in with no further schema
+ * change (spec AC5). */
+export interface RunProgress {
+  stage: string;
+  stageIndex: number;
+  stageTotal: number;
+  stageStartedAt: string; // ISO 8601 UTC
+  updatedAt: string; // ISO 8601 UTC — last write, also a per-stage heartbeat
+  itemCurrent: number | null;
+  itemTotal: number | null;
 }
 
 export interface RunDetail extends RunSummary {
@@ -54,6 +69,12 @@ export interface RunStoreWriter {
   /** Batched insert, one transaction. Also bumps heartbeat_at. */
   appendEvents(runId: number, events: RunEventRow[]): void;
   heartbeat(runId: number, at: string): void;
+  /** Upserts the run's current stage progress. Same fail-soft contract as
+   * every other writer method on this port (file header). */
+  recordProgress(
+    runId: number,
+    progress: { stage: string; stageIndex: number; stageTotal: number; stageStartedAt: string },
+  ): void;
   recordFailure(runId: number, failure: RunFailure): void;
   recordSyncDryrun(runId: number, report: unknown): void;
   finishRun(
