@@ -90,6 +90,7 @@ describe('DangerZone', () => {
           startedAt: '2026-08-08T09:00:00Z',
           finishedAt: null,
           heartbeatAt: '2026-08-08T09:01:00Z',
+          progress: null,
         },
       ],
       total: 1,

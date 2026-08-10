@@ -15,6 +15,7 @@ function makeRun(over: Partial<RunSummary> = {}): RunSummary {
     startedAt: '2026-08-08T10:00:00.000Z',
     finishedAt: null,
     heartbeatAt: '2026-08-08T10:00:00.000Z',
+    progress: null,
     ...over,
   };
 }

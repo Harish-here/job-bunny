@@ -17,6 +17,7 @@ function makeRun(
     startedAt: '2026-08-07T09:55:00.000Z',
     finishedAt: FRESH_FINISHED,
     heartbeatAt: null,
+    progress: null,
     ...over,
   };
 }

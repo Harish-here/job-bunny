@@ -41,6 +41,7 @@ function runRow(over: Partial<RunSummary> = {}): RunSummary {
     startedAt: '2026-08-08T09:00:00.000Z',
     finishedAt: null,
     heartbeatAt: null,
+    progress: null,
     ...over,
   };
 }

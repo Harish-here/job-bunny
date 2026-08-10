@@ -16,6 +16,7 @@ const ROWS: RunSummary[] = [
     startedAt: '2026-08-05T09:00:00.000Z',
     finishedAt: '2026-08-05T09:05:00.000Z',
     heartbeatAt: '2026-08-05T09:05:00.000Z',
+    progress: null,
   },
   {
     id: 1,
@@ -27,6 +28,7 @@ const ROWS: RunSummary[] = [
     startedAt: '2026-08-04T09:00:00.000Z',
     finishedAt: '2026-08-04T09:01:00.000Z',
     heartbeatAt: '2026-08-04T09:01:00.000Z',
+    progress: null,
   },
 ];
 
@@ -184,6 +186,7 @@ describe('RunsPage', () => {
         startedAt: '2026-08-06T09:00:00.000Z',
         finishedAt: null,
         heartbeatAt: '2026-08-06T09:00:05.000Z',
+        progress: null,
       },
       ...ROWS,
     ];

@@ -24,9 +24,12 @@ export type {
 } from '../../../../src/app/features/profiles/index.ts';
 export type {
   GetRunResponse,
+  GetSoftErrorsResponse,
   ListRunEventsResponse,
   ListRunsResponse,
   RunDetail,
   RunEventRow,
   RunSummary,
+  SoftErrorGroup,
+  SoftErrorSummary,
 } from '../../../../src/app/features/runs/index.ts';
