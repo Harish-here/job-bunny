@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import type { RunSummary } from '../../lib/api/types';
-import type { RunIntentView } from '../wizard/wizard.types';
-import { DONE_WINDOW_MS, pickRunControlState, runControlLabel } from './runState';
+import type { DaemonStatus, RunIntentView } from '../wizard/wizard.types';
+import {
+  DONE_WINDOW_MS,
+  pickLastRunStatus,
+  pickRunControlState,
+  runControlLabel,
+} from './runState';
+
+function makeDaemon(
+  over: Partial<DaemonStatus> & Pick<DaemonStatus, 'state'>,
+): DaemonStatus {
+  return {
+    pid: null,
+    startedAt: null,
+    lastTickAt: null,
+    inFlight: null,
+    profiles: [],
+    ...over,
+  };
+}
 
 const NOW = Date.parse('2026-08-08T10:00:00.000Z');
 const WITHIN = new Date(NOW - 5 * 60 * 1000).toISOString(); // 5 min ago
@@ -111,6 +129,63 @@ describe('pickRunControlState precedence', () => {
     expect(state).toEqual({ kind: 'queued', intentId: 2 });
   });
 
+  it('a pending intent with a confirmed non-running daemon classifies as daemon-down within one call, no 10-minute wait', () => {
+    const state = pickRunControlState(
+      baseInput({
+        intents: [makeIntent({ id: 5, status: 'pending' })],
+        daemon: makeDaemon({ state: 'stopped' }),
+      }),
+    );
+    expect(state).toEqual({ kind: 'daemon-down', intentId: 5 });
+  });
+
+  it('a pending intent with a stale daemon also classifies as daemon-down (state !== running)', () => {
+    const state = pickRunControlState(
+      baseInput({
+        intents: [makeIntent({ id: 5, status: 'pending' })],
+        daemon: makeDaemon({ state: 'stale' }),
+      }),
+    );
+    expect(state).toEqual({ kind: 'daemon-down', intentId: 5 });
+  });
+
+  it('a pending intent whose daemon probe errored/timed out (daemon: null) classifies as daemon-unknown, never daemon-down', () => {
+    const state = pickRunControlState(
+      baseInput({
+        intents: [makeIntent({ id: 5, status: 'pending' })],
+        daemon: null,
+      }),
+    );
+    expect(state).toEqual({ kind: 'daemon-unknown', intentId: 5 });
+  });
+
+  it('a pending intent with a running daemon stays queued', () => {
+    const state = pickRunControlState(
+      baseInput({
+        intents: [makeIntent({ id: 5, status: 'pending' })],
+        daemon: makeDaemon({ state: 'running' }),
+      }),
+    );
+    expect(state).toEqual({ kind: 'queued', intentId: 5 });
+  });
+
+  it('a pending intent with no daemon param wired at all stays queued (unchanged for callers not yet feeding it, e.g. B25)', () => {
+    const state = pickRunControlState(
+      baseInput({ intents: [makeIntent({ id: 5, status: 'pending' })] }),
+    );
+    expect(state).toEqual({ kind: 'queued', intentId: 5 });
+  });
+
+  it('the 10-minute expired-intent fallback still exists, unaffected by the daemon check (defense-in-depth)', () => {
+    const state = pickRunControlState(
+      baseInput({
+        intents: [makeIntent({ id: 4, status: 'expired' })],
+        daemon: null,
+      }),
+    );
+    expect(state).toEqual({ kind: 'expired', intentId: 4 });
+  });
+
   it('expired beats a fresh passed run', () => {
     const state = pickRunControlState(
       baseInput({
@@ -201,6 +276,48 @@ describe('pickRunControlState precedence', () => {
   });
 });
 
+describe('pickLastRunStatus (C15 — decoupled from DONE_WINDOW_MS)', () => {
+  it('a failed run finished long past DONE_WINDOW_MS still reports failed, not null', () => {
+    const status = pickLastRunStatus({
+      runs: [makeRun({ id: 1, status: 'failed', finishedAt: OUTSIDE })],
+      newestResult: undefined,
+    });
+    expect(status).toEqual({ kind: 'failed', runId: 1 });
+  });
+
+  it('a passed run finished long past DONE_WINDOW_MS still reports done with newCount, not null', () => {
+    const result = {
+      stages: [
+        {
+          name: 'filter',
+          jobsIn: 10,
+          jobsOut: 4,
+          dropsByRule: {},
+          elapsedMs: 100,
+          attempts: 1,
+        },
+      ],
+    };
+    const status = pickLastRunStatus({
+      runs: [makeRun({ id: 1, status: 'passed', finishedAt: OUTSIDE })],
+      newestResult: result,
+    });
+    expect(status).toEqual({ kind: 'done', runId: 1, newCount: 4 });
+  });
+
+  it('a still-running (finishedAt null) newest run reports null, not a stale outcome', () => {
+    const status = pickLastRunStatus({
+      runs: [makeRun({ id: 1, status: 'passed', finishedAt: null })],
+      newestResult: undefined,
+    });
+    expect(status).toBeNull();
+  });
+
+  it('no runs reports null', () => {
+    expect(pickLastRunStatus({ runs: [], newestResult: undefined })).toBeNull();
+  });
+});
+
 describe('runControlLabel', () => {
   it('idle -> "Run now"', () => {
     expect(runControlLabel({ kind: 'idle' })).toBe('Run now');
@@ -215,6 +332,18 @@ describe('runControlLabel', () => {
   it('expired -> "Daemon isn\'t running"', () => {
     expect(runControlLabel({ kind: 'expired', intentId: 1 })).toBe(
       "Daemon isn't running",
+    );
+  });
+
+  it('daemon-down -> "Daemon isn\'t running"', () => {
+    expect(runControlLabel({ kind: 'daemon-down', intentId: 1 })).toBe(
+      "Daemon isn't running",
+    );
+  });
+
+  it('daemon-unknown -> "Can\'t reach the daemon — queued anyway"', () => {
+    expect(runControlLabel({ kind: 'daemon-unknown', intentId: 1 })).toBe(
+      "Can't reach the daemon — queued anyway",
     );
   });
 
