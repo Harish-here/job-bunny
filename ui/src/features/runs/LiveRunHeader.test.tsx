@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RunEventRow, RunSummary } from '../../lib/api/types';
+import { describe, expect, it } from 'vitest';
+import type { RunProgress, RunSummary } from '../../lib/api/types';
 import { LiveRunHeader } from './LiveRunHeader';
 
 function makeRun(over: Partial<RunSummary> = {}): RunSummary {
@@ -20,16 +20,17 @@ function makeRun(over: Partial<RunSummary> = {}): RunSummary {
   };
 }
 
-function stubEvents(rows: RunEventRow[]) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ rows, total: rows.length }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    ),
-  );
+function makeProgress(over: Partial<RunProgress> = {}): RunProgress {
+  return {
+    stage: 'filter',
+    stageIndex: 7,
+    stageTotal: 10,
+    stageStartedAt: '2026-08-08T10:00:00.000Z',
+    updatedAt: '2026-08-08T10:00:00.000Z',
+    itemCurrent: null,
+    itemTotal: null,
+    ...over,
+  };
 }
 
 function renderHeader(run: RunSummary) {
@@ -41,14 +42,9 @@ function renderHeader(run: RunSummary) {
   );
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe('LiveRunHeader', () => {
-  it('renders the stage text and progress when events resolve a stage', async () => {
-    stubEvents([{ ts: 't', level: 'info', msg: 'filter: starting' }]);
-    renderHeader(makeRun());
+  it('renders the stage text and progress from run.progress', async () => {
+    renderHeader(makeRun({ progress: makeProgress() }));
 
     await waitFor(() => {
       expect(screen.getByTestId('live-run-stage')).toHaveTextContent(
@@ -57,9 +53,8 @@ describe('LiveRunHeader', () => {
     });
   });
 
-  it('renders "Running — starting…" when no stage has logged yet', async () => {
-    stubEvents([]);
-    renderHeader(makeRun());
+  it('renders "Running — starting…" when run.progress is null', async () => {
+    renderHeader(makeRun({ progress: null }));
 
     await waitFor(() => {
       expect(screen.getByTestId('live-run-stage')).toHaveTextContent(
@@ -69,7 +64,6 @@ describe('LiveRunHeader', () => {
   });
 
   it('renders Alive for a fresh heartbeat', async () => {
-    stubEvents([]);
     renderHeader(makeRun({ heartbeatAt: new Date().toISOString() }));
 
     await waitFor(() => {
@@ -78,7 +72,6 @@ describe('LiveRunHeader', () => {
   });
 
   it('renders the stale heartbeat message for a heartbeat over 10 minutes old', async () => {
-    stubEvents([]);
     const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
     renderHeader(makeRun({ heartbeatAt: old }));
 
@@ -90,7 +83,6 @@ describe('LiveRunHeader', () => {
   });
 
   it('renders the no-heartbeat-yet message when heartbeatAt is null', async () => {
-    stubEvents([]);
     renderHeader(makeRun({ heartbeatAt: null }));
 
     await waitFor(() => {

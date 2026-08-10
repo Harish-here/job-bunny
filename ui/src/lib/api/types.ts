@@ -29,6 +29,7 @@ export type {
   ListRunsResponse,
   RunDetail,
   RunEventRow,
+  RunProgress,
   RunSummary,
   SoftErrorGroup,
   SoftErrorSummary,

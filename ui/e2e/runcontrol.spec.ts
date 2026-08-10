@@ -30,6 +30,16 @@ interface IntentRow {
   claimedRunId: number | null;
 }
 
+interface RunProgress {
+  stage: string;
+  stageIndex: number;
+  stageTotal: number;
+  stageStartedAt: string;
+  updatedAt: string;
+  itemCurrent: number | null;
+  itemTotal: number | null;
+}
+
 interface RunRow {
   id: number;
   date: string;
@@ -40,6 +50,7 @@ interface RunRow {
   startedAt: string;
   finishedAt: string | null;
   heartbeatAt: string | null;
+  progress: RunProgress | null;
 }
 
 async function stubIntents(page: Page, rows: IntentRow[]): Promise<void> {
@@ -49,9 +60,14 @@ async function stubIntents(page: Page, rows: IntentRow[]): Promise<void> {
   });
 }
 
-async function stubRuns(page: Page, rows: RunRow[]): Promise<void> {
+async function stubRuns(
+  page: Page,
+  rows: RunRow[],
+  counter?: { count: number },
+): Promise<void> {
   await page.route('**/api/profiles/rajni/runs*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
+    if (counter) counter.count += 1;
     await route.fulfill({ json: { rows, total: rows.length, limit: 100, offset: 0 } });
   });
 }
@@ -156,6 +172,7 @@ test('run control: a stubbed running run with stage progress renders the live he
   page,
 }) => {
   const runId = 9001;
+  const now = new Date().toISOString();
   const running: RunRow = {
     id: runId,
     date: '2026-08-08',
@@ -163,14 +180,26 @@ test('run control: a stubbed running run with stage progress renders the live he
     kind: 'run',
     resumedFrom: null,
     status: 'running',
-    startedAt: new Date().toISOString(),
+    startedAt: now,
     finishedAt: null,
-    heartbeatAt: new Date().toISOString(),
+    heartbeatAt: now,
+    progress: {
+      stage: 'filter',
+      stageIndex: 7,
+      stageTotal: 10,
+      stageStartedAt: now,
+      updatedAt: now,
+      itemCurrent: null,
+      itemTotal: null,
+    },
   };
+  // Progress now lives on the polled `runs` list row itself (R3), not on a
+  // separately-polled events fetch — so the "genuinely live" proof below
+  // counts `runs`-list GETs, not events GETs.
   const counter = { count: 0 };
   await stubIntents(page, []);
-  await stubRuns(page, [running]);
-  await stubEvents(page, runId, ['structure: done', 'filter: starting'], counter);
+  await stubRuns(page, [running], counter);
+  await stubEvents(page, runId, ['structure: done', 'filter: starting']);
   await stubRunDetail(page, running);
 
   await page.goto('/#/runs');
@@ -197,6 +226,7 @@ test('run control: a stubbed running run with a stale heartbeat renders the stal
     startedAt: staleAt,
     finishedAt: null,
     heartbeatAt: staleAt,
+    progress: null,
   };
   await stubIntents(page, []);
   await stubRuns(page, [running]);

@@ -6,8 +6,8 @@ import {
 } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { RunSummary } from '../../lib/api/types';
-import { parseStageProgress } from '../runs/runProgress';
-import { runEventsQuery, runQuery, runsKeys, runsQuery } from '../runs/runs.queries';
+import { stageProgressFrom } from '../runs/runProgress';
+import { runQuery, runsKeys, runsQuery } from '../runs/runs.queries';
 import type { RunIntentView } from '../wizard/wizard.types';
 import { cancelRunIntent, requestRunIntent } from './intents.api';
 import { runControlKeys, runIntentsQuery } from './runcontrol.queries';
@@ -64,7 +64,7 @@ export function useRunControl(profile: string): RunControlHandle {
   const runs = runsResult.data?.rows ?? [];
   const intents = intentsResult.data?.rows ?? [];
   const newestId = runs.reduce((max, r) => Math.max(max, r.id), -1);
-  const runningId = runs.find((r) => r.status === 'running')?.id ?? -1;
+  const runningRun = runs.find((r) => r.status === 'running') ?? null;
 
   // A 409 sets `conflictRunId` sticky — `pickRunControlState` itself
   // already prefers a genuinely 'running' run over the conflict state
@@ -90,12 +90,15 @@ export function useRunControl(profile: string): RunControlHandle {
     ...runQuery(profile, newestId),
     refetchInterval: () => pollFlag(qc, profile),
   });
-  const eventsResult = useQuery({
-    ...runEventsQuery(profile, runningId),
-    refetchInterval: () => pollFlag(qc, profile),
-  });
 
-  const progress = parseStageProgress(eventsResult.data?.rows ?? []);
+  const rawProgress = runningRun ? stageProgressFrom(runningRun) : null;
+  const progress = rawProgress
+    ? {
+        stage: rawProgress.stage,
+        index: rawProgress.stageIndex,
+        total: rawProgress.stageTotal,
+      }
+    : null;
 
   const state = pickRunControlState({
     runs,

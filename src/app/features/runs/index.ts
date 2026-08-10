@@ -1,4 +1,9 @@
-export type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
+export type {
+  RunDetail,
+  RunEventRow,
+  RunProgress,
+  RunSummary,
+} from '../../../ports/run_store.ts';
 export type {
   GetRunResponse, // RunDetail
   GetSoftErrorsResponse, // SoftErrorSummary

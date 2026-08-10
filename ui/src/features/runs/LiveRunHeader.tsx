@@ -1,9 +1,6 @@
 import { Progress } from '../../components/ui/progress';
 import type { RunSummary } from '../../lib/api/types';
-import { heartbeatFreshness, parseStageProgress } from './runProgress';
-import { useRunEvents } from './useRunsData';
-
-const EVENTS_POLL_MS = 2500;
+import { heartbeatFreshness, stageProgressFrom } from './runProgress';
 
 const HEARTBEAT_LABEL: Record<'fresh' | 'stale' | 'unknown', string> = {
   fresh: 'Alive',
@@ -11,9 +8,10 @@ const HEARTBEAT_LABEL: Record<'fresh' | 'stale' | 'unknown', string> = {
   unknown: 'No heartbeat yet',
 };
 
-/** Elapsed time from `startedAt` to `now` — no `setInterval`: this
- * component's own 2.5s events poll (below) re-renders it on that cadence,
- * which is what keeps this honest without a second timer. */
+/** Elapsed time from `startedAt` to `now` — no `setInterval`: the parent
+ * `RunsPage`'s own runs-list poll (LIVE_POLL_MS, active while a run is
+ * running) re-renders this component on that cadence, which is what keeps
+ * this honest without a second timer here. */
 function formatElapsed(startedAt: string, now: number): string {
   const startedMs = Date.parse(startedAt);
   if (Number.isNaN(startedMs)) return '—';
@@ -23,16 +21,13 @@ function formatElapsed(startedAt: string, now: number): string {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
-/** Live header for the currently-running run (spec §3.6, §2.5). Polls its
- * own events at EVENTS_POLL_MS — deliberately independent of the detail
- * pane's SELECTED run, which is very often a different run than the one
- * currently in flight. */
-export function LiveRunHeader({ profile, run }: { profile: string; run: RunSummary }) {
-  const eventsQuery = useRunEvents(profile, run.id, EVENTS_POLL_MS);
-  const events = eventsQuery.data?.rows ?? [];
-  const progress = parseStageProgress(events);
+/** Live header for the currently-running run (spec §3.6, §2.5). Reads
+ * progress straight off the passed-in `run` (R3's precomputed
+ * `run.progress`) — no more events polling to re-derive it. */
+export function LiveRunHeader({ run }: { profile: string; run: RunSummary }) {
+  const progress = stageProgressFrom(run);
   const now = Date.now();
-  const percent = progress ? (progress.index / progress.total) * 100 : 0;
+  const percent = progress ? (progress.stageIndex / progress.stageTotal) * 100 : 0;
   const heartbeat = heartbeatFreshness(run, now);
 
   return (
@@ -43,7 +38,7 @@ export function LiveRunHeader({ profile, run }: { profile: string; run: RunSumma
       <div className="flex items-center justify-between gap-2">
         <span data-testid="live-run-stage" className="text-sm font-medium">
           {progress
-            ? `Running — ${progress.stage} ${progress.index}/${progress.total}`
+            ? `Running — ${progress.stage} ${progress.stageIndex}/${progress.stageTotal}`
             : 'Running — starting…'}
         </span>
         <span className="text-xs text-muted-foreground">
