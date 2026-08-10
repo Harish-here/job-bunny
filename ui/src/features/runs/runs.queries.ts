@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { getRun, listRunEvents, listRuns } from './runs.api';
+import { getSoftErrors } from './softErrors.api';
 
 const EVENTS_LIMIT = 500;
 
@@ -20,6 +21,17 @@ export const runQuery = (p: string, id: number) =>
   queryOptions({
     queryKey: runsKeys.detail(p, id),
     queryFn: () => getRun(p, id),
+    enabled: id > 0,
+  });
+
+export const softErrorsKeys = {
+  detail: (p: string, id: number) => [p, 'runs', id, 'soft-errors'] as const,
+};
+
+export const softErrorsQuery = (p: string, id: number) =>
+  queryOptions({
+    queryKey: softErrorsKeys.detail(p, id),
+    queryFn: () => getSoftErrors(p, id),
     enabled: id > 0,
   });
 
