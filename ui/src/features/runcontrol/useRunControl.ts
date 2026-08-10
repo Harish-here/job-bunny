@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import type { RunSummary } from '../../lib/api/types';
 import { stageProgressFrom } from '../runs/runProgress';
 import { runQuery, runsKeys, runsQuery } from '../runs/runs.queries';
+import { daemonQuery } from '../wizard/wizard.queries';
 import type { RunIntentView } from '../wizard/wizard.types';
 import { cancelRunIntent, requestRunIntent } from './intents.api';
 import { runControlKeys, runIntentsQuery } from './runcontrol.queries';
@@ -91,6 +92,16 @@ export function useRunControl(profile: string): RunControlHandle {
     refetchInterval: () => pollFlag(qc, profile),
   });
 
+  // No refetchInterval override here — daemonQuery()'s own comment says it
+  // refetches normally, and joining the shared poll or adding its own
+  // cadence is explicitly deferred to a later phase 4 slice.
+  const daemonResult = useQuery({ ...daemonQuery() });
+  // Loading or errored (a timeout included) both leave `data` undefined —
+  // collapsing both to `null` here is what makes pickRunControlState read
+  // 'daemon-unknown' rather than 'daemon-down' per C16: a probe that hasn't
+  // resolved yet must never be mistaken for a resolved "daemon is down".
+  const daemon = daemonResult.data ?? null;
+
   const rawProgress = runningRun ? stageProgressFrom(runningRun) : null;
   const progress = rawProgress
     ? {
@@ -107,6 +118,7 @@ export function useRunControl(profile: string): RunControlHandle {
     progress,
     conflictRunId,
     now: Date.now(),
+    daemon,
   });
 
   const runMutation = useMutation({

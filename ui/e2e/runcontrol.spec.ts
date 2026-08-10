@@ -101,6 +101,27 @@ async function stubRunDetail(page: Page, row: RunRow): Promise<void> {
   });
 }
 
+// useRunControl now consumes the real GET /api/daemon (B25) — a stubbed
+// pending intent is only genuinely 'queued' when the daemon itself reads
+// 'running'; against the real e2e server (no daemon process alive) it would
+// otherwise read 'daemon-down', which is a different state than this test
+// means to cover.
+async function stubDaemonRunning(page: Page): Promise<void> {
+  await page.route('**/api/daemon*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({
+      json: {
+        state: 'running',
+        pid: 123,
+        startedAt: new Date().toISOString(),
+        lastTickAt: new Date().toISOString(),
+        inFlight: null,
+        profiles: [],
+      },
+    });
+  });
+}
+
 test('run control: double-clicking Run now against the real server dedupes to one pending intent', async ({
   page,
 }) => {
@@ -136,6 +157,7 @@ test('run control: double-clicking Run now against the real server dedupes to on
 test('run control: a stubbed pending intent shows Queued (waiting for daemon) with a Cancel affordance', async ({
   page,
 }) => {
+  await stubDaemonRunning(page);
   await stubRuns(page, []);
   await stubIntents(page, [
     {
