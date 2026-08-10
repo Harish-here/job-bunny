@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { LATEST_SCHEMA_VERSION, openJobsDb } from './migrations.ts';
+
+// The committed profiles/rajni/ fixture PROFILE is tracked, but its sqlite
+// DB file is not (profiles/*/data/* is gitignored — see .gitignore) — it
+// only exists locally on a machine that has previously run a stage/verify
+// against profiles/rajni. That makes the real-fixture test below
+// opportunistic: it runs (and gives real production-shaped-schema evidence)
+// wherever the file happens to be present, and skips cleanly everywhere else
+// (a fresh checkout, CI), rather than depending on undeclared local state.
+const RAJNI_FIXTURE_DB = path.join(
+  import.meta.dirname,
+  '../../../../../profiles/rajni/data/jobbunny.db',
+);
 
 function tmpDbPath(): string {
   return path.join(
@@ -724,4 +743,49 @@ test('a v6-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
   ).map((t) => t.name);
   assert.ok(tables.includes('run_progress'));
   upgraded.close();
+});
+
+test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> v7 without data loss', {
+  skip: existsSync(RAJNI_FIXTURE_DB)
+    ? false
+    : 'no local profiles/rajni/data/jobbunny.db present (gitignored — not present on a fresh checkout/CI)',
+}, () => {
+  // Verifies the migration against the real, production-shaped rajni
+  // fixture DB (not just the hand-stamped fixtures above) — WITHOUT ever
+  // touching the live file: everything happens on a copy in a fresh
+  // mkdtemp'd temp directory.
+  const tmpDir = mkdtempSync(path.join(tmpdir(), 'jb-sqlite-rajni-'));
+  const copyPath = path.join(tmpDir, 'jobbunny.db');
+  for (const ext of ['', '-wal', '-shm']) {
+    const src = `${RAJNI_FIXTURE_DB}${ext}`;
+    if (existsSync(src)) copyFileSync(src, `${copyPath}${ext}`);
+  }
+
+  const before = new DatabaseSync(copyPath);
+  assert.equal(
+    userVersion(before),
+    6,
+    'fixture no longer starts at v6 — update this test',
+  );
+  const jobsBefore = (
+    before.prepare('SELECT COUNT(*) AS c FROM jobs').get() as { c: number }
+  ).c;
+  assert.ok(jobsBefore > 0, 'fixture has no jobs rows to verify preservation against');
+  before.close();
+
+  const upgraded = openJobsDb(copyPath);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+  const jobsAfter = (
+    upgraded.prepare('SELECT COUNT(*) AS c FROM jobs').get() as { c: number }
+  ).c;
+  assert.equal(jobsAfter, jobsBefore);
+  const tables = (
+    upgraded
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.includes('run_progress'));
+  upgraded.close();
+
+  rmSync(tmpDir, { recursive: true, force: true });
 });
