@@ -12,13 +12,24 @@ import { daemonQuery } from '../wizard/wizard.queries';
 import type { RunIntentView } from '../wizard/wizard.types';
 import { cancelRunIntent, requestRunIntent } from './intents.api';
 import { runControlKeys, runIntentsQuery } from './runcontrol.queries';
-import { pickRunControlState, type RunControlState, runControlLabel } from './runState';
+import {
+  type LastRunStatus,
+  pickLastRunStatus,
+  pickRunControlState,
+  type RunControlState,
+  runControlLabel,
+} from './runState';
 
 export const POLL_INTERVAL_MS = 2500;
 
 export interface RunControlHandle {
   state: RunControlState;
   label: string;
+  /** The persistent last-run status line's data (C15) — decoupled from
+   * DONE_WINDOW_MS, unlike `state`'s own windowed done/failed cases. Null
+   * until any run has ever completed (ux-notes §8/§9's "first-ever load:
+   * button only, no status line"). */
+  lastRunStatus: LastRunStatus;
   onRun: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
@@ -120,6 +131,10 @@ export function useRunControl(profile: string): RunControlHandle {
     now: Date.now(),
     daemon,
   });
+  const lastRunStatus = pickLastRunStatus({
+    runs,
+    newestResult: detailResult.data?.result,
+  });
 
   const runMutation = useMutation({
     mutationFn: () => requestRunIntent(profile),
@@ -169,9 +184,15 @@ export function useRunControl(profile: string): RunControlHandle {
   return {
     state,
     label: runControlLabel(state),
+    lastRunStatus,
     onRun: () => runMutation.mutate(),
     onCancel: () => {
-      if (state.kind === 'queued') cancelMutation.mutate(state.intentId);
+      // 'daemon-down' is still a pending intent underneath (B24) — its
+      // `[Cancel]` control (ux-notes §8) cancels the same intent as the
+      // plain 'queued' case.
+      if (state.kind === 'queued' || state.kind === 'daemon-down') {
+        cancelMutation.mutate(state.intentId);
+      }
     },
     isSubmitting: runMutation.isPending,
     error,

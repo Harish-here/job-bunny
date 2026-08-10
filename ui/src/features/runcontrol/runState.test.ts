@@ -282,7 +282,7 @@ describe('pickLastRunStatus (C15 — decoupled from DONE_WINDOW_MS)', () => {
       runs: [makeRun({ id: 1, status: 'failed', finishedAt: OUTSIDE })],
       newestResult: undefined,
     });
-    expect(status).toEqual({ kind: 'failed', runId: 1 });
+    expect(status).toEqual({ kind: 'failed', runId: 1, finishedAt: OUTSIDE });
   });
 
   it('a passed run finished long past DONE_WINDOW_MS still reports done with newCount, not null', () => {
@@ -302,7 +302,7 @@ describe('pickLastRunStatus (C15 — decoupled from DONE_WINDOW_MS)', () => {
       runs: [makeRun({ id: 1, status: 'passed', finishedAt: OUTSIDE })],
       newestResult: result,
     });
-    expect(status).toEqual({ kind: 'done', runId: 1, newCount: 4 });
+    expect(status).toEqual({ kind: 'done', runId: 1, newCount: 4, finishedAt: OUTSIDE });
   });
 
   it('a still-running (finishedAt null) newest run reports null, not a stale outcome', () => {

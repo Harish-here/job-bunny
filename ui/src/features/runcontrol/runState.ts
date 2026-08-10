@@ -17,10 +17,12 @@ export type RunControlState =
 /** The persistent last-run status line's own state (C15) — decoupled from
  * DONE_WINDOW_MS: the newest finished run's outcome is returned regardless
  * of how long ago it finished, unlike the primary button's windowed
- * done/failed classification below. */
+ * done/failed classification below. `finishedAt` is carried so the line's
+ * renderer (B26, `RunNowButton.tsx`) can format ux-notes §8's `2h ago`
+ * clause without re-deriving it from the raw `runs` list itself. */
 export type LastRunStatus =
-  | { kind: 'failed'; runId: number }
-  | { kind: 'done'; runId: number; newCount: number }
+  | { kind: 'failed'; runId: number; finishedAt: string }
+  | { kind: 'done'; runId: number; newCount: number; finishedAt: string }
   | null;
 
 export const DONE_WINDOW_MS = 10 * 60 * 1000;
@@ -122,10 +124,15 @@ export function pickLastRunStatus(input: {
   const newestRun = newestById(runs);
   if (!newestRun || newestRun.finishedAt === null) return null;
   if (newestRun.status === 'failed' || newestRun.status === 'crashed') {
-    return { kind: 'failed', runId: newestRun.id };
+    return { kind: 'failed', runId: newestRun.id, finishedAt: newestRun.finishedAt };
   }
   if (newestRun.status === 'passed') {
-    return { kind: 'done', runId: newestRun.id, newCount: newMatchCount(newestResult) };
+    return {
+      kind: 'done',
+      runId: newestRun.id,
+      newCount: newMatchCount(newestResult),
+      finishedAt: newestRun.finishedAt,
+    };
   }
   return null;
 }
