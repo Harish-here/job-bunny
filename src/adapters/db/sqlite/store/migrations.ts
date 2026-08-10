@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 6;
+export const LATEST_SCHEMA_VERSION = 7;
 
 const MIGRATIONS: readonly string[] = [
   // v0 -> v1
@@ -118,6 +118,19 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE UNIQUE INDEX idx_run_intents_one_pending
     ON run_intents(status) WHERE status = 'pending';
+  `,
+  // v6 -> v7: run_progress (run experience overhaul — see ports/run_store.ts)
+  `
+  CREATE TABLE run_progress (
+    run_id           INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    stage            TEXT    NOT NULL,
+    stage_index      INTEGER NOT NULL,
+    stage_total      INTEGER NOT NULL,
+    stage_started_at TEXT    NOT NULL,
+    updated_at       TEXT    NOT NULL,
+    item_current     INTEGER,
+    item_total       INTEGER
+  );
   `,
 ];
 
