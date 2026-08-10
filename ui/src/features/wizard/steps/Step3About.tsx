@@ -17,89 +17,15 @@ import type {
   WizardStepProps,
   WorkType,
 } from '../wizard.types';
-
-const WORK_TYPES: WorkType[] = ['onsite', 'hybrid', 'remote'];
-const WORK_TYPE_LABEL: Record<WorkType, string> = {
-  onsite: 'Onsite',
-  hybrid: 'Hybrid',
-  remote: 'Remote',
-};
-// Fallback pool when no persona is picked (the 'scratch' persona pre-fills
-// nothing, and the catalog may still be loading) — a generic seniority
-// ladder, not tied to any one persona.
-const DEFAULT_SENIORITY_OPTIONS = [
-  'Junior',
-  'Mid',
-  'Senior',
-  'Staff',
-  'Lead',
-  'Principal',
-];
-
-/** A doc counts as "real pre-existing config" once its trimmed text is
- * neither empty nor the seeded `'{}'` placeholder — shared by the
- * never-clobber guard's filter.json AND resume.json reads so a
- * /setup-seeded resume.json with real content blocks the save exactly
- * like a hand-edited filter.json would. */
-function hasExistingContent(text: string): boolean {
-  const trimmed = text.trim();
-  return trimmed !== '' && trimmed !== '{}';
-}
-
-type ChipListKey = 'coreSkills' | 'secondarySkills' | 'domainExperience';
-
-/** A removable-chip list with a free-text add row. Composed from Badge +
- * Input + Button — no new `components/ui` primitive is added. */
-function ChipListEditor({
-  legend,
-  values,
-  onAdd,
-  onRemove,
-}: {
-  legend: string;
-  values: string[];
-  onAdd: (value: string) => void;
-  onRemove: (value: string) => void;
-}) {
-  const [draft, setDraft] = useState('');
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-sm leading-none font-medium">{legend}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {values.map((value) => (
-          <Badge key={value} variant="secondary">
-            <span>{value}</span>
-            <button
-              type="button"
-              aria-label={`Remove ${value}`}
-              onClick={() => onRemove(value)}
-            >
-              ×
-            </button>
-          </Badge>
-        ))}
-      </div>
-      <div className="flex gap-1.5">
-        <Input
-          aria-label={`Add to ${legend}`}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            onAdd(draft);
-            setDraft('');
-          }}
-        >
-          Add
-        </Button>
-      </div>
-    </div>
-  );
-}
+import { ChipListEditor } from './step3/ChipListEditor';
+import {
+  type ChipListKey,
+  DEFAULT_SENIORITY_OPTIONS,
+  hasExistingContent,
+  WORK_TYPE_LABEL,
+  WORK_TYPES,
+} from './step3/constants';
+import { LocationsEditor } from './step3/LocationsEditor';
 
 export function Step3About({ draft, onDraftChange, registerSubmit }: WizardStepProps) {
   const profile = draft.profile;
@@ -187,29 +113,9 @@ export function Step3About({ draft, onDraftChange, registerSubmit }: WizardStepP
     update({ ...about, yoe: isValid ? Number(trimmed) : null });
   }
 
+  // handleSubmit's validation needs the home city; the rest of the location
+  // editing logic (additional locations, add/remove) lives in LocationsEditor.
   const homeLocation: WizardLocation = about.locations[0] ?? { city: '', country: '' };
-  const additionalLocations = about.locations.slice(1);
-
-  function updateHome(patch: Partial<WizardLocation>) {
-    const home = { ...homeLocation, ...patch };
-    update({ ...about, locations: [home, ...about.locations.slice(1)] });
-  }
-
-  function updateAdditional(index: number, patch: Partial<WizardLocation>) {
-    const next = about.locations.map((loc, i) =>
-      i === index ? { ...loc, ...patch } : loc,
-    );
-    update({ ...about, locations: next });
-  }
-
-  function addLocation() {
-    const base = about.locations.length > 0 ? about.locations : [homeLocation];
-    update({ ...about, locations: [...base, { city: '', country: '' }] });
-  }
-
-  function removeLocationAt(index: number) {
-    update({ ...about, locations: about.locations.filter((_, i) => i !== index) });
-  }
 
   const seniorityPool = useMemo(() => {
     const base =
@@ -369,67 +275,11 @@ export function Step3About({ draft, onDraftChange, registerSubmit }: WizardStepP
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <div className="flex gap-3">
-          <Field invalid={Boolean(fieldErrors.homeCity)} className="flex-1">
-            <FieldLabel>Home city</FieldLabel>
-            <FieldControl>
-              <Input
-                value={homeLocation.city}
-                onChange={(e) => updateHome({ city: e.target.value })}
-              />
-            </FieldControl>
-            <FieldError>{fieldErrors.homeCity}</FieldError>
-          </Field>
-          <Field className="flex-1">
-            <FieldLabel>Country</FieldLabel>
-            <FieldControl>
-              <Input
-                value={homeLocation.country}
-                onChange={(e) => updateHome({ country: e.target.value })}
-              />
-            </FieldControl>
-          </Field>
-        </div>
-
-        {additionalLocations.map((loc, i) => {
-          const index = i + 1;
-          return (
-            <div key={index} className="flex items-end gap-3">
-              <Field className="flex-1">
-                <FieldLabel>{`Additional city ${index}`}</FieldLabel>
-                <FieldControl>
-                  <Input
-                    value={loc.city}
-                    onChange={(e) => updateAdditional(index, { city: e.target.value })}
-                  />
-                </FieldControl>
-              </Field>
-              <Field className="flex-1">
-                <FieldLabel>{`Additional country ${index}`}</FieldLabel>
-                <FieldControl>
-                  <Input
-                    value={loc.country}
-                    onChange={(e) => updateAdditional(index, { country: e.target.value })}
-                  />
-                </FieldControl>
-              </Field>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => removeLocationAt(index)}
-              >
-                Remove
-              </Button>
-            </div>
-          );
-        })}
-
-        <Button type="button" variant="outline" size="sm" onClick={addLocation}>
-          Add another location
-        </Button>
-      </div>
+      <LocationsEditor
+        locations={about.locations}
+        onChange={(locations) => update({ ...about, locations })}
+        homeCityError={fieldErrors.homeCity}
+      />
 
       <div className="flex flex-col gap-2">
         <Button

@@ -124,7 +124,7 @@ test('formatDate: the UTC-midnight parsing trap — a manual local parse, not ne
   const original = process.env.TZ;
   try {
     // Capability probe: check if TZ reassignment works on this platform.
-    // LA standard time offset is -480 min; daylight time is -420 min.
+    // LA standard time offset is 480 min; daylight time is 420 min.
     const probe = new Date(2026, 6, 1); // July 1 — daylight time in LA
     const beforeOffset = probe.getTimezoneOffset();
     process.env.TZ = 'America/Los_Angeles';
@@ -132,7 +132,7 @@ test('formatDate: the UTC-midnight parsing trap — a manual local parse, not ne
     const afterOffset = probeAfter.getTimezoneOffset();
 
     // Skip if TZ reassignment had no effect AND the host was not already in LA.
-    if (afterOffset === beforeOffset && beforeOffset !== -420 && beforeOffset !== -480) {
+    if (afterOffset === beforeOffset && beforeOffset !== 420 && beforeOffset !== 480) {
       t.skip('runtime TZ reassignment unsupported on this platform');
       return;
     }
