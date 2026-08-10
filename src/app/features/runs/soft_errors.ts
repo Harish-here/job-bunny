@@ -1,0 +1,88 @@
+/**
+ * Read-side soft-error grouping over `run_events` warn/error rows
+ * (R9, blueprint §5). No write-side instrumentation — this is a pure
+ * function over rows the caller has already read from `RunStoreReader`.
+ *
+ * The grouping key is a PRAGMATIC bucketing over genuinely heterogeneous
+ * `data_json` shapes, not a strict typed union: recon shows the
+ * breaker-open warn carries `{ reopenAt, tripCount }`, per-URL warns carry
+ * `{ lane, company, error }` roughly, and other events carry other shapes
+ * entirely. There is no single schema to type against, so this derives a
+ * best-effort key from `data.scope` (+ `data.company`/`data.lane` when
+ * present) and falls back to an `'unknown'` bucket rather than throwing.
+ */
+import type { RunEventRow } from '../../../ports/run_store.ts';
+
+export interface SoftErrorGroup {
+  key: string; // e.g. "source.linkedin" (scope) or "source.linkedin·acme corp" (scope+company)
+  label: string; // human label for the disclosure row, e.g. "source: empty job shell (linkedin)"
+  count: number;
+  sample: string; // one representative event msg
+}
+
+export interface SoftErrorSummary {
+  total: number; // warn+error count
+  groups: SoftErrorGroup[]; // sorted by count desc
+}
+
+const UNKNOWN_KEY = 'unknown';
+
+function keyOf(data: Record<string, unknown> | undefined): {
+  key: string;
+  scope: string | undefined;
+  detail: string | undefined;
+} {
+  const scope = data && typeof data.scope === 'string' ? data.scope : undefined;
+  if (!scope) return { key: UNKNOWN_KEY, scope: undefined, detail: undefined };
+
+  const company = data && typeof data.company === 'string' ? data.company : undefined;
+  const lane = data && typeof data.lane === 'string' ? data.lane : undefined;
+  const detail = company ?? lane;
+
+  return { key: detail ? `${scope}·${detail}` : scope, scope, detail };
+}
+
+function labelOf(scope: string | undefined, detail: string | undefined): string {
+  if (!scope) return 'unknown: uncategorized soft error';
+  return `${scope}: ${detail ?? 'unknown'}`;
+}
+
+/**
+ * Groups already-filtered warn/error `RunEventRow`s by a best-effort key
+ * derived from `data.scope` (+ `data.company`/`data.lane` when present).
+ * Does NOT filter by `level` itself — the caller (Task 4/B7's route) is
+ * responsible for passing only warn/error rows.
+ */
+export function groupSoftErrors(events: RunEventRow[]): SoftErrorSummary {
+  const byKey = new Map<
+    string,
+    {
+      key: string;
+      scope: string | undefined;
+      detail: string | undefined;
+      count: number;
+      sample: string;
+    }
+  >();
+
+  for (const event of events) {
+    const { key, scope, detail } = keyOf(event.data);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      byKey.set(key, { key, scope, detail, count: 1, sample: event.msg });
+    }
+  }
+
+  const groups: SoftErrorGroup[] = Array.from(byKey.values())
+    .map((g) => ({
+      key: g.key,
+      label: labelOf(g.scope, g.detail),
+      count: g.count,
+      sample: g.sample,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  return { total: events.length, groups };
+}
