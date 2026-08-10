@@ -1,5 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import {
+  formatInstant,
+  formatInstantTitle,
+} from '../../../../../src/core/datetime/index.ts';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
@@ -90,10 +94,13 @@ export function ScheduleSection({ profile }: { profile: string }) {
   }
 
   const entry = daemon.data?.profiles.find((p) => p.profile === profile);
+  const now = new Date();
   const nextRunLabel =
     entry?.nextRunAt != null
-      ? `Next run (saved): ${new Date(entry.nextRunAt).toLocaleString()}`
+      ? `Next run (saved): ${formatInstant(entry.nextRunAt, now)}`
       : 'Next run (saved): no upcoming run';
+  const nextRunTitle =
+    entry?.nextRunAt != null ? formatInstantTitle(entry.nextRunAt, now) : undefined;
 
   return (
     <DocFormGate
@@ -103,7 +110,11 @@ export function ScheduleSection({ profile }: { profile: string }) {
       parseError={docForm.parseError}
     >
       <div className="flex flex-col gap-4">
-        <p data-testid="schedule-next-run" className="text-sm text-muted-foreground">
+        <p
+          data-testid="schedule-next-run"
+          className="text-sm text-muted-foreground"
+          title={nextRunTitle}
+        >
           {nextRunLabel}
         </p>
         <Field>

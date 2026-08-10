@@ -1,7 +1,11 @@
+import {
+  formatInstant,
+  formatInstantTitle,
+} from '../../../../src/core/datetime/index.ts';
 import { Badge } from '../../components/ui/badge';
 import type { RunSummary } from '../../lib/api/types';
 import { cn } from '../../lib/utils';
-import { formatDuration, formatWhen, statusLabel, statusVariant } from './runFormat';
+import { formatDuration, statusLabel, statusVariant } from './runFormat';
 
 export function RunsList({
   rows,
@@ -19,6 +23,8 @@ export function RunsList({
       </div>
     );
   }
+
+  const now = new Date();
 
   return (
     <div role="listbox" aria-label="Runs">
@@ -45,7 +51,12 @@ export function RunsList({
             )}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">{formatWhen(row)}</span>
+              <span
+                className="text-sm font-medium"
+                title={formatInstantTitle(row.startedAt, now)}
+              >
+                {formatInstant(row.startedAt, now)}
+              </span>
               <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

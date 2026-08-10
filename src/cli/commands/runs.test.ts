@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { formatInstantFull } from '../../core/datetime/index.ts';
 import type { BoardSource, BoardStore, DaemonStatus } from '../../ports/board.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../ports/run_store.ts';
 import { type RunsDeps, runsCommand } from './runs.ts';
@@ -143,8 +144,14 @@ test('runsCommand: list prints one line per run, duration "running" when unfinis
   const code = await runsCommand({ profile: 'rajni' }, deps);
   assert.equal(code, 0);
   assert.equal(out.lines.length, 2);
-  assert.equal(out.lines[0], '#1  2026-08-05 09-00  run  passed  42s  ');
-  assert.equal(out.lines[1], '#3  2026-08-05 -  stage  running  running  ');
+  assert.equal(
+    out.lines[0],
+    `#1  ${formatInstantFull(PASSED_SUMMARY.startedAt)}  run  passed  42s  `,
+  );
+  assert.equal(
+    out.lines[1],
+    `#3  ${formatInstantFull(RUNNING_SUMMARY.startedAt)}  stage  running  running  `,
+  );
 });
 
 test('runsCommand: list recovers failedStage for a failed row via getRun', async () => {
@@ -164,7 +171,10 @@ test('runsCommand: list recovers failedStage for a failed row via getRun', async
   const code = await runsCommand({ profile: 'rajni' }, deps);
   assert.equal(code, 0);
   assert.deepEqual(getRunCalls, [2]);
-  assert.equal(out.lines[0], '#2  2026-08-05 10-00  run  failed  1m 30s  structure');
+  assert.equal(
+    out.lines[0],
+    `#2  ${formatInstantFull(FAILED_SUMMARY.startedAt)}  run  failed  1m 30s  structure`,
+  );
 });
 
 test('runsCommand: list does NOT call getRun for non-failed rows', async () => {
@@ -223,15 +233,15 @@ test('runsCommand: show prints summary, failure block, funnel lines, and events'
   const code = await runsCommand({ profile: 'rajni', runId: 2 }, deps);
   assert.equal(code, 0);
   assert.deepEqual(out.lines, [
-    '#2  2026-08-05 10-00  run  failed  1m 30s  structure',
+    `#2  ${formatInstantFull(FAILED_SUMMARY.startedAt)}  run  failed  1m 30s  structure`,
     'failure:',
     '  stage: structure',
     '  error: timed out',
     '  elapsedMs: 5000',
     '  lastCheckpoint: 02-farm.json',
     '  farm: 0 -> 5',
-    '2026-08-05T10:00:01.000Z info stage started',
-    '2026-08-05T10:00:02.000Z error stage failed {"stage":"structure"}',
+    `${formatInstantFull('2026-08-05T10:00:01.000Z')} info stage started`,
+    `${formatInstantFull('2026-08-05T10:00:02.000Z')} error stage failed {"stage":"structure"}`,
   ]);
 });
 
@@ -259,7 +269,9 @@ test('runsCommand: show omits the failure block when failure is null', async () 
   };
   const code = await runsCommand({ profile: 'rajni', runId: 1 }, deps);
   assert.equal(code, 0);
-  assert.deepEqual(out.lines, ['#1  2026-08-05 09-00  run  passed  42s  ']);
+  assert.deepEqual(out.lines, [
+    `#1  ${formatInstantFull(PASSED_SUMMARY.startedAt)}  run  passed  42s  `,
+  ]);
 });
 
 test('runsCommand: closes the source after use, even on the unknown-profile path', async () => {

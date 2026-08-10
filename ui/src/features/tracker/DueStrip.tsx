@@ -1,3 +1,4 @@
+import { formatDate } from '../../../../src/core/datetime/index.ts';
 import type { BoardJobRow } from '../../lib/api/types';
 
 /**
@@ -14,6 +15,7 @@ export function DueStrip({
   onFocusCard: (jobId: string) => void;
 }) {
   if (rows.length === 0) return null;
+  const now = new Date();
   return (
     <div data-testid="due-strip" className="flex gap-2 overflow-x-auto border-b p-2">
       {rows.map((row) => (
@@ -24,7 +26,8 @@ export function DueStrip({
           onClick={() => onFocusCard(row.id)}
         >
           <span className="inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl bg-attention px-2 py-0.5 text-xs font-medium whitespace-nowrap text-attention-foreground">
-            ⚡ {row.company} — {row.tracking?.nextAction} ({row.tracking?.nextActionDate})
+            ⚡ {row.company} — {row.tracking?.nextAction} (
+            {formatDate(row.tracking?.nextActionDate ?? '', now)})
           </span>
         </button>
       ))}

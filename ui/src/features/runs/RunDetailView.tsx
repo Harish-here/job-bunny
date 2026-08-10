@@ -1,4 +1,9 @@
 import { useMemo, useState } from 'react';
+import {
+  formatInstant,
+  formatInstantFull,
+  formatInstantTitle,
+} from '../../../../src/core/datetime/index.ts';
 import { Badge } from '../../components/ui/badge';
 import {
   Select,
@@ -8,7 +13,7 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import type { RunDetail, RunEventRow } from '../../lib/api/types';
-import { formatDuration, formatWhen, statusLabel, statusVariant } from './runFormat';
+import { formatDuration, statusLabel, statusVariant } from './runFormat';
 import { getFailedStage, getFailureError, getFunnelStages } from './runResult';
 
 const LEVELS = ['all', 'debug', 'info', 'warn', 'error'] as const;
@@ -94,7 +99,7 @@ function EventsList({ events }: { events: RunEventRow[] }) {
               className="flex items-start gap-2 border-b py-1 text-sm last:border-b-0"
             >
               <span className="w-40 shrink-0 font-mono text-xs text-muted-foreground">
-                {event.ts}
+                {formatInstantFull(event.ts)}
               </span>
               <Badge variant="outline" className="shrink-0 uppercase">
                 {event.level}
@@ -117,12 +122,18 @@ export function RunDetailView({
 }) {
   const failedStage = getFailedStage(run.failure);
   const failureError = getFailureError(run.failure);
+  const now = new Date();
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold font-heading">{formatWhen(run)}</h2>
+          <h2
+            className="text-lg font-semibold font-heading"
+            title={formatInstantTitle(run.startedAt, now)}
+          >
+            {formatInstant(run.startedAt, now)}
+          </h2>
           <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
         </div>
         <div className="text-sm text-muted-foreground">

@@ -25,6 +25,7 @@
  * callers, never external input). Either narrowing failing (a
  * malformed/absent blob) degrades to omitting that section, never a crash.
  */
+import { formatInstantFull } from '../../core/datetime/index.ts';
 import { RunResultSchema } from '../../ops/observability/index.ts';
 import type { BoardSource, BoardStore } from '../../ports/board.ts';
 import type { RunEventRow, RunFailure, RunSummary } from '../../ports/run_store.ts';
@@ -85,13 +86,13 @@ function failedStageFromResult(result: unknown): string | undefined {
 function summaryLine(row: RunSummary, failedStage: string | undefined): string {
   const duration = formatDuration(row.startedAt, row.finishedAt) ?? 'running';
   return (
-    `#${row.id}  ${row.date} ${row.timeDir ?? '-'}  ${row.kind}  ${row.status}  ` +
+    `#${row.id}  ${formatInstantFull(row.startedAt)}  ${row.kind}  ${row.status}  ` +
     `${duration}  ${failedStage ?? ''}`
   );
 }
 
 function formatEvent(ev: RunEventRow): string {
-  const base = `${ev.ts} ${ev.level} ${ev.msg}`;
+  const base = `${formatInstantFull(ev.ts)} ${ev.level} ${ev.msg}`;
   return ev.data === undefined ? base : `${base} ${JSON.stringify(ev.data)}`;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatWhen, statusLabel, statusVariant } from './runFormat';
+import { formatDuration, statusLabel, statusVariant } from './runFormat';
 
 describe('formatDuration', () => {
   it('returns em dash when the run has not finished', () => {
@@ -22,16 +22,6 @@ describe('formatDuration', () => {
     expect(formatDuration('2026-08-05T09:02:00.000Z', '2026-08-05T09:00:00.000Z')).toBe(
       '—',
     );
-  });
-});
-
-describe('formatWhen', () => {
-  it('joins date and timeDir', () => {
-    expect(formatWhen({ date: '2026-08-05', timeDir: '09-00' })).toBe('2026-08-05 09-00');
-  });
-
-  it('falls back to date alone when timeDir is null', () => {
-    expect(formatWhen({ date: '2026-08-05', timeDir: null })).toBe('2026-08-05');
   });
 });
 
