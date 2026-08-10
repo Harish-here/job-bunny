@@ -27,6 +27,8 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-amber-foreground: var(--amber-foreground);
+  --color-amber: var(--amber);
   --color-success-foreground: var(--success-foreground);
   --color-success-strong: var(--success-strong);
   --color-success: var(--success);
@@ -82,6 +84,8 @@
   --success: #4caf6e;
   --success-foreground: #ffffff;
   --success-strong: #26703f;
+  --amber: #c98a2e;
+  --amber-foreground: #3d2c55;
   --border: #e4dbf0;
   --input: #e4dbf0;
   --ring: #7b5ea7;
@@ -124,6 +128,8 @@
   --success: #6fcb8e;
   --success-foreground: #1a1523;
   --success-strong: #6fcb8e;
+  --amber: #e1a856;
+  --amber-foreground: #1a1523;
   --border: #362c4a;
   --input: #3f3355;
   --ring: #b79ce0;
