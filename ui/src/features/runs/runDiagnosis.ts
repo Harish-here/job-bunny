@@ -1,4 +1,12 @@
-import type { RunDetail, SoftErrorSummary } from '../../lib/api/types';
+import type { RunDetail, RunEventRow, SoftErrorSummary } from '../../lib/api/types';
+import type { DiagnosisAction } from './diagnosisActions';
+import {
+  copyAction,
+  navigateAction,
+  readBreakerRetryAt,
+  revealAction,
+  runAction,
+} from './diagnosisActions';
 import { classifyOutcome, TOTAL_PIPELINE_STAGES } from './runOutcome';
 import {
   getBiggestDrop,
@@ -6,6 +14,8 @@ import {
   getFailureError,
   getFunnelStages,
 } from './runResult';
+
+export type { DiagnosisAction } from './diagnosisActions';
 
 /**
  * B14, amended by A4 + A5 (docs/product/run-experience-overhaul/plan.md §0).
@@ -17,12 +27,12 @@ import {
  * A4 — `stall` is a first-class registry entry, ordered first (highest
  * observed frequency, highest diagnostic value).
  *
- * A5 — the engine is an ORDERED ARRAY of `{ kind, matches, title,
- * nextAction }` entries, iterated first-match-wins, NOT a switch/if-else
- * over `run.failure`'s contents. Adding a class costs exactly one array
- * entry plus one test — never a refactor of `classifyFailure`'s control
- * flow. Do not "simplify" this into a switch statement; the extensibility
- * is the point (plan.md §5, "Open risk carried into implementation").
+ * A5 — the engine is an ORDERED ARRAY of `{ kind, matches, title, action }`
+ * entries, iterated first-match-wins, NOT a switch/if-else over
+ * `run.failure`'s contents. Adding a class costs exactly one array entry
+ * plus one test — never a refactor of `classifyFailure`'s control flow. Do
+ * not "simplify" this into a switch statement; the extensibility is the
+ * point (plan.md §5, "Open risk carried into implementation").
  */
 export type DiagnosisKind =
   | 'stall'
@@ -34,10 +44,30 @@ export type DiagnosisKind =
   | 'degraded'
   | 'fallback';
 
+/** Everything a diagnosis entry needs to classify and act on a run,
+ * bundled into one object rather than positional params so a new evidence
+ * source (events, profile name) doesn't ripple through every entry's
+ * signature. */
+export interface DiagnosisInput {
+  run: RunDetail;
+  softErrors: SoftErrorSummary | undefined;
+  events?: RunEventRow[];
+  /** The profile whose run this is — interpolated into the
+   * chrome-not-found copy command. */
+  profile: string;
+}
+
 export interface DiagnosisVerdict {
   kind: DiagnosisKind;
   title: string;
-  nextAction: string;
+  /** The primary call-to-action. Always present — every verdict has a real
+   * target. The panel renders it quietly (not as a primary button) for the
+   * calm 'zero-yield-healthy' kind; that tone choice is the panel's, not
+   * this module's. */
+  action: DiagnosisAction;
+  /** Optional quiet secondary — the mockup pairs a primary button with a
+   * quiet link on every failure state. */
+  secondaryAction?: DiagnosisAction;
   /** Only carried by `'fallback'` (spec AC11): the raw, un-interpreted
    * failure text and last checkpoint, shown verbatim rather than forcing
    * an unmatched failure into an invented bucket. */
@@ -47,9 +77,10 @@ export interface DiagnosisVerdict {
 
 export interface DiagnosisEntry {
   kind: DiagnosisKind;
-  matches(run: RunDetail, softErrors: SoftErrorSummary | undefined): boolean;
-  title(run: RunDetail, softErrors: SoftErrorSummary | undefined): string;
-  nextAction(run: RunDetail, softErrors: SoftErrorSummary | undefined): string;
+  matches(input: DiagnosisInput): boolean;
+  title(input: DiagnosisInput): string;
+  action(input: DiagnosisInput): DiagnosisAction;
+  secondaryAction?(input: DiagnosisInput): DiagnosisAction | undefined;
 }
 
 // ---- shared evidence readers -----------------------------------------
@@ -69,6 +100,10 @@ function getFailureLastCheckpoint(failure: unknown): string | undefined {
   if (!isRecord(failure)) return undefined;
   return typeof failure.lastCheckpoint === 'string' ? failure.lastCheckpoint : undefined;
 }
+
+/** The mockup pairs a primary button with a quiet "Show full log" link on
+ * every non-calm failure state — this is that shared secondary. */
+const showFullLog = () => revealAction('Show full log');
 
 // ---- class (vi) stall — src/pipeline/runner/guard.ts's armStall() -----
 // Exact thrown/recorded shape (guard.ts): `stage "${stage.name}" stalled:
@@ -100,8 +135,9 @@ const TOTAL_OUTAGE_SUBSTRING = 'total outage';
 // §7's "Class (i) divergence" — the pipeline itself declines to assert a
 // login expired over this evidence), and per plan.md's registry order
 // this class is checked AFTER total-outage so an overlapping fixture
-// never misclassifies as expired-login.
-const EXPIRED_LOGIN_PATTERN = /all \d+ attempted url\(s\) failed this run/;
+// never misclassifies as expired-login. The capture group doubles as the
+// failed-URL count for the secondary action's label.
+const EXPIRED_LOGIN_PATTERN = /all (\d+) attempted url\(s\) failed this run/;
 
 // ---- class (v) chrome-not-found — launcher.ts:105-108's exact message -
 const CHROME_NOT_FOUND_SUBSTRING = 'no Chrome executable found';
@@ -145,41 +181,51 @@ function degradedTitle(run: RunDetail, softErrors: SoftErrorSummary | undefined)
 const REGISTRY: DiagnosisEntry[] = [
   {
     kind: 'stall',
-    matches: (run) => errorText(run).includes(STALL_SUBSTRING),
-    title: (run) => {
+    matches: ({ run }) => errorText(run).includes(STALL_SUBSTRING),
+    title: ({ run }) => {
       const stage = getFailedStage(run.failure) ?? 'a';
       const minutes = stallMinutes(errorText(run));
       return minutes !== undefined
         ? `The \`${stage}\` stage stopped reporting progress for ${minutes} minute(s).`
         : `The \`${stage}\` stage stopped reporting progress.`;
     },
-    nextAction: () => 'Run again',
+    action: () => runAction('Run again'),
+    secondaryAction: showFullLog,
   },
   {
     kind: 'total-outage',
-    matches: (run) => errorText(run).includes(TOTAL_OUTAGE_SUBSTRING),
-    title: (run) => {
+    matches: ({ run }) => errorText(run).includes(TOTAL_OUTAGE_SUBSTRING),
+    title: ({ run }) => {
       const stage = getFailedStage(run.failure) ?? 'a';
       return (
         `Every attempted lane in the \`${stage}\` stage failed this run — ` +
         'this looks like an expired login or a broader outage.'
       );
     },
-    nextAction: () => 'Run again',
+    action: () => runAction('Run again'),
+    secondaryAction: showFullLog,
   },
   {
     kind: 'expired-login',
-    matches: (run) =>
+    matches: ({ run }) =>
       getFailedStage(run.failure) === 'source' &&
       EXPIRED_LOGIN_PATTERN.test(errorText(run)),
     title: () => 'LinkedIn login has expired.',
-    nextAction: () => 'Run again',
+    action: () => runAction('Run again'),
+    secondaryAction: ({ run }) => {
+      const match = EXPIRED_LOGIN_PATTERN.exec(errorText(run));
+      const count = match?.[1];
+      return count
+        ? revealAction(`Show the ${count} failed URLs`)
+        : revealAction('Show full log');
+    },
   },
   {
     kind: 'zero-yield-healthy',
-    matches: (run, softErrors) => classifyOutcome(run, softErrors) === 'empty',
-    title: (run) => zeroYieldHealthyTitle(run),
-    nextAction: () => 'Review filter rules',
+    matches: ({ run, softErrors }) => classifyOutcome(run, softErrors) === 'empty',
+    title: ({ run }) => zeroYieldHealthyTitle(run),
+    action: () =>
+      navigateAction('Review filter rules →', { name: 'settings', section: 'filters' }),
   },
   {
     kind: 'breaker-open',
@@ -187,21 +233,28 @@ const REGISTRY: DiagnosisEntry[] = [
     // substring match — see `SoftErrorSummary.breakerOpen`'s own doc
     // comment (`app/features/runs/soft_errors.ts`) for why that used to be
     // unreliable.
-    matches: (_run, softErrors) => softErrors?.breakerOpen ?? false,
+    matches: ({ softErrors }) => softErrors?.breakerOpen ?? false,
     title: () => 'LinkedIn is soft-blocking us — the throttle breaker is open.',
-    nextAction: () => 'Run again once the throttle breaker reopens',
+    action: ({ events }) =>
+      runAction('Run again', { disabled: true, retryAt: readBreakerRetryAt(events) }),
+    secondaryAction: showFullLog,
   },
   {
     kind: 'chrome-not-found',
-    matches: (run) => errorText(run).includes(CHROME_NOT_FOUND_SUBSTRING),
+    matches: ({ run }) => errorText(run).includes(CHROME_NOT_FOUND_SUBSTRING),
     title: () => "Chrome wasn't found at any known path.",
-    nextAction: () => 'Run `jobbunny doctor`',
+    action: ({ profile }) =>
+      copyAction(
+        `Copy: jobbunny doctor --profile ${profile}`,
+        `jobbunny doctor --profile ${profile}`,
+      ),
+    secondaryAction: showFullLog,
   },
   {
     kind: 'degraded',
-    matches: (run, softErrors) => classifyOutcome(run, softErrors) === 'degraded',
-    title: (run, softErrors) => degradedTitle(run, softErrors),
-    nextAction: () => 'Review run events',
+    matches: ({ run, softErrors }) => classifyOutcome(run, softErrors) === 'degraded',
+    title: ({ run, softErrors }) => degradedTitle(run, softErrors),
+    action: () => revealAction('Review run events'),
   },
 ];
 
@@ -214,15 +267,15 @@ const REGISTRY: DiagnosisEntry[] = [
  */
 export function runRegistry(
   entries: DiagnosisEntry[],
-  run: RunDetail,
-  softErrors: SoftErrorSummary | undefined,
+  input: DiagnosisInput,
 ): DiagnosisVerdict | null {
   for (const entry of entries) {
-    if (entry.matches(run, softErrors)) {
+    if (entry.matches(input)) {
       return {
         kind: entry.kind,
-        title: entry.title(run, softErrors),
-        nextAction: entry.nextAction(run, softErrors),
+        title: entry.title(input),
+        action: entry.action(input),
+        secondaryAction: entry.secondaryAction?.(input),
       };
     }
   }
@@ -236,18 +289,16 @@ export function runRegistry(
  * (spec AC11) — the designed-for outcome for a long-tail failure text,
  * not an error case.
  */
-export function classifyFailure(
-  run: RunDetail,
-  softErrors: SoftErrorSummary | undefined,
-): DiagnosisVerdict {
-  const matched = runRegistry(REGISTRY, run, softErrors);
+export function classifyFailure(input: DiagnosisInput): DiagnosisVerdict {
+  const matched = runRegistry(REGISTRY, input);
   if (matched) return matched;
 
   return {
     kind: 'fallback',
-    title: `Failed at \`${getFailedStage(run.failure) ?? 'unknown stage'}\``,
-    nextAction: 'Run again',
-    rawError: getFailureError(run.failure) ?? '',
-    lastCheckpoint: getFailureLastCheckpoint(run.failure),
+    title: `Failed at \`${getFailedStage(input.run.failure) ?? 'unknown stage'}\``,
+    action: runAction('Run again'),
+    secondaryAction: showFullLog(),
+    rawError: getFailureError(input.run.failure) ?? '',
+    lastCheckpoint: getFailureLastCheckpoint(input.run.failure),
   };
 }
