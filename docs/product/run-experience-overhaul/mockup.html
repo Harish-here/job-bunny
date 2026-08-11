@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Experience Overhaul — Mid-fi Mockup</title>
+<!--
+  Standalone design artifact. Not application code — no build step, no framework, no
+  external requests. The real app uses Geist (UI) / Nunito (headings); this mockup
+  substitutes the system font stack below so it renders identically offline.
+-->
+<style>
+:root{
+  --bg:#faf8fd; --fg:#3d2c55; --card:#ffffff; --muted:#f1ecf8; --muted-fg:#6d6280;
+  --border:rgba(61,44,85,0.10); --primary:#7b5ea7; --primary-fg:#ffffff; --success:#4caf6e;
+  --destructive:#d64545; --amber:#c98a2e; --ring:#7b5ea7; --radius:1rem;
+  --destructive-tint:rgba(214,69,69,.08); --primary-tint:rgba(123,94,167,.06); --amber-tint:rgba(201,138,46,.08);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.45}
+a{color:var(--primary)}
+code{font-family:ui-monospace,Menlo,monospace;background:var(--muted);padding:1px 4px;border-radius:4px;font-size:.85em}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+button{font:inherit;color:inherit}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+h1,h2,h3,p{margin:0}
+
+/* header + toggle bar */
+.header-strip{position:sticky;top:0;z-index:60;background:var(--card);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;flex-wrap:wrap;gap:22px;align-items:center;font-size:.75rem}
+.header-strip .field{display:flex;gap:6px;align-items:baseline}
+.header-strip .k{color:var(--muted-fg);text-transform:uppercase;letter-spacing:.05em;font-size:.62rem}
+.header-strip .v{font-family:ui-monospace,Menlo,monospace;font-weight:600}
+.toggle-bar{position:sticky;top:39px;z-index:59;background:var(--muted);border-bottom:1px solid var(--border);padding:8px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toggle-bar .lbl{font-size:.68rem;color:var(--muted-fg);margin-right:2px}
+.toggle-btn{border:1px solid var(--border);background:var(--card);padding:5px 13px;border-radius:999px;font-size:.75rem;cursor:pointer;color:var(--fg)}
+.toggle-btn[aria-pressed="true"]{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+
+/* frames */
+.frame{margin:26px 20px;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--bg)}
+.frame-title{background:var(--muted);padding:10px 16px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.frame-title h2{font-size:.95rem;font-weight:700}
+.frame-title p{font-size:.74rem;color:var(--muted-fg)}
+.frame-body{padding:16px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:.68rem;background:var(--card);border:1px solid var(--border);padding:2px 9px;border-radius:999px;color:var(--muted-fg)}
+.label-chip{font-size:.65rem;background:var(--primary);color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;letter-spacing:.02em}
+.section-note{font-size:.75rem;color:var(--muted-fg);font-style:italic;margin:10px 0}
+
+/* app shell (S1/S2) */
+.app-shell{display:grid;grid-template-columns:224px 1fr;background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--border);overflow:hidden;min-height:600px}
+.app-sidebar{background:var(--muted);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:14px 10px}
+.app-nav{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:2px}
+.app-nav li a{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;color:var(--fg);text-decoration:none;font-size:.8rem}
+.app-nav li a.active{background:var(--card);box-shadow:0 0 0 1px var(--border);font-weight:600;color:var(--primary)}
+.sidebar-spacer{flex:1}
+.profile-switcher{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:.73rem;color:var(--muted-fg);display:flex;align-items:center;gap:6px}
+.runnow-block{background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--border);padding:10px;font-size:.78rem}
+.runnow-block.destructive-outline{box-shadow:0 0 0 1.5px var(--destructive)}
+.runnow-block.amber-outline{box-shadow:0 0 0 1.5px var(--amber)}
+.runnow-status{margin-top:8px;display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--muted-fg);cursor:pointer;background:none;border:0;padding:0;text-align:left;width:100%}
+
+.app-main{padding:16px 16px 22px;overflow:hidden}
+.page-header{display:flex;justify-content:space-between;align-items:center;height:34px;margin-bottom:10px}
+.page-header h1{font-size:1.125rem;font-weight:600}
+.freshness-chip{font-size:.68rem;color:var(--muted-fg);font-family:ui-monospace,monospace}
+.two-pane{display:grid;grid-template-columns:minmax(300px,360px) 1fr;gap:16px}
+
+/* run rows */
+.list-pane{display:flex;flex-direction:column;gap:6px}
+.run-row{display:flex;align-items:flex-start;gap:9px;padding:10px 11px;border-radius:8px;border-left:0 solid transparent;cursor:pointer;background:transparent}
+.run-row:hover{background:var(--muted)}
+.run-row.selected{background:var(--muted);box-shadow:0 0 0 2px rgba(123,94,167,.4) inset}
+.run-row.degraded{border-left:2px solid var(--amber)}
+.run-row.failed{border-left:3px solid var(--destructive);background:var(--destructive-tint)}
+.run-row.crashed{border-left:3px dashed var(--destructive);background:var(--destructive-tint)}
+.run-row.running{border-left:2px solid var(--primary);background:var(--primary-tint)}
+.run-row.unrecorded{border:1.5px dashed var(--border);border-radius:8px}
+.run-icon{flex-shrink:0;margin-top:1px}
+.icon{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:inline-block;vertical-align:middle}
+.icon-lg{width:26px;height:26px}
+.run-icon.success{color:var(--success)}
+.run-icon.muted{color:var(--muted-fg)}
+.run-icon.amber{color:var(--amber)}
+.run-icon.destructive{color:var(--destructive)}
+.run-num{font-size:1.2rem;font-weight:700;min-width:1.6ch}
+.run-body{flex:1;min-width:0}
+.run-label{font-size:.82rem;font-weight:600}
+.run-sub{font-size:.72rem;color:var(--muted-fg);margin-top:2px}
+.run-meta{font-size:.66rem;color:var(--muted-fg);font-family:ui-monospace,monospace;margin-top:3px}
+.badge-high{display:inline-flex;align-items:center;gap:3px;font-size:.63rem;background:var(--primary-tint);color:var(--primary);border:1px solid rgba(123,94,167,.3);border-radius:999px;padding:1px 7px;margin-left:6px}
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--primary);flex-shrink:0;margin-top:5px}
+.pulse-dot.animate{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media(prefers-reduced-motion:reduce){.pulse-dot.animate{animation:none}}
+
+/* live strip */
+.live-strip{margin:0 0 12px;padding:9px 14px;border-radius:10px;background:var(--primary-tint);box-shadow:0 0 0 1px rgba(123,94,167,.25) inset;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.live-strip.disconnected{background:var(--amber-tint);box-shadow:0 0 0 1px rgba(201,138,46,.35) inset}
+.live-strip .pulse-dot{margin-top:0}
+.live-strip.disconnected .pulse-dot{background:var(--amber)}
+
+/* stage rail */
+.rail-groups{display:flex;gap:14px}
+.rail-group-label{font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-fg);margin-bottom:3px}
+.rail-list-segs{display:flex;gap:3px;list-style:none;margin:0;padding:0}
+.rail-list-segs li{flex:1}
+.rail-btn{width:100%;height:6px;border:0;border-radius:999px;padding:0;cursor:pointer;background:var(--muted);text-indent:-9999px;overflow:hidden}
+.rail-btn.done{background:rgba(109,98,128,.4)}
+.rail-btn.current{background:var(--primary)}
+.rail-btn.current.animate{animation:pulse 1.4s ease-in-out infinite}
+.rail-btn.pending{background:var(--muted);box-shadow:0 0 0 1px var(--border) inset}
+.rail-btn.failed{background:var(--destructive)}
+.rail-btn.skipped{background:repeating-linear-gradient(45deg,var(--muted) 0,var(--muted) 3px,var(--border) 3px,var(--border) 6px)}
+.rail-text{font-size:.72rem;color:var(--muted-fg);margin-top:6px}
+.rail-wrap{display:flex;gap:9px;flex:1;min-width:160px}
+.rail-seg{height:6px;border-radius:999px;flex:1;background:var(--muted)}
+.rail-seg.done{background:rgba(109,98,128,.4)}
+.rail-seg.current{background:var(--primary)}
+.rail-seg.current.animate{animation:pulse 1.4s ease-in-out infinite}
+.rail-seg.pending{background:var(--muted);box-shadow:0 0 0 1px var(--border) inset}
+.rail-seg.failed{background:var(--destructive)}
+.rail-seg.skipped{background:repeating-linear-gradient(45deg,var(--muted) 0,var(--muted) 3px,var(--border) 3px,var(--border) 6px)}
+
+/* funnel */
+.funnel-table{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:8px}
+.funnel-table th{text-align:left;border-bottom:1px solid var(--border);padding:4px 8px 4px 0;font-weight:500;color:var(--muted-fg);font-size:.64rem;text-transform:uppercase;letter-spacing:.03em}
+.funnel-table td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border);vertical-align:middle}
+.funnel-stage{font-weight:600}
+.funnel-bar-cell{min-width:130px}
+.funnel-bar{position:relative;height:17px;border-radius:4px;background:var(--muted);overflow:hidden}
+.funnel-bar-fill{position:absolute;top:0;left:0;height:100%;background:rgba(123,94,167,.35)}
+.funnel-bar-fill.outward{background:rgba(123,94,167,.5)}
+.funnel-bar-fill.destructive{background:rgba(214,69,69,.35)}
+.funnel-num{font-family:ui-monospace,monospace;font-size:.72rem}
+.funnel-info{display:inline-flex;width:14px;height:14px;border-radius:50%;background:var(--muted);color:var(--muted-fg);font-size:.6rem;align-items:center;justify-content:center;margin-left:4px;cursor:help;border:0}
+.funnel-drops{font-size:.72rem;color:var(--muted-fg)}
+.funnel-na{color:var(--muted-fg);font-style:italic;font-size:.72rem}
+.funnel-foot{font-size:.7rem;color:var(--muted-fg);margin-top:6px}
+
+/* diagnosis */
+.diagnosis{display:flex;gap:12px;padding:14px;border-radius:10px;background:var(--card);box-shadow:0 0 0 1px var(--border);margin:12px 0}
+.diagnosis-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--destructive-tint);color:var(--destructive)}
+.diagnosis-icon.amber{background:var(--amber-tint);color:var(--amber)}
+.diagnosis-icon.calm{background:rgba(76,175,110,.12);color:var(--success)}
+.diagnosis-body{flex:1;min-width:0}
+.diagnosis-l1{font-size:.9rem;font-weight:600;margin:0 0 2px}
+.diagnosis-l2{font-size:.8rem;color:var(--muted-fg);margin:0 0 10px}
+.diagnosis-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn-primary{background:var(--primary);color:var(--primary-fg);border:0;padding:7px 14px;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-quiet{background:none;border:0;color:var(--primary);font-size:.78rem;cursor:pointer;padding:4px 0;text-decoration:underline}
+.btn-outline{background:var(--card);border:1px solid var(--border);padding:6px 12px;border-radius:8px;font-size:.78rem;cursor:pointer}
+.countdown-chip{font-size:.66rem;background:var(--amber-tint);color:var(--amber);padding:2px 8px;border-radius:999px;font-family:ui-monospace,monospace}
+pre.raw-error{background:var(--muted);border-radius:6px;padding:8px;font-size:.68rem;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0 0 8px;white-space:pre-wrap}
+
+/* outcome header */
+.outcome-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.outcome-yield{font-size:1.5rem;font-weight:700}
+.outcome-yield.calm{color:var(--fg)}
+.outcome-sub{font-size:.8rem;color:var(--muted-fg);margin-top:3px}
+.outcome-meta{display:flex;gap:10px;font-size:.68rem;color:var(--muted-fg);font-family:ui-monospace,monospace;flex-wrap:wrap;justify-content:flex-end}
+.status-chip{font-size:.66rem;padding:2px 9px;border-radius:999px;border:1px solid var(--border);font-family:inherit}
+
+/* disclosure / evidence */
+.disclosure{border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:12px}
+.disclosure > button{width:100%;text-align:left;background:var(--muted);border:0;padding:8px 12px;font-size:.78rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.disclosure-content{padding:10px 12px;font-size:.75rem;display:none}
+.disclosure[data-open="true"] .disclosure-content{display:block}
+.disclosure[data-open="true"] .chev{transform:rotate(180deg)}
+.chev{transition:transform .15s}
+.event-row{display:flex;gap:8px;padding:3px 0;border-bottom:1px dashed var(--border);font-family:ui-monospace,monospace;font-size:.67rem}
+.level-warn{color:var(--amber);font-weight:600}
+.level-error{color:var(--destructive);font-weight:600}
+.level-info{color:var(--muted-fg)}
+
+/* skeleton / empty / error */
+.skel{background:linear-gradient(90deg,var(--muted) 25%,rgba(255,255,255,.6) 37%,var(--muted) 63%);background-size:400% 100%;animation:shimmer 1.4s ease infinite;border-radius:6px}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+@media(prefers-reduced-motion:reduce){.skel{animation:none;background:var(--muted)}}
+.skel-card{height:76px;border-radius:8px}
+.skel-line{height:12px;border-radius:4px;margin:6px 0}
+.empty-card{border:1px solid var(--border);border-radius:10px;padding:30px 18px;text-align:center;color:var(--muted-fg);display:flex;flex-direction:column;align-items:center;gap:10px}
+.dashed-card{border:1.5px dashed var(--border);border-radius:10px;padding:18px}
+.error-retry{border:1px solid rgba(214,69,69,.3);background:var(--destructive-tint);border-radius:10px;padding:16px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-size:.8rem}
+
+/* toggle-driven variants */
+.variant{display:none}
+body[data-state="default"] .v-default{display:block}
+body[data-state="loading"] .v-loading{display:block}
+body[data-state="empty"] .v-empty{display:block}
+body[data-state="error"] .v-error{display:block}
+body[data-state="disconnected"] .v-disconnected{display:block}
+
+/* callouts */
+.callout{display:inline-flex;width:19px;height:19px;border-radius:50%;background:var(--primary);color:#fff;font-size:.62rem;font-weight:700;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 1px 3px rgba(0,0,0,.25);flex-shrink:0}
+.callout:hover{filter:brightness(1.1)}
+
+/* S8 cards */
+.runnow-cards{display:flex;gap:12px;flex-wrap:wrap}
+.runnow-card-wrap{width:190px}
+.runnow-card-cap{font-size:.68rem;color:var(--muted-fg);margin-top:6px;text-align:center}
+
+/* S9 tiles */
+.s9-row{margin-bottom:20px}
+.s9-row h3{font-size:.85rem;margin-bottom:8px}
+.s9-tiles{display:flex;gap:10px;flex-wrap:wrap}
+.s9-tile{border:1px solid var(--border);border-radius:8px;padding:9px;background:var(--card);width:170px;min-height:96px;display:flex;flex-direction:column;gap:6px}
+.s9-tile .cap{font-size:.6rem;color:var(--muted-fg);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+
+/* annotations */
+.annotations{padding:20px;background:var(--card);margin:26px 20px;border-radius:14px;box-shadow:0 0 0 1px var(--border)}
+.annotation-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.annotation-row:last-child{border-bottom:0}
+.annotation-text{font-size:.82rem}
+.annotation-text b{display:block;margin-bottom:2px}
+.back-link{font-size:.68rem;margin-left:6px}
+
+/* scorecard */
+.scorecard-table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:10px}
+.scorecard-table th,.scorecard-table td{text-align:left;padding:8px;border-bottom:1px solid var(--border);vertical-align:top}
+.pillar-score{font-weight:700;white-space:nowrap}
+.weaknesses li{margin-bottom:10px;font-size:.82rem}
+footer.foot{padding:20px;text-align:center;font-size:.7rem;color:var(--muted-fg)}
+</style>
+</head>
+<body data-state="default">
+
+<!-- ============== inline icon sprite (hand-drawn, lucide-style, 24x24 stroke) ============== -->
+<svg style="display:none" aria-hidden="true">
+<defs>
+<symbol id="icon-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></symbol>
+<symbol id="icon-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="1.5"/></symbol>
+<symbol id="icon-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.3" r="0.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-alert-triangle" viewBox="0 0 24 24"><path d="M10.3 3.9L2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.2"/><circle cx="12" cy="16.3" r="0.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-plug-zap-off" viewBox="0 0 24 24"><path d="M8 3v4"/><path d="M16 3v4"/><path d="M6 7h12l-1 5a5 5 0 0 1-5 4c-2.8 0-5-2.2-5-4z"/><path d="M12 16v3"/><line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></symbol>
+<symbol id="icon-database-off" viewBox="0 0 24 24"><path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3"/><path d="M20 6.5v5.3c0 .6-.5 1.2-1.4 1.7"/><path d="M6.3 12.7C4.9 13.2 4 13.9 4 14.7v4.8c0 1.7 3.6 3 8 3 1.6 0 3.1-.2 4.4-.5"/><line x1="3" y1="3" x2="21" y2="21"/></symbol>
+<symbol id="icon-activity-off" viewBox="0 0 24 24"><path d="M3 12h4l2 5 4-15 2 8h6" opacity=".35"/><path d="M14.5 6.5L13 12H3" /><line x1="3" y1="21" x2="21" y2="3"/></symbol>
+<symbol id="icon-wifi-off" viewBox="0 0 24 24"><path d="M1 9a16 16 0 0 1 4.3-2.8"/><path d="M8.5 4.4A16 16 0 0 1 23 9"/><path d="M5 13a10 10 0 0 1 3-2"/><path d="M13 13a10 10 0 0 1 3.5 1.4"/><path d="M9 17a4 4 0 0 1 4 0"/><circle cx="12" cy="20" r="0.7" fill="currentColor" stroke="none"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+<symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.7" r="0.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-play" viewBox="0 0 24 24"><path d="M6.5 4.5l13 7.5-13 7.5z"/></symbol>
+<symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+<symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="icon-external-link" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
+<symbol id="icon-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+<symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></symbol>
+<symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+</defs>
+</svg>
+
+<!-- ============== header strip ============== -->
+<header class="header-strip">
+  <div class="field"><span class="k">Feature</span><span class="v">Run Experience Overhaul</span></div>
+  <div class="field"><span class="k">Slug</span><span class="v">run-experience-overhaul</span></div>
+  <div class="field"><span class="k">Date</span><span class="v">2026-08-10</span></div>
+  <div class="field"><span class="k">Spec</span><span class="v">docs/product/run-experience-overhaul/spec.md</span></div>
+  <div class="field"><span class="k">Stage</span><span class="v">product-ux · mid-fi mockup</span></div>
+</header>
+
+<!-- ============== state toggle bar (drives S1 + S2 only) ============== -->
+<div class="toggle-bar" role="group" aria-label="State toggle for S1 and S2">
+  <span class="lbl">S1 / S2 state:</span>
+  <button class="toggle-btn" data-state="default" aria-pressed="true">Default</button>
+  <button class="toggle-btn" data-state="loading" aria-pressed="false">Loading</button>
+  <button class="toggle-btn" data-state="empty" aria-pressed="false">Empty</button>
+  <button class="toggle-btn" data-state="error" aria-pressed="false">Error</button>
+  <button class="toggle-btn" data-state="disconnected" aria-pressed="false">Disconnected</button>
+  <span class="lbl" style="margin-left:10px">— S1 keeps zero live chrome in every state (C5); S2's strip alone reflects Error/Disconnected.</span>
+</div>
+
+<!-- ======================================================================= -->
+<!-- S1 — Runs page, history default -->
+<!-- ======================================================================= -->
+<section class="frame" id="s1">
+  <div class="frame-title">
+    <div><h2>S1 — Runs page — history default (nothing running)</h2><p>The 95% visit</p></div>
+    <span class="chip">list role="listbox" · detail 5-panel order</span>
+  </div>
+  <div class="frame-body">
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <ul class="app-nav">
+          <li><a href="#">Triage</a></li>
+          <li><a href="#">Tracker</a></li>
+          <li><a href="#" class="active" aria-current="page">Runs</a></li>
+          <li><a href="#">Analytics</a></li>
+          <li><a href="#">Setup</a></li>
+          <li><a href="#">Settings</a></li>
+        </ul>
+        <div class="sidebar-spacer"></div>
+        <div class="runnow-block">
+          <button class="btn-primary" style="width:100%">Run now</button>
+          <button class="runnow-status">
+            <svg class="icon run-icon success"><use href="#icon-check-circle"></use></svg>
+            <span><b>7 new</b> · 2h ago</span>
+            <a href="#c15" id="c15-src-s1" class="callout" aria-label="callout 15" style="margin-left:auto">15</a>
+          </button>
+        </div>
+        <div class="profile-switcher"><svg class="icon" style="width:14px;height:14px"><use href="#icon-chevron-right"></use></svg><span>Profile:</span> <b>harish</b></div>
+      </aside>
+      <div class="app-main">
+        <div class="page-header">
+          <h1>Runs <a href="#c4" id="c4-src" class="callout" aria-label="callout 4" style="margin-left:6px">4</a></h1>
+          <span class="freshness-chip">Updated 12s ago · refetches on focus</span>
+        </div>
+        <!-- zero live chrome when idle: no strip element exists here at all -->
+        <div class="two-pane">
+          <div class="list-pane">
+            <div class="variant v-default v-disconnected" role="listbox" aria-label="Run history, newest first" style="display:flex;flex-direction:column;gap:6px">
+              <div class="run-row selected" role="option" aria-selected="true">
+                <svg class="icon run-icon success"><use href="#icon-check-circle"></use></svg>
+                <div class="run-body">
+                  <div style="display:flex;align-items:baseline;flex-wrap:wrap"><span class="run-num" id="c3-src">7</span><a href="#c3" class="callout" aria-label="callout 3" style="margin:0 6px">3</a><span class="run-label">new jobs on your board<span class="badge-high">2 high matches</span></span></div>
+                  <div class="run-meta">Aug 9, 23:04 · 6m 12s · scheduled</div>
+                </div>
+              </div>
+              <div class="run-row" role="option" aria-selected="false" id="c1-src">
+                <svg class="icon run-icon muted"><use href="#icon-circle"></use></svg>
+                <div class="run-body">
+                  <div style="display:flex;align-items:baseline;gap:6px"><span class="run-num">0</span><span class="run-label">Ran clean</span><a href="#c1" class="callout" aria-label="callout 1">1</a></div>
+                  <div class="run-sub" id="c2-src">Ran clean · 10/10 stages · 214 scraped, 0 passed filter <a href="#c2" class="callout" aria-label="callout 2">2</a></div>
+                  <div class="run-meta">Aug 8, 23:03 · 5m 48s · scheduled</div>
+                </div>
+              </div>
+              <div class="run-row degraded" role="option" aria-selected="false">
+                <svg class="icon run-icon amber"><use href="#icon-alert-circle"></use></svg>
+                <div class="run-body">
+                  <div style="display:flex;align-items:baseline;gap:6px"><span class="run-num">0</span><span class="run-label">Ran with warnings</span></div>
+                  <div class="run-sub">41 soft errors</div>
+                  <div class="run-meta">Aug 7, 23:04 · scheduled</div>
+                </div>
+              </div>
+              <div class="run-row failed" role="option" aria-selected="false">
+                <svg class="icon run-icon destructive"><use href="#icon-alert-triangle"></use></svg>
+                <div class="run-body">
+                  <div class="run-label">Failed at <code>structure</code></div>
+                  <div class="run-meta">Aug 6, 23:02 · 2m 09s · scheduled</div>
+                </div>
+              </div>
+              <div class="run-row crashed" role="option" aria-selected="false">
+                <svg class="icon run-icon destructive"><use href="#icon-plug-zap-off"></use></svg>
+                <div class="run-body">
+                  <div class="run-label">Lost contact</div>
+                  <div class="run-meta">Aug 5, 23:01 · scheduled</div>
+                </div>
+              </div>
+              <div class="run-row unrecorded" role="option" aria-selected="false">
+                <svg class="icon run-icon muted"><use href="#icon-database-off"></use></svg>
+                <div class="run-body">
+                  <div class="run-label">Telemetry missing</div>
+                  <div class="run-meta">Aug 4, 23:02</div>
+                </div>
+              </div>
+            </div>
+            <div class="variant v-loading" aria-busy="true">
+              <div class="skel skel-card" style="margin-bottom:6px"></div>
+              <div class="skel skel-card" style="margin-bottom:6px"></div>
+              <div class="skel skel-card"></div>
+            </div>
+            <div class="variant v-empty">
+              <div class="empty-card">
+                <svg class="icon icon-lg run-icon muted"><use href="#icon-circle"></use></svg>
+                <p>No runs recorded yet.</p>
+                <button class="btn-primary">Run now</button>
+              </div>
+            </div>
+            <div class="variant v-error">
+              <div class="error-retry">
+                <svg class="icon run-icon destructive"><use href="#icon-alert-triangle"></use></svg>
+                <p>Couldn't load runs.</p>
+                <button class="btn-outline">Retry</button>
+              </div>
+            </div>
+          </div>
+          <div class="detail-pane">
+            <div class="variant v-default v-disconnected" id="s1-detail-default">
+              <!-- identical content to S3, shown here as the auto-selected newest run -->
+              <div class="outcome-header">
+                <div>
+                  <div class="outcome-yield">7 new jobs on your board <span class="badge-high">2 high matches</span></div>
+                  <a href="#" class="btn-quiet" id="c7-src">View them <svg class="icon" style="width:12px;height:12px"><use href="#icon-external-link"></use></svg></a>
+                  <a href="#c7" class="callout" aria-label="callout 7">7</a>
+                </div>
+                <div class="outcome-meta">
+                  <span class="status-chip">Produced</span><span>6m 12s</span><span>scheduled</span><span>Aug 9, 23:04:11</span>
+                </div>
+              </div>
+              <div class="rail-groups" id="c6-src-s1">
+                <div style="flex:.9"><div class="rail-group-label">Acquire</div>
+                  <ol class="rail-list-segs" style="list-style:none">
+                    <li><button class="rail-btn done" aria-label="stage 1 of 10, reconcile, done, 2s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 2 of 10, farm, done, 18s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 3 of 10, source, done, 3m 10s"></button></li>
+                  </ol></div>
+                <div style="flex:.9"><div class="rail-group-label">Understand</div>
+                  <ol class="rail-list-segs" style="list-style:none">
+                    <li><button class="rail-btn done" aria-label="stage 4 of 10, compress, done, 8s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 5 of 10, structure, done, 1m 40s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 6 of 10, assemble, done, 4s"></button></li>
+                  </ol></div>
+                <div style="flex:1.2"><div class="rail-group-label">Decide</div>
+                  <ol class="rail-list-segs" style="list-style:none">
+                    <li><button class="rail-btn done" aria-label="stage 7 of 10, filter, done, 2s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 8 of 10, dedup, done, 1s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 9 of 10, rank, done, 1s"></button></li>
+                    <li><button class="rail-btn done" aria-label="stage 10 of 10, sync, done, 6s"></button></li>
+                  </ol></div>
+              </div>
+              <p class="rail-text">stage 10 of 10 — sync · complete</p>
+              <table class="funnel-table">
+                <caption class="sr-only">Stage funnel: jobs in, jobs out, retention, and drops by rule for the Aug 9 run.</caption>
+                <thead><tr><th>Stage</th><th>in → out</th><th>retention</th><th>Drops by rule</th></tr></thead>
+                <tbody>
+                  <tr><td class="funnel-stage">reconcile</td><td class="funnel-na">n/a</td><td class="funnel-na">state-sync only</td><td class="funnel-drops">—</td></tr>
+                  <tr><td class="funnel-stage">farm</td><td class="funnel-num">— → 18<button class="funnel-info" aria-label="farm is additive — it discovers companies and adds jobs, so there is no input to measure." title="farm is additive — it discovers companies and adds jobs, so there is no input to measure.">i</button></td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill outward" style="width:55%"></div></div></td><td class="funnel-drops">additive — no drops</td></tr>
+                  <tr><td class="funnel-stage">source</td><td class="funnel-num">214 → 211</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:98%"></div></div></td><td class="funnel-drops">3 fetch timeout</td></tr>
+                  <tr><td class="funnel-stage">compress</td><td class="funnel-num">211 → 211</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+                  <tr><td class="funnel-stage">structure</td><td class="funnel-num">211 → 205</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:97%"></div></div></td><td class="funnel-drops">6 unparseable</td></tr>
+                  <tr><td class="funnel-stage">assemble</td><td class="funnel-num">205 → 205</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+                  <tr><td class="funnel-stage">filter</td><td class="funnel-num">205 → 34</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:17%"></div></div></td><td class="funnel-drops">171 by locations</td></tr>
+                  <tr><td class="funnel-stage">dedup</td><td class="funnel-num">34 → 15</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:44%"></div></div></td><td class="funnel-drops">19 duplicate</td></tr>
+                  <tr><td class="funnel-stage">rank</td><td class="funnel-num">15 → 15</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+                  <tr><td class="funnel-stage">sync</td><td class="funnel-num">15 → 7</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:47%"></div></div></td><td class="funnel-drops">8 already on board</td></tr>
+                </tbody>
+              </table>
+              <p class="funnel-foot" id="c11-src-s1">Retention (excluding farm, which is additive <a href="#c11" class="callout" aria-label="callout 11">11</a>): 214 → 7 · 3.3%</p>
+              <div class="disclosure" data-open="false">
+                <button aria-expanded="false">Evidence — 0 soft errors <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+                <div class="disclosure-content">
+                  <p>No soft errors on this run.</p>
+                  <a href="#" class="btn-quiet">Show full log (247 events)</a>
+                </div>
+              </div>
+            </div>
+            <div class="variant v-loading" aria-busy="true">
+              <div class="skel skel-line" style="width:60%;height:24px"></div>
+              <div class="skel skel-line" style="width:40%"></div>
+              <div class="skel skel-line" style="width:90%;height:8px;margin-top:14px"></div>
+              <div class="skel skel-line" style="width:70%"></div>
+              <div class="skel skel-line" style="width:100%;height:60px;margin-top:10px"></div>
+              <p class="section-note">Diagnosis panel does not skeleton — it renders only once data arrives (C13).</p>
+            </div>
+            <div class="variant v-empty">
+              <div class="empty-card" style="grid-column:1/-1">
+                <svg class="icon icon-lg run-icon muted"><use href="#icon-circle"></use></svg>
+                <p>No runs recorded yet — list and detail collapse to one card.</p>
+                <button class="btn-primary">Run now</button>
+              </div>
+            </div>
+            <div class="variant v-error">
+              <div class="error-retry">
+                <svg class="icon run-icon destructive"><use href="#icon-alert-triangle"></use></svg>
+                <p>Couldn't load this run. The list stays usable.</p>
+                <button class="btn-outline">Retry</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S2 — Runs page, live run in flight -->
+<!-- ======================================================================= -->
+<section class="frame" id="s2">
+  <div class="frame-title">
+    <div><h2>S2 — Runs page — live run in flight</h2><p>The 5% visit</p></div>
+    <span class="chip">strip mounts only with data</span>
+  </div>
+  <div class="frame-body">
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <ul class="app-nav">
+          <li><a href="#">Triage</a></li>
+          <li><a href="#">Tracker</a></li>
+          <li><a href="#" class="active" aria-current="page">Runs</a></li>
+          <li><a href="#">Analytics</a></li>
+          <li><a href="#">Setup</a></li>
+          <li><a href="#">Settings</a></li>
+        </ul>
+        <div class="sidebar-spacer"></div>
+        <div class="runnow-block">
+          <button class="btn-primary" style="width:100%" disabled><span class="pulse-dot animate" style="display:inline-block;vertical-align:middle;background:#fff;margin:0 6px 0 0"></span>Running…</button>
+          <button class="runnow-status"><span>structure 5/10 · <span style="text-decoration:underline">View</span></span></button>
+        </div>
+        <div class="profile-switcher"><svg class="icon" style="width:14px;height:14px"><use href="#icon-chevron-right"></use></svg><span>Profile:</span> <b>harish</b></div>
+      </aside>
+      <div class="app-main">
+        <div class="page-header">
+          <h1>Runs</h1>
+          <span class="freshness-chip">Updated 2s ago</span>
+        </div>
+
+        <div class="variant v-default" style="display:block">
+          <div class="live-strip" aria-live="polite" id="c5-src">
+            <span class="pulse-dot animate" aria-hidden="true"></span>
+            <span style="font-size:.8rem;font-weight:600">Running — <code>structure</code></span>
+            <div class="rail-wrap" role="img" aria-label="stage 5 of 10, structure, in progress, 1 minute 42 seconds in this stage, elapsed 6 minutes 3 seconds total" id="c6-src">
+              <div class="rail-seg done"></div><div class="rail-seg done"></div><div class="rail-seg done"></div><div class="rail-seg done"></div>
+              <div class="rail-seg current animate"></div>
+              <div class="rail-seg pending"></div><div class="rail-seg pending"></div><div class="rail-seg pending"></div><div class="rail-seg pending"></div><div class="rail-seg pending"></div>
+            </div>
+            <span style="font-size:.66rem;font-family:ui-monospace,monospace;color:var(--muted-fg)">in stage 1m 42s</span>
+            <span style="font-size:.66rem;font-family:ui-monospace,monospace;color:var(--muted-fg)">elapsed 6m 03s</span>
+            <span class="chip" style="color:var(--success);border-color:rgba(76,175,110,.3)">Alive</span>
+            <button class="btn-outline">View</button>
+            <a href="#c5" class="callout" aria-label="callout 5">5</a><a href="#c6" class="callout" aria-label="callout 6">6</a>
+          </div>
+        </div>
+        <div class="variant v-loading"><p class="section-note">Live strip mounts only when data exists — no skeleton is shown for it while polling first loads.</p></div>
+        <div class="variant v-empty"><p class="section-note">Live strip: n/a — absent when nothing runs (this toggle demonstrates the tabled Empty state for list/detail; the strip rule holds regardless).</p></div>
+        <div class="variant v-error">
+          <div class="live-strip disconnected" aria-live="assertive">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <svg class="icon" style="color:var(--amber)"><use href="#icon-wifi-off"></use></svg>
+            <span style="font-size:.8rem;font-weight:600;color:var(--amber)">Disconnected — last update 47s ago</span>
+            <button class="btn-outline" aria-label="Retry connection">Retry</button>
+          </div>
+        </div>
+        <div class="variant v-disconnected">
+          <div class="live-strip disconnected" aria-live="assertive">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <svg class="icon" style="color:var(--amber)"><use href="#icon-wifi-off"></use></svg>
+            <span style="font-size:.8rem;font-weight:600;color:var(--amber)">Disconnected — last update 47s ago</span>
+            <button class="btn-outline" aria-label="Retry connection">Retry</button>
+          </div>
+        </div>
+
+        <div class="two-pane">
+          <div class="list-pane">
+            <div class="variant v-default v-disconnected" role="listbox" aria-label="Run history, newest first" style="display:flex;flex-direction:column;gap:6px">
+              <div class="run-row running selected" role="option" aria-selected="true">
+                <span class="pulse-dot animate" aria-hidden="true"></span>
+                <div class="run-body">
+                  <div class="run-label">Running — <code>structure</code> 5/10</div>
+                  <div class="run-meta">started 23:04 · scheduled</div>
+                </div>
+              </div>
+              <div class="run-row" role="option" aria-selected="false">
+                <svg class="icon run-icon success"><use href="#icon-check-circle"></use></svg>
+                <div class="run-body"><div style="display:flex;align-items:baseline;gap:6px"><span class="run-num">7</span><span class="run-label">new jobs on your board<span class="badge-high">2 high matches</span></span></div><div class="run-meta">Aug 9, 23:04 · 6m 12s · scheduled</div></div>
+              </div>
+              <div class="run-row" role="option" aria-selected="false">
+                <svg class="icon run-icon muted"><use href="#icon-circle"></use></svg>
+                <div class="run-body"><div style="display:flex;align-items:baseline;gap:6px"><span class="run-num">0</span><span class="run-label">Ran clean</span></div><div class="run-sub">Ran clean · 10/10 stages · 214 scraped, 0 passed filter</div><div class="run-meta">Aug 8, 23:03 · 5m 48s · scheduled</div></div>
+              </div>
+              <div class="run-row degraded" role="option" aria-selected="false">
+                <svg class="icon run-icon amber"><use href="#icon-alert-circle"></use></svg>
+                <div class="run-body"><div style="display:flex;align-items:baseline;gap:6px"><span class="run-num">0</span><span class="run-label">Ran with warnings</span></div><div class="run-sub">41 soft errors</div><div class="run-meta">Aug 7, 23:04 · scheduled</div></div>
+              </div>
+              <div class="run-row failed" role="option" aria-selected="false">
+                <svg class="icon run-icon destructive"><use href="#icon-alert-triangle"></use></svg>
+                <div class="run-body"><div class="run-label">Failed at <code>structure</code></div><div class="run-meta">Aug 6, 23:02 · 2m 09s · scheduled</div></div>
+              </div>
+              <div class="run-row crashed" role="option" aria-selected="false">
+                <svg class="icon run-icon destructive"><use href="#icon-plug-zap-off"></use></svg>
+                <div class="run-body"><div class="run-label">Lost contact</div><div class="run-meta">Aug 5, 23:01 · scheduled</div></div>
+              </div>
+              <div class="run-row unrecorded" role="option" aria-selected="false">
+                <svg class="icon run-icon muted"><use href="#icon-database-off"></use></svg>
+                <div class="run-body"><div class="run-label">Telemetry missing</div><div class="run-meta">Aug 4, 23:02</div></div>
+              </div>
+            </div>
+            <div class="variant v-loading"><div class="skel skel-card" style="margin-bottom:6px"></div><div class="skel skel-card" style="margin-bottom:6px"></div><div class="skel skel-card"></div></div>
+            <div class="variant v-empty"><div class="empty-card"><svg class="icon icon-lg run-icon muted"><use href="#icon-circle"></use></svg><p>No runs recorded yet.</p><button class="btn-primary">Run now</button></div></div>
+            <div class="variant v-error"><div class="error-retry"><svg class="icon run-icon destructive"><use href="#icon-alert-triangle"></use></svg><p>Couldn't load runs.</p><button class="btn-outline">Retry</button></div></div>
+          </div>
+          <div class="detail-pane">
+            <div class="variant v-default v-disconnected">
+              <p class="section-note">User was deliberately reading the Aug 9 (produced) run when the live run started — the strip appeared and offered [View]; the pane was not hijacked (§3).</p>
+              <div class="outcome-header">
+                <div><div class="outcome-yield">7 new jobs on your board <span class="badge-high">2 high matches</span></div><a href="#" class="btn-quiet">View them →</a></div>
+                <div class="outcome-meta"><span class="status-chip">Produced</span><span>6m 12s</span><span>scheduled</span><span>Aug 9, 23:04:11</span></div>
+              </div>
+              <p class="rail-text">stage 10 of 10 — sync · complete (same run detail as S3, abbreviated here)</p>
+            </div>
+            <div class="variant v-loading" aria-busy="true"><div class="skel skel-line" style="width:60%;height:24px"></div><div class="skel skel-line" style="width:40%"></div><div class="skel skel-line" style="width:90%;height:60px;margin-top:10px"></div></div>
+            <div class="variant v-empty"><div class="empty-card"><svg class="icon icon-lg run-icon muted"><use href="#icon-circle"></use></svg><p>No other runs recorded yet.</p></div></div>
+            <div class="variant v-error"><div class="error-retry"><svg class="icon run-icon destructive"><use href="#icon-alert-triangle"></use></svg><p>Couldn't load this run.</p><button class="btn-outline">Retry</button></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S3 — Run detail, produced -->
+<!-- ======================================================================= -->
+<section class="frame" id="s3">
+  <div class="frame-title"><div><h2>S3 — Run detail — produced</h2><p>JTBD-1 satisfied</p></div><span class="chip">detail pane alone, same width as two-pane</span></div>
+  <div class="frame-body" style="max-width:560px">
+    <div style="background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--border);padding:16px">
+      <div class="outcome-header">
+        <div>
+          <div class="outcome-yield">7 new jobs on your board <span class="badge-high">2 high matches</span></div>
+          <a href="#" class="btn-quiet">View them <svg class="icon" style="width:12px;height:12px"><use href="#icon-external-link"></use></svg></a>
+        </div>
+        <div class="outcome-meta"><span class="status-chip">Produced</span><span>6m 12s</span><span>scheduled</span><span>Aug 9, 23:04:11</span></div>
+      </div>
+      <p class="section-note">1 outcome header → 2 diagnosis (absent for clean produced) → 3 pipeline rail → 4 funnel → 5 evidence. <span id="c9-src">Fixed order, identical across S3–S6</span> <a href="#c9" class="callout" aria-label="callout 9">9</a>.</p>
+      <div class="rail-groups">
+        <div style="flex:.9"><div class="rail-group-label">Acquire</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 1 of 10, reconcile, done, 2s"></button></li><li><button class="rail-btn done" aria-label="stage 2 of 10, farm, done, 18s"></button></li><li><button class="rail-btn done" aria-label="stage 3 of 10, source, done, 3m 10s"></button></li></ol></div>
+        <div style="flex:.9"><div class="rail-group-label">Understand</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 4 of 10, compress, done, 8s"></button></li><li><button class="rail-btn done" aria-label="stage 5 of 10, structure, done, 1m 40s"></button></li><li><button class="rail-btn done" aria-label="stage 6 of 10, assemble, done, 4s"></button></li></ol></div>
+        <div style="flex:1.2"><div class="rail-group-label">Decide</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 7 of 10, filter, done, 2s"></button></li><li><button class="rail-btn done" aria-label="stage 8 of 10, dedup, done, 1s"></button></li><li><button class="rail-btn done" aria-label="stage 9 of 10, rank, done, 1s"></button></li><li><button class="rail-btn done" aria-label="stage 10 of 10, sync, done, 6s"></button></li></ol></div>
+      </div>
+      <p class="rail-text">stage 10 of 10 — sync · complete</p>
+      <table class="funnel-table">
+        <caption class="sr-only">Stage funnel for the Aug 9 produced run.</caption>
+        <thead><tr><th>Stage</th><th>in → out</th><th>retention</th><th>Drops by rule</th></tr></thead>
+        <tbody>
+          <tr><td class="funnel-stage">reconcile</td><td class="funnel-na">n/a</td><td class="funnel-na">state-sync only</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">farm</td><td class="funnel-num">— → 18<button class="funnel-info" aria-label="farm is additive — no input to measure" title="farm is additive — no input to measure">i</button></td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill outward" style="width:55%"></div></div></td><td class="funnel-drops">additive — no drops</td></tr>
+          <tr><td class="funnel-stage">source</td><td class="funnel-num">214 → 211</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:98%"></div></div></td><td class="funnel-drops">3 fetch timeout</td></tr>
+          <tr><td class="funnel-stage">compress</td><td class="funnel-num">211 → 211</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">structure</td><td class="funnel-num">211 → 205</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:97%"></div></div></td><td class="funnel-drops">6 unparseable</td></tr>
+          <tr><td class="funnel-stage">assemble</td><td class="funnel-num">205 → 205</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">filter</td><td class="funnel-num">205 → 34</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:17%"></div></div></td><td class="funnel-drops">171 by locations</td></tr>
+          <tr><td class="funnel-stage">dedup</td><td class="funnel-num">34 → 15</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:44%"></div></div></td><td class="funnel-drops">19 duplicate</td></tr>
+          <tr><td class="funnel-stage">rank</td><td class="funnel-num">15 → 15</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">sync</td><td class="funnel-num">15 → 7</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:47%"></div></div></td><td class="funnel-drops">8 already on board</td></tr>
+        </tbody>
+      </table>
+      <p class="funnel-foot">Retention (excluding farm): 214 → 7 · 3.3%</p>
+      <div class="disclosure" data-open="false">
+        <button aria-expanded="false">Evidence — 0 soft errors <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+        <div class="disclosure-content"><p>No soft errors on this run.</p><a href="#" class="btn-quiet">Show full log (247 events)</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S4 — Run detail, ran clean / empty -->
+<!-- ======================================================================= -->
+<section class="frame" id="s4">
+  <div class="frame-title"><div><h2>S4 — Run detail — ran clean, empty</h2><p>The central problem</p></div><span class="chip">calm ≠ faded — full-contrast 0</span></div>
+  <div class="frame-body" style="max-width:560px">
+    <div style="background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--border);padding:16px">
+      <div class="outcome-header">
+        <div><div class="outcome-yield calm">0 new — Ran clean</div><p class="outcome-sub">Ran clean · 10/10 stages · 214 scraped, 0 passed filter</p></div>
+        <div class="outcome-meta"><span class="status-chip">Ran clean</span><span>5m 48s</span><span>scheduled</span><span>Aug 8, 23:03:02</span></div>
+      </div>
+      <div class="diagnosis" id="c8-src">
+        <div class="diagnosis-icon calm"><svg class="icon"><use href="#icon-check-circle"></use></svg></div>
+        <div class="diagnosis-body">
+          <p class="diagnosis-l1" id="c17-src">Ran clean — 214 jobs scraped, none passed your filter.</p>
+          <p class="diagnosis-l2">Biggest drop: <code>filter</code> — 189 by <code>locations</code>.</p>
+          <div class="diagnosis-actions">
+            <a href="#" class="btn-quiet">Review filter rules →</a>
+            <a href="#c8" class="callout" aria-label="callout 8">8</a>
+            <a href="#c17" class="callout" aria-label="callout 17">17</a>
+          </div>
+        </div>
+      </div>
+      <div class="rail-groups">
+        <div style="flex:.9"><div class="rail-group-label">Acquire</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 1 of 10, reconcile, done, 2s"></button></li><li><button class="rail-btn done" aria-label="stage 2 of 10, farm, done, 14s"></button></li><li><button class="rail-btn done" aria-label="stage 3 of 10, source, done, 3m 02s"></button></li></ol></div>
+        <div style="flex:.9"><div class="rail-group-label">Understand</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 4 of 10, compress, done, 7s"></button></li><li><button class="rail-btn done" aria-label="stage 5 of 10, structure, done, 1m 35s"></button></li><li><button class="rail-btn done" aria-label="stage 6 of 10, assemble, done, 3s"></button></li></ol></div>
+        <div style="flex:1.2"><div class="rail-group-label">Decide</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 7 of 10, filter, done, 2s"></button></li><li><button class="rail-btn done" aria-label="stage 8 of 10, dedup, done, 1s"></button></li><li><button class="rail-btn done" aria-label="stage 9 of 10, rank, done, 1s"></button></li><li><button class="rail-btn done" aria-label="stage 10 of 10, sync, done, 1s"></button></li></ol></div>
+      </div>
+      <p class="rail-text">stage 10 of 10 — sync · complete</p>
+      <table class="funnel-table">
+        <caption class="sr-only">Stage funnel for the Aug 8 clean-empty run.</caption>
+        <thead><tr><th>Stage</th><th>in → out</th><th>retention</th><th>Drops by rule</th></tr></thead>
+        <tbody>
+          <tr><td class="funnel-stage">reconcile</td><td class="funnel-na">n/a</td><td class="funnel-na">state-sync only</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">farm</td><td class="funnel-num">— → 0<button class="funnel-info" aria-label="farm is additive — no input to measure" title="farm is additive — no input to measure">i</button></td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill outward" style="width:2%"></div></div></td><td class="funnel-drops">additive — no new companies today</td></tr>
+          <tr><td class="funnel-stage">source</td><td class="funnel-num">214 → 214</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">compress</td><td class="funnel-num">214 → 214</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">structure</td><td class="funnel-num">214 → 214</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">assemble</td><td class="funnel-num">214 → 214</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">filter</td><td class="funnel-num">214 → 0</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill destructive" style="width:1%"></div></div></td><td class="funnel-drops">189 by locations, 25 by title</td></tr>
+          <tr><td class="funnel-stage">dedup</td><td class="funnel-num">0 → 0</td><td class="funnel-bar-cell"><div class="funnel-bar"></div></td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">rank</td><td class="funnel-num">0 → 0</td><td class="funnel-bar-cell"><div class="funnel-bar"></div></td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">sync</td><td class="funnel-num">0 → 0</td><td class="funnel-bar-cell"><div class="funnel-bar"></div></td><td class="funnel-drops">—</td></tr>
+        </tbody>
+      </table>
+      <p class="funnel-foot">Retention (excluding farm): 214 → 0 · 0%</p>
+      <div class="disclosure" data-open="false">
+        <button aria-expanded="false">Evidence — 0 soft errors <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+        <div class="disclosure-content"><p>No soft errors on this run.</p><a href="#" class="btn-quiet">Show full log (247 events)</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S5 — Run detail, failed diagnosed -->
+<!-- ======================================================================= -->
+<section class="frame" id="s5">
+  <div class="frame-title"><div><h2>S5 — Run detail — failed, diagnosed</h2><p>JTBD-3, R6</p></div><span class="chip">class i · expired login</span></div>
+  <div class="frame-body" style="max-width:560px">
+    <div style="background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--border);padding:16px">
+      <div class="outcome-header">
+        <div><div class="outcome-yield">Failed at <code>source</code></div></div>
+        <div class="outcome-meta"><span class="status-chip">Failed</span><span>2m 09s</span><span>scheduled</span><span>Aug 6, 23:02:00</span></div>
+      </div>
+      <div class="diagnosis" id="c10-src">
+        <div class="diagnosis-icon"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></div>
+        <div class="diagnosis-body">
+          <p class="diagnosis-l1">LinkedIn login has expired.</p>
+          <p class="diagnosis-l2">All 6 saved-search URLs returned empty job shells at <code>source</code>.</p>
+          <div class="diagnosis-actions">
+            <button class="btn-primary">Run again</button>
+            <a href="#" class="btn-quiet">Show the 6 failed URLs</a>
+            <a href="#c10" class="callout" aria-label="callout 10">10</a>
+          </div>
+        </div>
+      </div>
+      <div class="rail-groups">
+        <div style="flex:.9"><div class="rail-group-label">Acquire</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 1 of 10, reconcile, done, 2s"></button></li><li><button class="rail-btn done" aria-label="stage 2 of 10, farm, done, 9s"></button></li><li><button class="rail-btn failed" aria-label="stage 3 of 10, source, failed, 1m 50s"></button></li></ol></div>
+        <div style="flex:.9"><div class="rail-group-label">Understand</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn pending" aria-label="stage 4 of 10, compress, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 5 of 10, structure, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 6 of 10, assemble, not reached"></button></li></ol></div>
+        <div style="flex:1.2"><div class="rail-group-label">Decide</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn pending" aria-label="stage 7 of 10, filter, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 8 of 10, dedup, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 9 of 10, rank, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 10 of 10, sync, not reached"></button></li></ol></div>
+      </div>
+      <p class="rail-text">stage 3 of 10 — source · failed</p>
+      <table class="funnel-table">
+        <caption class="sr-only">Stage funnel for the Aug 6 failed run, stopped at source.</caption>
+        <thead><tr><th>Stage</th><th>in → out</th><th>retention</th><th>Drops by rule</th></tr></thead>
+        <tbody>
+          <tr><td class="funnel-stage">reconcile</td><td class="funnel-na">n/a</td><td class="funnel-na">state-sync only</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">farm</td><td class="funnel-num">— → 3<button class="funnel-info" aria-label="farm is additive — no input to measure" title="farm is additive — no input to measure">i</button></td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill outward" style="width:12%"></div></div></td><td class="funnel-drops">additive — no drops</td></tr>
+          <tr><td class="funnel-stage">source</td><td class="funnel-num">190 → —</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill destructive" style="width:100%"></div></div></td><td class="funnel-drops">failed — 0/6 URLs returned non-empty shells</td></tr>
+          <tr><td class="funnel-stage">compress</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">structure</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">assemble</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">filter</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">dedup</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">rank</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">sync</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+        </tbody>
+      </table>
+      <p class="funnel-foot">Stopped at <code>source</code> — retention not computed.</p>
+      <div class="disclosure" data-open="false">
+        <button aria-expanded="false">Evidence — 6 soft errors, grouped by cause <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+        <div class="disclosure-content">
+          <div class="event-row"><span class="level-warn">warn</span><span>source: empty job shell — url_1 (linkedin)</span></div>
+          <div class="event-row"><span class="level-warn">warn</span><span>source: empty job shell — url_2 (linkedin)</span></div>
+          <div class="event-row"><span class="level-warn">warn</span><span>source: empty job shell — url_3 … url_6 (linkedin)</span></div>
+          <a href="#" class="btn-quiet">Show full log (247 events)</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S6 — Run detail, failed undiagnosed (raw fallback) -->
+<!-- ======================================================================= -->
+<section class="frame" id="s6">
+  <div class="frame-title"><div><h2>S6 — Run detail — failed, undiagnosed (raw fallback)</h2><p>R6 fallback / R7</p></div><span class="chip">no invented diagnosis</span></div>
+  <div class="frame-body" style="max-width:560px">
+    <div style="background:var(--card);border-radius:10px;box-shadow:0 0 0 1px var(--border);padding:16px">
+      <div class="outcome-header">
+        <div><div class="outcome-yield">Failed at <code>structure</code></div></div>
+        <div class="outcome-meta"><span class="status-chip">Failed</span><span>2m 09s</span><span>scheduled</span><span>Aug 6, 23:02:00</span></div>
+      </div>
+      <div class="diagnosis">
+        <div class="diagnosis-icon"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></div>
+        <div class="diagnosis-body">
+          <p class="diagnosis-l1">Failed at <code>structure</code></p>
+          <p class="diagnosis-l2" style="margin-bottom:6px">No matching diagnosis class — raw error and last checkpoint below.</p>
+          <pre class="raw-error">TypeError: Cannot read properties of undefined (reading 'choices')
+    at StructureStage.run (structure/index.ts:142:18)
+    at Pipeline.execute (runner/index.ts:88:5)</pre>
+          <p class="diagnosis-l2" style="margin:0 0 10px">Last checkpoint: <code>compress</code> @ 23:03:58</p>
+          <div class="diagnosis-actions">
+            <button class="btn-primary">Run again</button>
+            <a href="#" class="btn-quiet">Show full log</a>
+          </div>
+        </div>
+      </div>
+      <div class="rail-groups">
+        <div style="flex:.9"><div class="rail-group-label">Acquire</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 1 of 10, reconcile, done, 2s"></button></li><li><button class="rail-btn done" aria-label="stage 2 of 10, farm, done, 7s"></button></li><li><button class="rail-btn done" aria-label="stage 3 of 10, source, done, 1m 40s"></button></li></ol></div>
+        <div style="flex:.9"><div class="rail-group-label">Understand</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn done" aria-label="stage 4 of 10, compress, done, 9s"></button></li><li><button class="rail-btn failed" aria-label="stage 5 of 10, structure, failed, 11s"></button></li><li><button class="rail-btn pending" aria-label="stage 6 of 10, assemble, not reached"></button></li></ol></div>
+        <div style="flex:1.2"><div class="rail-group-label">Decide</div><ol class="rail-list-segs" style="list-style:none"><li><button class="rail-btn pending" aria-label="stage 7 of 10, filter, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 8 of 10, dedup, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 9 of 10, rank, not reached"></button></li><li><button class="rail-btn pending" aria-label="stage 10 of 10, sync, not reached"></button></li></ol></div>
+      </div>
+      <p class="rail-text">stage 5 of 10 — structure · failed</p>
+      <table class="funnel-table">
+        <caption class="sr-only">Stage funnel for the Aug 6 fallback run, stopped at structure.</caption>
+        <thead><tr><th>Stage</th><th>in → out</th><th>retention</th><th>Drops by rule</th></tr></thead>
+        <tbody>
+          <tr><td class="funnel-stage">reconcile</td><td class="funnel-na">n/a</td><td class="funnel-na">state-sync only</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">farm</td><td class="funnel-num" id="c11-src">— → 2<button class="funnel-info" aria-label="farm is additive — no input to measure" title="farm is additive — no input to measure">i</button> <a href="#c11" class="callout" aria-label="callout 11">11</a></td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill outward" style="width:9%"></div></div></td><td class="funnel-drops">additive — no drops</td></tr>
+          <tr><td class="funnel-stage">source</td><td class="funnel-num">176 → 176</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">compress</td><td class="funnel-num">176 → 176</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill" style="width:100%"></div></div></td><td class="funnel-drops">none</td></tr>
+          <tr><td class="funnel-stage">structure</td><td class="funnel-num">176 → —</td><td class="funnel-bar-cell"><div class="funnel-bar"><div class="funnel-bar-fill destructive" style="width:100%"></div></div></td><td class="funnel-drops">failed — LLM request timeout</td></tr>
+          <tr><td class="funnel-stage">assemble</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">filter</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">dedup</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">rank</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+          <tr><td class="funnel-stage">sync</td><td class="funnel-na">n/a</td><td class="funnel-na">not reached</td><td class="funnel-drops">—</td></tr>
+        </tbody>
+      </table>
+      <p class="funnel-foot">Stopped at <code>structure</code> — retention not computed.</p>
+      <div class="disclosure" data-open="false">
+        <button aria-expanded="false">Evidence — 0 soft errors (hard failure) <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+        <div class="disclosure-content"><p>No warn-level soft errors — this was a hard stage failure.</p><a href="#" class="btn-quiet">Show full log (247 events)</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== reference: all 5 diagnosis classes + fallback, dossier §6 verbatim ============== -->
+<section class="frame" id="diag-ref">
+  <div class="frame-title"><div><h2>Reference — Diagnosis panel classes (dossier §6, verbatim)</h2><p>Not a numbered screen — a content-fidelity reference. Classes i and iv appear in context above (S5, S4); reproduced again here alongside ii/iii/v/fallback for a single audit point.</p></div></div>
+  <div class="frame-body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="diagnosis" style="margin:0"><div class="diagnosis-icon"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></div><div class="diagnosis-body"><p class="diagnosis-l1">i · LinkedIn login has expired.</p><p class="diagnosis-l2">All 6 saved-search URLs returned empty job shells at <code>source</code>.</p><div class="diagnosis-actions"><button class="btn-primary">Run again</button><a href="#" class="btn-quiet">Show the 6 failed URLs</a></div></div></div>
+    <div class="diagnosis" style="margin:0"><div class="diagnosis-icon"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></div><div class="diagnosis-body"><p class="diagnosis-l1">ii · LinkedIn is soft-blocking us — the throttle breaker is open.</p><p class="diagnosis-l2">12 consecutive withheld JD shells. Reopens ~21:40.</p><div class="diagnosis-actions"><button class="btn-primary" disabled>Run again</button><span class="countdown-chip">Retry in 34m</span><a href="#" class="btn-quiet">What is the breaker?</a></div></div></div>
+    <div class="diagnosis" style="margin:0"><div class="diagnosis-icon amber"><svg class="icon"><use href="#icon-alert-circle"></use></svg></div><div class="diagnosis-body"><p class="diagnosis-l1">iii · The daemon isn't running, so your queued run won't start.</p><p class="diagnosis-l2">No daemon process responded to the health probe.</p><div class="diagnosis-actions"><button class="btn-primary">Copy: jobbunny serve start</button><a href="#" class="btn-quiet">Keep queued</a><a href="#" class="btn-quiet">Cancel</a></div><p class="section-note" style="margin:6px 0 0">Has no run row — surfaces in S8 and the live strip only, never in run detail (weakness #4).</p></div></div>
+    <div class="diagnosis calm-wrap" style="margin:0"><div class="diagnosis-icon calm"><svg class="icon"><use href="#icon-check-circle"></use></svg></div><div class="diagnosis-body"><p class="diagnosis-l1">iv · Ran clean — 214 jobs scraped, none passed your filter.</p><p class="diagnosis-l2">Biggest drop: <code>filter</code> — 189 by <code>locations</code>.</p><div class="diagnosis-actions"><a href="#" class="btn-quiet">Review filter rules →</a></div></div></div>
+    <div class="diagnosis" style="margin:0"><div class="diagnosis-icon"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></div><div class="diagnosis-body"><p class="diagnosis-l1">v · Chrome wasn't found at any known path.</p><p class="diagnosis-l2">Tried 4 candidate paths for darwin.</p><div class="diagnosis-actions"><button class="btn-primary">Copy: jobbunny doctor --profile harish</button><a href="#" class="btn-quiet">Show the paths tried</a></div></div></div>
+    <div class="diagnosis" style="margin:0"><div class="diagnosis-icon"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></div><div class="diagnosis-body"><p class="diagnosis-l1">fallback · Failed at <code>structure</code></p><p class="diagnosis-l2">No invented diagnosis — raw error 2-line-clamped, last checkpoint shown.</p><div class="diagnosis-actions"><button class="btn-primary">Run again</button><a href="#" class="btn-quiet">Show full log</a></div></div></div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S7 — Run detail, telemetry missing -->
+<!-- ======================================================================= -->
+<section class="frame" id="s7">
+  <div class="frame-title"><div><h2>S7 — Run detail — telemetry missing</h2><p>R10</p></div><span class="chip">no rail, no funnel, no events — that absence is the design</span></div>
+  <div class="frame-body" style="max-width:560px">
+    <div class="dashed-card" id="c12-src">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <svg class="icon icon-lg run-icon muted"><use href="#icon-database-off"></use></svg>
+        <div><div class="outcome-yield" style="font-size:1.3rem">— Telemetry missing</div><div class="outcome-meta" style="justify-content:flex-start;margin-top:2px"><span>—</span><span>scheduled</span><span>Aug 4, 23:02</span></div></div>
+        <a href="#c12" class="callout" aria-label="callout 12" style="margin-left:auto">12</a>
+      </div>
+      <p style="font-size:.85rem">"This run's telemetry was never written. The run itself may have succeeded — the board cannot tell. Check <code>jobbunny runs --profile harish</code> or the daemon log."</p>
+      <p class="section-note">No rail, no funnel, no events render below — rendering empty versions of those would itself be the lie R10 forbids. The one honest terminal hand-off in the design.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S8 — Sidebar Run Now block, 6(+1) states -->
+<!-- ======================================================================= -->
+<section class="frame" id="s8">
+  <div class="frame-title"><div><h2>S8 — Sidebar Run Now block — 6 states</h2><p>Trigger + zero-click status, R5</p></div><span class="chip">+ conflict, a 7th</span></div>
+  <div class="frame-body">
+    <div class="runnow-cards">
+      <div class="runnow-card-wrap">
+        <div class="runnow-block">
+          <button class="btn-primary" style="width:100%">Run now</button>
+          <button class="runnow-status"><svg class="icon run-icon success"><use href="#icon-check-circle"></use></svg><span><b>7 new</b> · 2h ago</span><a href="#c15" class="callout" aria-label="callout 15" style="margin-left:auto">15</a></button>
+        </div>
+        <p class="runnow-card-cap">idle</p>
+      </div>
+      <div class="runnow-card-wrap">
+        <div class="runnow-block">
+          <button class="btn-primary" style="width:100%" disabled>Queuing…</button>
+          <a href="#c16" class="callout" aria-label="callout 16" style="margin-top:6px;display:inline-flex">16</a>
+        </div>
+        <p class="runnow-card-cap">queuing (optimistic, &lt;400ms)</p>
+      </div>
+      <div class="runnow-card-wrap">
+        <div class="runnow-block">
+          <div style="font-size:.78rem">Starts within ~30s</div>
+          <button class="btn-outline" style="width:100%;margin-top:6px">Cancel</button>
+        </div>
+        <p class="runnow-card-cap">queued</p>
+      </div>
+      <div class="runnow-card-wrap">
+        <div class="runnow-block destructive-outline">
+          <div style="font-size:.78rem;font-weight:600">Daemon isn't running</div>
+          <button class="btn-outline" style="width:100%;margin-top:6px">Copy: jobbunny serve start</button>
+          <div style="display:flex;gap:8px;margin-top:6px"><button class="btn-quiet" style="padding:0">Keep queued</button><button class="btn-quiet" style="padding:0">Cancel</button></div>
+        </div>
+        <p class="runnow-card-cap">daemon down</p>
+      </div>
+      <div class="runnow-card-wrap">
+        <div class="runnow-block amber-outline">
+          <div style="font-size:.78rem;color:var(--amber);font-weight:600">Can't reach the daemon — queued anyway</div>
+        </div>
+        <p class="runnow-card-cap">daemon unknown</p>
+      </div>
+      <div class="runnow-card-wrap">
+        <div class="runnow-block">
+          <button class="btn-primary" style="width:100%" disabled><span class="pulse-dot animate" style="display:inline-block;vertical-align:middle;background:#fff;margin:0 6px 0 0"></span>structure 5/10</button>
+          <a href="#" class="btn-quiet" style="padding-left:0">View</a>
+        </div>
+        <p class="runnow-card-cap">running</p>
+      </div>
+      <div class="runnow-card-wrap">
+        <div class="runnow-block">
+          <div style="font-size:.78rem">Run in progress — view it</div>
+        </div>
+        <p class="runnow-card-cap">conflict (7th, bonus)</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S9 — State matrix -->
+<!-- ======================================================================= -->
+<section class="frame" id="s9">
+  <div class="frame-title"><div><h2>S9 — State matrix — loading / empty / error / disconnected</h2><p>Five-states coverage, §9</p></div><span class="chip">rendered as tiles, not the dossier's table</span></div>
+  <div class="frame-body">
+
+    <div class="s9-row">
+      <h3>List pane</h3>
+      <div class="s9-tiles">
+        <div class="s9-tile"><span class="cap">List pane · Default</span><div class="run-row" style="padding:6px"><svg class="icon run-icon success"><use href="#icon-check-circle"></use></svg><div class="run-body"><span class="run-num" style="font-size:1rem">7</span> <span class="run-label" style="font-size:.72rem">new jobs</span></div></div></div>
+        <div class="s9-tile"><span class="cap">List pane · Empty</span><div class="empty-card" style="padding:10px"><p style="font-size:.7rem">No runs recorded yet.</p><button class="btn-primary" style="font-size:.68rem;padding:4px 8px">Run now</button></div></div>
+        <div class="s9-tile"><span class="cap">List pane · Loading</span><div class="skel skel-card" style="height:56px"></div></div>
+        <div class="s9-tile"><span class="cap">List pane · Error</span><div class="error-retry" style="padding:8px"><p style="font-size:.7rem">Couldn't load runs.</p><button class="btn-outline" style="font-size:.68rem;padding:3px 8px">Retry</button></div></div>
+        <div class="s9-tile"><span class="cap">List pane · Success</span><div class="run-row selected" style="padding:6px"><svg class="icon run-icon success"><use href="#icon-check-circle"></use></svg><div class="run-body"><span style="font-size:.68rem">ring-primary/40 + bg-accent</span></div></div></div>
+      </div>
+    </div>
+
+    <div class="s9-row">
+      <h3>Detail pane</h3>
+      <div class="s9-tiles">
+        <div class="s9-tile"><span class="cap">Detail pane · Default</span><p style="font-size:.68rem">Fixed 5-panel order: header → diagnosis → rail → funnel → evidence.</p></div>
+        <div class="s9-tile"><span class="cap">Detail pane · Empty</span><div class="empty-card" style="padding:8px"><p style="font-size:.66rem">Both panes collapse to one centred card.</p></div></div>
+        <div class="s9-tile" id="c13-src"><span class="cap">Detail pane · Loading <a href="#c13" class="callout" aria-label="callout 13">13</a></span><div class="skel skel-line" style="width:70%"></div><div class="skel skel-line" style="width:90%;height:26px"></div><p style="font-size:.62rem;color:var(--muted-fg)">diagnosis panel never skeletons</p></div>
+        <div class="s9-tile"><span class="cap">Detail pane · Error</span><div class="error-retry" style="padding:8px"><p style="font-size:.68rem">Pane-scoped — list stays usable.</p></div></div>
+        <div class="s9-tile"><span class="cap">Detail pane · Success</span><p style="font-size:.68rem">Outcome header renders first; panels stream in.</p></div>
+      </div>
+    </div>
+
+    <div class="s9-row">
+      <h3>Live strip</h3>
+      <div class="s9-tiles">
+        <div class="s9-tile"><span class="cap">Live strip · Default</span><div class="live-strip" style="padding:6px;height:auto"><span class="pulse-dot animate"></span><span style="font-size:.66rem">Running — structure</span></div></div>
+        <div class="s9-tile"><span class="cap">Live strip · Loading</span><p style="font-size:.68rem">No skeleton — mounts only when data exists. Absence is the state.</p></div>
+        <div class="s9-tile"><span class="cap">Live strip · Empty</span><p style="font-size:.68rem">n/a — absent when nothing runs.</p></div>
+        <div class="s9-tile" id="c14-src"><span class="cap">Live strip · Error (Disconnected) <a href="#c14" class="callout" aria-label="callout 14">14</a></span><div class="live-strip disconnected" style="padding:6px;height:auto"><svg class="icon" style="width:14px;height:14px;color:var(--amber)"><use href="#icon-wifi-off"></use></svg><span style="font-size:.64rem;color:var(--amber)">Disconnected — 47s ago</span></div></div>
+        <div class="s9-tile"><span class="cap">Live strip · Stalled (contrast, R11)</span><div class="live-strip" style="padding:6px;height:auto;background:var(--amber-tint);box-shadow:0 0 0 1px rgba(201,138,46,.35) inset"><svg class="icon" style="width:14px;height:14px;color:var(--amber)"><use href="#icon-activity-off"></use></svg><span style="font-size:.64rem;color:var(--amber)">No heartbeat for 11m</span></div></div>
+        <div class="s9-tile"><span class="cap">Live strip · Success</span><div class="live-strip" style="padding:6px;height:auto"><span class="chip" style="color:var(--success);border-color:rgba(76,175,110,.3);font-size:.62rem">Alive</span><span style="font-size:.6rem;color:var(--muted-fg)">aria-live="polite" on stage change</span></div></div>
+      </div>
+    </div>
+
+    <div class="s9-row">
+      <h3>Sidebar block</h3>
+      <div class="s9-tiles">
+        <div class="s9-tile"><span class="cap">Sidebar block · Default</span><button class="btn-primary" style="width:100%;font-size:.7rem">Run now</button><div style="font-size:.62rem;color:var(--muted-fg)">idle + last-run line</div></div>
+        <div class="s9-tile"><span class="cap">Sidebar block · Empty</span><button class="btn-primary" style="width:100%;font-size:.7rem">Run now</button><div style="font-size:.62rem;color:var(--muted-fg)">first-ever load: button only</div></div>
+        <div class="s9-tile"><span class="cap">Sidebar block · Loading</span><button class="btn-primary" style="width:100%;font-size:.7rem" disabled>Run now</button><div class="skel skel-line" style="width:80%;height:8px"></div></div>
+        <div class="s9-tile"><span class="cap">Sidebar block · Error</span><button class="btn-primary" style="width:100%;font-size:.7rem">Run now</button><div style="font-size:.62rem;color:var(--muted-fg)">status unavailable</div></div>
+        <div class="s9-tile"><span class="cap">Sidebar block · Success</span><div style="font-size:.7rem"><svg class="icon run-icon success" style="width:12px;height:12px"><use href="#icon-check-circle"></use></svg> Done: 7 new</div></div>
+      </div>
+    </div>
+
+    <div class="s9-row">
+      <h3>Event log</h3>
+      <div class="s9-tiles">
+        <div class="s9-tile"><span class="cap">Event log · Default</span><div class="disclosure" data-open="false" style="margin:0"><button aria-expanded="false" style="font-size:.66rem">Evidence <svg class="icon chev" style="width:12px;height:12px"><use href="#icon-chevron-down"></use></svg></button></div></div>
+        <div class="s9-tile"><span class="cap">Event log · Empty</span><p style="font-size:.66rem">"No events at this level."</p><a href="#" class="btn-quiet" style="font-size:.66rem">Clear filter</a></div>
+        <div class="s9-tile"><span class="cap">Event log · Loading</span><div class="skel skel-line" style="height:6px"></div><div class="skel skel-line" style="height:6px"></div><div class="skel skel-line" style="height:6px"></div></div>
+        <div class="s9-tile"><span class="cap">Event log · Error</span><p style="font-size:.66rem">"Couldn't load events."</p><button class="btn-outline" style="font-size:.62rem;padding:2px 6px">Retry</button></div>
+        <div class="s9-tile"><span class="cap">Event log · Success</span><p style="font-size:.62rem">level filter lives inside the disclosure</p></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Annotation panel: C1-C17 -->
+<!-- ======================================================================= -->
+<section class="annotations" id="annotations">
+  <h2 style="font-size:1rem;margin-bottom:12px">Annotations — C1 – C17 (dossier §12, verbatim)</h2>
+
+  <div class="annotation-row" id="c1"><a href="#c1-src" class="callout" aria-label="callout 1 source">1</a><div class="annotation-text"><b>S1 list</b><b>Urgency = weight, not hue.</b> Urgent rows are the only rows with a left border and tint; calm rows are the lightest thing on the page. Survives greyscale and peripheral vision.<a href="#c1-src" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c2"><a href="#c2-src" class="callout" aria-label="callout 2 source">2</a><div class="annotation-text"><b>S1 list</b>Calm <b>asserts health</b> in words ("Ran clean · 10/10 stages"). Redundant with the visual channel by design — §1's hypothesis is unsourced, so language carries it alone if the visual fails.<a href="#c2-src" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c3"><a href="#c3-src" class="callout" aria-label="callout 3 source">3</a><div class="annotation-text"><b>S1 list</b><b>Von Restorff:</b> the yield number is the one distinct element on a produced row. On a calm row the one accented element is the health assertion — nothing else competes, because nothing else needs the user.<a href="#c3-src" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c4"><a href="#c4-src" class="callout" aria-label="callout 4 source">4</a><div class="annotation-text"><b>S1 list</b><b>Jakob's Law:</b> status-icon-left, newest-top, click-row-for-detail-right is the GH Actions / Airflow model this engineer already runs on. It changed the decision — a card grid would have looked better and read slower.<a href="#c4-src" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c5"><a href="#c5-src" class="callout" aria-label="callout 5 source">5</a><div class="annotation-text"><b>S2 strip</b><b>Live never hijacks.</b> Zero live chrome when idle; a one-row strip when live; the detail pane is offered, never stolen. Resolves concern (b).<a href="#c5-src" class="back-link">↩ back to S2</a></div></div>
+  <div class="annotation-row" id="c6"><a href="#c6-src" class="callout" aria-label="callout 6 source">6</a><div class="annotation-text"><b>S2 rail</b><b>10 pips chunked 3/3/4</b> (Miller) with exactly one distinct segment (Von Restorff) and a mandatory text partner — the test that keeps it an accelerator, not a widget. Resolves concern (c).<a href="#c6-src" class="back-link">↩ back to S2</a></div></div>
+  <div class="annotation-row" id="c7"><a href="#c7-src" class="callout" aria-label="callout 7 source">7</a><div class="annotation-text"><b>S3 header</b><code>[View them →]</code> closes the loop to the jobs. <b>UX-added, not in R1–R8</b> — see NOTES.<a href="#c7-src" class="back-link">↩ back to S3</a></div></div>
+  <div class="annotation-row" id="c8"><a href="#c8-src" class="callout" aria-label="callout 8 source">8</a><div class="annotation-text"><b>S4 panel</b>The zero-yield-healthy panel has <b>no button</b> on purpose. An action affordance here would re-manufacture the alarm this feature exists to remove.<a href="#c8-src" class="back-link">↩ back to S4</a></div></div>
+  <div class="annotation-row" id="c9"><a href="#c9-src" class="callout" aria-label="callout 9 source">9</a><div class="annotation-text"><b>S3–S6</b><b>Fixed panel order</b> across all outcomes; Content Priority #6 is satisfied by lifting the <i>evidence summary</i> into the diagnosis panel while the <i>full log</i> stays last.<a href="#c9-src" class="back-link">↩ back to S3</a></div></div>
+  <div class="annotation-row" id="c10"><a href="#c10-src" class="callout" aria-label="callout 10 source">10</a><div class="annotation-text"><b>S5 panel</b><b>Hick's Law:</b> exactly one primary action per diagnosis, never a remedy menu. <b>Fitts's:</b> it sits adjacent to the sentence that motivates it, top of pane, not in a footer.<a href="#c10-src" class="back-link">↩ back to S5</a></div></div>
+  <div class="annotation-row" id="c11"><a href="#c11-src" class="callout" aria-label="callout 11 source">11</a><div class="annotation-text"><b>S5/S6 funnel</b><code>farm</code> renders <code>—</code> with an "additive" explanation and an outward bar, never <code>0</code> (R8), and is excluded from retention arithmetic.<a href="#c11-src" class="back-link">↩ back to S6</a></div></div>
+  <div class="annotation-row" id="c12"><a href="#c12-src" class="callout" aria-label="callout 12 source">12</a><div class="annotation-text"><b>S7</b><b>Telemetry-missing is a first-class screen</b>, dashed and empty of rail/funnel/events. The one honest terminal hand-off in the design.<a href="#c12-src" class="back-link">↩ back to S7</a></div></div>
+  <div class="annotation-row" id="c13"><a href="#c13-src" class="callout" aria-label="callout 13 source">13</a><div class="annotation-text"><b>S9</b><b>Never skeleton a severity-shaped state.</b> A red-shaped placeholder is a 300ms false alarm.<a href="#c13-src" class="back-link">↩ back to S9</a></div></div>
+  <div class="annotation-row" id="c14"><a href="#c14-src" class="callout" aria-label="callout 14 source">14</a><div class="annotation-text"><b>S9</b><b>Stalled ≠ disconnected</b> (R11) — connected-but-not-beating vs cannot-tell. Two icons, two sentences.<a href="#c14-src" class="back-link">↩ back to S9</a></div></div>
+  <div class="annotation-row" id="c15"><a href="#c15-src-s1" class="callout" aria-label="callout 15 source">15</a><div class="annotation-text"><b>S8</b><b>Persistent last-run line</b> turns the daily question into a zero-click answer from any route. Highest-leverage efficiency change here.<a href="#c15-src-s1" class="back-link">↩ back to S1/S8</a></div></div>
+  <div class="annotation-row" id="c16"><a href="#c16-src" class="callout" aria-label="callout 16 source">16</a><div class="annotation-text"><b>S8</b><b>Doherty:</b> the queue state flips optimistically in &lt;400ms, independent of the daemon health probe; the probe result then refines it. A timeout reads "unknown", never "down".<a href="#c16-src" class="back-link">↩ back to S8</a></div></div>
+  <div class="annotation-row" id="c17"><a href="#c17-src" class="callout" aria-label="callout 17 source">17</a><div class="annotation-text"><b>S5</b> <span style="font-size:.7rem;color:var(--muted-fg)">(shown here on S4's healthy-diagnosis panel, same principle)</span><b>Tesler's Law:</b> "is this zero good or bad" is irreducible complexity — the <i>system</i> runs the health gate and states the verdict. The user is never handed a raw count to interpret. That inversion is the whole feature.<a href="#c17-src" class="back-link">↩ back to S4</a></div></div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Charter scorecard -->
+<!-- ======================================================================= -->
+<section class="annotations" id="scorecard">
+  <h2 style="font-size:1rem;margin-bottom:4px">Charter scorecard (dossier §13, verbatim)</h2>
+  <table class="scorecard-table">
+    <thead><tr><th>Pillar</th><th>Score</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td>Learnability</td><td class="pillar-score">Strong</td><td>Borrows the CI run-list model the persona uses daily (Jakob). Every state is text-labelled, so nothing must be inferred from colour. Not top-of-scale: the calm/urgent <i>weight</i> language is novel and has no sourced precedent — a first-time reader may need one broken run to internalise it.</td></tr>
+      <tr><td>Efficiency</td><td class="pillar-score">Strong</td><td>Daily answer at 0 clicks, failure diagnosis at 1 click and 0 scrolls, 0 text inputs, six controls killed outright. This is the pillar the design optimises hardest, and the counter-metric (time on page should <i>fall</i>) is aligned with it rather than against it.</td></tr>
+      <tr><td>Memorability</td><td class="pillar-score">Medium</td><td><i>Non-top score, named.</i> The outcome vocabulary is six-wide — produced / empty / degraded / failed / crashed / unrecorded. For a surface visited once a day, that is more distinctions than anyone will hold in memory. Mitigated (never memorised — every state is labelled in words) but not solved: <b>failed vs crashed</b> and <b>empty vs degraded</b> are genuinely subtle pairs. If real use shows the user cannot articulate the difference, collapse crashed into failed and keep the distinction as a sub-line.</td></tr>
+      <tr><td>Error prevention</td><td class="pillar-score">Medium-Strong</td><td>Few destructive actions exist to prevent — the only reversible-window action is cancel-pending, and it needs no confirm. Skeletons never imply severity; stalled and disconnected cannot be confused. <b>But</b> the design cannot <i>prevent</i> this system's worst error, only disclose it: a run whose telemetry vanished (R10) and a health gate that says "ran clean" on a heuristic.</td></tr>
+      <tr><td>Satisfaction</td><td class="pillar-score">Medium-Strong</td><td>The design's success looks like disengagement — the counter-metric says time on this page should fall. That is correct for the persona and it caps this pillar honestly: a runs page that felt <i>satisfying to browse</i> would have failed. What it can deliver is relief (the red row explains itself) and trust (the calm row justifies its calm). Neither is delight, and aiming for delight here would be the wrong instinct.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="weaknesses">
+    <h3 style="font-size:.9rem;margin:16px 0 8px">Named weaknesses — this scorecard is not a clean sweep</h3>
+    <ol>
+      <li><b>The central visual hypothesis is unsourced and untested.</b> §1's weight-not-hue answer is reasoning, not precedent — the spec flags this and I am not able to remove the flag. It is cheaply falsifiable: one week of real runs, and ask whether a calm zero was ever mistaken for a broken one. Design accordingly hedged with redundant language (C2).</li>
+      <li><b>The calm state has a scope dependency the MVP slice does not cover.</b> The health gate that <i>earns</i> calm leans on soft-error aggregation — <b>R9, a Should, not a Must.</b> If R9 slips, the gate degrades to <code>10/10 stages && no failure && no open breaker</code>, the health sentence drops its soft-error clause, and a run that limped through with 40 per-URL failures can still render calm. That is a weaker guarantee than §1 implies and it must be stated at build time, not discovered. <b>Recommendation to product-ui: R9 is load-bearing for R2 and should be promoted, or the calm copy softened to match what the gate can actually prove.</b></li>
+      <li><b>Six-state vocabulary risks over-design</b> — see Memorability. The honest read is that I added <i>degraded</i> and <i>unrecorded</i> to states the spec named five of; both are derivable from the spec, but the total is at the edge of what one user will retain.</li>
+      <li><b>Two of the five diagnosis classes live on a different surface.</b> Class (iii), daemon-not-running, never produces a run row, so it cannot appear in run detail. The spec presents the five as one set; the UI must split them across the sidebar block and the detail pane. Not a defect, but a seam that an implementer reading R6 literally will trip over.</li>
+    </ol>
+  </div>
+</section>
+
+<footer class="foot">Standalone mid-fi mockup — docs/product/run-experience-overhaul/mockup.html — not imported by any application code.</footer>
+
+<script>
+(function () {
+  var body = document.body;
+  var buttons = document.querySelectorAll('.toggle-btn');
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () {
+      buttons.forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+      b.setAttribute('aria-pressed', 'true');
+      body.setAttribute('data-state', b.dataset.state);
+    });
+  });
+  document.querySelectorAll('.disclosure > button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var wrap = btn.parentElement;
+      var wasOpen = wrap.getAttribute('data-open') === 'true';
+      wrap.setAttribute('data-open', wasOpen ? 'false' : 'true');
+      btn.setAttribute('aria-expanded', wasOpen ? 'false' : 'true');
+    });
+  });
+})();
+</script>
+</body>
+</html>

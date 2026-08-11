@@ -6,18 +6,30 @@ import {
 } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { RunSummary } from '../../lib/api/types';
-import { parseStageProgress } from '../runs/runProgress';
-import { runEventsQuery, runQuery, runsKeys, runsQuery } from '../runs/runs.queries';
+import { stageProgressFrom } from '../runs/runProgress';
+import { runQuery, runsKeys, runsQuery } from '../runs/runs.queries';
+import { daemonQuery } from '../wizard/wizard.queries';
 import type { RunIntentView } from '../wizard/wizard.types';
 import { cancelRunIntent, requestRunIntent } from './intents.api';
 import { runControlKeys, runIntentsQuery } from './runcontrol.queries';
-import { pickRunControlState, type RunControlState, runControlLabel } from './runState';
+import {
+  type LastRunStatus,
+  pickLastRunStatus,
+  pickRunControlState,
+  type RunControlState,
+  runControlLabel,
+} from './runState';
 
 export const POLL_INTERVAL_MS = 2500;
 
 export interface RunControlHandle {
   state: RunControlState;
   label: string;
+  /** The persistent last-run status line's data (C15) — decoupled from
+   * DONE_WINDOW_MS, unlike `state`'s own windowed done/failed cases. Null
+   * until any run has ever completed (ux-notes §8/§9's "first-ever load:
+   * button only, no status line"). */
+  lastRunStatus: LastRunStatus;
   onRun: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
@@ -64,7 +76,7 @@ export function useRunControl(profile: string): RunControlHandle {
   const runs = runsResult.data?.rows ?? [];
   const intents = intentsResult.data?.rows ?? [];
   const newestId = runs.reduce((max, r) => Math.max(max, r.id), -1);
-  const runningId = runs.find((r) => r.status === 'running')?.id ?? -1;
+  const runningRun = runs.find((r) => r.status === 'running') ?? null;
 
   // A 409 sets `conflictRunId` sticky — `pickRunControlState` itself
   // already prefers a genuinely 'running' run over the conflict state
@@ -90,12 +102,25 @@ export function useRunControl(profile: string): RunControlHandle {
     ...runQuery(profile, newestId),
     refetchInterval: () => pollFlag(qc, profile),
   });
-  const eventsResult = useQuery({
-    ...runEventsQuery(profile, runningId),
-    refetchInterval: () => pollFlag(qc, profile),
-  });
 
-  const progress = parseStageProgress(eventsResult.data?.rows ?? []);
+  // No refetchInterval override here — daemonQuery()'s own comment says it
+  // refetches normally, and joining the shared poll or adding its own
+  // cadence is explicitly deferred to a later phase 4 slice.
+  const daemonResult = useQuery({ ...daemonQuery() });
+  // Loading or errored (a timeout included) both leave `data` undefined —
+  // collapsing both to `null` here is what makes pickRunControlState read
+  // 'daemon-unknown' rather than 'daemon-down' per C16: a probe that hasn't
+  // resolved yet must never be mistaken for a resolved "daemon is down".
+  const daemon = daemonResult.data ?? null;
+
+  const rawProgress = runningRun ? stageProgressFrom(runningRun) : null;
+  const progress = rawProgress
+    ? {
+        stage: rawProgress.stage,
+        index: rawProgress.stageIndex,
+        total: rawProgress.stageTotal,
+      }
+    : null;
 
   const state = pickRunControlState({
     runs,
@@ -104,6 +129,11 @@ export function useRunControl(profile: string): RunControlHandle {
     progress,
     conflictRunId,
     now: Date.now(),
+    daemon,
+  });
+  const lastRunStatus = pickLastRunStatus({
+    runs,
+    newestResult: detailResult.data?.result,
   });
 
   const runMutation = useMutation({
@@ -154,9 +184,15 @@ export function useRunControl(profile: string): RunControlHandle {
   return {
     state,
     label: runControlLabel(state),
+    lastRunStatus,
     onRun: () => runMutation.mutate(),
     onCancel: () => {
-      if (state.kind === 'queued') cancelMutation.mutate(state.intentId);
+      // 'daemon-down' is still a pending intent underneath (B24) — its
+      // `[Cancel]` control (ux-notes §8) cancels the same intent as the
+      // plain 'queued' case.
+      if (state.kind === 'queued' || state.kind === 'daemon-down') {
+        cancelMutation.mutate(state.intentId);
+      }
     },
     isSubmitting: runMutation.isPending,
     error,

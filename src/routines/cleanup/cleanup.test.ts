@@ -105,6 +105,7 @@ function fakeRunStore(opts?: { prunedResult?: number }): {
     },
     appendEvents() {},
     heartbeat() {},
+    recordProgress() {},
     recordFailure() {},
     recordSyncDryrun() {},
     finishRun() {},

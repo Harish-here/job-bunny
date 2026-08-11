@@ -181,6 +181,7 @@ test('a BoardStore satisfies the port and round-trips a query', () => {
     listRuns: () => ({ rows: [], total: 0 }),
     getRun: () => null,
     listRunEvents: () => ({ rows: [], total: 0 }),
+    listRunHealth: () => new Map(),
     close() {},
   };
   const { rows, total } = store.listJobs({ status: 'applied' });
@@ -211,6 +212,7 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     listRuns: () => ({ rows: [], total: 0 }),
     getRun: () => null,
     listRunEvents: () => ({ rows: [], total: 0 }),
+    listRunHealth: () => new Map(),
     close() {},
   };
   const docs = new Map<string, string>();

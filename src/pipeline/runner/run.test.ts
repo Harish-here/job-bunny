@@ -63,16 +63,23 @@ function fakePorts(): WiredPorts {
   return { lanes: [], connector: fakeConnector(), notifiers: [] };
 }
 
-/** A recording fake `RunStore` — only `heartbeat`/`recordFailure` (the two
- * methods the runner calls) do anything useful; the rest are stubs the
- * runner never touches. */
-function fakeRunStore(): {
+/** A recording fake `RunStore` — only `heartbeat`/`recordProgress`/
+ * `recordFailure` (the methods the runner calls) do anything useful; the
+ * rest are stubs the runner never touches. `throwOnRecordProgress`, when
+ * set, makes `recordProgress` throw on every call — used to fault-inject the
+ * runner's tolerance of a misbehaving progress writer (mirrors
+ * `fakeCheckpointStore`'s `throwOn` idiom above). `progressCalls` records
+ * once per invocation regardless of whether it throws, so tests can assert
+ * the call site was actually exercised. */
+function fakeRunStore(opts?: { throwOnRecordProgress?: boolean }): {
   store: RunStore;
   heartbeats: string[];
   failures: RunFailure[];
+  progressCalls: number[];
 } {
   const heartbeats: string[] = [];
   const failures: RunFailure[] = [];
+  const progressCalls: number[] = [];
   const store: RunStore = {
     startRun() {
       return -1;
@@ -80,6 +87,12 @@ function fakeRunStore(): {
     appendEvents() {},
     heartbeat(_runId, at) {
       heartbeats.push(at);
+    },
+    recordProgress() {
+      progressCalls.push(progressCalls.length);
+      if (opts?.throwOnRecordProgress) {
+        throw new Error('recordProgress boom');
+      }
     },
     recordFailure(_runId, failure) {
       failures.push(failure);
@@ -106,7 +119,7 @@ function fakeRunStore(): {
     },
     close() {},
   };
-  return { store, heartbeats, failures };
+  return { store, heartbeats, failures, progressCalls };
 }
 
 /** A recording fake `CheckpointStore` — only `write` (the one method the
@@ -378,6 +391,55 @@ test('a checkpoint-store write throw fails the run', async () => {
 
   assert.equal(failures.length, 1);
   assert.ok(failures[0]?.error.includes('checkpoint write failed at position 0'));
+});
+
+test('a recordProgress throw does not fail or stall the run', async () => {
+  const group = { date: '2026-07-21', timeDir: '09-00' };
+  const { store, heartbeats, failures, progressCalls } = fakeRunStore({
+    throwOnRecordProgress: true,
+  });
+  const { ctx } = fakeCtx(undefined, { runStore: store, runId: 5 });
+  const warnCalls: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+  ctx.logger = { ...ctx.logger, warn: (msg, data) => warnCalls.push({ msg, data }) };
+
+  let stage2Called = false;
+
+  const stage1: StageDef<StagePayload, StagePayload> = fakeStage({
+    name: 'stage1',
+    async run(input) {
+      return { jobs: [...input.jobs, makeJD('a')], dropped: input.dropped };
+    },
+  });
+  const stage2: StageDef<StagePayload, StagePayload> = fakeStage({
+    name: 'stage2',
+    async run(input) {
+      stage2Called = true;
+      return input;
+    },
+  });
+
+  const result = await runPipeline([stage1, stage2], ctx, group, {
+    runCapMs: 5_000,
+    stallMs: 5_000,
+  });
+
+  // A throwing recordProgress must not fail the run, nor stop later stages
+  // from running — unlike the checkpoint-store fault-injection case above.
+  assert.equal(result.outcome, 'passed');
+  assert.equal(result.stages.length, 2);
+  assert.equal(stage2Called, true);
+  assert.equal(heartbeats.length, 2, 'expected one heartbeat per stage started');
+  assert.equal(failures.length, 0);
+  assert.equal(
+    progressCalls.length,
+    2,
+    'expected recordProgress to be called once per stage, proving the throwing stub was actually exercised',
+  );
+  // The catch must not silently discard the fault — it stays observable via
+  // ctx.logger.warn (one per throw), so a real violation of the adapter's
+  // documented fail-soft contract would still surface a diagnostic.
+  assert.equal(warnCalls.length, 2, 'expected one warn per recordProgress throw');
+  assert.ok(warnCalls.every((call) => call.msg === 'recordProgress threw'));
 });
 
 test('resume: seeded from an earlier group, fast-forwards past its latest checkpoint, reuses its payload, and writes into its OWN group', async () => {

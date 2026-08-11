@@ -459,6 +459,96 @@ test('deriveStatus: running with a stale heartbeat (> 10min old) is crashed', ()
   assert.equal(deriveStatus('running', '2026-08-05T11:49:00.000Z', now), 'crashed');
 });
 
+test('recordProgress: upserts a row readable back via listRuns and getRun', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  const runId = store.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  store.recordProgress(runId, {
+    stage: 'farm',
+    stageIndex: 2,
+    stageTotal: 10,
+    stageStartedAt: '2026-08-05T10:00:00.000Z',
+  });
+  store.recordProgress(runId, {
+    stage: 'source',
+    stageIndex: 3,
+    stageTotal: 10,
+    stageStartedAt: '2026-08-05T10:01:00.000Z',
+  });
+
+  const listRow = store.listRuns().find((r) => r.id === runId);
+  assert.deepEqual(listRow?.progress?.stage, 'source');
+  assert.deepEqual(listRow?.progress?.stageIndex, 3);
+  assert.deepEqual(listRow?.progress?.stageTotal, 10);
+  assert.deepEqual(listRow?.progress?.stageStartedAt, '2026-08-05T10:01:00.000Z');
+  assert.equal(listRow?.progress?.itemCurrent, null);
+  assert.equal(listRow?.progress?.itemTotal, null);
+  assert.equal(typeof listRow?.progress?.updatedAt, 'string');
+
+  const detail = store.getRun(runId);
+  assert.equal(detail?.progress?.stage, 'source');
+  assert.equal(detail?.progress?.stageIndex, 3);
+});
+
+test('recordProgress: a writer called with runId === -1 is a silent no-op', () => {
+  const dbPath = freshDbPath();
+  const { warn, calls } = warnCollector();
+  const store = new SqliteRunStore(dbPath, { warn });
+  store.recordProgress(-1, {
+    stage: 'farm',
+    stageIndex: 1,
+    stageTotal: 10,
+    stageStartedAt: '2026-08-05T10:00:00.000Z',
+  });
+  assert.equal(calls.length, 0);
+  assert.equal(existsSync(dbPath), false);
+});
+
+test('recordProgress: fail-soft — a throw inside the prepared statement is caught, warned once, and never propagated', () => {
+  const dbPath = freshDbPath();
+  const { warn, calls } = warnCollector();
+  const store = new SqliteRunStore(dbPath, { warn });
+  // run_id 999 does not exist -> FK violation on insert, caught not thrown
+  // (mirrors the existing appendEvents fault-injection test above).
+  assert.doesNotThrow(() => {
+    store.recordProgress(999, {
+      stage: 'farm',
+      stageIndex: 1,
+      stageTotal: 10,
+      stageStartedAt: '2026-08-05T10:00:00.000Z',
+    });
+  });
+  assert.equal(calls.length, 1);
+  // A second failure does not add a second warning (single warned flag).
+  assert.doesNotThrow(() => {
+    store.recordProgress(999, {
+      stage: 'source',
+      stageIndex: 2,
+      stageTotal: 10,
+      stageStartedAt: '2026-08-05T10:01:00.000Z',
+    });
+  });
+  assert.equal(calls.length, 1);
+});
+
+test('listRuns / getRun: progress is null for a run with no run_progress row', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  const runId = store.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  const listRow = store.listRuns().find((r) => r.id === runId);
+  assert.equal(listRow?.progress, null);
+  const detail = store.getRun(runId);
+  assert.equal(detail?.progress, null);
+});
+
 test('deriveStatus: running with a fresh heartbeat (<= 10min old) stays running', () => {
   const now = new Date('2026-08-05T12:00:00.000Z');
   assert.equal(deriveStatus('running', '2026-08-05T11:51:00.000Z', now), 'running');

@@ -114,6 +114,7 @@ function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
     },
     appendEvents() {},
     heartbeat() {},
+    recordProgress() {},
     recordFailure() {},
     recordSyncDryrun() {},
     finishRun(runId, outcome, result, finishedAt) {

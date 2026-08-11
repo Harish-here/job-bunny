@@ -11,6 +11,8 @@ export interface FunnelStage {
   jobsIn: number;
   jobsOut: number;
   dropsByRule: Record<string, number>;
+  elapsedMs: number;
+  attempts: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,7 +25,9 @@ function isFunnelStage(value: unknown): value is FunnelStage {
     typeof value.name === 'string' &&
     typeof value.jobsIn === 'number' &&
     typeof value.jobsOut === 'number' &&
-    isRecord(value.dropsByRule)
+    isRecord(value.dropsByRule) &&
+    typeof value.elapsedMs === 'number' &&
+    typeof value.attempts === 'number'
   );
 }
 
@@ -57,4 +61,49 @@ export function newMatchCount(result: unknown): number {
   if (!stages || stages.length === 0) return 0;
   const last = stages[stages.length - 1];
   return last ? last.jobsOut : 0;
+}
+
+/** Stages excluded from retention arithmetic: `farm` has no meaningful
+ * in→out yield (it's additive, see CLAUDE.md's "Known limitations"), and
+ * `reconcile` is a state-sync stage with no meaningful in→out yield either
+ * (per ux-notes.md §5 / B17's `n/a · state-sync only` treatment). */
+const RETENTION_EXCLUDED_STAGES = new Set(['reconcile', 'farm']);
+
+/** Returns the single largest drop across every stage's `dropsByRule`, or
+ * `null` when `stages` is empty or no stage recorded any drop. Ties break to
+ * the first-encountered stage/rule in array order (stable iteration, `>` not
+ * `>=` when comparing to the running max). */
+export function getBiggestDrop(
+  stages: FunnelStage[],
+): { stage: string; rule: string; count: number } | null {
+  let biggest: { stage: string; rule: string; count: number } | null = null;
+  for (const stage of stages) {
+    for (const [rule, count] of Object.entries(stage.dropsByRule)) {
+      if (!biggest || count > biggest.count) {
+        biggest = { stage: stage.name, rule, count };
+      }
+    }
+  }
+  return biggest;
+}
+
+/** Aggregate retention over a funnel, after excluding `reconcile` and `farm`
+ * by name (see `RETENTION_EXCLUDED_STAGES`) — both are state-sync/additive
+ * stages with no meaningful in→out yield, so including them would skew the
+ * "how many jobs survived the funnel" summary. `startCount` is the first
+ * remaining stage's `jobsIn`; `endCount` is the last remaining stage's
+ * `jobsOut`; `retainedPct` is `endCount / startCount * 100`, `0` when there
+ * are no remaining stages or `startCount` is `0`. */
+export function computeRetention(stages: FunnelStage[]): {
+  startCount: number;
+  endCount: number;
+  retainedPct: number;
+} {
+  const filtered = stages.filter((stage) => !RETENTION_EXCLUDED_STAGES.has(stage.name));
+  const first = filtered[0];
+  const last = filtered[filtered.length - 1];
+  const startCount = first ? first.jobsIn : 0;
+  const endCount = last ? last.jobsOut : 0;
+  const retainedPct = startCount === 0 ? 0 : (endCount / startCount) * 100;
+  return { startCount, endCount, retainedPct };
 }

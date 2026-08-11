@@ -6,13 +6,15 @@
  * for a profile without a local database. No `service.ts`: unlike the
  * board feature, there is no not-found/404 translation to isolate from
  * request validation — each handler talks to the `BoardStore` directly
- * (two-pair rule keeps this slice at exactly one impl file plus `index.ts`).
+ * (two-pair rule: this slice is at its cap of two impl files —
+ * `routes.ts` + `soft_errors.ts` — plus `index.ts`).
  */
 import { z } from 'zod';
 import type { BoardSource } from '../../../ports/board.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../../shared/index.ts';
 import { HttpError, param } from '../../shared/index.ts';
+import { groupSoftErrors, type SoftErrorSummary } from './soft_errors.ts';
 
 const ListRunsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -26,8 +28,25 @@ const ListRunEventsQuerySchema = z.object({
 
 const RunIdSchema = z.coerce.number().int().positive();
 
+/** Well above any realistic personal-scale run's warn+error volume — the
+ * same "hundreds not millions" scale reasoning `reconcile.ts`'s own doc
+ * comment uses for its DB-wide timeout. This is the "bounded query" R9's
+ * backend-dependency table asks for. */
+export const SOFT_ERROR_SCAN_LIMIT = 2000;
+
+/** One `GET /runs` list row: a `RunSummary` plus the health-gate inputs
+ * `classifyOutcome` (`ui/runOutcome.ts`) needs — `total`/`breakerOpen`,
+ * batched via ONE `BoardStore.listRunHealth` query per list call, never a
+ * per-row soft-errors fetch (fix-round finding #4's N+1 constraint).
+ * `groups` is always `[]` here: the list never needs the full grouped
+ * breakdown, only the detail pane's dedicated `/soft-errors` endpoint
+ * computes that. */
+export interface RunListRow extends RunSummary {
+  softErrors: SoftErrorSummary;
+}
+
 export interface ListRunsResponse {
-  rows: RunSummary[];
+  rows: RunListRow[];
   total: number;
   limit: number;
   offset: number;
@@ -39,6 +58,7 @@ export interface ListRunEventsResponse {
   limit: number;
   offset: number;
 }
+export type GetSoftErrorsResponse = SoftErrorSummary;
 
 function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
   const parsed = schema.safeParse(data);
@@ -74,8 +94,22 @@ function listHandler(source: BoardSource) {
     const store = await openStoreOrThrow(source, req);
     const q = parseOrThrow(ListRunsQuerySchema, Object.fromEntries(req.query));
     const { rows, total } = store.listRuns({ limit: q.limit, offset: q.offset });
+    // ONE batched query for every row's health, not a per-row fetch — see
+    // `RunListRow`'s own doc comment and `ports/board.ts`'s
+    // `listRunHealth`.
+    const health = store.listRunHealth(rows.map((r) => r.id));
     const body: ListRunsResponse = {
-      rows,
+      rows: rows.map((r) => {
+        const h = health.get(r.id);
+        return {
+          ...r,
+          softErrors: {
+            total: h?.total ?? 0,
+            groups: [],
+            breakerOpen: h?.breakerOpen ?? false,
+          },
+        };
+      }),
       total,
       limit: q.limit ?? 50,
       offset: q.offset ?? 0,
@@ -114,6 +148,26 @@ function listEventsHandler(source: BoardSource) {
   };
 }
 
+/** R9 read-side soft-error aggregation (blueprint §5) — bounded scan over
+ * `SOFT_ERROR_SCAN_LIMIT` most-recent events, filtered to warn/error, then
+ * grouped by `groupSoftErrors`. Read-only: no write to `jobs` or any `runs`
+ * table, same as every other handler in this file. */
+function softErrorsHandler(source: BoardSource) {
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
+    const id = parseRunId(req);
+    // `getRun` is the existence check — `listRunEvents` alone can't tell
+    // "run has no events yet" apart from "no such run".
+    if (!store.getRun(id)) throw new HttpError(404, 'not_found', `no such run: ${id}`);
+    const { rows } = store.listRunEvents(id, { limit: SOFT_ERROR_SCAN_LIMIT });
+    const softErrors = rows.filter(
+      (row) => row.level === 'warn' || row.level === 'error',
+    );
+    const body: GetSoftErrorsResponse = groupSoftErrors(softErrors);
+    return { status: 200, body };
+  };
+}
+
 export function makeRunsRoutes(source: BoardSource): RouteDef[] {
   return [
     { method: 'GET', path: '/api/profiles/:name/runs', handler: listHandler(source) },
@@ -122,6 +176,11 @@ export function makeRunsRoutes(source: BoardSource): RouteDef[] {
       method: 'GET',
       path: '/api/profiles/:name/runs/:id/events',
       handler: listEventsHandler(source),
+    },
+    {
+      method: 'GET',
+      path: '/api/profiles/:name/runs/:id/soft-errors',
+      handler: softErrorsHandler(source),
     },
   ];
 }

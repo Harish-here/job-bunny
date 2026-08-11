@@ -90,6 +90,8 @@ describe('DangerZone', () => {
           startedAt: '2026-08-08T09:00:00Z',
           finishedAt: null,
           heartbeatAt: '2026-08-08T09:01:00Z',
+          progress: null,
+          softErrors: { total: 0, groups: [], breakerOpen: false },
         },
       ],
       total: 1,

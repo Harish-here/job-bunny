@@ -1,4 +1,4 @@
-import type { RunEventRow, RunSummary } from '../../lib/api/types';
+import type { RunProgress, RunSummary } from '../../lib/api/types';
 
 /** The frozen 10-stage pipeline order (CLAUDE.md, "Pipeline architecture"). */
 export const STAGE_ORDER = [
@@ -14,30 +14,12 @@ export const STAGE_ORDER = [
   'sync',
 ] as const;
 
-const STAGE_PREFIX = /^([a-z]+):/;
-
-/**
- * `run_events` rows carry no stage column — stages log their own free-text
- * `msg`, e.g. "structure: starting". This scans every event's `msg` for a
- * leading `<word>:` prefix, keeps only prefixes present in STAGE_ORDER, and
- * takes the LAST such match in event order (not the highest stage index
- * seen — see this task's brief Rationale for why "last, not max" is the
- * honest reading here). Returns null when no event matches, which callers
- * render as "starting…" rather than fabricating stage 1.
- */
-export function parseStageProgress(
-  events: RunEventRow[],
-): { stage: string; index: number; total: number } | null {
-  let found: string | null = null;
-  for (const event of events) {
-    const word = STAGE_PREFIX.exec(event.msg)?.[1];
-    if (word !== undefined && (STAGE_ORDER as readonly string[]).includes(word)) {
-      found = word;
-    }
-  }
-  if (found === null) return null;
-  const index = STAGE_ORDER.indexOf(found as (typeof STAGE_ORDER)[number]) + 1;
-  return { stage: found, index, total: STAGE_ORDER.length };
+/** Thin accessor over `run.progress` (persist-to-db R3) — the backend now
+ * writes stage progress directly on the run row on every stage transition,
+ * so there is no more need to re-derive it by scanning `run_events` for a
+ * `<stage>:` message prefix (the old, guessy `parseStageProgress`). */
+export function stageProgressFrom(run: RunSummary): RunProgress | null {
+  return run.progress;
 }
 
 export const RUN_HEARTBEAT_STALE_MS = 10 * 60 * 1000;

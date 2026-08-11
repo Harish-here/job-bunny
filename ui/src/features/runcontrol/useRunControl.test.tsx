@@ -9,6 +9,8 @@ import type {
   RunSummary,
 } from '../../lib/api/types';
 import * as runsApi from '../runs/runs.api';
+import * as wizardApi from '../wizard/wizard.api';
+import type { DaemonStatus } from '../wizard/wizard.types';
 import * as intentsApi from './intents.api';
 import { useRunControl } from './useRunControl';
 
@@ -22,6 +24,10 @@ vi.mock('./intents.api', () => ({
   requestRunIntent: vi.fn(),
   cancelRunIntent: vi.fn(),
 }));
+vi.mock('../wizard/wizard.api', () => ({
+  getDaemonStatus: vi.fn(),
+  getPersonas: vi.fn(),
+}));
 
 function emptyRuns(): ListRunsResponse {
   return { rows: [], total: 0, limit: 100, offset: 0 };
@@ -30,7 +36,19 @@ function emptyEvents(): ListRunEventsResponse {
   return { rows: [], total: 0, limit: 500, offset: 0 };
 }
 
-function runRow(over: Partial<RunSummary> = {}): RunSummary {
+function daemonStatus(over: Partial<DaemonStatus> = {}): DaemonStatus {
+  return {
+    state: 'running',
+    pid: 123,
+    startedAt: '2026-08-08T09:00:00.000Z',
+    lastTickAt: '2026-08-08T09:00:00.000Z',
+    inFlight: null,
+    profiles: [],
+    ...over,
+  };
+}
+
+function runRow(over: Partial<RunSummary> = {}): ListRunsResponse['rows'][number] {
   return {
     id: 42,
     date: '2026-08-08',
@@ -41,6 +59,8 @@ function runRow(over: Partial<RunSummary> = {}): RunSummary {
     startedAt: '2026-08-08T09:00:00.000Z',
     finishedAt: null,
     heartbeatAt: null,
+    progress: null,
+    softErrors: { total: 0, groups: [], breakerOpen: false },
     ...over,
   };
 }
@@ -62,6 +82,7 @@ function stubBaseline() {
   vi.mocked(runsApi.listRunEvents).mockResolvedValue(emptyEvents());
   vi.mocked(runsApi.getRun).mockResolvedValue(runDetail());
   vi.mocked(intentsApi.listRunIntents).mockResolvedValue({ rows: [] });
+  vi.mocked(wizardApi.getDaemonStatus).mockResolvedValue(daemonStatus());
 }
 
 afterEach(() => {
@@ -166,5 +187,46 @@ describe('useRunControl', () => {
 
     await waitFor(() => expect(result.current.state.kind).not.toBe('conflict'));
     expect(result.current.state.kind).toBe('done');
+  });
+
+  it('a stopped daemon yields daemon-down for a pending intent, end-to-end through the hook', async () => {
+    stubBaseline();
+    vi.mocked(wizardApi.getDaemonStatus).mockResolvedValue(
+      daemonStatus({ state: 'stopped' }),
+    );
+    vi.mocked(intentsApi.listRunIntents).mockResolvedValue({
+      rows: [
+        {
+          id: 7,
+          requestedAt: '2026-08-08T09:00:00.000Z',
+          status: 'pending',
+          claimedRunId: null,
+        },
+      ],
+    });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunControl('rajni'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.state.kind).toBe('daemon-down'));
+  });
+
+  it('an errored/timed-out daemon probe yields daemon-unknown, never daemon-down (C16)', async () => {
+    stubBaseline();
+    vi.mocked(wizardApi.getDaemonStatus).mockRejectedValue(new Error('timeout'));
+    vi.mocked(intentsApi.listRunIntents).mockResolvedValue({
+      rows: [
+        {
+          id: 7,
+          requestedAt: '2026-08-08T09:00:00.000Z',
+          status: 'pending',
+          claimedRunId: null,
+        },
+      ],
+    });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunControl('rajni'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.state.kind).toBe('daemon-unknown'));
+    expect(result.current.state.kind).not.toBe('daemon-down');
   });
 });

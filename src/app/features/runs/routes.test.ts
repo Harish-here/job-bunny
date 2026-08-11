@@ -56,6 +56,7 @@ const SAMPLE_SUMMARY: RunSummary = {
   startedAt: '2026-08-05T09:00:00.000Z',
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:04:00.000Z',
+  progress: null,
 };
 
 const SAMPLE_DETAIL: RunDetail = {
@@ -71,18 +72,43 @@ const SAMPLE_EVENT: RunEventRow = {
   msg: 'stage passed',
 };
 
+const SOFT_ERROR_EVENTS: RunEventRow[] = [
+  { ts: '2026-08-05T09:01:00.000Z', level: 'info', msg: 'stage passed' },
+  {
+    ts: '2026-08-05T09:01:01.000Z',
+    level: 'warn',
+    msg: 'linkedin lane: url failed',
+    data: { scope: 'source.linkedin', lane: 'linkedin' },
+  },
+  {
+    ts: '2026-08-05T09:01:02.000Z',
+    level: 'warn',
+    msg: 'linkedin lane: url failed',
+    data: { scope: 'source.linkedin', lane: 'linkedin' },
+  },
+  {
+    ts: '2026-08-05T09:01:03.000Z',
+    level: 'error',
+    msg: 'board fetch failed',
+    data: { scope: 'source', company: 'acme corp' },
+  },
+];
+
 function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   listRunsCalls: Array<{ limit?: number; offset?: number }>;
   listRunEventsCalls: Array<{ id: number; query: { limit?: number; offset?: number } }>;
+  listRunHealthCalls: number[][];
 } {
   const listRunsCalls: Array<{ limit?: number; offset?: number }> = [];
   const listRunEventsCalls: Array<{
     id: number;
     query: { limit?: number; offset?: number };
   }> = [];
+  const listRunHealthCalls: number[][] = [];
   return {
     listRunsCalls,
     listRunEventsCalls,
+    listRunHealthCalls,
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
     updateTracking: () => null,
@@ -96,6 +122,10 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     listRunEvents(id, query) {
       listRunEventsCalls.push({ id, query });
       return { rows: [SAMPLE_EVENT], total: 1 };
+    },
+    listRunHealth(runIds) {
+      listRunHealthCalls.push(runIds);
+      return new Map();
     },
     close() {},
     ...overrides,
@@ -133,12 +163,37 @@ test('list: happy path with defaults', async () => {
   const res = await route.handler(req({ params: { name: 'rajni' } }));
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, {
-    rows: [SAMPLE_SUMMARY],
+    rows: [
+      { ...SAMPLE_SUMMARY, softErrors: { total: 0, groups: [], breakerOpen: false } },
+    ],
     total: 1,
     limit: 50,
     offset: 0,
   });
   assert.deepEqual(store.listRunsCalls[0], { limit: undefined, offset: undefined });
+  // ONE batched health query for the whole page, not a per-row fetch.
+  assert.deepEqual(store.listRunHealthCalls, [[SAMPLE_SUMMARY.id]]);
+});
+
+test('list: merges the batched listRunHealth map onto each row as softErrors (health-gate inputs, no per-row fetch — fix-round finding #4)', async () => {
+  const store = fakeStore({
+    listRunHealth(runIds) {
+      store.listRunHealthCalls.push(runIds);
+      const map = new Map<number, { total: number; breakerOpen: boolean }>();
+      map.set(SAMPLE_SUMMARY.id, { total: 5, breakerOpen: true });
+      return map;
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs');
+  const res = await route.handler(req({ params: { name: 'rajni' } }));
+  assert.equal(res.status, 200);
+  const body = res.body as { rows: Array<{ softErrors: unknown }> };
+  assert.deepEqual(body.rows[0]?.softErrors, {
+    total: 5,
+    groups: [],
+    breakerOpen: true,
+  });
+  assert.deepEqual(store.listRunHealthCalls, [[SAMPLE_SUMMARY.id]]);
 });
 
 test('list: ?limit=10&offset=5 reaches the store and echoes into the response envelope', async () => {
@@ -276,5 +331,64 @@ test('events: null store (no local db) is a 404 no_local_db', async () => {
     () => route.handler(req({ params: { name: 'notion-only', id: '7' } })),
     404,
     'no_local_db',
+  );
+});
+
+// --- GET /api/profiles/:name/runs/:id/soft-errors ---
+
+test('soft-errors: happy path groups warn/error rows and excludes info', async () => {
+  const store = fakeStore({
+    listRunEvents(id, query) {
+      store.listRunEventsCalls.push({ id, query });
+      return { rows: SOFT_ERROR_EVENTS, total: SOFT_ERROR_EVENTS.length };
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id/soft-errors');
+  const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
+  assert.equal(res.status, 200);
+  const body = res.body as {
+    total: number;
+    groups: Array<{ key: string; count: number }>;
+  };
+  // 3 warn/error rows total, the info row excluded
+  assert.equal(body.total, 3);
+  assert.equal(body.groups.length, 2);
+  assert.deepEqual(
+    body.groups.map((g) => g.key).sort(),
+    ['source.linkedin·linkedin', 'source·acme corp'].sort(),
+  );
+  assert.deepEqual(store.listRunEventsCalls[0], {
+    id: 7,
+    query: { limit: 2000 },
+  });
+});
+
+test('soft-errors: 404 for an unknown run id (checked via getRun before listRunEvents)', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id/soft-errors');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'rajni', id: '999' } })),
+    404,
+    'not_found',
+  );
+  assert.equal(store.listRunEventsCalls.length, 0);
+});
+
+test('soft-errors: null store (no local db) is a 404 no_local_db', async () => {
+  const route = findRoute(fakeSource(null), '/api/profiles/:name/runs/:id/soft-errors');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'notion-only', id: '7' } })),
+    404,
+    'no_local_db',
+  );
+});
+
+test('soft-errors: non-numeric id is a 400 validation error', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id/soft-errors');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'rajni', id: 'abc' } })),
+    400,
+    'validation',
   );
 });

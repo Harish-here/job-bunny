@@ -8,6 +8,7 @@ function makeControl(over: Partial<RunControlHandle> = {}): RunControlHandle {
   return {
     state: { kind: 'idle' },
     label: 'Run now',
+    lastRunStatus: null,
     onRun: vi.fn(),
     onCancel: vi.fn(),
     isSubmitting: false,
@@ -142,5 +143,112 @@ describe('RunNowButton', () => {
     });
     render(<RunNowButton control={control} collapsed={true} />);
     expect(screen.queryByTestId('run-now-secondary')).not.toBeInTheDocument();
+  });
+
+  describe('daemon-down (S8/ux-notes §8)', () => {
+    function daemonDownControl(over: Partial<RunControlHandle> = {}) {
+      return makeControl({
+        state: { kind: 'daemon-down', intentId: 5 },
+        label: "Daemon isn't running",
+        ...over,
+      });
+    }
+
+    it('renders a destructive-outline treatment, a copy-command button, and both Keep queued and Cancel', () => {
+      render(<RunNowButton control={daemonDownControl()} collapsed={false} />);
+
+      const button = screen.getByTestId('run-now');
+      expect(button).toHaveAttribute('data-variant', 'outline');
+      expect(button).toHaveClass('border-destructive');
+
+      expect(screen.getByTestId('run-now-copy')).toBeInTheDocument();
+
+      const secondary = screen.getAllByTestId('run-now-secondary');
+      expect(secondary.map((el) => el.textContent)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Keep queued'),
+          expect.stringContaining('Cancel'),
+        ]),
+      );
+    });
+
+    it('writes exactly "jobbunny serve start" to the clipboard when the copy button is clicked', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+
+      render(<RunNowButton control={daemonDownControl()} collapsed={false} />);
+      await userEvent.click(screen.getByTestId('run-now-copy'));
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith('jobbunny serve start');
+    });
+
+    it('calls onCancel when Cancel is clicked', async () => {
+      const control = daemonDownControl();
+      render(<RunNowButton control={control} collapsed={false} />);
+
+      const cancel = screen
+        .getAllByTestId('run-now-secondary')
+        .find((el) => el.textContent?.includes('Cancel'));
+      expect(cancel).toBeDefined();
+      await userEvent.click(cancel as HTMLElement);
+
+      expect(control.onCancel).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('daemon-unknown (S8/ux-notes §8, C16)', () => {
+    it('renders an amber-outline treatment distinct from daemon-down, with the "queued anyway" copy', () => {
+      const control = makeControl({
+        state: { kind: 'daemon-unknown', intentId: 5 },
+        label: "Can't reach the daemon — queued anyway",
+      });
+      render(<RunNowButton control={control} collapsed={false} />);
+
+      const button = screen.getByTestId('run-now');
+      expect(button).toHaveAttribute('data-variant', 'outline');
+      expect(button).toHaveClass('border-amber');
+      expect(button).not.toHaveClass('border-destructive');
+      expect(button).toHaveTextContent("Can't reach the daemon — queued anyway");
+    });
+  });
+
+  describe('persistent last-run status line (C15, decoupled from DONE_WINDOW_MS)', () => {
+    it('renders even when the last run finished well outside any 10-minute window', () => {
+      const control = makeControl({
+        state: { kind: 'idle' },
+        label: 'Run now',
+        lastRunStatus: {
+          kind: 'done',
+          runId: 9,
+          newCount: 7,
+          finishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        },
+      });
+      render(<RunNowButton control={control} collapsed={false} />);
+
+      const line = screen.getByTestId('run-now-last-status');
+      expect(line).toHaveTextContent('7 new');
+      expect(line).toHaveTextContent(/hour/);
+    });
+
+    it('is absent when no run has ever completed', () => {
+      render(<RunNowButton control={makeControl()} collapsed={false} />);
+      expect(screen.queryByTestId('run-now-last-status')).not.toBeInTheDocument();
+    });
+
+    it('navigates to the runs page when clicked', async () => {
+      const control = makeControl({
+        lastRunStatus: {
+          kind: 'failed',
+          runId: 3,
+          finishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        },
+      });
+      render(<RunNowButton control={control} collapsed={false} />);
+
+      await userEvent.click(screen.getByTestId('run-now-last-status'));
+      expect(window.location.hash).toBe('#/runs');
+    });
   });
 });

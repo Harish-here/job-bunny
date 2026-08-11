@@ -59,6 +59,22 @@ export async function runPipeline(
 
     if (ctx.runId !== undefined) {
       ctx.runStore.heartbeat(ctx.runId, new Date().toISOString());
+      try {
+        ctx.runStore.recordProgress(ctx.runId, {
+          stage: stage.name,
+          stageIndex: index + 1,
+          stageTotal: stages.length,
+          stageStartedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        // Defense in depth (spec AC6): every real RunStore adapter is
+        // fail-soft by construction (never throws), but the runner itself
+        // must not depend on that promise alone — a throwing recordProgress
+        // must never fail or stall the run. Still logged (not silently
+        // discarded) so a violation of the adapter's fail-soft contract
+        // stays observable.
+        ctx.logger.warn('recordProgress threw', { error: String(err) });
+      }
     }
 
     const stageStarted = Date.now();

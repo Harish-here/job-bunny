@@ -1,15 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { RunEventRow, RunSummary } from '../../lib/api/types';
+import type { RunProgress, RunSummary } from '../../lib/api/types';
 import {
   heartbeatFreshness,
-  parseStageProgress,
   RUN_HEARTBEAT_STALE_MS,
   STAGE_ORDER,
+  stageProgressFrom,
 } from './runProgress';
-
-function event(msg: string): RunEventRow {
-  return { ts: '2026-08-08T09:00:00.000Z', level: 'info', msg };
-}
 
 function makeRun(over: Partial<RunSummary> = {}): RunSummary {
   return {
@@ -22,6 +18,7 @@ function makeRun(over: Partial<RunSummary> = {}): RunSummary {
     startedAt: '2026-08-08T09:50:00.000Z',
     finishedAt: null,
     heartbeatAt: null,
+    progress: null,
     ...over,
   };
 }
@@ -43,46 +40,22 @@ describe('STAGE_ORDER', () => {
   });
 });
 
-describe('parseStageProgress', () => {
-  it('returns null for no events', () => {
-    expect(parseStageProgress([])).toBeNull();
+describe('stageProgressFrom', () => {
+  it('returns run.progress unchanged when it is populated', () => {
+    const progress: RunProgress = {
+      stage: 'filter',
+      stageIndex: 7,
+      stageTotal: 10,
+      stageStartedAt: '2026-08-08T09:00:00.000Z',
+      updatedAt: '2026-08-08T09:05:00.000Z',
+      itemCurrent: null,
+      itemTotal: null,
+    };
+    expect(stageProgressFrom(makeRun({ progress }))).toBe(progress);
   });
 
-  it('returns null when no message has a stage prefix', () => {
-    expect(
-      parseStageProgress([event('daemon: tick'), event('notify: sending digest')]),
-    ).toBeNull();
-  });
-
-  it('a single reconcile: starting maps to index 1', () => {
-    expect(parseStageProgress([event('reconcile: starting')])).toEqual({
-      stage: 'reconcile',
-      index: 1,
-      total: 10,
-    });
-  });
-
-  it('the LAST matching prefix wins even when earlier ones exist', () => {
-    const events = [
-      event('reconcile: starting'),
-      event('farm: starting'),
-      event('structure: starting'),
-      event('source: retry'),
-    ];
-    expect(parseStageProgress(events)?.stage).toBe('source');
-  });
-
-  it('a message whose prefix is not in STAGE_ORDER is ignored', () => {
-    const events = [event('filter: starting'), event('notify: sending digest')];
-    expect(parseStageProgress(events)).toEqual({ stage: 'filter', index: 7, total: 10 });
-  });
-
-  it('sync: done maps to index 10, total 10', () => {
-    expect(parseStageProgress([event('sync: done')])).toEqual({
-      stage: 'sync',
-      index: 10,
-      total: 10,
-    });
+  it('returns null when run.progress is null', () => {
+    expect(stageProgressFrom(makeRun({ progress: null }))).toBeNull();
   });
 });
 

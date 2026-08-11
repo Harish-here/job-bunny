@@ -1,19 +1,17 @@
 /**
  * SqliteRunStore — the `RunStore` port over jobbunny.db's `runs` +
- * `run_events` tables (runs-observability Phase 1). Lazy-open (ledger
- * L13): the constructor touches no file I/O — the DB opens via
- * `openJobsDb` on first method call, so `wire()` never creates a DB file
- * as a side effect. Every method is fail-soft: an open failure or a
- * runtime SQL error warns once (a single `warned` flag per instance) and
- * never throws. Once open fails, the store degrades PERMANENTLY to a
- * no-op — writers return silently (`startRun` returns -1), readers return
- * empty results — because observability must never red a run.
+ * `run_events` (+ `run_progress`, joined read-only — see `./progress.ts`)
+ * tables. Lazy-open (ledger L13): the constructor touches no file I/O —
+ * the DB opens via `openJobsDb` on first method call, so `wire()` never
+ * creates a DB file as a side effect. Every method is fail-soft: an open
+ * failure or a runtime SQL error warns once (a single `warned` flag per
+ * instance) and never throws — once open fails the store degrades
+ * PERMANENTLY to a no-op (writers return silently, readers return empty).
  *
  * Crash detection is derived on read, never reconciled into the row: a
- * 'running' row whose `heartbeat_at` is null or older than
- * `RUN_HEARTBEAT_STALE_MS` displays as 'crashed' in `listRuns`/`getRun`.
- * `startRun` additionally tidies PRIOR stale 'running' rows to 'crashed'
- * for real, before inserting the new row.
+ * 'running' row whose `heartbeat_at` is null/stale displays as 'crashed' in
+ * `listRuns`/`getRun`. `startRun` additionally tidies PRIOR stale 'running'
+ * rows to 'crashed' for real, before inserting the new row.
  */
 import type { DatabaseSync } from 'node:sqlite';
 import type {
@@ -26,14 +24,21 @@ import type {
   RunSummary,
 } from '../../../../ports/run_store.ts';
 import { openJobsDb } from '../store/index.ts';
+import {
+  mapProgressRow,
+  PROGRESS_JOIN,
+  type ProgressInput,
+  progressRowValues,
+  type RawProgressRow,
+  UPSERT_PROGRESS_SQL,
+} from './progress.ts';
 
 export const RUN_HEARTBEAT_STALE_MS = 10 * 60_000;
 
 /** Pure crash-derivation shared by `SqliteRunStore` (this file) and
- * `SqliteBoardStore` (adapters/db/sqlite/board/board.ts, board reads the
- * same `runs` table read-only) — a 'running' row whose heartbeat is null
- * or older than `RUN_HEARTBEAT_STALE_MS` displays as 'crashed'; any other
- * status passes through unchanged. Re-exported by `./index.ts`. */
+ * `SqliteBoardStore` (board.ts, reads the same `runs` table read-only) — a
+ * 'running' row whose heartbeat is null/stale displays as 'crashed'; any
+ * other status passes through unchanged. Re-exported by `./index.ts`. */
 export function deriveStatus(
   status: RunStatus,
   heartbeatAt: string | null,
@@ -50,7 +55,9 @@ interface RunStoreDeps {
   warn?: (msg: string) => void;
 }
 
-interface RunRow {
+// Extends RawProgressRow (progress.ts) for the LEFT JOIN run_progress
+// columns — all null when the run has no progress row.
+interface RunRow extends RawProgressRow {
   id: number;
   run_date: string;
   time_dir: string | null;
@@ -120,6 +127,7 @@ export class SqliteRunStore implements RunStore {
       startedAt: row.started_at,
       finishedAt: row.finished_at,
       heartbeatAt: row.heartbeat_at,
+      progress: mapProgressRow(row),
     };
   }
 
@@ -201,6 +209,17 @@ export class SqliteRunStore implements RunStore {
     }
   }
 
+  recordProgress(runId: number, progress: ProgressInput): void {
+    if (runId === -1) return;
+    const db = this.open();
+    if (!db) return;
+    try {
+      db.prepare(UPSERT_PROGRESS_SQL).run(...progressRowValues(runId, progress));
+    } catch (err) {
+      this.warnOnce(`SqliteRunStore.recordProgress failed: ${String(err)}`);
+    }
+  }
+
   recordFailure(runId: number, failure: RunFailure): void {
     if (runId === -1) return;
     const db = this.open();
@@ -252,7 +271,7 @@ export class SqliteRunStore implements RunStore {
     if (!db) return [];
     try {
       const rows = db
-        .prepare('SELECT * FROM runs ORDER BY id DESC LIMIT ? OFFSET ?')
+        .prepare(`SELECT runs.*, ${PROGRESS_JOIN} ORDER BY runs.id DESC LIMIT ? OFFSET ?`)
         .all(opts.limit ?? 50, opts.offset ?? 0) as unknown as RunRow[];
       return rows.map((row) => this.toSummary(row));
     } catch (err) {
@@ -265,9 +284,9 @@ export class SqliteRunStore implements RunStore {
     const db = this.open();
     if (!db) return null;
     try {
-      const row = db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as
-        | RunRow
-        | undefined;
+      const row = db
+        .prepare(`SELECT runs.*, ${PROGRESS_JOIN} WHERE runs.id = ?`)
+        .get(id) as RunRow | undefined;
       if (!row) return null;
       return {
         ...this.toSummary(row),

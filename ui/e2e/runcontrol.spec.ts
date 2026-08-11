@@ -30,6 +30,16 @@ interface IntentRow {
   claimedRunId: number | null;
 }
 
+interface RunProgress {
+  stage: string;
+  stageIndex: number;
+  stageTotal: number;
+  stageStartedAt: string;
+  updatedAt: string;
+  itemCurrent: number | null;
+  itemTotal: number | null;
+}
+
 interface RunRow {
   id: number;
   date: string;
@@ -40,6 +50,7 @@ interface RunRow {
   startedAt: string;
   finishedAt: string | null;
   heartbeatAt: string | null;
+  progress: RunProgress | null;
 }
 
 async function stubIntents(page: Page, rows: IntentRow[]): Promise<void> {
@@ -49,9 +60,14 @@ async function stubIntents(page: Page, rows: IntentRow[]): Promise<void> {
   });
 }
 
-async function stubRuns(page: Page, rows: RunRow[]): Promise<void> {
+async function stubRuns(
+  page: Page,
+  rows: RunRow[],
+  counter?: { count: number },
+): Promise<void> {
   await page.route('**/api/profiles/rajni/runs*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
+    if (counter) counter.count += 1;
     await route.fulfill({ json: { rows, total: rows.length, limit: 100, offset: 0 } });
   });
 }
@@ -81,6 +97,27 @@ async function stubRunDetail(page: Page, row: RunRow): Promise<void> {
     if (route.request().url().includes('/events')) return route.fallback();
     await route.fulfill({
       json: { ...row, result: null, failure: null, syncDryrun: null },
+    });
+  });
+}
+
+// useRunControl now consumes the real GET /api/daemon (B25) — a stubbed
+// pending intent is only genuinely 'queued' when the daemon itself reads
+// 'running'; against the real e2e server (no daemon process alive) it would
+// otherwise read 'daemon-down', which is a different state than this test
+// means to cover.
+async function stubDaemonRunning(page: Page): Promise<void> {
+  await page.route('**/api/daemon*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({
+      json: {
+        state: 'running',
+        pid: 123,
+        startedAt: new Date().toISOString(),
+        lastTickAt: new Date().toISOString(),
+        inFlight: null,
+        profiles: [],
+      },
     });
   });
 }
@@ -120,6 +157,7 @@ test('run control: double-clicking Run now against the real server dedupes to on
 test('run control: a stubbed pending intent shows Queued (waiting for daemon) with a Cancel affordance', async ({
   page,
 }) => {
+  await stubDaemonRunning(page);
   await stubRuns(page, []);
   await stubIntents(page, [
     {
@@ -156,6 +194,7 @@ test('run control: a stubbed running run with stage progress renders the live he
   page,
 }) => {
   const runId = 9001;
+  const now = new Date().toISOString();
   const running: RunRow = {
     id: runId,
     date: '2026-08-08',
@@ -163,14 +202,26 @@ test('run control: a stubbed running run with stage progress renders the live he
     kind: 'run',
     resumedFrom: null,
     status: 'running',
-    startedAt: new Date().toISOString(),
+    startedAt: now,
     finishedAt: null,
-    heartbeatAt: new Date().toISOString(),
+    heartbeatAt: now,
+    progress: {
+      stage: 'filter',
+      stageIndex: 7,
+      stageTotal: 10,
+      stageStartedAt: now,
+      updatedAt: now,
+      itemCurrent: null,
+      itemTotal: null,
+    },
   };
+  // Progress now lives on the polled `runs` list row itself (R3), not on a
+  // separately-polled events fetch — so the "genuinely live" proof below
+  // counts `runs`-list GETs, not events GETs.
   const counter = { count: 0 };
   await stubIntents(page, []);
-  await stubRuns(page, [running]);
-  await stubEvents(page, runId, ['structure: done', 'filter: starting'], counter);
+  await stubRuns(page, [running], counter);
+  await stubEvents(page, runId, ['structure: done', 'filter: starting']);
   await stubRunDetail(page, running);
 
   await page.goto('/#/runs');
@@ -197,6 +248,7 @@ test('run control: a stubbed running run with a stale heartbeat renders the stal
     startedAt: staleAt,
     finishedAt: null,
     heartbeatAt: staleAt,
+    progress: null,
   };
   await stubIntents(page, []);
   await stubRuns(page, [running]);
@@ -205,11 +257,12 @@ test('run control: a stubbed running run with a stale heartbeat renders the stal
 
   await page.goto('/#/runs');
   await expect(page.getByTestId('live-run-heartbeat')).toBeVisible();
-  // The frozen HEARTBEAT_LABEL copy for 'stale' is "No heartbeat for over 10
-  // minutes" — it never contains the literal word "stale". Adjusted from the
-  // brief's /stale/i regex to the real rendered wording, preserving the
-  // assertion's intent (the stale-heartbeat state is shown) exactly.
+  // B22 rewrote the copy from the fixed "No heartbeat for over 10 minutes"
+  // to the exact-minutes ux-notes §9 wording — it never contains the
+  // literal word "stale". Adjusted from the brief's /stale/i regex to the
+  // real rendered wording, preserving the assertion's intent (the
+  // stale-heartbeat state is shown) exactly.
   await expect(page.getByTestId('live-run-heartbeat')).toContainText(
-    'No heartbeat for over 10 minutes',
+    /No heartbeat for \d+m/,
   );
 });

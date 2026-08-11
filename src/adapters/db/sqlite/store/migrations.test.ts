@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { LATEST_SCHEMA_VERSION, openJobsDb } from './migrations.ts';
+
+// The committed profiles/rajni/ fixture PROFILE is tracked, but its sqlite
+// DB file is not (profiles/*/data/* is gitignored — see .gitignore) — it
+// only exists locally on a machine that has previously run a stage/verify
+// against profiles/rajni. That makes the real-fixture test below
+// opportunistic: it runs (and gives real production-shaped-schema evidence)
+// wherever the file happens to be present, and skips cleanly everywhere else
+// (a fresh checkout, CI), rather than depending on undeclared local state.
+const RAJNI_FIXTURE_DB = path.join(
+  import.meta.dirname,
+  '../../../../../profiles/rajni/data/jobbunny.db',
+);
 
 function tmpDbPath(): string {
   return path.join(
@@ -64,13 +83,13 @@ test('a db stamped newer than LATEST_SCHEMA_VERSION throws loud', () => {
   const db = openJobsDb(dbPath);
   db.exec('PRAGMA user_version = 99');
   db.close();
-  assert.throws(() => openJobsDb(dbPath), /v99.*newer.*v6/s);
+  assert.throws(() => openJobsDb(dbPath), /v99.*newer.*v7/s);
 });
 
-test('fresh :memory: db lands at v6 with runs + run_events + checkpoints + state_docs + config_docs + run_intents tables', () => {
+test('fresh :memory: db lands at v7 with runs + run_events + checkpoints + state_docs + config_docs + run_intents tables', () => {
   const db = openJobsDb(':memory:');
   assert.equal(userVersion(db), LATEST_SCHEMA_VERSION);
-  assert.equal(LATEST_SCHEMA_VERSION, 6);
+  assert.equal(LATEST_SCHEMA_VERSION, 7);
   const tables = (
     db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -575,7 +594,7 @@ test('a v5-stamped db upgrades to LATEST_SCHEMA_VERSION with a run_intents table
 
   const upgraded = openJobsDb(dbPath);
   assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
-  assert.equal(userVersion(upgraded), 6);
+  assert.equal(userVersion(upgraded), 7);
   const tables = (
     upgraded
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -587,4 +606,186 @@ test('a v5-stamped db upgrades to LATEST_SCHEMA_VERSION with a run_intents table
     .get('profile.json') as { value_text: string } | undefined;
   assert.equal(configRow?.value_text, '{}');
   upgraded.close();
+});
+
+test('fresh :memory: db lands at v7 with a run_progress table', () => {
+  const db = openJobsDb(':memory:');
+  assert.equal(userVersion(db), LATEST_SCHEMA_VERSION);
+  assert.equal(LATEST_SCHEMA_VERSION, 7);
+  const tables = (
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as {
+      name: string;
+    }[]
+  ).map((t) => t.name);
+  assert.ok(tables.includes('run_progress'));
+  db.close();
+});
+
+test('a v6-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs rows, adding run_progress', () => {
+  const dbPath = tmpDbPath();
+  // Build a v6 db by hand: MIGRATIONS[0..5] (through run_intents), stamped
+  // user_version=6.
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const v6 = new DatabaseSync(dbPath);
+  v6.exec(`
+    CREATE TABLE jobs (
+      id            TEXT PRIMARY KEY,
+      lane          TEXT NOT NULL,
+      title         TEXT NOT NULL,
+      company       TEXT NOT NULL,
+      url           TEXT NOT NULL,
+      seniority     TEXT,
+      location_city TEXT,
+      work_type     TEXT,
+      timezone      TEXT,
+      skills        TEXT,
+      excitement    TEXT,
+      score         REAL,
+      match_reasons TEXT,
+      date_found    TEXT NOT NULL,
+      jd_json       TEXT NOT NULL,
+      synced_at     TEXT NOT NULL,
+      archived      INTEGER NOT NULL DEFAULT 0,
+      archived_at   TEXT
+    );
+    CREATE TABLE tracking (
+      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
+      status           TEXT,
+      comp_range       TEXT,
+      notes            TEXT,
+      contact          TEXT,
+      date_applied     TEXT,
+      next_action      TEXT,
+      next_action_date TEXT,
+      updated_at       TEXT NOT NULL
+    );
+    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
+    CREATE TABLE runs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_date      TEXT NOT NULL,
+      time_dir      TEXT,
+      kind          TEXT NOT NULL,
+      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+      status        TEXT NOT NULL,
+      started_at    TEXT NOT NULL,
+      finished_at   TEXT,
+      heartbeat_at  TEXT,
+      result_json   TEXT,
+      failure_json  TEXT,
+      sync_dryrun_json TEXT
+    );
+    CREATE INDEX idx_runs_date ON runs(run_date);
+    CREATE TABLE run_events (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id    INTEGER NOT NULL REFERENCES runs(id),
+      ts        TEXT NOT NULL,
+      level     TEXT NOT NULL,
+      msg       TEXT NOT NULL,
+      data_json TEXT
+    );
+    CREATE INDEX idx_run_events_run ON run_events(run_id);
+    CREATE TABLE checkpoints (
+      run_date   TEXT    NOT NULL,
+      time_dir   TEXT    NOT NULL,
+      position   INTEGER NOT NULL,
+      stage      TEXT    NOT NULL,
+      payload_json TEXT  NOT NULL,
+      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+      created_at TEXT    NOT NULL,
+      PRIMARY KEY (run_date, time_dir, position)
+    );
+    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
+    CREATE TABLE state_docs (
+      key        TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE config_docs (
+      key        TEXT PRIMARY KEY,
+      value_text TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE run_intents (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      requested_at   TEXT NOT NULL,
+      status         TEXT NOT NULL,
+      claimed_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL
+    );
+    CREATE UNIQUE INDEX idx_run_intents_one_pending
+      ON run_intents(status) WHERE status = 'pending';
+  `);
+  v6.exec('PRAGMA user_version = 6');
+  const { lastInsertRowid } = v6
+    .prepare(
+      `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
+       VALUES ('2026-08-06', '09-00', 'run', 'running', '2026-08-06T09:00:00Z')`,
+    )
+    .run();
+  v6.close();
+
+  const upgraded = openJobsDb(dbPath);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+  assert.equal(userVersion(upgraded), 7);
+  const runRow = upgraded
+    .prepare('SELECT run_date, kind, status FROM runs WHERE id = ?')
+    .get(lastInsertRowid) as
+    | { run_date: string; kind: string; status: string }
+    | undefined;
+  assert.equal(runRow?.run_date, '2026-08-06');
+  assert.equal(runRow?.kind, 'run');
+  assert.equal(runRow?.status, 'running');
+  const tables = (
+    upgraded
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.includes('run_progress'));
+  upgraded.close();
+});
+
+test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> v7 without data loss', {
+  skip: existsSync(RAJNI_FIXTURE_DB)
+    ? false
+    : 'no local profiles/rajni/data/jobbunny.db present (gitignored — not present on a fresh checkout/CI)',
+}, () => {
+  // Verifies the migration against the real, production-shaped rajni
+  // fixture DB (not just the hand-stamped fixtures above) — WITHOUT ever
+  // touching the live file: everything happens on a copy in a fresh
+  // mkdtemp'd temp directory.
+  const tmpDir = mkdtempSync(path.join(tmpdir(), 'jb-sqlite-rajni-'));
+  const copyPath = path.join(tmpDir, 'jobbunny.db');
+  for (const ext of ['', '-wal', '-shm']) {
+    const src = `${RAJNI_FIXTURE_DB}${ext}`;
+    if (existsSync(src)) copyFileSync(src, `${copyPath}${ext}`);
+  }
+
+  const before = new DatabaseSync(copyPath);
+  assert.equal(
+    userVersion(before),
+    6,
+    'fixture no longer starts at v6 — update this test',
+  );
+  const jobsBefore = (
+    before.prepare('SELECT COUNT(*) AS c FROM jobs').get() as { c: number }
+  ).c;
+  assert.ok(jobsBefore > 0, 'fixture has no jobs rows to verify preservation against');
+  before.close();
+
+  const upgraded = openJobsDb(copyPath);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+  const jobsAfter = (
+    upgraded.prepare('SELECT COUNT(*) AS c FROM jobs').get() as { c: number }
+  ).c;
+  assert.equal(jobsAfter, jobsBefore);
+  const tables = (
+    upgraded
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.includes('run_progress'));
+  upgraded.close();
+
+  rmSync(tmpDir, { recursive: true, force: true });
 });
