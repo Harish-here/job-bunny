@@ -98,6 +98,26 @@ function stubFetch(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      // RunsPage now calls useRunControl (B-fix: threading onRun into
+      // RunDetailView/DiagnosisPanel), which polls these two endpoints
+      // independently of the runs list — stub them so the throw-on-
+      // unknown-URL guard below doesn't fire for every test in this file.
+      if (url.includes('/run-intents')) {
+        return { ok: true, json: async () => ({ rows: [] }) } as unknown as Response;
+      }
+      if (url.includes('/api/daemon')) {
+        return {
+          ok: true,
+          json: async () => ({
+            state: 'stopped',
+            pid: null,
+            startedAt: null,
+            lastTickAt: null,
+            inFlight: null,
+            profiles: [],
+          }),
+        } as unknown as Response;
+      }
       const eventsMatch = url.match(/\/runs\/(\d+)\/events/);
       if (eventsMatch) {
         return {

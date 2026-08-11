@@ -478,9 +478,15 @@ test('run detail: failed with the breaker-open diagnosis reports the throttle-br
   await expect(panel.getByTestId('diagnosis-line-1')).toHaveText(
     'LinkedIn is soft-blocking us — the throttle breaker is open.',
   );
-  await expect(
-    panel.getByRole('button', { name: 'Run again once the throttle breaker reopens' }),
-  ).toHaveCount(1);
+  // Disabled "Run again" plus a countdown chip — the diagnosis actions
+  // rewrite (diagnosisActions.ts) replaces the old inert "Run again once
+  // the throttle breaker reopens" label with a real disabled control, since
+  // this fixture's breaker-open warn event carries no `reopenAt`, no chip
+  // renders at all (never an invented countdown).
+  const runAgain = panel.getByRole('button', { name: 'Run again' });
+  await expect(runAgain).toHaveCount(1);
+  await expect(runAgain).toBeDisabled();
+  await expect(page.getByTestId('diagnosis-retry-chip')).toHaveCount(0);
 });
 
 test('run detail: failed with the chrome-not-found diagnosis reports the "no Chrome executable" copy', async ({
@@ -514,9 +520,12 @@ test('run detail: failed with the chrome-not-found diagnosis reports the "no Chr
   await expect(panel.getByTestId('diagnosis-line-1')).toHaveText(
     "Chrome wasn't found at any known path.",
   );
-  await expect(panel.getByRole('button', { name: 'Run `jobbunny doctor`' })).toHaveCount(
-    1,
-  );
+  // The action-table rewrite (diagnosisActions.ts) replaced the old inert
+  // "Run `jobbunny doctor`" label with a real clipboard-copy control,
+  // interpolating the pinned `rajni` fixture profile.
+  await expect(
+    panel.getByRole('button', { name: 'Copy: jobbunny doctor --profile rajni' }),
+  ).toHaveCount(1);
 });
 
 test('run detail: failed with an unmatched error falls back to the raw error and last checkpoint, inventing no diagnosis', async ({

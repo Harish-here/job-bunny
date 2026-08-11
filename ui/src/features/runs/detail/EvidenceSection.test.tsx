@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import type { RunEventRow, SoftErrorSummary } from '../../../lib/api/types';
 import { EvidenceSection } from './EvidenceSection';
 
@@ -20,19 +21,81 @@ function event(over: Partial<RunEventRow> & { msg: string }): RunEventRow {
   };
 }
 
-describe('EvidenceSection — disclosure closed by default', () => {
-  it('does not render the events content before any interaction', () => {
+function noopOpenChange() {}
+
+describe('EvidenceSection — controlled by the parent (mockup fix)', () => {
+  it('open=false hides both the soft-error content and the full-log control', () => {
     render(
       <EvidenceSection
         summary={summary({ total: 3 })}
         events={[event({ msg: 'one' }), event({ msg: 'two' })]}
+        open={false}
+        onOpenChange={noopOpenChange}
       />,
     );
+    expect(screen.getByTestId('evidence-disclosure-trigger')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByTestId('evidence-summary-line')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-events')).not.toBeInTheDocument();
+    expect(screen.queryByText('one')).not.toBeInTheDocument();
   });
 
-  it('the trigger has aria-expanded="false" before any interaction', () => {
-    render(<EvidenceSection summary={summary()} events={[]} />);
+  it('open=true shows both the soft-error content and the full-log control', () => {
+    render(
+      <EvidenceSection
+        summary={summary({ total: 3 })}
+        events={[event({ msg: 'one' }), event({ msg: 'two' })]}
+        open={true}
+        onOpenChange={noopOpenChange}
+      />,
+    );
+    expect(screen.getByTestId('evidence-disclosure-trigger')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByTestId('evidence-summary-line')).toBeInTheDocument();
+    expect(screen.getByTestId('run-events')).toBeInTheDocument();
+    expect(screen.getByText('one')).toBeInTheDocument();
+  });
+
+  it('clicking the trigger calls onOpenChange with the toggled value', async () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <EvidenceSection
+        summary={summary()}
+        events={[]}
+        open={false}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('evidence-disclosure-trigger'));
+    expect(onOpenChange).toHaveBeenCalledWith(true);
+
+    onOpenChange.mockClear();
+    rerender(
+      <EvidenceSection
+        summary={summary()}
+        events={[]}
+        open={true}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('evidence-disclosure-trigger'));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('never opens itself — a click with a no-op onOpenChange leaves it closed', async () => {
+    render(
+      <EvidenceSection
+        summary={summary()}
+        events={[]}
+        open={false}
+        onOpenChange={noopOpenChange}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('evidence-disclosure-trigger'));
     expect(screen.getByTestId('evidence-disclosure-trigger')).toHaveAttribute(
       'aria-expanded',
       'false',
@@ -40,7 +103,7 @@ describe('EvidenceSection — disclosure closed by default', () => {
   });
 });
 
-describe('EvidenceSection — trigger label count matches SoftErrorSummary.total (AC14)', () => {
+describe('EvidenceSection — trigger label reads "Evidence — N soft errors" (AC14)', () => {
   it('matches total=3, distinct from a larger raw events array', () => {
     const events = [
       event({ msg: 'a', level: 'warn' }),
@@ -49,19 +112,34 @@ describe('EvidenceSection — trigger label count matches SoftErrorSummary.total
       event({ msg: 'd', level: 'debug' }),
       event({ msg: 'e', level: 'info' }),
     ];
-    render(<EvidenceSection summary={summary({ total: 3 })} events={events} />);
+    render(
+      <EvidenceSection
+        summary={summary({ total: 3 })}
+        events={events}
+        open={false}
+        onOpenChange={noopOpenChange}
+      />,
+    );
     const trigger = screen.getByTestId('evidence-disclosure-trigger');
-    expect(trigger.textContent).toContain('3');
+    expect(trigger.textContent).toContain('Evidence — 3 soft errors');
     expect(trigger.textContent).not.toContain(String(events.length));
   });
 
-  it('matches a different total=17', () => {
-    const events = Array.from({ length: 5 }, (_, i) =>
-      event({ msg: `m${i}`, level: 'info' }),
+  it('singular wording for total=1', () => {
+    render(
+      <EvidenceSection
+        summary={summary({ total: 1 })}
+        events={[]}
+        open={false}
+        onOpenChange={noopOpenChange}
+      />,
     );
-    render(<EvidenceSection summary={summary({ total: 17 })} events={events} />);
-    const trigger = screen.getByTestId('evidence-disclosure-trigger');
-    expect(trigger.textContent).toContain('17');
+    expect(screen.getByTestId('evidence-disclosure-trigger').textContent).toContain(
+      'Evidence — 1 soft error',
+    );
+    expect(screen.getByTestId('evidence-disclosure-trigger').textContent).not.toContain(
+      '1 soft errors',
+    );
   });
 });
 
@@ -87,6 +165,8 @@ describe('EvidenceSection — soft-error summary line', () => {
           ],
         })}
         events={[]}
+        open={true}
+        onOpenChange={noopOpenChange}
       />,
     );
     const line = screen.getByTestId('evidence-summary-line');
@@ -95,41 +175,37 @@ describe('EvidenceSection — soft-error summary line', () => {
   });
 
   it('renders a calm "no soft errors" line when total is 0', () => {
-    render(<EvidenceSection summary={summary({ total: 0, groups: [] })} events={[]} />);
+    render(
+      <EvidenceSection
+        summary={summary({ total: 0, groups: [] })}
+        events={[]}
+        open={true}
+        onOpenChange={noopOpenChange}
+      />,
+    );
     const line = screen.getByTestId('evidence-summary-line');
     expect(line.textContent).toMatch(/no soft errors/i);
   });
 });
 
-describe('EvidenceSection — opening the disclosure reveals the moved EventsList', () => {
-  it('clicking the trigger reveals events content, level filter, and event rows', () => {
+describe('EvidenceSection — the moved EventsList, visible only while open', () => {
+  it('shows event rows, the level filter, and each event message when open', () => {
     const events = [
       event({ msg: 'first event', level: 'warn' }),
       event({ msg: 'second event', level: 'info' }),
     ];
-    render(<EvidenceSection summary={summary({ total: 1 })} events={events} />);
+    render(
+      <EvidenceSection
+        summary={summary({ total: 1 })}
+        events={events}
+        open={true}
+        onOpenChange={noopOpenChange}
+      />,
+    );
 
-    const trigger = screen.getByTestId('evidence-disclosure-trigger');
-    expect(screen.queryByTestId('run-events')).not.toBeInTheDocument();
-
-    fireEvent.click(trigger);
-
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('run-events')).toBeInTheDocument();
     expect(screen.getAllByTestId('run-event-row')).toHaveLength(2);
     expect(screen.getByText('first event')).toBeInTheDocument();
     expect(screen.getByLabelText('Filter by level')).toBeInTheDocument();
-  });
-
-  it('clicking again collapses the disclosure', () => {
-    render(
-      <EvidenceSection summary={summary({ total: 1 })} events={[event({ msg: 'x' })]} />,
-    );
-    const trigger = screen.getByTestId('evidence-disclosure-trigger');
-    fireEvent.click(trigger);
-    expect(screen.getByTestId('run-events')).toBeInTheDocument();
-    fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByTestId('run-events')).not.toBeInTheDocument();
   });
 });

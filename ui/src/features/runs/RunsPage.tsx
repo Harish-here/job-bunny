@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
 import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
+import { useRunControl } from '../runcontrol/useRunControl';
 import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
 import { RunsList } from './RunsList';
@@ -76,6 +77,11 @@ function ErrorRetry({
  * rows, matching the brief's "no polling beyond manual refresh". */
 export function RunsPage({ profile }: { profile: string }) {
   const qc = useQueryClient();
+  // Kept in RunsPage rather than RunDetailView (decided, docs/product/
+  // run-experience-overhaul/mockup.html's diagnosis "Run again" actions)
+  // so RunDetailView stays presentational — its own bare-render tests never
+  // need a QueryClientProvider or fetch stubbing just to exercise a click.
+  const runControl = useRunControl(profile);
   const cachedRows =
     qc.getQueryData<{ rows: RunSummary[] }>(runsKeys.list(profile))?.rows ?? [];
   const pollInterval = cachedRows.some((r) => r.status === 'running')
@@ -204,6 +210,8 @@ export function RunsPage({ profile }: { profile: string }) {
               run={detail}
               events={events}
               softErrors={softErrorsQuery.data}
+              profile={profile}
+              onRun={runControl.onRun}
             />
           ) : (
             <div className="text-muted-foreground">

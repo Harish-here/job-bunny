@@ -10,11 +10,19 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../../components/ui/button';
+import { navigate } from '../../../lib/router';
 import { cn } from '../../../lib/utils';
+import type { DiagnosisAction } from '../diagnosisActions';
+import { formatRetryIn } from '../diagnosisActions';
 import type { DiagnosisKind, DiagnosisVerdict } from '../runDiagnosis';
 
 export interface DiagnosisPanelProps {
   verdict: DiagnosisVerdict;
+  /** The caller's run trigger — dispatched by a `kind: 'run'` action. */
+  onRun: () => void;
+  /** Reveals the Evidence section (`RunDetailView`'s `EvidenceSection`) —
+   * dispatched by a `kind: 'reveal'` action, primary or secondary alike. */
+  onReveal: () => void;
 }
 
 /**
@@ -58,8 +66,7 @@ const KIND_TINT: Record<DiagnosisKind, { bg: string; fg: string }> = {
 };
 
 /**
- * Line-2 "evidence clause" copy, keyed by kind. `DiagnosisVerdict` (Task
- * 11/B14) carries only `title`/`nextAction`/`rawError`/`lastCheckpoint` — no
+ * Line-2 "evidence clause" copy, keyed by kind. `DiagnosisVerdict` carries no
  * field separate from `title` for ux-notes §6's Evidence column, and for
  * some classes (`zero-yield-healthy` notably) `title` already folds a
  * biggest-drop clause into one sentence. Rather than duplicating `title`
@@ -144,41 +151,135 @@ function FallbackEvidence({
 }
 
 /**
- * The action row. Every non-calm kind gets exactly one primary action
- * (`variant="default"`, the shadcn Button idiom this codebase already keys
- * "primary" off — see `data-variant` on `button.tsx`). `zero-yield-healthy`
- * (ux-notes' class iv) is the sole exception: C8's "no button on purpose" —
- * it renders only a quiet `variant="link"` secondary
- * ("Review filter rules →"), never a `variant="default"` button, so an
- * alarming affordance never appears on a healthy run.
+ * The mockup's `.countdown-chip` (amber tint, rounded-full, monospace,
+ * tiny) — rendered only next to a disabled `kind: 'run'` action that
+ * carries a `retryAt` `formatRetryIn` can still count down to. Never
+ * invents a countdown: no `retryAt`, or an already-past one, means no chip.
  */
-function ActionRow({ verdict }: { verdict: DiagnosisVerdict }) {
-  if (verdict.kind === 'zero-yield-healthy') {
-    return (
-      <Button variant="link" size="sm" className="h-auto self-start px-0">
-        {verdict.nextAction} →
-      </Button>
-    );
-  }
+function RetryChip({ action }: { action: DiagnosisAction }) {
+  if (action.kind !== 'run' || action.retryAt === undefined) return null;
+  const text = formatRetryIn(action.retryAt, Date.now());
+  if (text === null) return null;
   return (
-    <Button variant="default" size="sm">
-      {verdict.nextAction}
-    </Button>
+    <span
+      data-testid="diagnosis-retry-chip"
+      className="rounded-full bg-amber/10 px-2 py-0.5 font-mono text-[10px] text-amber"
+    >
+      {text}
+    </span>
   );
 }
 
 /**
- * B18 (plan.md) — renders a `DiagnosisVerdict` (runDiagnosis.ts, B14) per
- * ux-notes §6's anatomy. Present for failed/crashed/degraded/empty run
- * outcomes; never rendered for a clean produced run (that decision belongs
- * to the caller, `RunDetailView.tsx` — this component always renders
- * something once given a verdict, per §9's "never rendered empty").
+ * Renders one `DiagnosisAction`, dispatching on `action.kind` — the one
+ * place every action's real target (a run, a route, a clipboard copy, or an
+ * Evidence reveal) becomes a real handler. `tone` picks the button variant:
+ * `'primary'` is the shadcn `Button` idiom this codebase keys "primary" off
+ * (`variant="default"`, which renders `data-variant="default"` on the DOM
+ * element); `'quiet'` is a `variant="link"` control, used for every
+ * secondary action and for the primary slot on the calm `'zero-yield-
+ * healthy'` verdict (C8 — no alarming affordance on a healthy run).
  */
-export function DiagnosisPanel({ verdict }: DiagnosisPanelProps) {
+function ActionButton({
+  action,
+  tone,
+  onRun,
+  onReveal,
+  testId,
+}: {
+  action: DiagnosisAction;
+  tone: 'primary' | 'quiet';
+  onRun: () => void;
+  onReveal: () => void;
+  testId: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const variant = tone === 'primary' ? 'default' : 'link';
+  const className = tone === 'primary' ? undefined : 'h-auto self-start px-0';
+
+  async function handleCopy(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be denied by the browser sandbox — the
+      // command still renders in the label, copyable by hand (same
+      // swallow-on-denial idiom as RunNowButton's CopyServeStartButton).
+    }
+  }
+
+  switch (action.kind) {
+    case 'run':
+      return (
+        <Button
+          type="button"
+          data-testid={testId}
+          variant={variant}
+          size="sm"
+          className={className}
+          disabled={action.disabled}
+          onClick={onRun}
+        >
+          {action.label}
+        </Button>
+      );
+    case 'navigate':
+      return (
+        <Button
+          type="button"
+          data-testid={testId}
+          variant={variant}
+          size="sm"
+          className={className}
+          onClick={() => navigate(action.route)}
+        >
+          {action.label}
+        </Button>
+      );
+    case 'copy':
+      return (
+        <Button
+          type="button"
+          data-testid={testId}
+          variant={variant}
+          size="sm"
+          className={className}
+          onClick={() => handleCopy(action.command)}
+        >
+          {copied ? 'Copied' : action.label}
+        </Button>
+      );
+    case 'reveal':
+      return (
+        <Button
+          type="button"
+          data-testid={testId}
+          variant={variant}
+          size="sm"
+          className={className}
+          onClick={onReveal}
+        >
+          {action.label}
+        </Button>
+      );
+  }
+}
+
+/**
+ * B18 (plan.md), amended for the action-table rewrite — renders a
+ * `DiagnosisVerdict` (runDiagnosis.ts, B14) per ux-notes §6's anatomy.
+ * Present for failed/crashed/degraded/empty run outcomes; never rendered
+ * for a clean produced run (that decision belongs to the caller,
+ * `RunDetailView.tsx` — this component always renders something once
+ * given a verdict, per §9's "never rendered empty").
+ */
+export function DiagnosisPanel({ verdict, onRun, onReveal }: DiagnosisPanelProps) {
+  const primaryTone = verdict.kind === 'zero-yield-healthy' ? 'quiet' : 'primary';
   return (
     <div
       data-testid="diagnosis-panel"
-      className="flex gap-3 rounded-lg border border-border bg-card p-4"
+      className="flex gap-3 rounded-lg border border-border bg-card p-3"
     >
       <DiagnosisIcon kind={verdict.kind} />
       <div className="flex flex-1 flex-col gap-1">
@@ -196,7 +297,23 @@ export function DiagnosisPanel({ verdict }: DiagnosisPanelProps) {
           </p>
         )}
         <div className="mt-2 flex items-center gap-2">
-          <ActionRow verdict={verdict} />
+          <ActionButton
+            action={verdict.action}
+            tone={primaryTone}
+            onRun={onRun}
+            onReveal={onReveal}
+            testId="diagnosis-action"
+          />
+          <RetryChip action={verdict.action} />
+          {verdict.secondaryAction && (
+            <ActionButton
+              action={verdict.secondaryAction}
+              tone="quiet"
+              onRun={onRun}
+              onReveal={onReveal}
+              testId="diagnosis-secondary-action"
+            />
+          )}
         </div>
       </div>
     </div>
