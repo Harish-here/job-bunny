@@ -42,6 +42,44 @@ function isRunDetail(run: RunSummary | RunDetail): run is RunDetail {
   return 'result' in run;
 }
 
+/**
+ * The redundant text channel (ux-notes §1's Label column / §11's greyscale
+ * requirement): every kind gets its own label, distinct from every other
+ * kind's, independent of icon/color. `failed` and `running` fold in the
+ * stage name they already carry, matching `LiveRunHeader`'s existing
+ * "Running — `stage` i/n" copy for the live case.
+ *
+ * Shared between `RunsList.tsx` (row label) and `RunDetailView.tsx`'s
+ * outcome header (headline label for `produced`/`empty`/`degraded`) so the
+ * two never drift into duplicate copies of the same copy strings.
+ */
+export function outcomeLabel(kind: OutcomeKind, run: RunSummary | RunDetail): string {
+  switch (kind) {
+    case 'produced':
+      return 'New jobs on your board';
+    case 'empty':
+      return 'Ran clean';
+    case 'degraded':
+      return 'Ran with warnings';
+    case 'failed': {
+      const stage = isRunDetail(run) ? getFailedStage(run.failure) : null;
+      return stage ? `Failed at \`${stage}\`` : 'Failed';
+    }
+    case 'crashed':
+      return 'Lost contact';
+    case 'running': {
+      const progress = run.progress;
+      return progress
+        ? `Running — \`${progress.stage}\` ${progress.stageIndex}/${progress.stageTotal}`
+        : 'Running — starting…';
+    }
+    case 'unrecorded':
+      return 'Telemetry missing';
+    default:
+      return kind satisfies never;
+  }
+}
+
 /** True only for the exact A6 real-DB-row shape: `status === 'crashed'` AND
  * both the `result` and `failure` blobs are literally `null` (not merely
  * malformed/unparseable — a crashed run that DID manage to write one of the

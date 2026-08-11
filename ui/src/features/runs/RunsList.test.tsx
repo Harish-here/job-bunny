@@ -328,3 +328,60 @@ describe('RunsList — soft-error-driven degraded row (fix-round finding #4)', (
     expect(rowEl).toHaveAttribute('data-outcome-kind', 'empty');
   });
 });
+
+// This task's fix: `RunsList` used to render a subline ONLY for `'empty'`
+// rows (`emptySubline`) — a `'degraded'` row rendered no subline at all,
+// silently dropping the soft-error count that is exactly what makes the row
+// urgent in the first place. `row.softErrors` is the same hydration input
+// `classifyOutcome` already reads to reach `'degraded'` (fix-round finding
+// #4 above), so this reuses that same attached field rather than a new
+// per-row fetch.
+describe('RunsList — degraded row soft-error-count subline', () => {
+  it('a degraded row with softErrors.total 8 renders "8 soft errors"', () => {
+    const softErrors: SoftErrorSummary = { total: 8, groups: [], breakerOpen: false };
+    const row: RunDetail & { softErrors: SoftErrorSummary } = {
+      id: 40,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 0) },
+      failure: null,
+      syncDryrun: null,
+      softErrors,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'degraded');
+    expect(screen.getByTestId('run-row-subline')).toHaveTextContent('8 soft errors');
+  });
+
+  it('a degraded row with softErrors.total 1 renders the singular "1 soft error"', () => {
+    const softErrors: SoftErrorSummary = { total: 1, groups: [], breakerOpen: true };
+    const row: RunDetail & { softErrors: SoftErrorSummary } = {
+      id: 41,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 0) },
+      failure: null,
+      syncDryrun: null,
+      softErrors,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    expect(screen.getByTestId('run-row-subline')).toHaveTextContent('1 soft error');
+    expect(screen.getByTestId('run-row-subline')).not.toHaveTextContent('1 soft errors');
+  });
+
+  it('a degraded row with no softErrors attached (still loading) renders no subline at all', () => {
+    const row: RunDetail = {
+      id: 42,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(9, 0) }, // missing-stage-count degraded — no softErrors needed
+      failure: null,
+      syncDryrun: null,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'degraded');
+    expect(screen.queryByTestId('run-row-subline')).not.toBeInTheDocument();
+  });
+});

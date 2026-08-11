@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type {
   RunDetail,
@@ -230,5 +230,46 @@ describe('RunDetailView — panel content sanity', () => {
     render(<RunDetailView run={run} events={EVENTS} softErrors={undefined} />);
 
     expect(screen.getByText('No soft errors recorded for this run.')).toBeInTheDocument();
+  });
+});
+
+describe('RunDetailView — outcome-driven header (blueprint §6)', () => {
+  it('produced: headline is the yield number and "New jobs on your board", not the timestamp', () => {
+    const run = detail({ status: 'passed', result: { stages: stages(10, 7) } });
+    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+
+    const header = within(screen.getByTestId('rundetail-outcome-header'));
+    expect(header.getByText('7')).toBeInTheDocument();
+    expect(header.getByText('New jobs on your board')).toBeInTheDocument();
+  });
+
+  it('empty: headline reads "Ran clean" at the zero-yield number slot', () => {
+    const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
+    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+
+    const header = within(screen.getByTestId('rundetail-outcome-header'));
+    expect(header.getByText('0')).toBeInTheDocument();
+    expect(header.getByText('Ran clean')).toBeInTheDocument();
+  });
+
+  it('degraded: headline reads "Ran with warnings"', () => {
+    const run = detail({ status: 'passed', result: { stages: stages(9, 0) } });
+    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+
+    const header = within(screen.getByTestId('rundetail-outcome-header'));
+    expect(header.getByText('Ran with warnings')).toBeInTheDocument();
+  });
+
+  it('failed: the timestamp moves out of the headline into the meta cluster, and the status chip stays present', () => {
+    const run = detail({
+      status: 'failed',
+      result: null,
+      failure: { stage: 'structure', error: 'boom', elapsedMs: 500 },
+    });
+    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+
+    const header = within(screen.getByTestId('rundetail-outcome-header'));
+    expect(header.getByText(/Failed at stage: structure/)).toBeInTheDocument();
+    expect(header.getByText('Failed')).toBeInTheDocument();
   });
 });

@@ -14,9 +14,9 @@ import {
 import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { cn } from '../../lib/utils';
 import { formatDuration } from './runFormat';
-import { classifyOutcome, type OutcomeKind } from './runOutcome';
+import { classifyOutcome, type OutcomeKind, outcomeLabel } from './runOutcome';
 import { STAGE_ORDER } from './runProgress';
-import { computeRetention, getFailedStage, getFunnelStages } from './runResult';
+import { computeRetention, getFunnelStages } from './runResult';
 
 /** `softErrors` is OPTIONAL here (fix-round finding #4): the real `/runs`
  * list response always attaches it (`RunListRow`, `app/features/runs/
@@ -89,40 +89,6 @@ const TREATMENT: Record<OutcomeKind, OutcomeTreatment> = {
   },
 };
 
-/**
- * The redundant text channel (ux-notes §1's Label column / §11's greyscale
- * requirement): every kind gets its own label, distinct from every other
- * kind's, independent of icon/color. `failed` and `running` fold in the
- * stage name they already carry, matching `LiveRunHeader`'s existing
- * "Running — `stage` i/n" copy for the live case.
- */
-function outcomeLabel(kind: OutcomeKind, row: Row): string {
-  switch (kind) {
-    case 'produced':
-      return 'New jobs on your board';
-    case 'empty':
-      return 'Ran clean';
-    case 'degraded':
-      return 'Ran with warnings';
-    case 'failed': {
-      const stage = isRunDetail(row) ? getFailedStage(row.failure) : null;
-      return stage ? `Failed at \`${stage}\`` : 'Failed';
-    }
-    case 'crashed':
-      return 'Lost contact';
-    case 'running': {
-      const progress = row.progress;
-      return progress
-        ? `Running — \`${progress.stage}\` ${progress.stageIndex}/${progress.stageTotal}`
-        : 'Running — starting…';
-    }
-    case 'unrecorded':
-      return 'Telemetry missing';
-    default:
-      return kind satisfies never;
-  }
-}
-
 /** Number-slot content (ux-notes §1). `produced`/`empty`/`degraded` all
  * read the last funnel stage's `jobsOut` (0 for the latter two, by
  * construction of `classifyOutcome`) at full foreground weight — the
@@ -169,6 +135,18 @@ function emptySubline(row: Row): string | null {
   return `${stages.length}/${TOTAL_STAGES} stages · ${startCount} scraped, ${endCount} passed filter`;
 }
 
+/** The `'degraded'` row's soft-error-count subline (exact copy: `{n} soft
+ * errors`, singular `1 soft error`). `row.softErrors` is the same
+ * health-gate input `classifyOutcome` already read to reach `'degraded'` in
+ * the first place (commit ed47bb4's row hydration) — `undefined` here means
+ * "not yet loaded", not "zero", so this renders no subline rather than a
+ * placeholder count. */
+function degradedSubline(row: Row): string | null {
+  const total = row.softErrors?.total;
+  if (total === undefined) return null;
+  return `${total} soft error${total === 1 ? '' : 's'}`;
+}
+
 function RunningDot() {
   return (
     <span
@@ -206,7 +184,12 @@ export function RunsList({
         const selected = row.id === selectedId;
         const label = outcomeLabel(kind, row);
         const number = outcomeNumber(kind, row);
-        const subline = kind === 'empty' ? emptySubline(row) : null;
+        const subline =
+          kind === 'empty'
+            ? emptySubline(row)
+            : kind === 'degraded'
+              ? degradedSubline(row)
+              : null;
 
         return (
           <div

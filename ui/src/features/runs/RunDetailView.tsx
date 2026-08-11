@@ -11,9 +11,14 @@ import { FunnelTable } from './detail/FunnelTable';
 import { StageRail, type StageRailStage } from './detail/StageRail';
 import { classifyFailure } from './runDiagnosis';
 import { formatDuration, statusLabel, statusVariant } from './runFormat';
-import { classifyOutcome, type OutcomeKind } from './runOutcome';
+import { classifyOutcome, type OutcomeKind, outcomeLabel } from './runOutcome';
 import { STAGE_ORDER } from './runProgress';
-import { getFailedStage, getFailureError, getFunnelStages } from './runResult';
+import {
+  getFailedStage,
+  getFailureError,
+  getFunnelStages,
+  newMatchCount,
+} from './runResult';
 
 /** ux-notes.md §7's exact copy — kept verbatim, including the illustrative
  * `--profile harish` example (a fixed UI string, not an actual invocation
@@ -85,39 +90,69 @@ function UnrecordedCard() {
   );
 }
 
+/** The kinds whose headline is the "Failed at stage: …" banner (test-pinned
+ * verbatim at `RunDetailView.test.tsx:217-226`) rather than the yield
+ * sentence — always exactly `'failed'`/`'crashed'` since only those two
+ * kinds have `failedStage != null` (blueprint §6, "KEEP the existing
+ * headline behavior exactly"). */
+const FAILED_HEADLINE_KINDS: ReadonlySet<OutcomeKind> = new Set(['failed', 'crashed']);
+
+/**
+ * Outcome-driven headline (blueprint §6, "yield sentence at text-2xl";
+ * ux-notes §1's Number-slot/Label columns). `produced`/`empty`/`degraded`
+ * render the same yield number the list row shows (`newMatchCount`, the
+ * last funnel stage's `jobsOut`) beside its `outcomeLabel` — the exact same
+ * label copy `RunsList.tsx` uses, shared via `runOutcome.ts` so the two
+ * never drift into duplicate strings. `failed`/`crashed` keep the pinned
+ * "Failed at stage: …" text unchanged. The timestamp/status/duration/kind
+ * that used to be the headline move into a right-aligned meta cluster.
+ */
 function OutcomeHeader({
   run,
+  kind,
   failedStage,
   failureError,
 }: {
   run: RunDetail;
+  kind: OutcomeKind;
   failedStage: string | null;
   failureError: string | null;
 }) {
   const now = new Date();
+  const isFailedHeadline = FAILED_HEADLINE_KINDS.has(kind);
   return (
-    <div data-testid="rundetail-outcome-header" className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        <h2
-          className="text-lg font-semibold font-heading"
-          title={formatInstantTitle(run.startedAt, now)}
-        >
-          {formatInstant(run.startedAt, now)}
-        </h2>
-        <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
-      </div>
-      <div className="text-sm text-muted-foreground">
-        <span className="capitalize">{run.kind}</span>
-        {' · '}
-        {formatDuration(run.startedAt, run.finishedAt)}
-        {run.resumedFrom != null && ` · resumed from run #${run.resumedFrom}`}
-      </div>
-      {failedStage != null && (
+    <div
+      data-testid="rundetail-outcome-header"
+      className="flex flex-wrap items-start justify-between gap-4"
+    >
+      {isFailedHeadline ? (
         <div className="text-sm text-destructive">
           Failed at stage: {failedStage}
           {failureError != null && ` — ${failureError}`}
         </div>
+      ) : (
+        <div className="flex items-baseline gap-2">
+          <span className="font-heading text-2xl">{newMatchCount(run.result)}</span>
+          <span className="text-sm text-muted-foreground">{outcomeLabel(kind, run)}</span>
+        </div>
       )}
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
+        <span>·</span>
+        <span>{formatDuration(run.startedAt, run.finishedAt)}</span>
+        <span>·</span>
+        <span className="capitalize">{run.kind}</span>
+        {run.resumedFrom != null && (
+          <>
+            <span>·</span>
+            <span>resumed from run #{run.resumedFrom}</span>
+          </>
+        )}
+        <span>·</span>
+        <span title={formatInstantTitle(run.startedAt, now)}>
+          {formatInstant(run.startedAt, now)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -152,7 +187,12 @@ export function RunDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <OutcomeHeader run={run} failedStage={failedStage} failureError={failureError} />
+      <OutcomeHeader
+        run={run}
+        kind={kind}
+        failedStage={failedStage}
+        failureError={failureError}
+      />
 
       {DIAGNOSIS_KINDS.has(kind) && (
         <div data-testid="rundetail-diagnosis-panel">
