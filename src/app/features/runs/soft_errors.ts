@@ -23,9 +23,37 @@ export interface SoftErrorGroup {
 export interface SoftErrorSummary {
   total: number; // warn+error count
   groups: SoftErrorGroup[]; // sorted by count desc
+  /** True when any of the three throttle-breaker warn messages appears
+   * anywhere in `events` — computed by scanning every raw event's `msg`,
+   * NEVER a group's `sample` (fix-round finding #3): `pipeline/runner/
+   * run.ts`'s `withScope(logger, stage.name)` means the breaker-open warn
+   * (`adapters/lanes/linkedin/lane.ts`) carries `data.scope === 'farm'`,
+   * the SAME key every other farm-stage warn buckets under — a group's
+   * `sample` is whichever event landed in that key FIRST, which is
+   * frequently not the breaker warn at all. See `runs_read.ts`'s own
+   * `fetchRunHealth` (`adapters/db/sqlite/board`) for the read-side twin
+   * of this same three-message list, duplicated rather than imported
+   * across the adapters/app layer boundary. */
+  breakerOpen: boolean;
 }
 
 const UNKNOWN_KEY = 'unknown';
+
+/** Exact substrings of the three throttle-breaker warn messages a run can
+ * log: the open-skip warn (`adapters/lanes/linkedin/lane.ts`), the trip
+ * warn (`fire/loop/cards.ts`), and the half-open-probe re-open warn
+ * (`fire/probe.ts`). */
+const BREAKER_MESSAGE_SUBSTRINGS = [
+  'throttle breaker is open',
+  'opening the breaker',
+  'breaker re-opened',
+];
+
+function hasBreakerMessage(events: RunEventRow[]): boolean {
+  return events.some((event) =>
+    BREAKER_MESSAGE_SUBSTRINGS.some((substring) => event.msg.includes(substring)),
+  );
+}
 
 function keyOf(data: Record<string, unknown> | undefined): {
   key: string;
@@ -84,5 +112,5 @@ export function groupSoftErrors(events: RunEventRow[]): SoftErrorSummary {
     }))
     .sort((a, b) => b.count - a.count);
 
-  return { total: events.length, groups };
+  return { total: events.length, groups, breakerOpen: hasBreakerMessage(events) };
 }

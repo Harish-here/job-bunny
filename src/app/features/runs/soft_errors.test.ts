@@ -9,7 +9,7 @@ function row(msg: string, data?: Record<string, unknown>): RunEventRow {
 
 test('groupSoftErrors: empty input', () => {
   const summary = groupSoftErrors([]);
-  assert.deepEqual(summary, { total: 0, groups: [] });
+  assert.deepEqual(summary, { total: 0, groups: [], breakerOpen: false });
 });
 
 test('groupSoftErrors: single group', () => {
@@ -76,4 +76,59 @@ test('groupSoftErrors: data present but missing scope degrades to unknown bucket
   const summary = groupSoftErrors(events);
   assert.equal(summary.groups.length, 1);
   assert.equal(summary.groups[0]?.key, 'unknown');
+});
+
+test('groupSoftErrors: no breaker warn present -> breakerOpen is false', () => {
+  const events: RunEventRow[] = [
+    row('linkedin lane: page identity loss', { scope: 'farm' }),
+    row('harvest: harvested 0 cards', { scope: 'farm' }),
+  ];
+  const summary = groupSoftErrors(events);
+  assert.equal(summary.breakerOpen, false);
+});
+
+// Real event order (pipeline/runner/run.ts's withScope(logger, stage.name) —
+// every farm-stage warn, including the breaker-open warn itself, carries
+// `data.scope === 'farm'`, never a dedicated 'linkedin' scope): several
+// unrelated farm warns land in `run_events` BEFORE the breaker-open warn.
+// `groupSoftErrors`'s bucketing keys all of them into the SAME 'farm'
+// group (no company/lane in `data`), and a group's `sample` is the FIRST
+// event's msg — so a `group.sample`-substring detector (the old,
+// fix-round-finding-#3-broken approach) would miss the breaker warn
+// entirely here. `breakerOpen` must still fire because it scans every raw
+// event's `msg`, never a group's single `sample`.
+test('groupSoftErrors: breakerOpen fires even when the breaker warn is bucketed under the SAME scope key as unrelated warns and is not the group sample (real ScopedLogger order)', () => {
+  const events: RunEventRow[] = [
+    row('linkedin lane: page identity loss', { scope: 'farm' }),
+    row('linkedin lane: page identity loss', { scope: 'farm' }),
+    row(
+      'linkedin lane: throttle breaker is open — skipping this fire without launching a browser',
+      { scope: 'farm', reopenAt: '2026-08-10T10:00:00.000Z', tripCount: 1 },
+    ),
+  ];
+  const summary = groupSoftErrors(events);
+  // Bucketing precondition this test depends on: all 3 events land in one
+  // 'farm' group, whose sample is the FIRST event's msg — NOT the breaker
+  // warn's text.
+  assert.equal(summary.groups.length, 1);
+  assert.equal(summary.groups[0]?.sample, 'linkedin lane: page identity loss');
+  assert.equal(summary.breakerOpen, true);
+});
+
+test('groupSoftErrors: breakerOpen also detects the trip and probe-re-open breaker messages, not just the open-skip one', () => {
+  const trip = groupSoftErrors([
+    row(
+      'linkedin lane: 3 consecutive server-withheld JD shells — the session is throttled; opening the breaker and stopping this fire, keeping every capture so far',
+      { scope: 'farm' },
+    ),
+  ]);
+  assert.equal(trip.breakerOpen, true);
+
+  const reopen = groupSoftErrors([
+    row(
+      'linkedin lane: half-open probe still got a server-withheld shell — breaker re-opened, ending this fire',
+      { scope: 'farm' },
+    ),
+  ]);
+  assert.equal(reopen.breakerOpen, true);
 });

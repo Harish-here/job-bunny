@@ -7,6 +7,7 @@ function summary(over: Partial<SoftErrorSummary> = {}): SoftErrorSummary {
   return {
     total: 0,
     groups: [],
+    breakerOpen: false,
     ...over,
   };
 }

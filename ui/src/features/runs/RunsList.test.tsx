@@ -1,6 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { RunDetail, RunProgress, RunSummary } from '../../lib/api/types';
+import type {
+  RunDetail,
+  RunProgress,
+  RunSummary,
+  SoftErrorSummary,
+} from '../../lib/api/types';
 import { RunsList } from './RunsList';
 import type { OutcomeKind } from './runOutcome';
 
@@ -263,5 +268,63 @@ describe('RunsList — bare RunSummary rows (the real /runs list contract)', () 
     const rowEl = screen.getByTestId('run-row');
     expect(rowEl).toHaveAttribute('data-outcome-kind', 'crashed');
     expect(rowEl).toHaveTextContent('Lost contact');
+  });
+});
+
+// Fix-round finding #4: `RunsList` used to classify every row via
+// `classifyOutcome(row, undefined)` — the list NEVER had a real
+// `SoftErrorSummary` to pass, even for a full `RunDetail` row with all 10
+// stages recorded, so a soft-error-driven (or breaker-driven) degraded run
+// always rendered as calm 'Ran clean' at list scope. This fixture is the
+// one case the ORIGINAL 7-fixture set above genuinely lacks: all 10 stages
+// present (so the stage-count health-gate check alone can't explain
+// 'degraded'), zero yield, health failing ONLY because of the attached
+// `softErrors`.
+describe('RunsList — soft-error-driven degraded row (fix-round finding #4)', () => {
+  it('a full RunDetail row with all 10 stages, zero yield, and softErrors over threshold classifies degraded, not empty', () => {
+    const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
+    const row: RunDetail & { softErrors: SoftErrorSummary } = {
+      id: 30,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 0) },
+      failure: null,
+      syncDryrun: null,
+      softErrors,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'degraded');
+    expect(rowEl).toHaveTextContent('Ran with warnings');
+  });
+
+  it('the SAME row shape with breakerOpen instead of a high total also classifies degraded, not empty', () => {
+    const softErrors: SoftErrorSummary = { total: 1, groups: [], breakerOpen: true };
+    const row: RunDetail & { softErrors: SoftErrorSummary } = {
+      id: 31,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 0) },
+      failure: null,
+      syncDryrun: null,
+      softErrors,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'degraded');
+  });
+
+  it('the same row WITHOUT softErrors attached (undefined) still classifies empty — proves the row-level softErrors is what changed the verdict, not the fixture shape', () => {
+    const row: RunDetail = {
+      id: 32,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 0) },
+      failure: null,
+      syncDryrun: null,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-outcome-kind', 'empty');
   });
 });

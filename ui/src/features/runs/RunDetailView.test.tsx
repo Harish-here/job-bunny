@@ -58,7 +58,7 @@ function detail(overrides: {
   };
 }
 
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [] };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
 
 const EVENTS: RunEventRow[] = [
   { ts: '2026-08-05T09:00:01.000Z', level: 'info', msg: 'stage started' },
@@ -167,6 +167,49 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
     expect(screen.queryByTestId('diagnosis-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('evidence-summary-line')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-events')).not.toBeInTheDocument();
+  });
+});
+
+// Fix-round finding #2: two REAL degraded shapes — a 10-stage zero-yield
+// run with soft errors over threshold, and a 9-stage zero-yield run (the
+// exact fixture RunsList.test.tsx uses) — both used to classify as
+// `'degraded'` (classifyOutcome) yet have NO registry entry able to match
+// (every entry read `errorText(run)`, which is `''` for a `status:
+// 'passed'` run), so both fell through to the generic fallback verdict and
+// rendered "Failed at `unknown stage`" with a destructive-red tint on a run
+// whose recorded status is `'passed'`.
+describe("RunDetailView — 'degraded' never reads as a whole-run failure (fix-round finding #2)", () => {
+  it('a 9-stage zero-yield passed run (missing-stage-count degraded) renders the diagnosis panel with amber tint, never destructive, and never "Failed at"', () => {
+    const run = detail({ status: 'passed', result: { stages: stages(9, 0) } });
+    const { container } = render(
+      <RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />,
+    );
+
+    expect(screen.queryByText(/^Failed at/)).not.toBeInTheDocument();
+    const iconWrapper = container.querySelector('.rounded-full');
+    expect(iconWrapper).not.toBeNull();
+    expect(iconWrapper?.className).toContain('bg-amber');
+    expect(iconWrapper?.className).not.toContain('bg-destructive');
+    expect(screen.getByTestId('diagnosis-line-1')).toHaveTextContent(
+      /ran with warnings/i,
+    );
+  });
+
+  it('a 10-stage zero-yield passed run with soft errors over threshold (soft-error-rate degraded) renders the same amber, non-destructive treatment', () => {
+    const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
+    const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
+    const { container } = render(
+      <RunDetailView run={run} events={EVENTS} softErrors={softErrors} />,
+    );
+
+    expect(screen.queryByText(/^Failed at/)).not.toBeInTheDocument();
+    const iconWrapper = container.querySelector('.rounded-full');
+    expect(iconWrapper).not.toBeNull();
+    expect(iconWrapper?.className).toContain('bg-amber');
+    expect(iconWrapper?.className).not.toContain('bg-destructive');
+    expect(screen.getByTestId('diagnosis-line-1')).toHaveTextContent(
+      /ran with warnings/i,
+    );
   });
 });
 

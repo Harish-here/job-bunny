@@ -53,19 +53,26 @@ function detail(overrides: {
   };
 }
 
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [] };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
 
+// The real shape `groupSoftErrors` (app/features/runs/soft_errors.ts)
+// returns: `breakerOpen` is a FIRST-CLASS field computed by scanning every
+// raw event's msg, never inferred from a group's `sample` — the breaker
+// warn is frequently bucketed under the same 'farm' scope key as unrelated
+// warns, so its text is often NOT the group sample at all (fix-round
+// finding #3).
 const BREAKER_OPEN_SOFT_ERRORS: SoftErrorSummary = {
   total: 1,
   groups: [
     {
-      key: 'unknown',
-      label: 'unknown: uncategorized soft error',
+      key: 'farm',
+      label: 'farm: uncategorized soft error',
       count: 1,
       sample:
         'linkedin lane: throttle breaker is open — skipping this fire without launching a browser',
     },
   ],
+  breakerOpen: true,
 };
 
 describe('classifyOutcome', () => {
@@ -127,9 +134,26 @@ describe('classifyOutcome', () => {
       expect(classifyOutcome(run, EMPTY_SOFT_ERRORS)).toBe('degraded');
     });
 
-    it('a breaker-open soft-error group is present', () => {
+    it('breakerOpen is true (fix-round finding #3: a first-class flag, not group.sample matching)', () => {
       const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
       expect(classifyOutcome(run, BREAKER_OPEN_SOFT_ERRORS)).toBe('degraded');
+    });
+
+    it('breakerOpen is true even when no group.sample contains the breaker text at all (real ScopedLogger bucketing: the breaker warn landed in a group whose FIRST/sample event was unrelated)', () => {
+      const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
+      const softErrors: SoftErrorSummary = {
+        total: 2,
+        groups: [
+          {
+            key: 'farm',
+            label: 'farm: uncategorized soft error',
+            count: 2,
+            sample: 'linkedin lane: page identity loss', // NOT the breaker text
+          },
+        ],
+        breakerOpen: true,
+      };
+      expect(classifyOutcome(run, softErrors)).toBe('degraded');
     });
 
     it('soft-error rate is at/above threshold', () => {
@@ -137,6 +161,7 @@ describe('classifyOutcome', () => {
       const softErrors: SoftErrorSummary = {
         total: SOFT_ERROR_RATE_THRESHOLD,
         groups: [],
+        breakerOpen: false,
       };
       expect(classifyOutcome(run, softErrors)).toBe('degraded');
     });

@@ -97,15 +97,18 @@ const SOFT_ERROR_EVENTS: RunEventRow[] = [
 function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   listRunsCalls: Array<{ limit?: number; offset?: number }>;
   listRunEventsCalls: Array<{ id: number; query: { limit?: number; offset?: number } }>;
+  listRunHealthCalls: number[][];
 } {
   const listRunsCalls: Array<{ limit?: number; offset?: number }> = [];
   const listRunEventsCalls: Array<{
     id: number;
     query: { limit?: number; offset?: number };
   }> = [];
+  const listRunHealthCalls: number[][] = [];
   return {
     listRunsCalls,
     listRunEventsCalls,
+    listRunHealthCalls,
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
     updateTracking: () => null,
@@ -119,6 +122,10 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     listRunEvents(id, query) {
       listRunEventsCalls.push({ id, query });
       return { rows: [SAMPLE_EVENT], total: 1 };
+    },
+    listRunHealth(runIds) {
+      listRunHealthCalls.push(runIds);
+      return new Map();
     },
     close() {},
     ...overrides,
@@ -156,12 +163,37 @@ test('list: happy path with defaults', async () => {
   const res = await route.handler(req({ params: { name: 'rajni' } }));
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, {
-    rows: [SAMPLE_SUMMARY],
+    rows: [
+      { ...SAMPLE_SUMMARY, softErrors: { total: 0, groups: [], breakerOpen: false } },
+    ],
     total: 1,
     limit: 50,
     offset: 0,
   });
   assert.deepEqual(store.listRunsCalls[0], { limit: undefined, offset: undefined });
+  // ONE batched health query for the whole page, not a per-row fetch.
+  assert.deepEqual(store.listRunHealthCalls, [[SAMPLE_SUMMARY.id]]);
+});
+
+test('list: merges the batched listRunHealth map onto each row as softErrors (health-gate inputs, no per-row fetch — fix-round finding #4)', async () => {
+  const store = fakeStore({
+    listRunHealth(runIds) {
+      store.listRunHealthCalls.push(runIds);
+      const map = new Map<number, { total: number; breakerOpen: boolean }>();
+      map.set(SAMPLE_SUMMARY.id, { total: 5, breakerOpen: true });
+      return map;
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs');
+  const res = await route.handler(req({ params: { name: 'rajni' } }));
+  assert.equal(res.status, 200);
+  const body = res.body as { rows: Array<{ softErrors: unknown }> };
+  assert.deepEqual(body.rows[0]?.softErrors, {
+    total: 5,
+    groups: [],
+    breakerOpen: true,
+  });
+  assert.deepEqual(store.listRunHealthCalls, [[SAMPLE_SUMMARY.id]]);
 });
 
 test('list: ?limit=10&offset=5 reaches the store and echoes into the response envelope', async () => {

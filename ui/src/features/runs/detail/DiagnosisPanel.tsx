@@ -27,9 +27,12 @@ export interface DiagnosisPanelProps {
  * name per-class icons only inconsistently, and `DiagnosisVerdict` carries no
  * icon field): destructive-tinted for the two whole-run failures with no
  * softer read (`total-outage`, `chrome-not-found`) and the unclassified
- * `fallback`; amber-tinted (B15's amber tokens) for the three "something is
- * off but the run tells a specific story" classes (`stall`, `expired-login`,
- * `breaker-open`); calm muted-tint for `zero-yield-healthy` — deliberately
+ * `fallback`; amber-tinted (B15's amber tokens) for the "something is off
+ * but the run tells a specific story" classes (`stall`, `expired-login`,
+ * `breaker-open`, and `degraded` — fix-round finding #2: a `'degraded'` run
+ * is a `status: 'passed'` run that ran with warnings, never a failure, so it
+ * gets the SAME amber register as the other non-fatal classes, never
+ * destructive-red); calm muted-tint for `zero-yield-healthy` — deliberately
  * the same register as a healthy row, never alarming (C8).
  */
 const KIND_ICON: Record<DiagnosisKind, LucideIcon> = {
@@ -39,6 +42,7 @@ const KIND_ICON: Record<DiagnosisKind, LucideIcon> = {
   'zero-yield-healthy': CircleCheck,
   'breaker-open': Ban,
   'chrome-not-found': MonitorOff,
+  degraded: CircleAlert,
   fallback: CircleAlert,
 };
 
@@ -49,6 +53,7 @@ const KIND_TINT: Record<DiagnosisKind, { bg: string; fg: string }> = {
   'zero-yield-healthy': { bg: 'bg-muted', fg: 'text-muted-foreground' },
   'breaker-open': { bg: 'bg-amber/10', fg: 'text-amber' },
   'chrome-not-found': { bg: 'bg-destructive/10', fg: 'text-destructive' },
+  degraded: { bg: 'bg-amber/10', fg: 'text-amber' },
   fallback: { bg: 'bg-destructive/10', fg: 'text-destructive' },
 };
 
@@ -74,6 +79,7 @@ const EVIDENCE_TEXT: Record<Exclude<DiagnosisKind, 'fallback'>, string> = {
   'breaker-open':
     'Consecutive withheld job listings tripped the shared throttle breaker.',
   'chrome-not-found': 'None of the known per-OS Chrome install paths resolved.',
+  degraded: 'The run finished (status: passed), but recorded warnings worth a look.',
 };
 
 function DiagnosisIcon({ kind }: { kind: DiagnosisKind }) {

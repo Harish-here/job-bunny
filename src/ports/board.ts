@@ -56,6 +56,21 @@ export interface BoardQuery {
   offset?: number; // >= 0
 }
 
+/** Batched warn/error health for one run, as `listRunHealth` returns it —
+ * the exact inputs `classifyOutcome`'s health gate (ui/runOutcome.ts) reads
+ * off a `SoftErrorSummary`, minus the full `groups` breakdown the runs
+ * LIST never needs (only the detail pane's dedicated soft-errors endpoint
+ * computes that). */
+export interface RunEventHealth {
+  /** warn+error `run_events` row count for this run. */
+  total: number;
+  /** true when any of the three throttle-breaker warn messages appears in
+   * this run's events (see `adapters/db/sqlite/board/runs_read.ts`'s own
+   * doc comment for the exact substrings and why they're duplicated,
+   * not imported, at this layer). */
+  breakerOpen: boolean;
+}
+
 export type DaemonState = 'running' | 'stopped' | 'stale';
 
 export interface DaemonProfileSchedule {
@@ -137,6 +152,12 @@ export interface BoardStore {
     id: number,
     query: { limit?: number; offset?: number },
   ): { rows: RunEventRow[]; total: number };
+  /** Batched warn/error totals + breaker-open flag for the given run ids,
+   * in ONE query regardless of row count — feeds the runs-list health gate
+   * (`app/features/runs/routes.ts`'s `listHandler`) without an N+1 per-row
+   * soft-errors fetch. Ids with no warn/error events are simply absent
+   * from the map. */
+  listRunHealth(runIds: number[]): Map<number, RunEventHealth>;
   close(): void;
 }
 

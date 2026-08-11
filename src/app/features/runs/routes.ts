@@ -34,8 +34,19 @@ const RunIdSchema = z.coerce.number().int().positive();
  * backend-dependency table asks for. */
 export const SOFT_ERROR_SCAN_LIMIT = 2000;
 
+/** One `GET /runs` list row: a `RunSummary` plus the health-gate inputs
+ * `classifyOutcome` (`ui/runOutcome.ts`) needs — `total`/`breakerOpen`,
+ * batched via ONE `BoardStore.listRunHealth` query per list call, never a
+ * per-row soft-errors fetch (fix-round finding #4's N+1 constraint).
+ * `groups` is always `[]` here: the list never needs the full grouped
+ * breakdown, only the detail pane's dedicated `/soft-errors` endpoint
+ * computes that. */
+export interface RunListRow extends RunSummary {
+  softErrors: SoftErrorSummary;
+}
+
 export interface ListRunsResponse {
-  rows: RunSummary[];
+  rows: RunListRow[];
   total: number;
   limit: number;
   offset: number;
@@ -83,8 +94,22 @@ function listHandler(source: BoardSource) {
     const store = await openStoreOrThrow(source, req);
     const q = parseOrThrow(ListRunsQuerySchema, Object.fromEntries(req.query));
     const { rows, total } = store.listRuns({ limit: q.limit, offset: q.offset });
+    // ONE batched query for every row's health, not a per-row fetch — see
+    // `RunListRow`'s own doc comment and `ports/board.ts`'s
+    // `listRunHealth`.
+    const health = store.listRunHealth(rows.map((r) => r.id));
     const body: ListRunsResponse = {
-      rows,
+      rows: rows.map((r) => {
+        const h = health.get(r.id);
+        return {
+          ...r,
+          softErrors: {
+            total: h?.total ?? 0,
+            groups: [],
+            breakerOpen: h?.breakerOpen ?? false,
+          },
+        };
+      }),
       total,
       limit: q.limit ?? 50,
       offset: q.offset ?? 0,

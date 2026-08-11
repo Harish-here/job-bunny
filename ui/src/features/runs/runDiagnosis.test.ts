@@ -57,19 +57,23 @@ function detail(overrides: {
   };
 }
 
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [] };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
 
+// The real shape `groupSoftErrors` returns: `breakerOpen` is a first-class
+// field, never inferred from a group's `sample` (fix-round finding #3) —
+// see `runOutcome.test.ts`'s own fixture comment for the full rationale.
 const BREAKER_OPEN_SOFT_ERRORS: SoftErrorSummary = {
   total: 1,
   groups: [
     {
-      key: 'unknown',
-      label: 'unknown: uncategorized soft error',
+      key: 'farm',
+      label: 'farm: uncategorized soft error',
       count: 1,
       sample:
         'linkedin lane: throttle breaker is open — skipping this fire without launching a browser',
     },
   ],
+  breakerOpen: true,
 };
 
 describe('classifyFailure', () => {
@@ -151,6 +155,28 @@ describe('classifyFailure', () => {
         elapsedMs: 1000,
       },
     });
+    const verdict = classifyFailure(run, BREAKER_OPEN_SOFT_ERRORS);
+    expect(verdict.kind).toBe('breaker-open');
+  });
+
+  it("'degraded' — a status:'passed' run with fewer than 10 recorded stages (fix-round finding #2, the exact fixture RunsList.test.tsx uses: 9 stages, zero yield)", () => {
+    const run = detail({ status: 'passed', result: { stages: stages(9, 0) } });
+    const verdict = classifyFailure(run, EMPTY_SOFT_ERRORS);
+    expect(verdict.kind).toBe('degraded');
+    expect(verdict.title).toContain('9 of 10');
+    expect(verdict.title).not.toContain('Failed');
+  });
+
+  it("'degraded' — a status:'passed' run with all 10 stages but a high soft-error count (fix-round finding #2)", () => {
+    const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
+    const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
+    const verdict = classifyFailure(run, softErrors);
+    expect(verdict.kind).toBe('degraded');
+    expect(verdict.title).toContain('12 soft errors');
+  });
+
+  it("'breaker-open' still outranks the generic 'degraded' entry when a zero-yield passed run's health gate fails specifically due to the breaker", () => {
+    const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
     const verdict = classifyFailure(run, BREAKER_OPEN_SOFT_ERRORS);
     expect(verdict.kind).toBe('breaker-open');
   });

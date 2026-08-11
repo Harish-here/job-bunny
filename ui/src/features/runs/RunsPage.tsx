@@ -5,7 +5,7 @@ import { formatRelative } from '../../../../src/core/datetime/index.ts';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
-import type { RunDetail, RunSummary } from '../../lib/api/types';
+import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
 import { RunsList } from './RunsList';
@@ -103,7 +103,17 @@ export function RunsPage({ profile }: { profile: string }) {
   for (const q of detailQueries) {
     if (q.data) detailById.set(q.data.id, q.data);
   }
-  const listRows: (RunSummary | RunDetail)[] = rows.map((r) => detailById.get(r.id) ?? r);
+  // Health-gate inputs (fix-round finding #4) — `rows` (the `/runs` list
+  // response) always carries `softErrors` per row, but hydrating a row into
+  // its fetched `RunDetail` above would otherwise DROP that field (`useRun`
+  // never returns it — the detail pane fetches it separately, only for the
+  // selected run). Carry it through explicitly so `RunsList` always has a
+  // real `SoftErrorSummary` to classify with, hydrated or not.
+  const listRows: ((RunSummary | RunDetail) & { softErrors?: SoftErrorSummary })[] =
+    rows.map((r) => {
+      const hydrated = detailById.get(r.id);
+      return hydrated ? { ...hydrated, softErrors: r.softErrors } : r;
+    });
 
   // Default-select the newest run once the list resolves, mirroring
   // TriagePage's first-row default — never overrides a user's own pick.

@@ -48,7 +48,7 @@ function daemonStatus(over: Partial<DaemonStatus> = {}): DaemonStatus {
   };
 }
 
-function runRow(over: Partial<RunSummary> = {}): RunSummary {
+function runRow(over: Partial<RunSummary> = {}): ListRunsResponse['rows'][number] {
   return {
     id: 42,
     date: '2026-08-08',
@@ -60,6 +60,7 @@ function runRow(over: Partial<RunSummary> = {}): RunSummary {
     finishedAt: null,
     heartbeatAt: null,
     progress: null,
+    softErrors: { total: 0, groups: [], breakerOpen: false },
     ...over,
   };
 }

@@ -1,5 +1,5 @@
 import type { RunDetail, SoftErrorSummary } from '../../lib/api/types';
-import { classifyOutcome } from './runOutcome';
+import { classifyOutcome, TOTAL_PIPELINE_STAGES } from './runOutcome';
 import {
   getBiggestDrop,
   getFailedStage,
@@ -31,6 +31,7 @@ export type DiagnosisKind =
   | 'zero-yield-healthy'
   | 'breaker-open'
   | 'chrome-not-found'
+  | 'degraded'
   | 'fallback';
 
 export interface DiagnosisVerdict {
@@ -102,16 +103,6 @@ const TOTAL_OUTAGE_SUBSTRING = 'total outage';
 // never misclassifies as expired-login.
 const EXPIRED_LOGIN_PATTERN = /all \d+ attempted url\(s\) failed this run/;
 
-// ---- class (ii) breaker-open — lane.ts:154-158's exact warn message ---
-const BREAKER_OPEN_SAMPLE_SUBSTRING = 'throttle breaker is open';
-
-function hasBreakerOpenWarn(softErrors: SoftErrorSummary | undefined): boolean {
-  if (!softErrors) return false;
-  return softErrors.groups.some((group) =>
-    group.sample.includes(BREAKER_OPEN_SAMPLE_SUBSTRING),
-  );
-}
-
 // ---- class (v) chrome-not-found — launcher.ts:105-108's exact message -
 const CHROME_NOT_FOUND_SUBSTRING = 'no Chrome executable found';
 
@@ -123,6 +114,31 @@ function zeroYieldHealthyTitle(run: RunDetail): string {
   return drop
     ? `${base} Biggest drop: \`${drop.stage}\` — ${drop.count} by \`${drop.rule}\`.`
     : base;
+}
+
+/**
+ * `'degraded'` — fix-round finding #2: `RunDetailView` renders this panel
+ * for every `classifyOutcome` kind in `{failed, crashed, degraded, empty}`
+ * (`RunDetailView.tsx`'s `DIAGNOSIS_KINDS`), but until this entry the
+ * registry had NO entry that could ever match a `'degraded'` run — every
+ * class above reads `errorText(run)`, which is `''` for a `status:
+ * 'passed'` run, so a degraded run always fell through to the generic
+ * `'fallback'` verdict and rendered "Failed at `unknown stage`" with a
+ * destructive-red tint, even though its recorded `status` is `'passed'`.
+ * Ordered LAST in the registry (after `'breaker-open'`/`'chrome-not-
+ * found'`, both of which are themselves "ordered after zero-yield-
+ * healthy" too): a degraded run caused specifically by an open throttle
+ * breaker still gets `'breaker-open'`'s more specific copy — this generic
+ * entry only catches degraded outcomes with no more specific class (a
+ * missing-stage count or a high soft-error rate with no breaker
+ * involved), never pre-empting a more specific match. */
+function degradedTitle(run: RunDetail, softErrors: SoftErrorSummary | undefined): string {
+  const stageCount = getFunnelStages(run.result)?.length ?? 0;
+  if (stageCount < TOTAL_PIPELINE_STAGES) {
+    return `Ran with warnings — only ${stageCount} of ${TOTAL_PIPELINE_STAGES} pipeline stages recorded.`;
+  }
+  const total = softErrors?.total ?? 0;
+  return `Ran with warnings — ${total} soft error${total === 1 ? '' : 's'} logged this run.`;
 }
 
 // ---- the registry, in the exact plan.md order --------------------------
@@ -167,7 +183,11 @@ const REGISTRY: DiagnosisEntry[] = [
   },
   {
     kind: 'breaker-open',
-    matches: (_run, softErrors) => hasBreakerOpenWarn(softErrors),
+    // First-class flag (fix-round finding #3), never a `group.sample`
+    // substring match — see `SoftErrorSummary.breakerOpen`'s own doc
+    // comment (`app/features/runs/soft_errors.ts`) for why that used to be
+    // unreliable.
+    matches: (_run, softErrors) => softErrors?.breakerOpen ?? false,
     title: () => 'LinkedIn is soft-blocking us — the throttle breaker is open.',
     nextAction: () => 'Run again once the throttle breaker reopens',
   },
@@ -176,6 +196,12 @@ const REGISTRY: DiagnosisEntry[] = [
     matches: (run) => errorText(run).includes(CHROME_NOT_FOUND_SUBSTRING),
     title: () => "Chrome wasn't found at any known path.",
     nextAction: () => 'Run `jobbunny doctor`',
+  },
+  {
+    kind: 'degraded',
+    matches: (run, softErrors) => classifyOutcome(run, softErrors) === 'degraded',
+    title: (run, softErrors) => degradedTitle(run, softErrors),
+    nextAction: () => 'Review run events',
   },
 ];
 

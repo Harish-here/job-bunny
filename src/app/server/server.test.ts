@@ -110,6 +110,9 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     listRunEvents() {
       return { rows: [], total: 0 };
     },
+    listRunHealth() {
+      return new Map();
+    },
     close() {},
     ...overrides,
   };

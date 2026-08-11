@@ -40,6 +40,11 @@ function verdictFor(kind: Exclude<DiagnosisKind, 'fallback'>): DiagnosisVerdict 
       title: "Chrome wasn't found at any known path.",
       nextAction: 'Run `jobbunny doctor`',
     },
+    degraded: {
+      kind: 'degraded',
+      title: 'Ran with warnings — 5 soft errors logged this run.',
+      nextAction: 'Review run events',
+    },
   };
   return byKind[kind];
 }
@@ -70,6 +75,7 @@ const NON_CALM_KINDS: Exclude<DiagnosisKind, 'fallback' | 'zero-yield-healthy'>[
   'expired-login',
   'breaker-open',
   'chrome-not-found',
+  'degraded',
 ];
 
 describe('DiagnosisPanel — exactly one primary action per non-calm verdict', () => {
@@ -150,5 +156,36 @@ describe('DiagnosisPanel — fallback verdict (AC11)', () => {
   it('renders no line-2 evidence-clause element (the raw error replaces it)', () => {
     render(<DiagnosisPanel verdict={FALLBACK_VERDICT} />);
     expect(screen.queryByTestId('diagnosis-line-2')).toBeNull();
+  });
+});
+
+// Fix-round finding #2: a 'degraded' run is `status: 'passed'` — it must
+// never read as a whole-run failure. Asserts the tint is amber (the same
+// register `stall`/`expired-login`/`breaker-open` already get), NEVER the
+// destructive-red `total-outage`/`chrome-not-found`/`fallback` share, and
+// that neither line renders the fallback verdict's "Failed at `...`" copy.
+describe("DiagnosisPanel — 'degraded' never reads as a whole-run failure (fix-round finding #2)", () => {
+  it('tints the icon amber, never destructive-red', () => {
+    const { container } = render(<DiagnosisPanel verdict={verdictFor('degraded')} />);
+    const iconWrapper = container.querySelector('.rounded-full');
+    expect(iconWrapper).not.toBeNull();
+    expect(iconWrapper?.className).toContain('bg-amber');
+    expect(iconWrapper?.className).not.toContain('bg-destructive');
+  });
+
+  it('never renders the generic "Failed at `...`" fallback copy', () => {
+    render(<DiagnosisPanel verdict={verdictFor('degraded')} />);
+    expect(screen.queryByText(/^Failed at/)).toBeNull();
+    expect(screen.getByTestId('diagnosis-line-1')).toHaveTextContent(
+      /ran with warnings/i,
+    );
+  });
+
+  it('renders exactly one primary action, distinct evidence line 2', () => {
+    render(<DiagnosisPanel verdict={verdictFor('degraded')} />);
+    expect(primaryButtons()).toHaveLength(1);
+    const line2 = screen.getByTestId('diagnosis-line-2');
+    expect(line2.textContent).toBeTruthy();
+    expect(line2.textContent).not.toBe(verdictFor('degraded').title);
   });
 });

@@ -11,14 +11,21 @@ import {
   formatInstant,
   formatInstantTitle,
 } from '../../../../src/core/datetime/index.ts';
-import type { RunDetail, RunSummary } from '../../lib/api/types';
+import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { cn } from '../../lib/utils';
 import { formatDuration } from './runFormat';
 import { classifyOutcome, type OutcomeKind } from './runOutcome';
 import { STAGE_ORDER } from './runProgress';
 import { computeRetention, getFailedStage, getFunnelStages } from './runResult';
 
-type Row = RunSummary | RunDetail;
+/** `softErrors` is OPTIONAL here (fix-round finding #4): the real `/runs`
+ * list response always attaches it (`RunListRow`, `app/features/runs/
+ * routes.ts`), but `RunsPage.tsx`'s hydration into full `RunDetail` rows,
+ * plus every existing bare-fixture test in this module, predates that
+ * field — making it required would force touching every unrelated
+ * fixture. `classifyOutcome`'s second parameter already tolerates
+ * `undefined`. */
+type Row = (RunSummary | RunDetail) & { softErrors?: SoftErrorSummary };
 
 function isRunDetail(row: Row): row is RunDetail {
   return 'result' in row;
@@ -193,7 +200,7 @@ export function RunsList({
   return (
     <div role="listbox" aria-label="Runs">
       {rows.map((row) => {
-        const kind = classifyOutcome(row, undefined);
+        const kind = classifyOutcome(row, row.softErrors);
         const treatment = TREATMENT[kind];
         const Icon = treatment.icon;
         const selected = row.id === selectedId;

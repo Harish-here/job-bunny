@@ -18,8 +18,10 @@ export type OutcomeKind =
 
 /** Total stage count in the frozen 10-stage pipeline
  * (`reconcile → farm → source → compress → structure → assemble → filter →
- * dedup → rank → sync`, CLAUDE.md "Pipeline architecture"). */
-const TOTAL_PIPELINE_STAGES = 10;
+ * dedup → rank → sync`, CLAUDE.md "Pipeline architecture"). Exported so
+ * `runDiagnosis.ts`'s `'degraded'` registry entry can name the missing
+ * count without duplicating this literal. */
+export const TOTAL_PIPELINE_STAGES = 10;
 
 /**
  * `SoftErrorSummary` carries only a raw `total` warn/error count, not a rate
@@ -35,16 +37,6 @@ const TOTAL_PIPELINE_STAGES = 10;
  * override the exact value.
  */
 export const SOFT_ERROR_RATE_THRESHOLD = 3;
-
-/** Substring of the breaker-open warn's exact message
- * (`adapters/lanes/linkedin/lane.ts`: "linkedin lane: throttle breaker is
- * open — skipping this fire without launching a browser"). The event's
- * `data` shape (`{ reopenAt, tripCount }`) has no `scope` field, so
- * `groupSoftErrors` (app/features/runs/soft_errors.ts) buckets it into the
- * generic `'unknown'` group rather than a dedicated key — the only way to
- * recognize it from a `SoftErrorSummary` is by matching a group's `sample`
- * text against this substring. */
-const BREAKER_OPEN_SAMPLE_SUBSTRING = 'throttle breaker is open';
 
 function isRunDetail(run: RunSummary | RunDetail): run is RunDetail {
   return 'result' in run;
@@ -64,13 +56,6 @@ function isUnrecorded(run: RunSummary | RunDetail): boolean {
     isRunDetail(run) &&
     run.result === null &&
     run.failure === null
-  );
-}
-
-function hasBreakerOpenWarn(softErrors: SoftErrorSummary | undefined): boolean {
-  if (!softErrors) return false;
-  return softErrors.groups.some((group) =>
-    group.sample.includes(BREAKER_OPEN_SAMPLE_SUBSTRING),
   );
 }
 
@@ -100,7 +85,7 @@ function passesHealthGate(
   return (
     hasAllStages(run.result) &&
     hasNoFailureRecord(run.failure) &&
-    !hasBreakerOpenWarn(softErrors) &&
+    !(softErrors?.breakerOpen ?? false) &&
     softErrorRateUnderThreshold(softErrors)
   );
 }
