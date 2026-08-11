@@ -1,4 +1,5 @@
 import { DatabaseX } from 'lucide-react';
+import { useState } from 'react';
 import {
   formatInstant,
   formatInstantTitle,
@@ -123,7 +124,7 @@ function OutcomeHeader({
   return (
     <div
       data-testid="rundetail-outcome-header"
-      className="flex flex-wrap items-start justify-between gap-4"
+      className="flex flex-wrap items-start justify-between gap-3"
     >
       {isFailedHeadline ? (
         <div className="text-sm text-destructive">
@@ -169,11 +170,16 @@ export function RunDetailView({
   run,
   events,
   softErrors,
+  profile,
+  onRun,
 }: {
   run: RunDetail;
   events: RunEventRow[];
   softErrors: SoftErrorSummary | undefined;
+  profile: string;
+  onRun: () => void;
 }) {
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const kind = classifyOutcome(run, softErrors);
 
   if (kind === 'unrecorded') {
@@ -186,31 +192,46 @@ export function RunDetailView({
   const railStages = buildStageRailStages(run, failedStage);
 
   return (
-    <div className="flex flex-col gap-6">
-      <OutcomeHeader
-        run={run}
-        kind={kind}
-        failedStage={failedStage}
-        failureError={failureError}
-      />
+    <div className="flex flex-col">
+      {/* Evidence's mt-3 (below) must NOT compound with this stack's own
+       * gap-6 — see the SPACING note on `rundetail-evidence-section`. */}
+      <div className="flex flex-col gap-6">
+        <OutcomeHeader
+          run={run}
+          kind={kind}
+          failedStage={failedStage}
+          failureError={failureError}
+        />
 
-      {DIAGNOSIS_KINDS.has(kind) && (
-        <div data-testid="rundetail-diagnosis-panel">
-          <DiagnosisPanel verdict={classifyFailure(run, softErrors)} />
+        {DIAGNOSIS_KINDS.has(kind) && (
+          <div data-testid="rundetail-diagnosis-panel">
+            <DiagnosisPanel
+              verdict={classifyFailure({ run, softErrors, events, profile })}
+              onRun={onRun}
+              onReveal={() => setEvidenceOpen(true)}
+            />
+          </div>
+        )}
+
+        <div data-testid="rundetail-stage-rail">
+          <StageRail variant="detail" stages={railStages} failedStage={failedStage} />
         </div>
-      )}
 
-      <div data-testid="rundetail-stage-rail">
-        <StageRail variant="detail" stages={railStages} failedStage={failedStage} />
+        <div data-testid="rundetail-funnel-table">
+          <div className="mb-2 text-sm font-medium">Funnel</div>
+          <FunnelTable stages={funnelStages} failedStage={failedStage} />
+        </div>
       </div>
 
-      <div data-testid="rundetail-funnel-table">
-        <div className="mb-2 text-sm font-medium">Funnel</div>
-        <FunnelTable stages={funnelStages} failedStage={failedStage} />
-      </div>
-
-      <div data-testid="rundetail-evidence-section">
-        <EvidenceSection summary={softErrors ?? EMPTY_SOFT_ERRORS} events={events} />
+      {/* Mockup's `.disclosure{margin-top:12px}` — kept OUT of the gap-6
+       * stack above so this margin doesn't compound with the flex gap. */}
+      <div data-testid="rundetail-evidence-section" className="mt-3">
+        <EvidenceSection
+          summary={softErrors ?? EMPTY_SOFT_ERRORS}
+          events={events}
+          open={evidenceOpen}
+          onOpenChange={setEvidenceOpen}
+        />
       </div>
     </div>
   );

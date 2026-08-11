@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   RunDetail,
   RunEventRow,
@@ -64,6 +65,30 @@ const EVENTS: RunEventRow[] = [
   { ts: '2026-08-05T09:00:01.000Z', level: 'info', msg: 'stage started' },
 ];
 
+function noop() {}
+
+/** Renders `RunDetailView` with the two new required props defaulted —
+ * every existing test in this file is a bare-render assertion that doesn't
+ * care about the run trigger or profile name, so a shared default (`onRun`
+ * a no-op, `profile: 'rajni'`, the committed fixture) keeps them from
+ * repeating boilerplate the brief's own tests don't exercise. */
+function renderDetail(props: {
+  run: RunDetail;
+  events?: RunEventRow[];
+  softErrors: SoftErrorSummary | undefined;
+  onRun?: () => void;
+}) {
+  return render(
+    <RunDetailView
+      run={props.run}
+      events={props.events ?? EVENTS}
+      softErrors={props.softErrors}
+      profile="rajni"
+      onRun={props.onRun ?? noop}
+    />,
+  );
+}
+
 /** The five composed-panel testids RunDetailView owns, in the fixed order
  * a non-`'unrecorded'` render must produce (blueprint §6). */
 const PANEL_TESTIDS = [
@@ -87,9 +112,7 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
       result: null,
       failure: { stage: 'structure', error: 'boom', elapsedMs: 500 },
     });
-    const { container } = render(
-      <RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />,
-    );
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(panelOrder(container)).toEqual([
       'rundetail-outcome-header',
@@ -106,9 +129,7 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
       result: null,
       failure: { stage: 'source', error: 'lost contact', elapsedMs: 1000 },
     });
-    const { container } = render(
-      <RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />,
-    );
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(panelOrder(container)).toEqual([
       'rundetail-outcome-header',
@@ -121,9 +142,7 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
 
   it('produced: renders outcome, rail, funnel, evidence — NO diagnosis panel', () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 7) } });
-    const { container } = render(
-      <RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />,
-    );
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(panelOrder(container)).toEqual([
       'rundetail-outcome-header',
@@ -136,9 +155,7 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
 
   it('empty: renders outcome, diagnosis, rail, funnel, evidence — in that DOM order', () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
-    const { container } = render(
-      <RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />,
-    );
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(panelOrder(container)).toEqual([
       'rundetail-outcome-header',
@@ -151,7 +168,7 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
 
   it('unrecorded: renders ONLY the dashed telemetry-missing card — no other panel node at all', () => {
     const run = detail({ status: 'crashed', result: null, failure: null });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={undefined} />);
+    renderDetail({ run, softErrors: undefined });
 
     expect(screen.getByTestId('rundetail-unrecorded-card')).toBeInTheDocument();
     expect(screen.getByText('Telemetry missing')).toBeInTheDocument();
@@ -181,9 +198,7 @@ describe('RunDetailView — panel composition (B20, AC12)', () => {
 describe("RunDetailView — 'degraded' never reads as a whole-run failure (fix-round finding #2)", () => {
   it('a 9-stage zero-yield passed run (missing-stage-count degraded) renders the diagnosis panel with amber tint, never destructive, and never "Failed at"', () => {
     const run = detail({ status: 'passed', result: { stages: stages(9, 0) } });
-    const { container } = render(
-      <RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />,
-    );
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(screen.queryByText(/^Failed at/)).not.toBeInTheDocument();
     const iconWrapper = container.querySelector('.rounded-full');
@@ -198,9 +213,7 @@ describe("RunDetailView — 'degraded' never reads as a whole-run failure (fix-r
   it('a 10-stage zero-yield passed run with soft errors over threshold (soft-error-rate degraded) renders the same amber, non-destructive treatment', () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
     const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
-    const { container } = render(
-      <RunDetailView run={run} events={EVENTS} softErrors={softErrors} />,
-    );
+    const { container } = renderDetail({ run, softErrors });
 
     expect(screen.queryByText(/^Failed at/)).not.toBeInTheDocument();
     const iconWrapper = container.querySelector('.rounded-full');
@@ -220,15 +233,19 @@ describe('RunDetailView — panel content sanity', () => {
       result: null,
       failure: { stage: 'structure', error: 'boom', elapsedMs: 500 },
     });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(screen.getByText(/Failed at stage: structure/)).toBeInTheDocument();
   });
 
-  it('evidence section falls back to an empty summary when softErrors is undefined', () => {
+  it('evidence section falls back to an empty summary when softErrors is undefined', async () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 7) } });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={undefined} />);
+    renderDetail({ run, softErrors: undefined });
 
+    // The summary line lives inside the Evidence disclosure now (mockup
+    // fix — both the summary and the full log share one disclosure), so
+    // it isn't visible until the disclosure is opened.
+    await userEvent.click(screen.getByTestId('evidence-disclosure-trigger'));
     expect(screen.getByText('No soft errors recorded for this run.')).toBeInTheDocument();
   });
 });
@@ -236,7 +253,7 @@ describe('RunDetailView — panel content sanity', () => {
 describe('RunDetailView — outcome-driven header (blueprint §6)', () => {
   it('produced: headline is the yield number and "New jobs on your board", not the timestamp', () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 7) } });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     const header = within(screen.getByTestId('rundetail-outcome-header'));
     expect(header.getByText('7')).toBeInTheDocument();
@@ -245,7 +262,7 @@ describe('RunDetailView — outcome-driven header (blueprint §6)', () => {
 
   it('empty: headline reads "Ran clean" at the zero-yield number slot', () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     const header = within(screen.getByTestId('rundetail-outcome-header'));
     expect(header.getByText('0')).toBeInTheDocument();
@@ -254,7 +271,7 @@ describe('RunDetailView — outcome-driven header (blueprint §6)', () => {
 
   it('degraded: headline reads "Ran with warnings"', () => {
     const run = detail({ status: 'passed', result: { stages: stages(9, 0) } });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     const header = within(screen.getByTestId('rundetail-outcome-header'));
     expect(header.getByText('Ran with warnings')).toBeInTheDocument();
@@ -266,10 +283,55 @@ describe('RunDetailView — outcome-driven header (blueprint §6)', () => {
       result: null,
       failure: { stage: 'structure', error: 'boom', elapsedMs: 500 },
     });
-    render(<RunDetailView run={run} events={EVENTS} softErrors={EMPTY_SOFT_ERRORS} />);
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     const header = within(screen.getByTestId('rundetail-outcome-header'));
     expect(header.getByText(/Failed at stage: structure/)).toBeInTheDocument();
     expect(header.getByText('Failed')).toBeInTheDocument();
+  });
+});
+
+// The exact user-reported dead button: DiagnosisPanel's "Review run events"
+// (the 'degraded' class's primary action, runDiagnosis.ts) used to render
+// with no handler at all. This asserts the real integration effect —
+// clicking it opens RunDetailView's own EvidenceSection state, not just
+// that DiagnosisPanel calls some spy in isolation.
+describe('RunDetailView — "Review run events" opens the Evidence disclosure (dead-button fix)', () => {
+  it('evidence content is hidden initially, then visible after clicking Review run events', async () => {
+    const run = detail({ status: 'passed', result: { stages: stages(9, 0) } });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    expect(screen.queryByTestId('evidence-summary-line')).not.toBeInTheDocument();
+    expect(screen.getByTestId('evidence-disclosure-trigger')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Review run events' }));
+
+    expect(screen.getByTestId('evidence-disclosure-trigger')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByTestId('evidence-summary-line')).toBeInTheDocument();
+  });
+});
+
+describe('RunDetailView — threads onRun into the diagnosis panel', () => {
+  it('clicking a "Run again" diagnosis action calls the onRun prop', async () => {
+    const run = detail({
+      status: 'failed',
+      result: null,
+      failure: {
+        stage: 'structure',
+        error: 'stage "structure" stalled: no beat() within 360000ms',
+        elapsedMs: 360_000,
+      },
+    });
+    const onRun = vi.fn();
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS, onRun });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Run again' }));
+    expect(onRun).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react';
 import { formatInstantFull } from '../../../../../src/core/datetime/index.ts';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '../../../components/ui/accordion';
 import { Badge } from '../../../components/ui/badge';
 import {
   Select,
@@ -13,14 +19,23 @@ import type { RunEventRow, SoftErrorSummary } from '../../../lib/api/types';
 const LEVELS = ['all', 'debug', 'info', 'warn', 'error'] as const;
 type LevelFilter = (typeof LEVELS)[number];
 
+/** The single disclosure's item value — an accordion of type="single" only
+ * ever has this one item, so the literal is never surfaced to callers. */
+const EVIDENCE_ITEM = 'evidence';
+
 export interface EvidenceSectionProps {
   summary: SoftErrorSummary;
   events: RunEventRow[];
+  /** Controlled disclosure state (mockup fix, docs/product/run-experience-
+   * overhaul/mockup.html lines ~627-630/735-743) — the parent
+   * (`RunDetailView`) owns whether this is open, so a `DiagnosisPanel`
+   * "Review run events" action can open it too. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 /** Moved verbatim from `RunDetailView.tsx` (B19, plan.md/blueprint §8 step
- * 19) — unchanged body, only relocated. `RunDetailView.tsx` still owns its
- * own copy until Task 15/B20's composition rewrite removes it. */
+ * 19) — unchanged body, only relocated. */
 function EventsList({ events }: { events: RunEventRow[] }) {
   const [level, setLevel] = useState<LevelFilter>('all');
   const filtered = useMemo(
@@ -90,32 +105,52 @@ function summaryLine(summary: SoftErrorSummary): string {
   return `${summary.total} soft error(s) recorded — most common: ${top.label} (${top.count}).`;
 }
 
-/** B19 (plan.md) — ux-notes §6 position 5, "Evidence": the soft-error
- * summary line plus the existing `EventsList` (moved unchanged, above)
- * behind a disclosure, closed by default (ux-notes §9's Event log row).
- * Trigger is a `<button aria-expanded>` per §11's a11y note, not a bare
- * `<details>` element (the idiom `TrackingPanel.tsx` uses elsewhere in this
- * codebase is deliberately NOT followed here, per this brief's step 2).
- * The trigger label's count is `summary.total` (AC14) — NOT `events.length`,
- * since `events` may include debug/info rows `SoftErrorSummary` excludes. */
-export function EvidenceSection({ summary, events }: EvidenceSectionProps) {
-  const [open, setOpen] = useState(false);
+/** The disclosure trigger's label — the mockup's "Evidence — N soft
+ * errors" (docs/product/run-experience-overhaul/mockup.html ~line 628).
+ * Keyed off `summary.total`, not `events.length` (AC14): `events` may
+ * include debug/info rows `SoftErrorSummary` excludes. */
+function triggerLabel(summary: SoftErrorSummary): string {
+  return `Evidence — ${summary.total} soft error${summary.total === 1 ? '' : 's'}`;
+}
 
+/**
+ * B19 (plan.md), amended by the mockup-drift fix: ONE disclosure (the
+ * shadcn `Accordion`), controlled by the parent. Its content carries BOTH
+ * the soft-error summary line and the full event log (the moved
+ * `EventsList`, unchanged) — the shipped drift this fix corrects had the
+ * summary line rendered as an always-visible sibling above a second,
+ * separately-toggled "Show full log" control; the mockup pairs them inside
+ * one disclosure instead.
+ */
+export function EvidenceSection({
+  summary,
+  events,
+  open,
+  onOpenChange,
+}: EvidenceSectionProps) {
   return (
-    <div className="flex flex-col gap-2">
-      <p data-testid="evidence-summary-line" className="text-sm text-muted-foreground">
-        {summaryLine(summary)}
-      </p>
-      <button
-        type="button"
-        data-testid="evidence-disclosure-trigger"
-        aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
-        className="self-start text-sm text-primary underline-offset-4 hover:underline"
-      >
-        {open ? 'Hide full log' : `Show full log (${summary.total} events)`}
-      </button>
-      {open && <EventsList events={events} />}
-    </div>
+    <Accordion
+      type="single"
+      collapsible
+      value={open ? EVIDENCE_ITEM : ''}
+      onValueChange={(value) => onOpenChange(value === EVIDENCE_ITEM)}
+    >
+      <AccordionItem value={EVIDENCE_ITEM}>
+        <AccordionTrigger data-testid="evidence-disclosure-trigger">
+          {triggerLabel(summary)}
+        </AccordionTrigger>
+        <AccordionContent>
+          <div className="flex flex-col gap-2">
+            <p
+              data-testid="evidence-summary-line"
+              className="text-sm text-muted-foreground"
+            >
+              {summaryLine(summary)}
+            </p>
+            <EventsList events={events} />
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   );
 }
