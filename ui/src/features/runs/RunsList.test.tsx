@@ -387,3 +387,60 @@ describe('RunsList — degraded row soft-error-count subline', () => {
     expect(screen.queryByTestId('run-row-subline')).not.toBeInTheDocument();
   });
 });
+
+// Task 25 (blueprint.md step 1.5): a catch-up run's badge + subline
+// override, layered on top of a normally-classified `produced` row —
+// `catchupSlots` is orthogonal to `OutcomeKind` (design-scale.md), so these
+// fixtures deliberately reuse the plain `produced` shape and vary only
+// `catchupSlots`.
+describe('RunsList — catch-up row extension (blueprint.md 1.5)', () => {
+  it('a produced row with catchupSlots renders the "Catch-up" badge and the "Stood in for N slots" subline verbatim', () => {
+    const row: RunDetail = {
+      id: 50,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      failure: null,
+      syncDryrun: null,
+      catchupSlots: ['14:00', '16:30', '19:00'],
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-qa', 'run-row-catchup');
+    expect(screen.getByText('Catch-up')).toBeInTheDocument();
+    expect(screen.getByText('Stood in for 3 slots')).toBeInTheDocument();
+  });
+
+  it('the same row shape with catchupSlots: null renders neither the badge nor the overridden subline', () => {
+    const row: RunDetail = {
+      id: 51,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      failure: null,
+      syncDryrun: null,
+      catchupSlots: null,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).not.toHaveAttribute('data-qa', 'run-row-catchup');
+    expect(screen.queryByText('Catch-up')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Stood in for/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-row-subline')).not.toBeInTheDocument();
+  });
+
+  it('a singular catch-up count renders "Stood in for 1 slot" with no trailing "s"', () => {
+    const row: RunDetail = {
+      id: 52,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      failure: null,
+      syncDryrun: null,
+      catchupSlots: ['14:00'],
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    expect(screen.getByText('Stood in for 1 slot')).toBeInTheDocument();
+    expect(screen.queryByText('Stood in for 1 slots')).not.toBeInTheDocument();
+  });
+});

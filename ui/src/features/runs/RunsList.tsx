@@ -11,6 +11,7 @@ import {
   formatInstant,
   formatInstantTitle,
 } from '../../../../src/core/datetime/index.ts';
+import { Badge } from '../../components/ui/badge';
 import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { cn } from '../../lib/utils';
 import { formatDuration } from './runFormat';
@@ -185,11 +186,13 @@ export function RunsList({
         const label = outcomeLabel(kind, row);
         const number = outcomeNumber(kind, row);
         const subline =
-          kind === 'empty'
-            ? emptySubline(row)
-            : kind === 'degraded'
-              ? degradedSubline(row)
-              : null;
+          row.catchupSlots != null
+            ? `Stood in for ${row.catchupSlots.length} slot${row.catchupSlots.length === 1 ? '' : 's'}`
+            : kind === 'empty'
+              ? emptySubline(row)
+              : kind === 'degraded'
+                ? degradedSubline(row)
+                : null;
 
         return (
           <div
@@ -200,6 +203,7 @@ export function RunsList({
             data-testid="run-row"
             data-run-id={row.id}
             data-outcome-kind={kind}
+            {...(row.catchupSlots != null ? { 'data-qa': 'run-row-catchup' } : {})}
             onClick={() => onSelect(row.id)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -235,8 +239,19 @@ export function RunsList({
                 {number}
               </span>
             </div>
-            <div data-testid="run-row-label" className="text-sm font-medium">
+            <div
+              data-testid="run-row-label"
+              className="flex items-baseline gap-2 flex-wrap text-sm font-medium"
+            >
               {label}
+              {row.catchupSlots != null && (
+                <Badge
+                  variant="outline"
+                  className="border-transparent bg-accent text-primary"
+                >
+                  Catch-up
+                </Badge>
+              )}
             </div>
             {subline !== null && (
               <div
