@@ -381,3 +381,20 @@ test('start (child): the constructed DaemonDeps carries readIntents/claimIntent/
   assert.equal(daemonDeps.claimIntent, claimIntent);
   assert.equal(daemonDeps.attachIntentRun, attachIntentRun);
 });
+
+test('start (child): the constructed DaemonDeps carries checkSchemaDrift/notify/hasNotifierConfigured through from ServeDeps unchanged', () => {
+  const checkSchemaDrift = () => new Map();
+  const notify = async () => {};
+  const hasNotifierConfigured = async () => false;
+  const { deps } = baseServeDeps({ checkSchemaDrift, notify, hasNotifierConfigured });
+
+  const daemonDeps = buildDaemonDeps(
+    deps,
+    async () => 0,
+    () => {},
+  );
+
+  assert.equal(daemonDeps.checkSchemaDrift, checkSchemaDrift);
+  assert.equal(daemonDeps.notify, notify);
+  assert.equal(daemonDeps.hasNotifierConfigured, hasNotifierConfigured);
+});
