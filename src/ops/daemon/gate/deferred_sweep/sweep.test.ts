@@ -1,18 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ProfileSchedule, RunRecord } from '../../../core/schedule/index.ts';
-import { deriveExpiredUnserved } from '../../../core/schedule/index.ts';
+import type { ProfileSchedule, RunRecord } from '../../../../core/schedule/index.ts';
+import { deriveExpiredUnserved } from '../../../../core/schedule/index.ts';
 import {
   acquireDaemonPidfile,
   readDaemonPidfile,
   updateDaemonPidfile,
-} from '../pidfile.ts';
-import { fakeDeferredSlotStore, fakePidfileDeps, ROOT } from '../testkit/index.ts';
-import {
-  runDeferredSweepAndCatchup,
-  runRetrospectiveDeferredSweep,
-} from './deferred_sweep.ts';
-import type { ReachabilityGateDecision } from './reachability_gate.ts';
+} from '../../pidfile.ts';
+import { fakeDeferredSlotStore, fakePidfileDeps, ROOT } from '../../testkit/index.ts';
+import type { ReachabilityGateDecision } from '../reachability_gate.ts';
+import { runDeferredSweepAndCatchup, runRetrospectiveDeferredSweep } from './sweep.ts';
 
 const NOW = new Date(2026, 6, 27, 20, 0); // 2026-07-27 20:00, well past every slot's grace.
 

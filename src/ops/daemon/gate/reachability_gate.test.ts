@@ -180,59 +180,72 @@ test('computeCatchupOnlyGate (bug 7): no cache -> probes fresh and populates the
   assert.equal(result.cache?.at, NOW.getTime());
 });
 
-test('computeCatchupOnlyGate (bug 7): a fresh cache within the interval is reused — no probe call, fresh: false', async () => {
+test('computeCatchupOnlyGate (bug 8, CRITICAL): the gate DECISION is recomputed every tick, never served from cache — a cache hit still probes and still returns the live result', async () => {
   let probed = 0;
   const cache: CatchupGateCache = {
     reasonCode: 'host-asleep',
     reason: 'asleep',
-    at: NOW.getTime() - 1000, // 1s ago — well within the interval.
+    at: NOW.getTime() - 1000, // 1s ago — well within the log-throttle interval.
   };
+  // The live probe now says REACHABLE — if the decision were served from
+  // cache (the bug), this would still return `declined: true`.
   const result = await computeCatchupOnlyGate(cache, NOW, undefined, async () => {
     probed += 1;
     return true;
   });
-  assert.equal(probed, 0);
-  assert.equal(result.fresh, false);
-  assert.deepEqual(result.gate, {
-    declined: true,
-    reasonCode: 'host-asleep',
-    reason: 'asleep',
-  });
-  assert.equal(result.cache, cache); // unchanged.
+  assert.equal(probed, 1, 'must probe fresh on every tick, even with a recent cache');
+  assert.equal(result.gate.declined, false, 'the decision must reflect the LIVE probe');
+  assert.equal(result.cache, undefined, 'a reachable result clears the log cache');
 });
 
-test('computeCatchupOnlyGate (bug 7): a cache exactly at the interval boundary is still reused (inclusive)', async () => {
+test('computeCatchupOnlyGate (bug 7, log only): a fresh cache within the interval suppresses the LOG (fresh: false) but the decision is still freshly computed', async () => {
   let probed = 0;
+  const cache: CatchupGateCache = {
+    reasonCode: 'network-unreachable',
+    reason: 'down',
+    at: NOW.getTime() - 1000, // 1s ago — well within the interval.
+  };
+  const result = await computeCatchupOnlyGate(cache, NOW, undefined, async () => {
+    probed += 1;
+    return false; // still unreachable — same reasonCode as the cache.
+  });
+  assert.equal(probed, 1, 'the probe always runs — only the LOG is throttled');
+  assert.equal(result.fresh, false, 'same reason within the window -> log suppressed');
+  assert.deepEqual(result.gate, {
+    declined: true,
+    reasonCode: 'network-unreachable',
+    reason: 'Job Bunny declined to start this run because the network was unreachable.',
+  });
+  assert.equal(result.cache, cache); // log-window cache unchanged.
+});
+
+test('computeCatchupOnlyGate (bug 7, log only): a cache exactly at the interval boundary still suppresses the log (inclusive)', async () => {
   const cache: CatchupGateCache = {
     reasonCode: 'network-unreachable',
     reason: 'down',
     at: NOW.getTime() - CATCHUP_GATE_RETRY_INTERVAL_MS,
   };
-  const result = await computeCatchupOnlyGate(cache, NOW, undefined, async () => {
-    probed += 1;
-    return true;
-  });
-  assert.equal(probed, 0);
+  const result = await computeCatchupOnlyGate(cache, NOW, undefined, async () => false);
   assert.equal(result.fresh, false);
 });
 
-test('computeCatchupOnlyGate (bug 7): past the interval, re-probes fresh and replaces the cache', async () => {
-  let probed = 0;
+test('computeCatchupOnlyGate (bug 7, log only): past the interval, the log fires again and the cache is replaced', async () => {
   const staleCache: CatchupGateCache = {
     reasonCode: 'network-unreachable',
     reason: 'down',
     at: NOW.getTime() - CATCHUP_GATE_RETRY_INTERVAL_MS - 1,
   };
-  const result = await computeCatchupOnlyGate(staleCache, NOW, undefined, async () => {
-    probed += 1;
-    return false;
-  });
-  assert.equal(probed, 1);
+  const result = await computeCatchupOnlyGate(
+    staleCache,
+    NOW,
+    undefined,
+    async () => false,
+  );
   assert.equal(result.fresh, true);
   assert.equal(result.cache?.at, NOW.getTime());
 });
 
-test('computeCatchupOnlyGate (bug 7): a fresh probe that finds things reachable clears the cache entirely', async () => {
+test('computeCatchupOnlyGate: a fresh probe that finds things reachable clears the cache entirely', async () => {
   const staleCache: CatchupGateCache = {
     reasonCode: 'network-unreachable',
     reason: 'down',
@@ -248,7 +261,27 @@ test('computeCatchupOnlyGate (bug 7): a fresh probe that finds things reachable 
   assert.equal(result.cache, undefined);
 });
 
-test('computeCatchupOnlyGate (bug 7): a large previousLastTickAt gap declines host-asleep without ever probing, even with no prior cache', async () => {
+test('computeCatchupOnlyGate (bug 8): a DIFFERENT reasonCode within the window resets the log immediately, even though the decline never lets up', async () => {
+  const cache: CatchupGateCache = {
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+    at: NOW.getTime() - 1000,
+  };
+  const result = await computeCatchupOnlyGate(
+    cache,
+    NOW,
+    new Date(NOW.getTime() - 10_000).toISOString(), // small gap -> not suspected.
+    async () => false, // unreachable -> network-unreachable, a DIFFERENT reason.
+  );
+  assert.equal(result.gate.reasonCode, 'network-unreachable');
+  assert.equal(
+    result.fresh,
+    true,
+    'a changed reason must log again, not stay suppressed',
+  );
+});
+
+test('computeCatchupOnlyGate: a large previousLastTickAt gap declines host-asleep, probing is skipped by computeReachabilityGate itself (suspected short-circuits before the probe)', async () => {
   let probed = 0;
   const result = await computeCatchupOnlyGate(
     undefined,

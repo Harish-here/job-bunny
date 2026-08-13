@@ -91,21 +91,21 @@ export interface DaemonPidfile {
   // `inFlight?: DaemonInFlight`'s convention rather than the four
   // `schemaDrift*` fields' `T | null` convention. Kept for whatever cheap
   // "what was the last thing that happened" display value it's worth —
-  // `deferred_sweep.ts`'s own per-SLOT reason attribution (bug 1) never
+  // `deferred_sweep/sweep.ts`'s own per-SLOT reason attribution (bug 1) never
   // reads it; see `slotGateDeclines` below for why a single rolling field
   // cannot answer "why was THIS slot declined."
   slotGateDeclines: SlotGateDecline[];
   // Bug 1 (pipeline-stability-hardening QA, 2026-08-14): `lastGateDecline`
   // above is a single rolling value, overwritten by every gate-declined
   // owed entry — by the time a SPECIFIC slot's grace window fully closes
-  // (`deferred_sweep.ts`'s own sweep, possibly many ticks and several OTHER
+  // (`deferred_sweep/sweep.ts`'s own sweep, possibly many ticks and several OTHER
   // declined slots later), it usually holds a LATER slot's own reason, so
   // the recorded `deferred_slots` row silently misattributes. This is the
   // per-slot record that field cannot be: one entry per (profile, date,
   // slot) that was EVER seen gate-declined while still owed (written by
   // `applyGateDecline`, upserted so a later tick's decline for the SAME
   // slot replaces rather than duplicates its own entry), read by
-  // `deferred_sweep.ts` once that slot's grace has fully closed. Filtered
+  // `deferred_sweep/sweep.ts` once that slot's grace has fully closed. Filtered
   // to `date === today` on every write (same self-pruning idiom as
   // `attempts`), so yesterday's entries never linger.
   deferredNotifyAttempts: DeferredNotifyAttempt[];
@@ -114,7 +114,7 @@ export interface DaemonPidfile {
   // (profile, date) — covers BOTH the same-day T4 path and the retrospective
   // (past-day) summary path, since both compose and send the exact same
   // kind of message for the exact same (profile, date) pair.
-  // `deferred_sweep.ts` skips the attempt (no send, no log) entirely while
+  // `deferred_sweep/sweep.ts` skips the attempt (no send, no log) entirely while
   // less than `DEFERRED_NOTIFY_RETRY_INTERVAL_MS` has elapsed since the
   // last one — the same 1-hour-retry idiom as
   // `schemaDriftNotifyFailedAt`/`SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS`
@@ -123,6 +123,16 @@ export interface DaemonPidfile {
   // is fail-soft (silently drops on a DB write error), so a SUCCEEDING send
   // immediately followed by a FAILING write must still stay throttled — see
   // this task's own report for the "escalation" this guards against.
+  // Bug 9 (pipeline-stability-hardening QA round 2, 2026-08-14): pruned by
+  // the entry's own `at` AGE on every `stampNotifyAttempt` write (dropped
+  // once older than `DEFERRED_NOTIFY_ATTEMPT_MAX_AGE_MS`, 24h) — NOT by
+  // `date === today` like `slotGateDeclines` below. The retrospective
+  // sweep re-visits PAST dates every tick for as long as they stay
+  // unnotified (`listUnnotifiedDatesBefore` has no date floor), so a
+  // date-based prune would evict a still-active PAST-date throttle and
+  // reopen bug 2 for exactly the dates this array protects; age-based
+  // pruning only ever drops an entry once nothing has attempted that
+  // (profile, date) pair in over a day.
 }
 
 export interface SlotGateDecline {

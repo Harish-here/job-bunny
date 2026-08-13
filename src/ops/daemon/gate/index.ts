@@ -1,8 +1,8 @@
-export type { DeferredSweepDeps } from './deferred_sweep.ts';
+export type { DeferredSweepDeps } from './deferred_sweep/index.ts';
 export {
   runDeferredSweepAndCatchup,
   runRetrospectiveDeferredSweep,
-} from './deferred_sweep.ts';
+} from './deferred_sweep/index.ts';
 export type {
   CatchupGateCache,
   ReachabilityGateDecision,

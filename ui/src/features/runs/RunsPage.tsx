@@ -186,6 +186,26 @@ export function RunsPage({ profile }: { profile: string }) {
       : undefined;
   const events = eventsQuery.data?.rows ?? [];
 
+  // BUG 3 (pipeline-stability-hardening QA round 2, 2026-08-14) —
+  // today's own catch-up row, if any, found by identity (never assumed to
+  // be `listRows[0]` positionally) so the deferred group threads in
+  // directly after it via `RunsList`'s `insertAfterId` slot. `date` here
+  // is each row's OWN scheduled/run date (matching `todaysRows` above),
+  // not `startedAt` — mirrors the daemon's own local-date convention.
+  const catchupRowToday =
+    listRows.find((r) => r.catchupSlots != null && r.date === today) ?? null;
+
+  const deferredRegion = deferredQuery.isPending ? (
+    <Skeleton className="h-12" />
+  ) : deferredQuery.isError ? (
+    <ErrorRetry
+      message="Couldn't load deferred slots — the board server may be unreachable."
+      onRetry={() => deferredQuery.refetch()}
+    />
+  ) : (
+    deferredRows.length > 0 && <DeferredGroup rows={deferredRows} />
+  );
+
   return (
     <div data-qa="runs-page" className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b p-3">
@@ -242,34 +262,34 @@ export function RunsPage({ profile }: { profile: string }) {
             </div>
           ) : (
             <>
-              {/* Deferred region — a SEPARATE sibling block ABOVE RunsList
-                  (mockup.html S1 DOM order: day reassurance -> catch-up row
-                  -> deferred group -> older runs; BUG 3 — a prior version of
-                  this placed it below the whole list, which put it
-                  off-screen on any day with more than a couple of runs),
-                  never merged into RunsList's own `rows` prop, which cannot
-                  represent a deferred slot without widening a type five
-                  other call sites depend on. Loading gets exactly ONE
+              {/* Deferred region (mockup.html S1 DOM order: day reassurance
+                  -> catch-up row -> deferred group -> older runs; BUG 3
+                  round 2 — a prior version placed this ABOVE the whole
+                  list unconditionally, which put it above the catch-up row
+                  too, inverting ux-notes callout 6's Von Restorff intent
+                  (the eye must land on the catch-up row that COVERED the
+                  day, not on the deferred footnote). When today's catch-up
+                  row is present in `listRows`, this same block is instead
+                  threaded into `RunsList` via `insertAfterId`/
+                  `insertContent`, so it renders directly after that row —
+                  never merged into RunsList's own `rows` prop, which
+                  cannot represent a deferred slot without widening a type
+                  five other call sites depend on. Loading gets exactly ONE
                   Skeleton (never the list's own 3x block — "or loading
-                  itself would look like an alarm"); an error here is scoped
-                  to just this region so it never blanks the runs list next
-                  to it. */}
-              <div className="p-3">
-                {deferredQuery.isPending ? (
-                  <Skeleton className="h-12" />
-                ) : deferredQuery.isError ? (
-                  <ErrorRetry
-                    message="Couldn't load deferred slots — the board server may be unreachable."
-                    onRetry={() => deferredQuery.refetch()}
-                  />
-                ) : (
-                  deferredRows.length > 0 && <DeferredGroup rows={deferredRows} />
-                )}
-              </div>
+                  itself would look like an alarm"); an error here is
+                  scoped to just this region so it never blanks the runs
+                  list next to it. Absent a same-day catch-up row, the
+                  group renders at the top of the list, directly under the
+                  reassurance line — unchanged from before. */}
+              {!catchupRowToday && <div className="p-3">{deferredRegion}</div>}
               <RunsList
                 rows={listRows}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                insertAfterId={catchupRowToday?.id ?? null}
+                insertContent={
+                  catchupRowToday ? <div className="p-3">{deferredRegion}</div> : null
+                }
               />
             </>
           )}

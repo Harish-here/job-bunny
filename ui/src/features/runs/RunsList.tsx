@@ -7,6 +7,7 @@ import {
   TriangleAlert,
   Unplug,
 } from 'lucide-react';
+import { Fragment, type ReactNode } from 'react';
 import {
   formatInstant,
   formatInstantTitle,
@@ -161,10 +162,28 @@ export function RunsList({
   rows,
   selectedId,
   onSelect,
+  insertAfterId = null,
+  insertContent = null,
 }: {
   rows: Row[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  /**
+   * BUG 3 (pipeline-stability-hardening QA round 2, 2026-08-14) — threading
+   * choice: rather than splitting `rows` at `RunsPage` and rendering two
+   * separate `<RunsList/>` instances (doubling the `role="listbox"`
+   * container and the "no runs recorded" empty-state special case, for a
+   * feature that only ever inserts ONE thing after ONE row), `RunsList`
+   * itself accepts an insertion-point slot: `insertContent` renders
+   * directly after the row whose `id === insertAfterId`, inside this same
+   * listbox. `RunsPage` passes the catch-up row's own id (never assumes
+   * "the first row" positionally) — matches the mockup's S1 order
+   * (day reassurance -> catch-up row -> deferred group -> older runs)
+   * exactly, and degrades safely to "no match, nothing inserted" if the
+   * id is ever absent from `rows`.
+   */
+  insertAfterId?: number | null;
+  insertContent?: ReactNode;
 }) {
   if (rows.length === 0) {
     return (
@@ -195,78 +214,80 @@ export function RunsList({
                 : null;
 
         return (
-          <div
-            key={row.id}
-            role="option"
-            tabIndex={0}
-            aria-selected={selected}
-            data-testid="run-row"
-            data-run-id={row.id}
-            data-outcome-kind={kind}
-            {...(row.catchupSlots != null ? { 'data-qa': 'run-row-catchup' } : {})}
-            onClick={() => onSelect(row.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onSelect(row.id);
-              }
-            }}
-            className={cn(
-              'flex cursor-pointer flex-col gap-1 rounded-lg bg-card px-3 py-2 hop',
-              treatment.cardClassName,
-              selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                {Icon ? (
-                  <Icon
-                    aria-hidden="true"
-                    strokeWidth={kind === 'empty' ? 1.5 : undefined}
-                    className={cn('size-4 shrink-0', treatment.iconClassName)}
-                  />
-                ) : (
-                  <RunningDot />
-                )}
-                <span
-                  className="text-sm font-medium"
-                  title={formatInstantTitle(row.startedAt, now)}
-                >
-                  {formatInstant(row.startedAt, now)}
+          <Fragment key={row.id}>
+            <div
+              role="option"
+              tabIndex={0}
+              aria-selected={selected}
+              data-testid="run-row"
+              data-run-id={row.id}
+              data-outcome-kind={kind}
+              {...(row.catchupSlots != null ? { 'data-qa': 'run-row-catchup' } : {})}
+              onClick={() => onSelect(row.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(row.id);
+                }
+              }}
+              className={cn(
+                'flex cursor-pointer flex-col gap-1 rounded-lg bg-card px-3 py-2 hop',
+                treatment.cardClassName,
+                selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {Icon ? (
+                    <Icon
+                      aria-hidden="true"
+                      strokeWidth={kind === 'empty' ? 1.5 : undefined}
+                      className={cn('size-4 shrink-0', treatment.iconClassName)}
+                    />
+                  ) : (
+                    <RunningDot />
+                  )}
+                  <span
+                    className="text-sm font-medium"
+                    title={formatInstantTitle(row.startedAt, now)}
+                  >
+                    {formatInstant(row.startedAt, now)}
+                  </span>
+                </div>
+                <span data-testid="run-row-number" className="text-2xl font-heading">
+                  {number}
                 </span>
               </div>
-              <span data-testid="run-row-number" className="text-2xl font-heading">
-                {number}
-              </span>
-            </div>
-            <div
-              data-testid="run-row-label"
-              className="flex items-baseline gap-2 flex-wrap text-sm font-medium"
-            >
-              {label}
-              {row.catchupSlots != null && (
-                <Badge
-                  variant="outline"
-                  className="border-transparent bg-accent text-primary"
-                >
-                  Catch-up
-                </Badge>
-              )}
-            </div>
-            {subline !== null && (
               <div
-                data-testid="run-row-subline"
-                className="text-xs text-muted-foreground"
+                data-testid="run-row-label"
+                className="flex items-baseline gap-2 flex-wrap text-sm font-medium"
               >
-                {subline}
+                {label}
+                {row.catchupSlots != null && (
+                  <Badge
+                    variant="outline"
+                    className="border-transparent bg-accent text-primary"
+                  >
+                    Catch-up
+                  </Badge>
+                )}
               </div>
-            )}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="capitalize">{row.kind}</span>
-              <span>·</span>
-              <span>{formatDuration(row.startedAt, row.finishedAt)}</span>
+              {subline !== null && (
+                <div
+                  data-testid="run-row-subline"
+                  className="text-xs text-muted-foreground"
+                >
+                  {subline}
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="capitalize">{row.kind}</span>
+                <span>·</span>
+                <span>{formatDuration(row.startedAt, row.finishedAt)}</span>
+              </div>
             </div>
-          </div>
+            {insertAfterId === row.id && insertContent}
+          </Fragment>
         );
       })}
     </div>

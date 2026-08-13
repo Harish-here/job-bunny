@@ -517,14 +517,16 @@ describe('RunsPage', () => {
     });
   });
 
-  it('places the deferred group above the run rows, not below all of them (BUG 3)', async () => {
+  it('no-catch-up case: places the deferred group above the run rows, not below all of them (BUG 3)', async () => {
     // With just 2 rows the off-screen symptom itself isn't reproducible
     // (both bug and fix scroll into view identically at that size) — the
     // assertion below checks *document order* directly rather than
     // relying on viewport position, so it still catches the regression
     // regardless of row count. `ROWS` (>1 row) is used anyway to match
     // the bug's own reproduction condition, not because the assertion
-    // needs it.
+    // needs it. Neither `ROWS` row has `catchupSlots` set, so this is the
+    // "no catch-up ran today" case — the group belongs at the TOP of the
+    // list, directly under the reassurance line.
     const deferredSlotsRows: DeferredSlotRow[] = [
       {
         runDate: todayLocalDate(),
@@ -553,6 +555,80 @@ describe('RunsPage', () => {
     // (day reassurance -> catch-up row -> deferred group -> older runs).
     const position = deferredGroup.compareDocumentPosition(firstRunRow);
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('catch-up-ran case: places the deferred group AFTER the catch-up row and BEFORE the older runs, never above the catch-up row (BUG 3 round 2)', async () => {
+    // Round-2 regression: the group's own fix landed above EVERYTHING,
+    // including the catch-up row — inverting ux-notes callout 6's Von
+    // Restorff intent (the eye must land on the green catch-up row that
+    // covered the day, not on the deferred footnote sitting above it).
+    const today = todayLocalDate();
+    const catchupRow: RunSummary = {
+      id: 40,
+      date: today,
+      timeDir: '09-00',
+      kind: 'catchup',
+      resumedFrom: null,
+      status: 'passed',
+      startedAt: `${today}T09:00:00.000Z`,
+      finishedAt: `${today}T09:05:00.000Z`,
+      heartbeatAt: `${today}T09:05:00.000Z`,
+      progress: null,
+      catchupSlots: ['09:00', '11:30'],
+    };
+    const olderRow = ROWS[0] as RunSummary; // catchupSlots: null, a different date.
+    const deferredSlotsRows: DeferredSlotRow[] = [
+      {
+        runDate: today,
+        slot: '09:00',
+        reasonCode: 'host-asleep',
+        reason: 'Job Bunny declined to start this run because the host was asleep.',
+        decidedAt: `${today}T09:00:05.000Z`,
+        notifiedAt: null,
+      },
+    ];
+    stubFetch({ rows: [catchupRow, olderRow], deferredSlotsRows });
+    const { container } = renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('deferred-group')).toBeInTheDocument();
+    });
+
+    const reassurance = container.querySelector(
+      '[data-qa="runs-day-reassurance"]',
+    ) as HTMLElement;
+    const catchupRowEl = container.querySelector(
+      '[data-qa="run-row-catchup"]',
+    ) as HTMLElement;
+    const deferredGroup = screen.getByTestId('deferred-group');
+    const olderRowEl = screen
+      .getAllByTestId('run-row')
+      .find(
+        (el) => el.getAttribute('data-run-id') === String(olderRow.id),
+      ) as HTMLElement;
+
+    expect(catchupRowEl).toBeInTheDocument();
+    expect(olderRowEl).toBeInTheDocument();
+
+    // Required order: reassurance -> catch-up row -> deferred group ->
+    // older runs. DOCUMENT_POSITION_FOLLOWING on the comparison target
+    // means the target comes AFTER the node compareDocumentPosition was
+    // called on.
+    expect(
+      reassurance.compareDocumentPosition(catchupRowEl) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      catchupRowEl.compareDocumentPosition(deferredGroup) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      deferredGroup.compareDocumentPosition(olderRowEl) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('deferred region shows exactly one Skeleton while its query is pending (never three, D3b)', async () => {

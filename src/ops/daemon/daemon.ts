@@ -298,7 +298,7 @@ export function createDaemon(deps: DaemonDeps): {
       deps.log('child-exit', { profile: owed.profile, slot: owed.slot, exitCode });
     }
 
-    // step 1.11, once at the end of the batch (`gate/deferred_sweep.ts`):
+    // step 1.11, once at the end of the batch (`gate/deferred_sweep/sweep.ts`):
     // records slots whose grace fully closed unserved, then decides
     // whether TODAY's catch-up should fire (R8/R8a/R8b/Trap 5). Reuses the
     // SAME `expired` candidates computed above for the reachability gate —
@@ -307,7 +307,7 @@ export function createDaemon(deps: DaemonDeps): {
     await runDeferredSweepAndCatchup(deps, now, date, expired, gate, catchupGateFresh);
 
     // step 1.11a (coordinator-added, 2026-08-13), split into
-    // `gate/deferred_sweep.ts`'s `runRetrospectiveDeferredSweep` purely to
+    // `gate/deferred_sweep/sweep.ts`'s `runRetrospectiveDeferredSweep` purely to
     // keep this file under the file-size cap (non-behavioral split, same
     // precedent as `runDeferredSweepAndCatchup` above) — the day-rollover
     // backstop: a lid that stays closed for a WHOLE calendar day means

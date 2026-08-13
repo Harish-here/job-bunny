@@ -524,7 +524,7 @@ test('bug 1 (the canonical lid-closed day): host asleep across all 5 slots, wake
 // ticks -> 240 log lines and 240 DNS probes). Both must now be bounded to
 // at most once per hour.
 
-test('bug 7: a catch-up-only tick that stays gate-declined re-probes DNS and re-logs gate-declined at most once per hour, not every tick', async () => {
+test('bug 7 (log only) / bug 8 (decision): a catch-up-only tick that stays gate-declined re-probes DNS EVERY tick, but re-logs gate-declined at most once per hour', async () => {
   const scan = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
     { [PROFILES_DIR]: ['harish'] },
@@ -541,23 +541,24 @@ test('bug 7: a catch-up-only tick that stays gate-declined re-probes DNS and re-
   });
   const daemon = createDaemon(deps);
 
-  // 6 ticks, 30s apart — well within the 1-hour throttle window.
+  // 6 ticks, 30s apart — well within the 1-hour LOG throttle window.
   for (let i = 0; i < 6; i++) {
     await daemon.tick();
     nowMs += 30_000;
   }
   assert.equal(
     probed,
-    1,
-    'must not re-probe DNS every tick for the same declined catch-up',
+    6,
+    'bug 8: the gate DECISION must be recomputed (re-probed) on every single tick — never served from cache',
   );
   assert.equal(
     events.filter((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup')
       .length,
     1,
+    'bug 7: the LOG line stays latched to at most once per hour',
   );
 
-  // Advance PAST the 1-hour throttle window in steps small enough
+  // Advance PAST the 1-hour LOG throttle window in steps small enough
   // (100s < SUSPECTED_SUSPEND_GAP_MS's 2 minutes) that no individual tick
   // trips the SUSPEND detector — this exercises the reachability-PROBE
   // retry path specifically, not a suspected-suspend one.
@@ -565,19 +566,16 @@ test('bug 7: a catch-up-only tick that stays gate-declined re-probes DNS and re-
     await daemon.tick();
     nowMs += 100_000;
   }
-  assert.equal(
-    probed,
-    2,
-    'a fresh probe must eventually happen once the interval elapses',
-  );
+  assert.equal(probed, 46, 'every one of the 46 ticks probes fresh');
   assert.equal(
     events.filter((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup')
       .length,
     2,
+    'the log fires again once the 1h window elapses, still bounded (not per-tick)',
   );
 });
 
-test('bug 7: once the network recovers, the catch-up-only cache clears and the very next tick re-probes fresh (no stale decline linger)', async () => {
+test('bug 8 (CRITICAL): once the network recovers, the very NEXT tick spawns the catch-up — a transient decline costs one tick, never an hour (AC4)', async () => {
   const scan = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
     { [PROFILES_DIR]: ['harish'] },
@@ -600,32 +598,100 @@ test('bug 7: once the network recovers, the catch-up-only cache clears and the v
   });
   const daemon = createDaemon(deps);
 
-  await daemon.tick(); // declined, network down — populates the cache.
-  nowMs += 30_000;
-  await daemon.tick(); // still within the throttle window — cached, no re-probe.
+  await daemon.tick(); // declined, network down.
   assert.equal(probed, 1);
+  assert.equal(spawnCatchupCalls.length, 0);
 
-  // Network recovers WITHIN the same throttle window the cache would
-  // otherwise still be honoring — the daemon must not blindly trust a
-  // stale "still declined" cache once it re-probes and finds it healthy.
-  // Advance past the throttle window in small (<2min) steps, one tick at a
-  // time, so no individual tick trips the suspend detector instead —
-  // stopping the moment the fresh (post-recovery) probe actually happens,
-  // since every tick after that keeps re-probing (nothing left to cache —
-  // an OPEN gate is never cached, by design: only a DECLINE is), which is
-  // a separate, pre-existing "known-served" concern outside this bug's
-  // own scope (see this task's own report).
+  // Network recovers 30 SECONDS later — a probe blip, not an hour-long
+  // outage. The old (bug 8) behavior kept honoring an already-declined
+  // cache for up to an hour; the fix must spawn on this very next tick.
   reachable = true;
-  let iterations = 0;
-  while (probed < 2 && iterations < 100) {
-    await daemon.tick();
-    nowMs += 100_000;
-    iterations += 1;
-  }
+  nowMs += 30_000;
+  await daemon.tick();
+
+  assert.equal(probed, 2, 'the very next tick must probe fresh, not reuse the cache');
   assert.equal(
-    probed,
-    2,
-    'a fresh probe must happen once reachable again, past the throttle window',
+    spawnCatchupCalls.length,
+    1,
+    'the catch-up must spawn on the tick immediately after recovery, not an hour later',
   );
-  assert.equal(spawnCatchupCalls.length, 1); // the catch-up now actually spawns.
+});
+
+test('bug 8 (CRITICAL): first tick suspend-declined, second tick healthy -> spawnCatchup fires exactly once, on the second tick (AC9/AC10 had no test asserting this before bug 8 shipped)', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let nowMs = new Date(2026, 6, 27, 9, 30).getTime(); // grace already expired -> catch-up-only tick.
+  const spawnCatchupCalls: number[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(nowMs),
+    probeReachable: async () => true, // reachable — only the suspend gap can decline tick 1.
+    spawnCatchup: async () => {
+      spawnCatchupCalls.push(1);
+      return 0;
+    },
+  });
+  // Simulate a suspend gap ahead of the FIRST tick only — the lid was
+  // closed, the host woke, and this daemon process's very first tick since
+  // waking fires now. Exactly the branch bug 8's cache was most often
+  // populated by, per the QA report's own note.
+  updateDaemonPidfile(
+    deps.root,
+    (c) => ({ ...c, lastTickAt: new Date(nowMs - 5 * 60_000).toISOString() }),
+    deps.pidfile,
+  );
+  const daemon = createDaemon(deps);
+
+  await daemon.tick(); // tick 1: suspend-declined -> no spawn, no ledger.
+  assert.equal(spawnCatchupCalls.length, 0);
+
+  nowMs += 30_000; // 30s later — the gap since tick 1 is small; no longer suspected.
+  await daemon.tick(); // tick 2: healthy -> spawns.
+
+  assert.equal(
+    spawnCatchupCalls.length,
+    1,
+    'exactly one catch-up, spawned on the SECOND tick — not delayed an hour, not lost',
+  );
+});
+
+test('bug 8 (CRITICAL): waking at 23:30 with unserved expired slots spawns the catch-up the SAME day, count 1 — the day must never be lost to a stale cache outliving the date', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['19:00'], graceMinutes: 5 }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  // 2026-07-27 23:30 — well past 19:00's grace window; the lid has been
+  // closed the whole day (a large gap since the last real tick).
+  let nowMs = new Date(2026, 6, 27, 23, 30).getTime();
+  const spawnCatchupCalls: number[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(nowMs),
+    probeReachable: async () => true,
+    spawnCatchup: async () => {
+      spawnCatchupCalls.push(1);
+      return 0;
+    },
+  });
+  updateDaemonPidfile(
+    deps.root,
+    (c) => ({ ...c, lastTickAt: new Date(nowMs - 10 * 60 * 60_000).toISOString() }), // 10h gap.
+    deps.pidfile,
+  );
+  const daemon = createDaemon(deps);
+
+  await daemon.tick(); // wake tick: suspend-declined.
+  assert.equal(spawnCatchupCalls.length, 0);
+
+  nowMs += 30_000; // the very next scheduled tick, still 2026-07-27.
+  await daemon.tick();
+
+  assert.equal(
+    spawnCatchupCalls.length,
+    1,
+    'the old (bug 8) cache would have blocked this for up to an hour — long enough, at a ' +
+      '23:30 wake, to survive past midnight and lose the day entirely',
+  );
 });

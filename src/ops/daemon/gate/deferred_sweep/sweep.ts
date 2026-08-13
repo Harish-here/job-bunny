@@ -1,12 +1,15 @@
 /**
- * ops/daemon/gate/deferred_sweep.ts — the deferred-slot sweep and
+ * ops/daemon/gate/deferred_sweep/sweep.ts — the deferred-slot sweep and
  * same-day catch-up decision (blueprint `pipeline-stability-hardening`
- * step 1.11, step 4). Split out of `../daemon.ts` purely to keep that
+ * step 1.11, step 4). Split out of `../../daemon.ts` purely to keep that
  * file under the file-size cap — a non-behavioral split, same precedent
  * as `../alert/schema_drift.ts`'s `trackSchemaDriftAndNotify`: `daemon.ts`
  * calls `runDeferredSweepAndCatchup` exactly ONCE, at the end of
  * `runOwedBatch`, and passes its own `deps` straight through with no cast
- * (`DeferredSweepDeps` is a structural subset of `DaemonDeps`).
+ * (`DeferredSweepDeps` is a structural subset of `DaemonDeps`). The
+ * notify-retry throttle/prune (bug 2/6/9) lives in the sibling
+ * `notify_throttle.ts`, imported directly — both files are this same
+ * module's own internals; `index.ts` is the folder's public surface.
  *
  * Trap 4 (see task report): `deps.recordDeferral` is called ONLY from this
  * module — never from the per-owed-entry gate guard clause in `daemon.ts`
@@ -21,14 +24,15 @@ import type {
   DeferralCandidate,
   OwedRun,
   ProfileSchedule,
-} from '../../../core/schedule/index.ts';
-import { nextFireAt } from '../../../core/schedule/index.ts';
-import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
-import type { NotifyEvent } from '../../../ports/notifier.ts';
-import { composeDeferredDaySummary } from '../../observability/report/index.ts';
-import type { DaemonPidfile, DaemonPidfileDeps } from '../pidfile.ts';
-import { readDaemonPidfile, updateDaemonPidfile } from '../pidfile.ts';
-import type { ReachabilityGateDecision } from './reachability_gate.ts';
+} from '../../../../core/schedule/index.ts';
+import { nextFireAt } from '../../../../core/schedule/index.ts';
+import type { DeferredSlotRow } from '../../../../ports/deferred_slots.ts';
+import type { NotifyEvent } from '../../../../ports/notifier.ts';
+import { composeDeferredDaySummary } from '../../../observability/report/index.ts';
+import type { DaemonPidfile, DaemonPidfileDeps } from '../../pidfile.ts';
+import { readDaemonPidfile, updateDaemonPidfile } from '../../pidfile.ts';
+import type { ReachabilityGateDecision } from '../reachability_gate.ts';
+import { isNotifyThrottled, stampNotifyAttempt } from './notify_throttle.ts';
 
 export interface DeferredSweepDeps {
   root: string;
@@ -60,66 +64,6 @@ export interface DeferredSweepDeps {
     data?: Record<string, unknown>,
     level?: 'info' | 'warn' | 'error',
   ) => void;
-}
-
-/** 1 hour — same idiom as `alert/schema_drift.ts`'s own
- * `SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS`, reused here rather than
- * duplicated inline. Bug 2/6 (pipeline-stability-hardening QA, 2026-08-14):
- * without this, both the same-day T4 send and the retrospective summary
- * send retry on EVERY 30s tick while failing (measured: 12 ticks -> 12
- * sends; ~2,880/day) — this bounds retries to at most once per pending
- * (profile, date) item per hour, both for a failing `notify()` AND for the
- * "notify succeeded but the fail-soft `markNotified` write silently didn't
- * stick" escalation (see `isNotifyThrottled`'s own doc comment). */
-export const DEFERRED_NOTIFY_RETRY_INTERVAL_MS = 60 * 60_000;
-
-/** Whether an attempt to notify (profile, date)'s deferred-day summary was
- * made within the last `DEFERRED_NOTIFY_RETRY_INTERVAL_MS` — checked BEFORE
- * every notify attempt in both `runDeferredSweepAndCatchup` and
- * `runRetrospectiveDeferredSweep`. Deliberately keyed off the last ATTEMPT
- * (stamped by `stampNotifyAttempt` regardless of whether `notify()`
- * succeeded), not the last FAILURE: `markNotified` is fail-soft (a DB write
- * error is swallowed, not surfaced), so a `notify()` that reports success
- * is not reliable proof the underlying `deferred_slots` row was actually
- * marked — throttling on attempts alone catches that escalation too,
- * where throttling only on reported failures would not. */
-function isNotifyThrottled(
-  pidfileNow: DaemonPidfile | undefined,
-  profile: string,
-  date: string,
-  now: Date,
-): boolean {
-  const entry = (pidfileNow?.deferredNotifyAttempts ?? []).find(
-    (a) => a.profile === profile && a.date === date,
-  );
-  if (!entry) return false;
-  const elapsed = now.getTime() - Date.parse(entry.at);
-  return Number.isFinite(elapsed) && elapsed <= DEFERRED_NOTIFY_RETRY_INTERVAL_MS;
-}
-
-/** Upserts (profile, date)'s own attempt timestamp — one entry per pair,
- * a later call replacing rather than accumulating. Best-effort: a failed
- * write here (unreadable/corrupt pidfile) is not fatal to the caller. */
-function stampNotifyAttempt(
-  root: string,
-  pidfile: DaemonPidfileDeps,
-  profile: string,
-  date: string,
-  now: Date,
-): void {
-  updateDaemonPidfile(
-    root,
-    (current) => ({
-      ...current,
-      deferredNotifyAttempts: [
-        ...current.deferredNotifyAttempts.filter(
-          (a) => !(a.profile === profile && a.date === date),
-        ),
-        { profile, date, at: now.toISOString() },
-      ],
-    }),
-    pidfile,
-  );
 }
 
 /** Bug 1 (pipeline-stability-hardening QA, 2026-08-14) — the reason a given

@@ -109,7 +109,7 @@ export function parseLastGateDecline(
 }
 
 /** Shape-checks a single `slotGateDeclines` entry (bug 1, D9 — see
- * `deferred_sweep.ts`'s attribution loop): every field required, `reasonCode`
+ * `deferred_sweep/sweep.ts`'s attribution loop): every field required, `reasonCode`
  * narrowed exactly like `parseLastGateDecline`'s own two-value union. */
 function parseSlotGateDecline(value: unknown): SlotGateDecline | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
@@ -153,7 +153,7 @@ export function parseSlotGateDeclines(value: unknown): SlotGateDecline[] {
 }
 
 /** Shape-checks a single `deferredNotifyAttempts` entry (bug 2/6 — see
- * `deferred_sweep.ts`'s notify-retry throttle). */
+ * `deferred_sweep/sweep.ts`'s notify-retry throttle). */
 function parseDeferredNotifyAttempt(value: unknown): DeferredNotifyAttempt | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Partial<DeferredNotifyAttempt>;
