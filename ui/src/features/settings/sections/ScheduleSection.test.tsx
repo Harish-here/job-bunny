@@ -163,4 +163,62 @@ describe('ScheduleSection', () => {
       );
     });
   });
+
+  it("healthy daemon status shows 'Running · last tick Ns ago', computed from the fixture's lastTickAt, not a hardcoded string", async () => {
+    stubDoc();
+    const lastTickAt = new Date(Date.now() - 12_000).toISOString(); // 12s ago.
+    stubDaemon({
+      state: 'running',
+      pid: 1,
+      startedAt: '2026-08-13T09:00:00.000Z',
+      lastTickAt,
+      inFlight: null,
+      profiles: [
+        {
+          profile: 'rajni',
+          enabled: true,
+          nextRunAt: '2026-08-13T11:30:00.000Z',
+          degraded: false,
+          degradedReason: null,
+        },
+      ],
+    });
+    renderSection();
+    const status = await screen.findByTestId('schedule-daemon-status-healthy');
+    expect(status).toHaveTextContent(/Running · last tick 1[0-4]s ago/);
+    // A tight range (10-14s), not an exact string match, since real
+    // elapsed time between seeding lastTickAt and the assertion running
+    // is a handful of milliseconds, never exactly 12000ms.
+  });
+
+  it('degraded daemon status renders the exact degradedReason and the remedy command in font-mono', async () => {
+    stubDoc();
+    const degradedReason =
+      "the database schema (v8) is newer than the running daemon's build (v7). This happens after an update that changes the schema.";
+    stubDaemon({
+      state: 'running',
+      pid: 1,
+      startedAt: '2026-08-13T09:00:00.000Z',
+      lastTickAt: new Date().toISOString(),
+      inFlight: null,
+      profiles: [
+        {
+          profile: 'rajni',
+          enabled: true,
+          nextRunAt: null,
+          degraded: true,
+          degradedReason,
+        },
+      ],
+    });
+    renderSection();
+    const status = await screen.findByTestId('schedule-daemon-status-degraded');
+    expect(status).toHaveTextContent(degradedReason);
+    const command = status.querySelector('code.font-mono');
+    expect(command).not.toBeNull();
+    expect(command?.textContent).toBe('jobbunny serve stop && jobbunny serve start');
+    expect(
+      screen.queryByTestId('schedule-daemon-status-healthy'),
+    ).not.toBeInTheDocument();
+  });
 });
