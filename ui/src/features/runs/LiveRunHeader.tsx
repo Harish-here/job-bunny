@@ -58,6 +58,12 @@ export interface LiveRunHeaderProps {
   /** Wired to the parent poll's own `refetch()` — the strip's `[Retry]`
    * control re-triggers that existing poll, never starts a new one (R12). */
   onRetry?: () => void;
+  /** Median-based ETA from `RunDetailResponse` (task 20's own port), threaded
+   * in by `RunsPage` from its already-fetched run-detail query — this
+   * component never fetches it itself. `null` when the backend can't
+   * estimate (fewer than 3 same-profile history samples); `undefined`/absent
+   * for callers that don't pass it (non-catchup rows never render it). */
+  estimatedDurationMs?: number | null;
 }
 
 /** Live strip for the currently-running run (spec §3.6, §2.5, plan.md B22):
@@ -71,30 +77,81 @@ export function LiveRunHeader({
   pollError = false,
   lastUpdatedAt = null,
   onRetry,
+  estimatedDurationMs = null,
 }: LiveRunHeaderProps) {
   const progress = stageProgressFrom(run);
   const now = Date.now();
   const percent = progress ? (progress.stageIndex / progress.stageTotal) * 100 : 0;
   const liveness = livenessFor(run, pollError, now);
+  const isCatchup = run.kind === 'catchup';
+  // Determinism (blueprint §8): `elapsedMs`/`remainingMs` are derived from
+  // the SAME `now` read above — never a second `Date.now()`/`new Date()`
+  // call — and `remainingMs` is computed exactly once, then reused by both
+  // `catchup-banner-eta` and `catchup-banner-stop-unavailable` so the two
+  // displayed minute counts can never disagree.
+  const elapsedMs = now - Date.parse(run.startedAt);
+  const remainingMs =
+    estimatedDurationMs != null ? Math.max(0, estimatedDurationMs - elapsedMs) : null;
+  const catchupSlots = run.catchupSlots ?? [];
 
   return (
     <div
       data-testid="live-run-header"
+      data-qa="catchup-banner"
       className="flex flex-col gap-2 border-b border-border bg-muted/30 px-4 py-3"
     >
       <div className="flex items-center justify-between gap-2">
-        <span data-testid="live-run-stage" className="text-sm font-medium">
-          {progress
-            ? `Running — ${progress.stage} ${progress.stageIndex}/${progress.stageTotal}`
-            : 'Running — starting…'}
+        <span
+          data-testid="live-run-stage"
+          data-qa="catchup-banner-label"
+          className="text-sm font-medium"
+        >
+          {isCatchup
+            ? progress
+              ? `Catch-up run — ${progress.stage} ${progress.stageIndex}/${progress.stageTotal}`
+              : 'Catch-up run — starting…'
+            : progress
+              ? `Running — ${progress.stage} ${progress.stageIndex}/${progress.stageTotal}`
+              : 'Running — starting…'}
         </span>
         <span className="text-xs text-muted-foreground">
           {formatElapsed(run.startedAt, now)}
         </span>
       </div>
-      <Progress value={percent} />
+      {isCatchup && (
+        <p data-qa="catchup-banner-standin" className="text-xs text-muted-foreground">
+          {`Standing in for ${catchupSlots.length} missed slot${catchupSlots.length === 1 ? '' : 's'} (${catchupSlots.join(', ')})`}
+        </p>
+      )}
+      <Progress value={percent} data-qa="catchup-banner-progress" />
+      {isCatchup && (
+        <p data-qa="catchup-banner-why" className="text-xs text-muted-foreground">
+          Chrome is open because Job Bunny is catching up on today's missed slots.
+        </p>
+      )}
       <div data-testid="live-run-heartbeat" className="flex items-center gap-2 text-xs">
-        {liveness === 'alive' && (
+        {liveness === 'alive' && isCatchup && (
+          <>
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-full bg-primary animate-pulse"
+            />
+            <span data-qa="catchup-banner-eta" className="text-xs text-muted-foreground">
+              {remainingMs !== null
+                ? `~${Math.round(remainingMs / 60000)} min left`
+                : `${formatElapsed(run.startedAt, now)} elapsed`}
+            </span>
+            <span
+              data-qa="catchup-banner-stop-unavailable"
+              className="text-xs font-medium text-muted-foreground ml-auto"
+            >
+              {remainingMs !== null
+                ? `Runs to completion — about ${Math.round(remainingMs / 60000)} min left.`
+                : 'Runs to completion.'}
+            </span>
+          </>
+        )}
+        {liveness === 'alive' && !isCatchup && (
           <>
             <span
               aria-hidden
