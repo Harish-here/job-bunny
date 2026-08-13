@@ -444,3 +444,133 @@ describe('RunsList — catch-up row extension (blueprint.md 1.5)', () => {
     expect(screen.queryByText('Stood in for 1 slots')).not.toBeInTheDocument();
   });
 });
+
+// BUG 10 (pipeline-stability-hardening QA round 3, 2026-08-14) — ux-notes.md
+// §9 verbatim: "it must not enter the runs listbox." `insertContent` used to
+// render inside `role="listbox"`, between two `role="option"` rows: a div
+// holding a paragraph/region/heading/button is not a permitted listbox
+// child (ARIA 1.2 requires only `option`, or `group` of `option`s), and AT
+// that prunes disallowed children drops the whole group from the
+// accessibility tree. `INSERT_FIXTURE` below reproduces the QA report's own
+// driven evidence shape (`text`, `paragraph`, `region`, `heading[level=3]`,
+// `button`) so the standing guard exercises the exact tree that was found
+// broken, not a simplified stand-in.
+const INSERT_FIXTURE = (
+  <div data-testid="fixture-insert">
+    <p>Job Bunny declined to start these runs because the host was asleep.</p>
+    <section aria-label="Details">09:00 · host asleep</section>
+    <h3>Details</h3>
+    <button type="button">Details</button>
+  </div>
+);
+
+describe('RunsList — accessibility: the inserted group must not enter role="listbox" (BUG 10)', () => {
+  it('STANDING GUARD: every role="listbox" contains ONLY role="option" children, even with content inserted mid-list', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const nonOptionChildren = container.querySelectorAll(
+      '[role="listbox"] > *:not([role="option"])',
+    );
+    expect(nonOptionChildren).toHaveLength(0);
+  });
+
+  it('STANDING GUARD: also holds with no insertion at all (the plain single-listbox case)', () => {
+    const { container } = render(
+      <RunsList rows={ROWS} selectedId={null} onSelect={() => {}} />,
+    );
+    const nonOptionChildren = container.querySelectorAll(
+      '[role="listbox"] > *:not([role="option"])',
+    );
+    expect(nonOptionChildren).toHaveLength(0);
+  });
+
+  it('STANDING GUARD: also holds when insertAfterId matches no row (degrades to a single listbox, nothing inserted)', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={999}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    expect(screen.queryByTestId('fixture-insert')).not.toBeInTheDocument();
+    const nonOptionChildren = container.querySelectorAll(
+      '[role="listbox"] > *:not([role="option"])',
+    );
+    expect(nonOptionChildren).toHaveLength(0);
+    expect(container.querySelectorAll('[role="listbox"]')).toHaveLength(1);
+  });
+
+  it('the inserted content is not a DESCENDANT of any listbox either (not just not a direct child)', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const insert = container.querySelector('[data-testid="fixture-insert"]');
+    expect(insert).not.toBeNull();
+    expect(insert?.closest('[role="listbox"]')).toBeNull();
+  });
+
+  it('splits into two listboxes with DISTINCT, non-empty accessible names — never two identically-named "Runs" lists', () => {
+    render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const listboxes = screen.getAllByRole('listbox');
+    expect(listboxes).toHaveLength(2);
+    const names = listboxes.map((el) => el.getAttribute('aria-label'));
+    expect(names[0]).toBeTruthy();
+    expect(names[1]).toBeTruthy();
+    expect(names[0]).not.toBe(names[1]);
+  });
+
+  it('document order: rows-before -> insertContent -> rows-after, with more than one row on each side', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const runIds = screen
+      .getAllByTestId('run-row')
+      .map((el) => el.getAttribute('data-run-id'));
+    // Row order itself is untouched by the split (ids 1..7, unchanged).
+    expect(runIds).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+
+    const lastBeforeRow = container.querySelector('[data-run-id="3"]') as HTMLElement;
+    const insert = container.querySelector(
+      '[data-testid="fixture-insert"]',
+    ) as HTMLElement;
+    const firstAfterRow = container.querySelector('[data-run-id="4"]') as HTMLElement;
+
+    // DOCUMENT_POSITION_FOLLOWING on the comparison target means the
+    // target comes AFTER the node compareDocumentPosition was called on.
+    expect(
+      lastBeforeRow.compareDocumentPosition(insert) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      insert.compareDocumentPosition(firstAfterRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
