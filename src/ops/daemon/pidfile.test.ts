@@ -320,6 +320,116 @@ test('updateDaemonPidfile + readDaemonPidfile: degraded, schemaDriftNotifiedAt, 
   assert.equal(stored?.schemaDriftNotifyFailedAt, '2026-08-13T10:07:00.000Z');
 });
 
+test('parsePidfile: an old-shape pidfile with no lastGateDecline key parses with lastGateDecline undefined', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.equal(stored?.lastGateDecline, undefined);
+});
+
+test('parsePidfile: a malformed lastGateDecline (missing a required sub-field, or an invalid reasonCode) is dropped, not trusted', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+      lastGateDecline: { reasonCode: 'host-asleep', reason: 'x' }, // missing `at`
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.equal(stored?.lastGateDecline, undefined);
+
+  const deps2 = fakeDeps();
+  setRaw(
+    deps2,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+      // Valid for DeferredSlotRow's three-value union, but NOT for
+      // lastGateDecline's own narrower two-value union — must be dropped.
+      lastGateDecline: {
+        reasonCode: 'daemon-unavailable',
+        reason: 'x',
+        at: '2026-08-13T10:00:00.000Z',
+      },
+    }),
+  );
+  const stored2 = readDaemonPidfile(ROOT, deps2);
+  assert.equal(stored2?.lastGateDecline, undefined);
+});
+
+test('updateDaemonPidfile + readDaemonPidfile: lastGateDecline round-trips through a write/read cycle', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      lastGateDecline: {
+        reasonCode: 'network-unreachable',
+        reason:
+          'Job Bunny declined to start this run because the network was unreachable.',
+        at: '2026-08-13T10:00:00.000Z',
+      },
+    }),
+    deps,
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.lastGateDecline, {
+    reasonCode: 'network-unreachable',
+    reason: 'Job Bunny declined to start this run because the network was unreachable.',
+    at: '2026-08-13T10:00:00.000Z',
+  });
+});
+
+test('updateDaemonPidfile + readDaemonPidfile: a second lastGateDecline write overwrites the first, not accumulates', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      lastGateDecline: {
+        reasonCode: 'host-asleep',
+        reason: 'first decline',
+        at: '2026-08-13T10:00:00.000Z',
+      },
+    }),
+    deps,
+  );
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      lastGateDecline: {
+        reasonCode: 'network-unreachable',
+        reason: 'second decline',
+        at: '2026-08-13T10:05:00.000Z',
+      },
+    }),
+    deps,
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.lastGateDecline, {
+    reasonCode: 'network-unreachable',
+    reason: 'second decline',
+    at: '2026-08-13T10:05:00.000Z',
+  });
+});
+
 test('defaultDaemonPidfileDeps: builds a working real-fs deps object shape', () => {
   const deps = defaultDaemonPidfileDeps();
   assert.equal(typeof deps.now, 'function');

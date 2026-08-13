@@ -68,6 +68,20 @@ export interface DaemonPidfile {
   // send and the log line while less than `SCHEMA_DRIFT_NOTIFY_RETRY_MS` has elapsed since it), and
   // cleared back to null the moment a send succeeds, so a later, genuinely new failure attempts
   // immediately rather than waiting out a stale interval.
+  lastGateDecline?: {
+    reasonCode: 'host-asleep' | 'network-unreachable';
+    reason: string;
+    at: string;
+  };
+  // Single rolling value, NOT an array — the gate is host-level, computed
+  // once per tick and applied uniformly to every owed entry that tick
+  // (step 1.11), so there is exactly one current reason at any moment,
+  // never a per-slot history. A second gate decline (same tick or a later
+  // one) simply overwrites this field wholesale via the normal
+  // updateDaemonPidfile mutate-and-write pattern — deliberately less
+  // structure than `degraded[]`. Optional (`?:`), not `| null`, mirroring
+  // `inFlight?: DaemonInFlight`'s convention rather than the four
+  // `schemaDrift*` fields' `T | null` convention.
 }
 
 export interface DaemonPidfileDeps {
@@ -184,6 +198,34 @@ function parseNullableTimestamp(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+/** Shape-checks the `lastGateDecline` value: mirrors `parseDegradedEntry`'s
+ * field-for-field checking, with `reasonCode` narrowed to exactly the two
+ * literals this field's own (narrower-than-`DeferredSlotRow`) union allows —
+ * a `'daemon-unavailable'` reasonCode is valid there but never here, since
+ * that case means the daemon wasn't even running to gate anything. */
+function parseLastGateDecline(value: unknown): DaemonPidfile['lastGateDecline'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Partial<{
+    reasonCode: unknown;
+    reason: unknown;
+    at: unknown;
+  }>;
+  if (
+    typeof candidate.reasonCode === 'string' &&
+    (candidate.reasonCode === 'host-asleep' ||
+      candidate.reasonCode === 'network-unreachable') &&
+    typeof candidate.reason === 'string' &&
+    typeof candidate.at === 'string'
+  ) {
+    return {
+      reasonCode: candidate.reasonCode,
+      reason: candidate.reason,
+      at: candidate.at,
+    };
+  }
+  return undefined;
+}
+
 function parsePidfile(raw: string): DaemonPidfile | undefined {
   try {
     const parsed = JSON.parse(raw) as Partial<DaemonPidfile>;
@@ -207,6 +249,7 @@ function parsePidfile(raw: string): DaemonPidfile | undefined {
         schemaDriftNotifyFailedAt: parseNullableTimestamp(
           parsed.schemaDriftNotifyFailedAt,
         ),
+        lastGateDecline: parseLastGateDecline(parsed.lastGateDecline),
       };
     }
     return undefined; // malformed shape — treated the same as unreadable.
