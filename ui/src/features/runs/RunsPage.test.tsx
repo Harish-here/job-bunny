@@ -17,6 +17,7 @@ const ROWS: RunSummary[] = [
     finishedAt: '2026-08-05T09:05:00.000Z',
     heartbeatAt: '2026-08-05T09:05:00.000Z',
     progress: null,
+    catchupSlots: null,
   },
   {
     id: 1,
@@ -29,6 +30,7 @@ const ROWS: RunSummary[] = [
     finishedAt: '2026-08-04T09:01:00.000Z',
     heartbeatAt: '2026-08-04T09:01:00.000Z',
     progress: null,
+    catchupSlots: null,
   },
 ];
 
@@ -291,6 +293,7 @@ describe('RunsPage', () => {
         finishedAt: null,
         heartbeatAt: '2026-08-06T09:00:05.000Z',
         progress: null,
+        catchupSlots: null,
       },
       ...ROWS,
     ];
@@ -322,6 +325,7 @@ describe('RunsPage', () => {
         finishedAt: '2026-08-07T09:05:00.000Z',
         heartbeatAt: '2026-08-07T09:05:00.000Z',
         progress: null,
+        catchupSlots: null,
       },
       {
         id: 11,
@@ -334,6 +338,7 @@ describe('RunsPage', () => {
         finishedAt: '2026-08-07T08:05:00.000Z',
         heartbeatAt: '2026-08-07T08:05:00.000Z',
         progress: null,
+        catchupSlots: null,
       },
       {
         id: 12,
@@ -346,6 +351,7 @@ describe('RunsPage', () => {
         finishedAt: '2026-08-07T07:05:00.000Z',
         heartbeatAt: '2026-08-07T07:05:00.000Z',
         progress: null,
+        catchupSlots: null,
       },
       {
         id: 13,
@@ -358,6 +364,7 @@ describe('RunsPage', () => {
         finishedAt: '2026-08-07T06:01:00.000Z',
         heartbeatAt: '2026-08-07T06:01:00.000Z',
         progress: null,
+        catchupSlots: null,
       },
     ];
     const detailOverrides: Record<number, RunDetail> = {

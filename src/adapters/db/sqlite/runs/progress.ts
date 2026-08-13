@@ -6,7 +6,7 @@
  * comment); mirrors why `board_daemon.ts` was split out of `board.ts`.
  */
 import type { SQLInputValue } from 'node:sqlite';
-import type { RunProgress } from '../../../../ports/run_store.ts';
+import type { RunKind, RunProgress, RunStatus } from '../../../../ports/run_store.ts';
 
 export interface ProgressInput {
   stage: string;
@@ -82,6 +82,25 @@ export interface RawProgressRow {
  * when no row matches) to `RunProgress`. Returns null for a missing row or
  * for the no-match join shape — a finished run's stale progress row is
  * otherwise harmless to keep (see store.ts's LEFT JOIN). */
+/** `runs` row shape read by `store.ts`'s `toSummary` — kept here, not
+ * `store.ts` (already at the file-size cap), since it extends
+ * `RawProgressRow` above and store.ts is the only importer. */
+export interface RunRow extends RawProgressRow {
+  id: number;
+  run_date: string;
+  time_dir: string | null;
+  kind: RunKind;
+  resumed_from: number | null;
+  status: RunStatus;
+  started_at: string;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+  result_json: string | null;
+  failure_json: string | null;
+  sync_dryrun_json: string | null;
+  catchup_slots_json: string | null;
+}
+
 export function mapProgressRow(
   row: RawProgressRow | null | undefined,
 ): RunProgress | null {

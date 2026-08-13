@@ -412,6 +412,34 @@ test('getRun: returns full detail with parsed blobs; unknown id -> null', () => 
   assert.equal(board.getRun(999999), null);
 });
 
+test('getRun/listRuns: catchupSlots populated identically to SqliteRunStore for the same row', () => {
+  const { board, runStore } = freshRunsFixture();
+  const runId = runStore.startRun({
+    date: '2026-08-05',
+    kind: 'catchup',
+    startedAt: '2026-08-05T14:00:00.000Z',
+    catchupSlots: ['14:00', '16:30', '19:00'],
+  });
+  const noSlotsId = runStore.startRun({
+    date: '2026-08-06',
+    kind: 'run',
+    startedAt: '2026-08-06T09:00:00.000Z',
+  });
+
+  const fromRunStore = runStore.getRun(runId);
+  const fromBoard = board.getRun(runId);
+  assert.deepEqual(fromBoard?.catchupSlots, ['14:00', '16:30', '19:00']);
+  assert.deepEqual(fromBoard?.catchupSlots, fromRunStore?.catchupSlots);
+
+  const boardRows = board.listRuns({}).rows;
+  const runStoreRows = runStore.listRuns();
+  assert.deepEqual(boardRows.find((r) => r.id === noSlotsId)?.catchupSlots, null);
+  assert.deepEqual(
+    boardRows.find((r) => r.id === noSlotsId)?.catchupSlots,
+    runStoreRows.find((r) => r.id === noSlotsId)?.catchupSlots,
+  );
+});
+
 test('listRunEvents: ascending order, total count, limit/offset paginate; unknown run id -> empty', () => {
   const { board, runStore } = freshRunsFixture();
   const runId = runStore.startRun({

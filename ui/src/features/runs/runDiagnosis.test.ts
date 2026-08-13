@@ -51,6 +51,7 @@ const BASE_SUMMARY: Omit<RunSummary, 'status'> = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:05:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 function detail(overrides: {

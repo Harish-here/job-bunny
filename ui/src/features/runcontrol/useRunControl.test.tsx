@@ -60,6 +60,7 @@ function runRow(over: Partial<RunSummary> = {}): ListRunsResponse['rows'][number
     finishedAt: null,
     heartbeatAt: null,
     progress: null,
+    catchupSlots: null,
     softErrors: { total: 0, groups: [], breakerOpen: false },
     ...over,
   };

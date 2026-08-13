@@ -25,6 +25,7 @@ import type {
   RunSummary,
 } from '../../../../ports/run_store.ts';
 import {
+  decodeCatchupSlots,
   deriveStatus,
   mapProgressRow,
   PROGRESS_JOIN,
@@ -47,6 +48,7 @@ interface RawRunRow extends RawProgressRow {
   result_json: string | null;
   failure_json: string | null;
   sync_dryrun_json: string | null;
+  catchup_slots_json: string | null;
 }
 
 interface RawRunEventRow {
@@ -68,6 +70,7 @@ function toRunSummary(row: RawRunRow): RunSummary {
     finishedAt: row.finished_at,
     heartbeatAt: row.heartbeat_at,
     progress: mapProgressRow(row),
+    catchupSlots: decodeCatchupSlots(row.catchup_slots_json),
   };
 }
 

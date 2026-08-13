@@ -62,6 +62,7 @@ const BASE = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:05:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const RUNNING_PROGRESS: RunProgress = {
@@ -251,6 +252,7 @@ const BARE_SUMMARY_BASE = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:05:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 describe('RunsList — bare RunSummary rows (the real /runs list contract)', () => {

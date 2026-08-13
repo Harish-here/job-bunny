@@ -553,3 +553,60 @@ test('deriveStatus: running with a fresh heartbeat (<= 10min old) stays running'
   const now = new Date('2026-08-05T12:00:00.000Z');
   assert.equal(deriveStatus('running', '2026-08-05T11:51:00.000Z', now), 'running');
 });
+
+test('startRun -> getRun: catchupSlots round-trips through catchup_slots_json', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  const runId = store.startRun({
+    date: '2026-08-05',
+    kind: 'catchup',
+    startedAt: '2026-08-05T10:00:00.000Z',
+    catchupSlots: ['14:00', '16:30', '19:00'],
+  });
+  const detail = store.getRun(runId);
+  assert.deepEqual(detail?.catchupSlots, ['14:00', '16:30', '19:00']);
+  const listRow = store.listRuns().find((r) => r.id === runId);
+  assert.deepEqual(listRow?.catchupSlots, ['14:00', '16:30', '19:00']);
+});
+
+test('startRun: catchupSlots omitted from meta -> getRun returns catchupSlots: null', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  const runId = store.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  const detail = store.getRun(runId);
+  assert.equal(detail?.catchupSlots, null);
+});
+
+test('hasRunOfKind: true only for the exact (date, kind) pair inserted', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteRunStore(dbPath);
+  store.startRun({
+    date: '2026-08-05',
+    kind: 'run',
+    startedAt: '2026-08-05T10:00:00.000Z',
+  });
+  store.startRun({
+    date: '2026-08-05',
+    kind: 'catchup',
+    startedAt: '2026-08-05T14:00:00.000Z',
+    catchupSlots: ['14:00'],
+  });
+
+  assert.equal(store.hasRunOfKind('2026-08-05', 'catchup'), true);
+  assert.equal(store.hasRunOfKind('2026-08-05', 'run'), true);
+  assert.equal(store.hasRunOfKind('2026-08-05', 'reconcile'), false);
+  assert.equal(store.hasRunOfKind('2026-08-04', 'catchup'), false);
+});
+
+test('hasRunOfKind: fail-soft — a degraded store (bad db path) returns false instead of throwing', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'jb-runstore-'));
+  const blockerFile = path.join(dir, 'blocker');
+  writeFileSync(blockerFile, 'not a directory');
+  const dbPath = path.join(blockerFile, 'sub', 'jobbunny.db');
+  const store = new SqliteRunStore(dbPath, { warn: () => {} });
+  assert.equal(store.hasRunOfKind('2026-08-05', 'run'), false);
+});
