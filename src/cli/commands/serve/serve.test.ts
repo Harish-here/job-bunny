@@ -430,3 +430,14 @@ test('start (child): notify is REBUILT (not passed through from ServeDeps) and n
   });
   assert.equal(result, false); // no real profile.json under ROOT — no-op.
 });
+
+test('start (child): step 1.12 — spawnCatchup wires to the SAME function reference as spawnRun, not a duplicate executor', () => {
+  const { deps } = baseServeDeps();
+  const injectedSpawnRun = async () => 0;
+
+  const daemonDeps = buildDaemonDeps(deps, injectedSpawnRun, () => {});
+
+  assert.equal(daemonDeps.spawnRun, injectedSpawnRun);
+  assert.equal(daemonDeps.spawnCatchup, injectedSpawnRun);
+  assert.equal(daemonDeps.spawnCatchup, daemonDeps.spawnRun);
+});

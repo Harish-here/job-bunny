@@ -82,9 +82,11 @@ export interface DaemonDeps {
    * not the pidfile, since only `runs` can answer this across a daemon
    * restart or a day that has already rolled over. Never throws. */
   hasCatchupRun: (profile: string, date: string) => boolean;
-  /** step 1.12 (task 14) — spawns the catch-up run. This task only adds
-   * the FIELD (so this file's own catch-up decision compiles and its
-   * tests can inject a fake); task 14 wires the real implementation in. */
+  /** step 1.12 — spawns the catch-up run. Real implementation
+   * (`cli/commands/serve/start.ts`'s `buildDaemonDeps`): the SAME function
+   * reference as `spawnRun` above — `ops/daemon/supervise/supervise.ts`'s
+   * `createSpawnRun` already branches on `'standingInFor' in owed`
+   * internally, so there is no separate catch-up executor. */
   spawnCatchup: (
     target: OwedRun & { standingInFor: readonly string[] },
   ) => Promise<number>;

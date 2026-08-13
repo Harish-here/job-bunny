@@ -28,7 +28,7 @@
  * genuine duplicate-run bug this `readRunHistory` injection closes).
  */
 
-import type { ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
+import type { OwedRun, ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
 import {
   formatLocalDate,
   hhMmToMinutes,
@@ -48,6 +48,14 @@ import { readDaemonPidfile, updateDaemonPidfile } from './pidfile.ts';
 import { scanProfileSchedules } from './scan/index.ts';
 
 export type { DaemonDeps, SpawnRun } from './deps.ts';
+
+/** step 1.12 — the real spawn executor's widened parameter type: a plain
+ * `OwedRun` for a normal scheduled slot, or an `OwedRun` carrying
+ * `standingInFor` for a catch-up run standing in for one or more slots a
+ * closed lid deferred. Discriminated STRUCTURALLY (`'standingInFor' in
+ * owed`), not by a `kind` tag — `createSpawnRun` (`ops/daemon/supervise/
+ * supervise.ts`) branches on presence at runtime. */
+export type SpawnTarget = OwedRun | (OwedRun & { standingInFor: readonly string[] });
 
 export const TICK_MS = 30_000;
 

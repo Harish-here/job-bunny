@@ -172,15 +172,10 @@ export function buildDaemonDeps(
     listUnnotifiedDatesBefore: deps.listUnnotifiedDatesBefore,
     markNotified: deps.markNotified,
     hasCatchupRun: deps.hasCatchupRun,
-    // step 1.12 (task 14, numbered AFTER this one) wires the REAL catch-up
-    // executor here (the same `spawnRun` reused, widened to accept
-    // `standingInFor`) — this placeholder exists only because
-    // `DaemonDeps.spawnCatchup` is a required field this task's own type
-    // addition introduced; task 14 replaces it, not adds it.
-    spawnCatchup: async (target) => {
-      log('catchup-spawn-not-wired', { profile: target.profile }, 'error');
-      return 1;
-    },
+    // step 1.12: the SAME executor as `spawnRun` above (`createSpawnRun`
+    // already branches on `'standingInFor' in owed` internally) — no
+    // duplicate executor, no separate `createSpawnRun` instance.
+    spawnCatchup: spawnRun,
     log,
     now: () => new Date(),
   };
