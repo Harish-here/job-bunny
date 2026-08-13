@@ -82,7 +82,7 @@ Eight rules in `.dependency-cruiser.cjs`, run via `npm run boundaries`:
 2. `ports-only-core` — `src/ports` may not import `adapters|pipeline|routines|ops|cli|app`
 3. `adapters-no-cross-family` — an adapter family may not import another
 4. `adapters-only-ports-core` — `src/adapters` may not import `pipeline|routines|ops|cli|app`
-5. `only-wire-imports-adapters` — nothing except `src/cli/wire/compose.ts` (plus siblings `builders.ts`, `board.ts`, `daemon.ts` and `migrate.ts`, and a TYPE-ONLY exception for `registry.ts` — see §2.3) may import `src/adapters/**`
+5. `only-wire-imports-adapters` — only `cli/wire`'s composition files may import `src/adapters/**`. The rule's own comment in `.dependency-cruiser.cjs` is the authoritative list of which files those are and why each is excepted (one is TYPE-ONLY; see also §2.3)
 6. `nothing-imports-cli` — nothing imports `cli`
 7. `app-only-ports-core` (2026-08-02) — `src/app` may not import `adapters|pipeline|routines|ops|cli`: the board layer reaches an adapter only via injection from `cli/wire`
 8. `only-cli-imports-app` (2026-08-02) — nothing except `src/cli` may import `src/app`
