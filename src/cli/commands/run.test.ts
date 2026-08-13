@@ -378,6 +378,10 @@ test('runCommand: a passed run opens a "run"-kind runs row and closes it with th
   assert.deepEqual(finished[0]?.result, result);
 });
 
+// The `opts.catchupSlots` → `startRun({ kind, catchupSlots })` tests live in
+// `run.catchup.test.ts`, split out to stay under the 800-line test-file cap
+// — mirrors `run.resume.test.ts`'s split precedent.
+
 test('runCommand: a failed run closes its runs row with outcome "failed"', async () => {
   const notified: NotifyEvent[] = [];
   const { store, finished } = fakeRunStore();

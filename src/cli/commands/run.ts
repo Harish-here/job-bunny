@@ -90,6 +90,10 @@ export interface RunCommandOptions {
   /** Operator override for the run-level cap (ms). Absent ⇒ derived from
    * the wired stages' own timeout/retry budgets (`computeRunCapMs`). */
   runCapMs?: number;
+  /** Daemon-internal (`ops/daemon`'s `createSpawnRun`): present ⇒ this
+   * invocation is a catch-up run covering these owed HH:MM slots, recorded
+   * via `startRun`'s `kind: 'catchup'` + `catchupSlots`. */
+  catchupSlots?: string[];
 }
 
 /** Lock file name at the repo root — see `ops/scheduling/run_lock.ts` for
@@ -262,9 +266,10 @@ export async function runCommand(
     const runId = ctx.runStore.startRun({
       date,
       timeDir: time,
-      kind: 'run',
+      kind: opts.catchupSlots ? 'catchup' : 'run',
       startedAt: now.toISOString(),
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
+      ...(opts.catchupSlots !== undefined ? { catchupSlots: opts.catchupSlots } : {}),
     });
     // Never propagate the degraded run store's sentinel (`startRun` returns
     // -1 when the store failed to open — ports/run_store.ts) into
