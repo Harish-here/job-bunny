@@ -30,19 +30,19 @@
 
 import type { OwedRun, ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
 import {
+  deriveExpiredUnserved,
   formatLocalDate,
   hhMmToMinutes,
   isRunOwed,
-  nextFireAt,
   parseLocal,
 } from '../../core/schedule/index.ts';
-import { composeDeferredDaySummary } from '../observability/report/index.ts';
 import { trackSchemaDriftAndNotify } from './alert/index.ts';
 import type { DaemonDeps } from './deps.ts';
 import {
   applyGateDecline,
   computeReachabilityGate,
   runDeferredSweepAndCatchup,
+  runRetrospectiveDeferredSweep,
 } from './gate/index.ts';
 import { readDaemonPidfile, updateDaemonPidfile } from './pidfile.ts';
 import { scanProfileSchedules } from './scan/index.ts';
@@ -171,13 +171,22 @@ export function createDaemon(deps: DaemonDeps): {
       return slotCmp !== 0 ? slotCmp : a.profile.localeCompare(b.profile);
     });
 
+    // Also computed here, BEFORE the reachability gate: `deriveExpiredUnserved`
+    // (grace fully closed, unserved) and `isRunOwed` (grace still open) are
+    // provably disjoint, so a tick that fires ONLY a catch-up (no owed
+    // entries at all) used to skip the probe entirely — R2's "before
+    // spawning, the daemon runs a bounded external reachability probe"
+    // never covered the catch-up path it exists for. Passed straight
+    // through to `runDeferredSweepAndCatchup` below so it is derived once.
+    const expired = deriveExpiredUnserved(now, activeSchedules, history);
+
     // step 1.11 (D1/D1b/D3b) — computed ONCE per batch (`gate/
     // reachability_gate.ts`): a suspend gap or unreachable network
     // declines every owed entry THIS tick. Reused by the catch-up below.
     const gate = await computeReachabilityGate(
       previousLastTickAt,
       now,
-      sorted.length > 0,
+      sorted.length > 0 || expired.length > 0,
       deps.probeReachable,
     );
 
@@ -270,47 +279,22 @@ export function createDaemon(deps: DaemonDeps): {
     // step 1.11, once at the end of the batch (`gate/deferred_sweep.ts`):
     // records slots whose grace fully closed unserved, then decides
     // whether TODAY's catch-up should fire (R8/R8a/R8b/Trap 5). Reuses the
-    // SAME `activeSchedules`/`history` above — no re-fetch. `deps` passes
-    // straight through, no cast (structural subset, same precedent as
-    // `trackSchemaDriftAndNotify` above).
-    await runDeferredSweepAndCatchup(deps, now, date, activeSchedules, history, gate);
+    // SAME `expired` candidates computed above for the reachability gate —
+    // no re-derivation. `deps` passes straight through, no cast (structural
+    // subset, same precedent as `trackSchemaDriftAndNotify` above).
+    await runDeferredSweepAndCatchup(deps, now, date, expired, gate);
 
-    // step 1.11a (coordinator-added, 2026-08-13) — the day-rollover
+    // step 1.11a (coordinator-added, 2026-08-13), split into
+    // `gate/deferred_sweep.ts`'s `runRetrospectiveDeferredSweep` purely to
+    // keep this file under the file-size cap (non-behavioral split, same
+    // precedent as `runDeferredSweepAndCatchup` above) — the day-rollover
     // backstop: a lid that stays closed for a WHOLE calendar day means
     // step 1.11's own T4 guard never fires for that day (it only ever
-    // evaluates `today`), and no live catch-up ever runs either. This
-    // THIRD, separate loop retrospectively covers every PAST date still
-    // carrying unnotified `deferred_slots` rows, once per tick, per
-    // scheduled profile — iterating the FULL `schedules` list (not
-    // `activeSchedules`), since a profile currently excluded by today's
-    // schema-drift check can still owe a summary for an earlier date.
-    for (const profile of schedules.map((s) => s.profile)) {
-      const staleDates = deps.listUnnotifiedDatesBefore(profile, date);
-      for (const staleDate of staleDates) {
-        const hadCatchup = deps.hasCatchupRun(profile, staleDate);
-        if (!hadCatchup) {
-          const slots = deps.listForDate(profile, staleDate);
-          const scheduleForProfile = schedules.find((s) => s.profile === profile);
-          const nextRun = scheduleForProfile
-            ? nextFireAt(now, [scheduleForProfile])
-            : null;
-          const text = composeDeferredDaySummary({
-            profile,
-            date: staleDate,
-            slots: slots.map((r) => ({ slot: r.slot, reasonCode: r.reasonCode })),
-            catchupFired: false,
-            nextRunAt: nextRun?.at.toISOString() ?? null,
-          });
-          await deps.notify(profile, { kind: 'digest', profile, text });
-        }
-        // Unconditional — a date already covered by a same-day T5 digest
-        // (the catch-up DID eventually run, just not detected by THIS
-        // mechanism until later) still needs its rows marked, so the
-        // query stops returning it on future ticks (see this step's own
-        // done-when case (c)).
-        deps.markNotified(profile, staleDate, now.toISOString());
-      }
-    }
+    // evaluates `today`), and no live catch-up ever runs either. Iterates
+    // the FULL `schedules` list (not `activeSchedules`), since a profile
+    // currently excluded by today's schema-drift check can still owe a
+    // summary for an earlier date.
+    await runRetrospectiveDeferredSweep(deps, now, date, schedules);
   }
 
   async function tick(): Promise<void> {

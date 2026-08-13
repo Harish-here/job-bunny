@@ -134,6 +134,7 @@ function OutcomeHeader({
           </span>
           {run.kind === 'catchup' && (
             <Badge
+              data-qa="run-detail-catchup-badge"
               variant="outline"
               className="border-transparent bg-accent text-primary"
             >
@@ -147,6 +148,7 @@ function OutcomeHeader({
           <span className="text-sm text-muted-foreground">{outcomeLabel(kind, run)}</span>
           {run.kind === 'catchup' && (
             <Badge
+              data-qa="run-detail-catchup-badge"
               variant="outline"
               className="border-transparent bg-accent text-primary"
             >
@@ -223,6 +225,7 @@ export function RunDetailView({
 
         {run.kind === 'catchup' && (
           <p
+            data-qa="run-detail-covered-slots"
             data-testid="run-detail-covered-slots"
             className="text-xs text-muted-foreground"
           >

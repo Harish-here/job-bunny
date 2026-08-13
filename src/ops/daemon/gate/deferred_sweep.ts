@@ -18,11 +18,11 @@
  * report for why this reading of the blueprint's pseudocode was chosen).
  */
 import type {
+  DeferralCandidate,
   OwedRun,
   ProfileSchedule,
-  RunRecord,
 } from '../../../core/schedule/index.ts';
-import { deriveExpiredUnserved, parseLocal } from '../../../core/schedule/index.ts';
+import { nextFireAt, parseLocal } from '../../../core/schedule/index.ts';
 import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { NotifyEvent } from '../../../ports/notifier.ts';
 import { composeDeferredDaySummary } from '../../observability/report/index.ts';
@@ -40,6 +40,18 @@ export interface DeferredSweepDeps {
   listForDate: (profile: string, runDate: string) => DeferredSlotRow[];
   markNotified: (profile: string, runDate: string, notifiedAt: string) => void;
   notify: (profile: string, event: NotifyEvent) => Promise<boolean>;
+  /** `runRetrospectiveDeferredSweep`'s own query surface — distinct PAST
+   * dates (strictly before `date`) that still carry at least one row with
+   * `notifiedAt` null. Not used by `runDeferredSweepAndCatchup` itself. */
+  listUnnotifiedDatesBefore: (profile: string, beforeDate: string) => string[];
+  /** step 1.11a's own catch-up check, reused here for the SAME-day spawn
+   * guard (finding — a daemon restart resets the pidfile's `attempts`
+   * ledger, defeating R8's "at most one catch-up per calendar day" if
+   * `alreadyLedgeredToday` were the only guard): did a `kind: 'catchup'`
+   * run already happen TODAY for this profile, per the durable `runs`
+   * table? Structurally the same field as `DaemonDeps.hasCatchupRun` — see
+   * that field's own doc comment. Never throws. */
+  hasCatchupRun: (profile: string, date: string) => boolean;
   spawnCatchup: (
     target: OwedRun & { standingInFor: readonly string[] },
   ) => Promise<number>;
@@ -50,18 +62,18 @@ export interface DeferredSweepDeps {
   ) => void;
 }
 
-/** Once per `runOwedBatch` tick, after the per-entry loop closes. Reuses
- * the SAME `activeSchedules`/`history` the caller already computed for
- * `isRunOwed` — no re-fetch. */
+/** Once per `runOwedBatch` tick, after the per-entry loop closes.
+ * `candidates` is `deriveExpiredUnserved`'s own output, computed ONCE by
+ * the caller (`daemon.ts`) — the caller needs the SAME value to size its
+ * own reachability-gate probe decision (`hasOwedEntries`), so it is passed
+ * in here rather than re-derived from `activeSchedules`/`history`. */
 export async function runDeferredSweepAndCatchup(
   deps: DeferredSweepDeps,
   now: Date,
   date: string,
-  activeSchedules: readonly ProfileSchedule[],
-  history: readonly RunRecord[],
+  candidates: readonly DeferralCandidate[],
   gate: ReachabilityGateDecision,
 ): Promise<void> {
-  const candidates = deriveExpiredUnserved(now, activeSchedules, history);
   // Read ONCE, after the caller's own per-entry loop has already made this
   // tick's own `lastGateDecline`/ledger writes — nothing below mutates the
   // pidfile for a DIFFERENT profile than the one currently being
@@ -108,7 +120,18 @@ export async function runDeferredSweepAndCatchup(
     const t4AlreadySentToday =
       todaysRows.length > 0 && todaysRows.every((r) => r.notifiedAt !== null);
 
-    if (!t4AlreadySentToday) {
+    if (todaysRows.length === 0) {
+      // `recordDeferral` (`SqliteDeferredSlotStore.recordIfAbsent`)
+      // fail-softs on a SQL error (warn-once, then return) — a persistent
+      // write failure leaves `listForDate` returning nothing even though
+      // `candidates.length > 0` above. Without this branch,
+      // `t4AlreadySentToday` would be permanently false and `notify` would
+      // fire on EVERY tick (a 2,880-sends/day storm), composed against an
+      // empty `slots` array the summary was never meant to render for.
+      // Stay silent and log instead — the write failure is the real
+      // problem, and retrying `notify` in a loop cannot fix it.
+      deps.log('deferred-rows-missing', { profile, date }, 'warn');
+    } else if (!t4AlreadySentToday) {
       // The same-day (live) variant always names the catch-up as starting
       // now, per the mockup's own ordering ("Catch-up run starting now —
       // digest to follow."), sent BEFORE the spawn decision below —
@@ -121,11 +144,24 @@ export async function runDeferredSweepAndCatchup(
         catchupFired: true,
         nextRunAt: null,
       });
-      await deps.notify(profile, { kind: 'digest', profile, text });
-      deps.markNotified(profile, date, now.toISOString());
+      // Only stamp `markNotified` when delivery actually succeeded — a
+      // discarded return value here would foreclose BOTH the same-day
+      // retry (below, next tick) and the retrospective backstop
+      // (`listUnnotifiedDatesBefore`, since `notifiedAt` is its sole gate)
+      // for one transient send failure. Mirrors `schema_drift.ts`'s own
+      // `trackSchemaDriftAndNotify` posture.
+      const sent = await deps.notify(profile, { kind: 'digest', profile, text });
+      if (sent) deps.markNotified(profile, date, now.toISOString());
     }
 
-    if (alreadyLedgeredToday) continue;
+    // R8's "at most one catch-up per calendar day" needs a guard that
+    // survives a daemon restart — `alreadyLedgeredToday` alone does not:
+    // `acquireDaemonPidfile` rewrites `attempts: []` on every `serve
+    // start`, but a catch-up run deliberately starts OUTSIDE every slot
+    // window, so `deriveExpiredUnserved` keeps returning the same
+    // candidate and nothing durable says "a catch-up already ran today"
+    // without also consulting `hasCatchupRun` (the `runs` table itself).
+    if (alreadyLedgeredToday || deps.hasCatchupRun(profile, date)) continue;
 
     if (gate.declined) {
       // Same principle as the owed-entry gate (Trap 1), generalized: the
@@ -159,6 +195,61 @@ export async function runDeferredSweepAndCatchup(
     if (ledgered) {
       const standingInFor = deps.listForDate(profile, date).map((r) => r.slot);
       await deps.spawnCatchup({ profile, date, slot: 'catchup', standingInFor });
+    }
+  }
+}
+
+/** step 1.11a (coordinator-added, 2026-08-13) — the day-rollover backstop:
+ * a lid that stays closed for a WHOLE calendar day means
+ * `runDeferredSweepAndCatchup`'s own same-day T4 guard never fires for
+ * that day (it only ever evaluates `today`), and no live catch-up ever
+ * runs either. Retrospectively covers every PAST date still carrying
+ * unnotified `deferred_slots` rows, once per tick, per scheduled profile.
+ * `schedules` is the caller's FULL list (not `activeSchedules`), since a
+ * profile currently excluded by today's schema-drift check can still owe
+ * a summary for an earlier date. Split out of `daemon.ts` purely to keep
+ * that file under the file-size cap — same non-behavioral-split precedent
+ * as this file's own header comment. */
+export async function runRetrospectiveDeferredSweep(
+  deps: DeferredSweepDeps,
+  now: Date,
+  date: string,
+  schedules: readonly ProfileSchedule[],
+): Promise<void> {
+  for (const profile of schedules.map((s) => s.profile)) {
+    const staleDates = deps.listUnnotifiedDatesBefore(profile, date);
+    for (const staleDate of staleDates) {
+      const hadCatchup = deps.hasCatchupRun(profile, staleDate);
+      // Tracks whether THIS tick actually delivered (or never needed to
+      // deliver) the retrospective summary — `markNotified` below must
+      // stay gated on it, mirroring the same-day T4 fix above: a
+      // discarded `notify` return value would permanently foreclose "you
+      // missed this day" for one transient send failure, since
+      // `listUnnotifiedDatesBefore` never returns a date once
+      // `markNotified` has stamped it.
+      let sent = true;
+      if (!hadCatchup) {
+        const slots = deps.listForDate(profile, staleDate);
+        const scheduleForProfile = schedules.find((s) => s.profile === profile);
+        const nextRun = scheduleForProfile ? nextFireAt(now, [scheduleForProfile]) : null;
+        const text = composeDeferredDaySummary({
+          profile,
+          date: staleDate,
+          slots: slots.map((r) => ({ slot: r.slot, reasonCode: r.reasonCode })),
+          catchupFired: false,
+          nextRunAt: nextRun?.at.toISOString() ?? null,
+        });
+        sent = await deps.notify(profile, { kind: 'digest', profile, text });
+      }
+      // `hadCatchup` (a date already covered by a same-day T5 digest — the
+      // catch-up DID eventually run, just not detected by THIS mechanism
+      // until later) still needs its rows marked regardless of `sent`, so
+      // the query stops returning it on future ticks (see this step's own
+      // done-when case (c)); a `!hadCatchup` date is marked ONLY once its
+      // own notify actually succeeded.
+      if (hadCatchup || sent) {
+        deps.markNotified(profile, staleDate, now.toISOString());
+      }
     }
   }
 }

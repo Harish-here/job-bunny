@@ -346,16 +346,18 @@ describe('RunDetailView — threads onRun into the diagnosis panel', () => {
 // orthogonal to `OutcomeKind` (design-scale.md), same as task 25's row
 // extension, so a plain `produced` fixture with `kind: 'catchup'` covers it.
 describe('RunDetailView — catch-up extension (blueprint.md 1.8)', () => {
-  it('a catchup run shows the "Catch-up" badge and the covered-slots line, exact text', () => {
+  it('a catchup run shows the "Catch-up" badge (via data-qa) and the covered-slots line, exact text', () => {
     const run = detail({
       status: 'passed',
       result: { stages: stages(10, 7) },
       kind: 'catchup',
       catchupSlots: ['14:00', '16:30', '19:00'],
     });
-    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
-    expect(screen.getByText('Catch-up')).toBeInTheDocument();
+    const badge = container.querySelector('[data-qa="run-detail-catchup-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveTextContent('Catch-up');
     expect(screen.getByTestId('run-detail-covered-slots')).toHaveTextContent(
       'Covered slots: 14:00, 16:30, 19:00',
     );
@@ -367,9 +369,9 @@ describe('RunDetailView — catch-up extension (blueprint.md 1.8)', () => {
       result: { stages: stages(10, 7) },
       kind: 'run',
     });
-    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
-    expect(screen.queryByText('Catch-up')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-qa="run-detail-catchup-badge"]')).toBeNull();
     expect(screen.queryByTestId('run-detail-covered-slots')).not.toBeInTheDocument();
   });
 
@@ -381,10 +383,12 @@ describe('RunDetailView — catch-up extension (blueprint.md 1.8)', () => {
       kind: 'catchup',
       catchupSlots: ['09:00', '11:30'],
     });
-    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+    const { container } = renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
 
     expect(screen.getByText(/Failed at stage: structure/)).toBeInTheDocument();
-    expect(screen.getByText('Catch-up')).toBeInTheDocument();
+    const badge = container.querySelector('[data-qa="run-detail-catchup-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveTextContent('Catch-up');
     expect(screen.getByTestId('run-detail-covered-slots')).toHaveTextContent(
       'Covered slots: 09:00, 11:30',
     );

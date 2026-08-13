@@ -53,6 +53,132 @@ function buildDbAtVersion(dbPath: string, version: number): DatabaseSync {
   return db;
 }
 
+// Golden, hand-written fixtures — deliberately NOT derived from
+// `MIGRATIONS` (unlike `buildDbAtVersion` above). A bug edited into an
+// already-shipped migration step is invisible to every `buildDbAtVersion`-
+// based test in this file, since both the fixture and the code under test
+// replay the exact same array — the assertion and the thing it's checking
+// move together. These two constants pin the v1 and v7 schemas as literal
+// SQL, frozen at the moment they were written: a future edit to
+// `MIGRATIONS[0]` or `MIGRATIONS[6]` can never silently rewrite what these
+// tests build "before" the upgrade under test.
+const GOLDEN_V1_SQL = `
+  CREATE TABLE jobs (
+    id            TEXT PRIMARY KEY,
+    lane          TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    company       TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    seniority     TEXT,
+    location_city TEXT,
+    work_type     TEXT,
+    timezone      TEXT,
+    skills        TEXT,
+    excitement    TEXT,
+    score         REAL,
+    match_reasons TEXT,
+    date_found    TEXT NOT NULL,
+    jd_json       TEXT NOT NULL,
+    synced_at     TEXT NOT NULL,
+    archived      INTEGER NOT NULL DEFAULT 0,
+    archived_at   TEXT
+  );
+  CREATE TABLE tracking (
+    job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
+    status           TEXT,
+    comp_range       TEXT,
+    notes            TEXT,
+    contact          TEXT,
+    date_applied     TEXT,
+    next_action      TEXT,
+    next_action_date TEXT,
+    updated_at       TEXT NOT NULL
+  );
+  CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
+`;
+
+const GOLDEN_V7_SQL = `
+  ${GOLDEN_V1_SQL}
+  CREATE TABLE runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date      TEXT NOT NULL,
+    time_dir      TEXT,
+    kind          TEXT NOT NULL,
+    resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    status        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    heartbeat_at  TEXT,
+    result_json   TEXT,
+    failure_json  TEXT,
+    sync_dryrun_json TEXT
+  );
+  CREATE INDEX idx_runs_date ON runs(run_date);
+  CREATE TABLE run_events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id    INTEGER NOT NULL REFERENCES runs(id),
+    ts        TEXT NOT NULL,
+    level     TEXT NOT NULL,
+    msg       TEXT NOT NULL,
+    data_json TEXT
+  );
+  CREATE INDEX idx_run_events_run ON run_events(run_id);
+  CREATE TABLE checkpoints (
+    run_date   TEXT    NOT NULL,
+    time_dir   TEXT    NOT NULL,
+    position   INTEGER NOT NULL,
+    stage      TEXT    NOT NULL,
+    payload_json TEXT  NOT NULL,
+    written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    created_at TEXT    NOT NULL,
+    PRIMARY KEY (run_date, time_dir, position)
+  );
+  CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
+  CREATE TABLE state_docs (
+    key        TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE config_docs (
+    key        TEXT PRIMARY KEY,
+    value_text TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE run_intents (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    requested_at   TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    claimed_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL
+  );
+  CREATE UNIQUE INDEX idx_run_intents_one_pending
+    ON run_intents(status) WHERE status = 'pending';
+  CREATE TABLE run_progress (
+    run_id           INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    stage            TEXT    NOT NULL,
+    stage_index      INTEGER NOT NULL,
+    stage_total      INTEGER NOT NULL,
+    stage_started_at TEXT    NOT NULL,
+    updated_at       TEXT    NOT NULL,
+    item_current     INTEGER,
+    item_total       INTEGER
+  );
+`;
+
+/** Builds a db from literal golden SQL (see `GOLDEN_V1_SQL`/`GOLDEN_V7_SQL`
+ * above) rather than replaying `MIGRATIONS` — the independent counterpart
+ * to `buildDbAtVersion`. */
+function buildDbFromGoldenSql(
+  dbPath: string,
+  sql: string,
+  version: number,
+): DatabaseSync {
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec(sql);
+  db.exec(`PRAGMA user_version = ${version}`);
+  return db;
+}
+
 function tableNames(db: ReturnType<typeof openJobsDb>): string[] {
   return (
     db
@@ -153,6 +279,29 @@ test('a v1-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing jobs
   assert.ok(tables.includes('runs'));
   assert.ok(tables.includes('run_events'));
   assert.ok(tables.includes('checkpoints'));
+  upgraded.close();
+});
+
+test('golden fixture (independent of MIGRATIONS): a hand-written v1 schema upgrades to LATEST_SCHEMA_VERSION preserving existing jobs rows', () => {
+  const dbPath = tmpDbPath();
+  const v1 = buildDbFromGoldenSql(dbPath, GOLDEN_V1_SQL, 1);
+  v1.prepare(
+    `INSERT INTO jobs (id, lane, title, company, url, date_found, jd_json, synced_at)
+     VALUES ('job-1', 'linkedin', 'Engineer', 'Acme', 'https://x', '2026-08-01', '{}', '2026-08-01T00:00:00Z')`,
+  ).run();
+  v1.close();
+
+  const upgraded = openJobsDb(dbPath);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+  const row = upgraded
+    .prepare('SELECT id, company FROM jobs WHERE id = ?')
+    .get('job-1') as { id: string; company: string } | undefined;
+  assert.equal(row?.company, 'Acme');
+  const tables = tableNames(upgraded);
+  assert.ok(tables.includes('runs'));
+  assert.ok(tables.includes('run_events'));
+  assert.ok(tables.includes('checkpoints'));
+  assert.ok(tables.includes('deferred_slots'));
   upgraded.close();
 });
 
@@ -306,6 +455,40 @@ test('a v7-stamped db upgrades to v8 adding deferred_slots + runs.catchup_slots_
   // The pre-existing run row survives, and its new nullable column reads
   // NULL — never a default value that would misrepresent a pre-migration
   // run as covering zero catch-up slots.
+  const runRow = upgraded
+    .prepare('SELECT run_date, kind, status, catchup_slots_json FROM runs WHERE id = ?')
+    .get(lastInsertRowid) as
+    | {
+        run_date: string;
+        kind: string;
+        status: string;
+        catchup_slots_json: string | null;
+      }
+    | undefined;
+  assert.equal(runRow?.run_date, '2026-08-06');
+  assert.equal(runRow?.kind, 'run');
+  assert.equal(runRow?.status, 'running');
+  assert.equal(runRow?.catchup_slots_json, null);
+
+  assert.ok(tableNames(upgraded).includes('deferred_slots'));
+  upgraded.close();
+});
+
+test('golden fixture (independent of MIGRATIONS): a hand-written v7 schema upgrades to v8 adding deferred_slots + runs.catchup_slots_json, preserving existing runs rows', () => {
+  const dbPath = tmpDbPath();
+  const v7 = buildDbFromGoldenSql(dbPath, GOLDEN_V7_SQL, 7);
+  const { lastInsertRowid } = v7
+    .prepare(
+      `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
+       VALUES ('2026-08-06', '09-00', 'run', 'running', '2026-08-06T09:00:00Z')`,
+    )
+    .run();
+  v7.close();
+
+  const upgraded = openJobsDb(dbPath);
+  assert.equal(userVersion(upgraded), 8);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+
   const runRow = upgraded
     .prepare('SELECT run_date, kind, status, catchup_slots_json FROM runs WHERE id = ?')
     .get(lastInsertRowid) as

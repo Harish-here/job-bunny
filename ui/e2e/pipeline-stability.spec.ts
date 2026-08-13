@@ -206,10 +206,11 @@ test('runs page: a running catch-up with no duration estimate shows elapsed-only
 // not. Both counts are anchored to ONE fixture's `catchupSlots` array via
 // ONE navigation — a real consistency check, not two surfaces
 // independently agreeing on a shared bug. `RunDetailView.tsx` renders
-// this element as `data-testid="run-detail-covered-slots"` (not
-// `data-qa`, unlike its sibling ids from the same task) — a pre-existing
-// naming inconsistency in already-landed markup this test observes
-// rather than corrects.
+// this element with BOTH `data-qa="run-detail-covered-slots"` (per the
+// blueprint) and `data-testid="run-detail-covered-slots"` (kept as a
+// duplicate — that was the only attribute present before the 2026-08-14
+// fix round closed the naming-inconsistency finding) — this test queries
+// the blueprint's own `data-qa` attribute.
 test('run detail: a catch-up run shows what it covered without leaving the page', async ({
   page,
 }) => {
@@ -250,7 +251,7 @@ test('run detail: a catch-up run shows what it covered without leaving the page'
   expect(sublineMatch).not.toBeNull();
   const sublineCount = Number(sublineMatch?.[1]);
 
-  const covered = page.locator('[data-testid="run-detail-covered-slots"]');
+  const covered = page.locator('[data-qa="run-detail-covered-slots"]');
   await expect(covered).toBeVisible();
   const coveredText = (await covered.textContent()) ?? '';
   const coveredMatch = coveredText.match(/Covered slots: (.+)$/);

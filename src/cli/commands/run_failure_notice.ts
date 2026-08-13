@@ -81,7 +81,23 @@ export function prettySignature(signature: string): string {
  * `writeDoc` always runs, AFTER `ctx.notify` has already resolved, wrapped
  * so a write failure can only fail to update NEXT time's bookkeeping —
  * never this run's own exit code (blueprint-be.md §8, "Dedup state
- * read/write (1.16)"). */
+ * read/write (1.16)").
+ *
+ * Accepted risk (deliberate, not missed): `PipelineCtx.notify` is
+ * `Promise<void>` (`pipeline/runner/context.ts`), and the real
+ * implementation (`cli/wire/compose.ts`) is `Promise.allSettled` over every
+ * configured notifier plus per-notifier error logging — it never signals
+ * whether any send actually reached its destination. `action.nextState` is
+ * therefore written UNCONDITIONALLY below, exactly as it always has been:
+ * a silently-dropped delivery (e.g. a revoked Telegram token) still stamps
+ * `lastNotifiedAt`, which can suppress the SAME recurring failure's next
+ * alert for up to 24h during an outage the operator has no other signal
+ * of. Widening `PipelineCtx.notify` to `Promise<boolean>` (mirroring
+ * `ops/daemon/deps.ts`'s `DaemonDeps.notify`, which DOES carry a delivery
+ * signal) would close this, but touches the shared pipeline-wide contract
+ * and every `PipelineCtx` fixture across `pipeline/`, `routines/`, and
+ * `cli/commands/*.test.ts` — out of scope for this call site alone. See
+ * `run.dedup.test.ts`'s own pin of this behavior. */
 export async function sendFailureDigest(
   ctx: PipelineCtx,
   runId: number,

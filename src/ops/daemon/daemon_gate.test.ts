@@ -199,7 +199,7 @@ test('(e) a failed catch-up (nonzero exit) is not retried later the same day', a
   assert.equal(spawnCatchupCalls.length, 1); // ledgered before spawn, regardless of exit code.
 });
 
-test('(f) a tick where the gate declines the catch-up spawn itself still sends exactly one T4', async () => {
+test('(f) a catch-up-only tick (no owed entries at all) still runs the reachability probe and declines on it — R2 must cover the catch-up path too', async () => {
   const scan = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
     { [PROFILES_DIR]: ['harish'] },
@@ -207,6 +207,7 @@ test('(f) a tick where the gate declines the catch-up spawn itself still sends e
   const now = new Date(2026, 6, 27, 9, 30); // grace (09:00-09:05) already expired.
   const notifyCalls: string[] = [];
   const spawnCatchupCalls: number[] = [];
+  let probed = 0;
   const { deps, events } = baseDeps({
     scan,
     now: () => now,
@@ -218,21 +219,31 @@ test('(f) a tick where the gate declines the catch-up spawn itself still sends e
       spawnCatchupCalls.push(1);
       return 0;
     },
+    probeReachable: async () => {
+      probed += 1;
+      return false; // the genuine network-decline case (finding: previously
+      // unreachable per this test's own gap, since `hasOwedEntries` was
+      // `sorted.length > 0` — always false on a catch-up-only tick, so the
+      // probe never ran and only a forced suspend-gap could decline this
+      // tick at all).
+    },
   });
-  // No owed entries this tick (09:00's own grace already closed), so only
-  // `wasHostSuspended` (pure, no probe) can decline the gate — force it.
-  updateDaemonPidfile(
-    deps.root,
-    (c) => ({ ...c, lastTickAt: new Date(now.getTime() - 5 * 60_000).toISOString() }),
-    deps.pidfile,
-  );
+  // No owed entries this tick (09:00's own grace already closed) — only a
+  // catch-up candidate exists. `lastTickAt` is left fresh (no suspend gap)
+  // so ONLY the reachability probe below can decline the gate.
 
   await createDaemon(deps).tick();
 
+  assert.equal(probed, 1, 'the probe must fire even with zero owed entries this tick');
   assert.equal(notifyCalls.length, 1); // message and spawn are decoupled.
   assert.equal(spawnCatchupCalls.length, 0);
   assert.ok(
-    events.some((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup'),
+    events.some(
+      (e) =>
+        e.event === 'gate-declined' &&
+        e.data?.slot === 'catchup' &&
+        e.data?.reasonCode === 'network-unreachable',
+    ),
   );
   assert.deepEqual(
     (readDaemonPidfile(deps.root, deps.pidfile)?.attempts ?? []).filter(

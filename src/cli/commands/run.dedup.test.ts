@@ -406,6 +406,41 @@ test('a writeDoc failure is logged, not fatal to the run exit code, and does not
   );
 });
 
+test('accepted risk: ctx.notify carries no delivery signal (Promise<void>) — a silently-dropped send still stamps dedup state and suppresses the SAME recurring failure for up to 24h', async () => {
+  const notified: NotifyEvent[] = [];
+  const { store: stateStore, writes } = fakeStateStore();
+  const failureRef = {
+    current: { stage: 'farm', error: 'stalled: no beat() within 360000ms' },
+  };
+  const { store: runStore } = fakeRunStore(failureRef);
+  // `fakeCtx`'s `notify` just records the call and resolves — the real
+  // `Promise<void>` contract (`pipeline/runner/context.ts`), whose actual
+  // implementation (`cli/wire/compose.ts`) is `Promise.allSettled` plus
+  // per-notifier error logging. This is indistinguishable, from
+  // `sendFailureDigest`'s own vantage point, from a SILENTLY DROPPED send
+  // (revoked Telegram token, a timed-out fetch, disk full) — see
+  // `run_failure_notice.ts`'s own "Accepted risk" doc comment.
+  const ctx = fakeCtx(notified, runStore, stateStore);
+
+  const code1 = await run(ctx, failedResult('farm'), T0);
+  assert.equal(code1, 1);
+  assert.equal(notified.length, 1, 'first failure "sends" (call made, delivery unknown)');
+  assert.equal(writes.length, 1, 'dedup state is stamped regardless of delivery outcome');
+
+  // The SAME underlying cause recurs within 24h — per the accepted-risk
+  // contract this is suppressed exactly as if the first send had genuinely
+  // been delivered, even though nothing here proves it was (an outage
+  // during the first failure would silently cost every recurrence up to
+  // 24h later).
+  const code2 = await run(ctx, failedResult('farm'), PLUS_1H);
+  assert.equal(code2, 1);
+  assert.equal(
+    notified.length,
+    1,
+    'suppressed for 24h — this is the documented accepted risk, not a bug',
+  );
+});
+
 test('direction 1 — same stage, same underlying cause, different volatile URL query string: one signature, second run suppressed', async () => {
   const notified: NotifyEvent[] = [];
   const { store: stateStore } = fakeStateStore();
