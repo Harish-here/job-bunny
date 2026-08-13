@@ -123,6 +123,7 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     listRunEvents: () => ({ rows: [], total: 0 }),
     listRunHealth: () => new Map(),
     listDeferredSlots: () => ({ rows: [], total: 0 }),
+    estimateRunDuration: () => null,
     close() {},
     ...overrides,
   };

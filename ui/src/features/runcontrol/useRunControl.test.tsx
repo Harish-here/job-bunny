@@ -67,7 +67,13 @@ function runRow(over: Partial<RunSummary> = {}): ListRunsResponse['rows'][number
 }
 
 function runDetail(over: Partial<RunSummary> = {}): GetRunResponse {
-  return { ...runRow(over), result: null, failure: null, syncDryrun: null };
+  return {
+    ...runRow(over),
+    result: null,
+    failure: null,
+    syncDryrun: null,
+    estimatedDurationMs: null,
+  };
 }
 
 function makeWrapper() {

@@ -24,6 +24,7 @@ import type {
   BoardJobRow,
   BoardQuery,
   BoardStore,
+  RunDurationEstimate,
   RunEventHealth,
   TrackingPatch,
   TrackingRow,
@@ -31,6 +32,7 @@ import type {
 import type { DeferredSlotRow } from '../../../../ports/deferred_slots.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../../ports/run_store.ts';
 import {
+  estimateRunDurationQuery,
   fetchRunHealth,
   getRunQuery,
   listRunEventsQuery,
@@ -342,6 +344,10 @@ export class SqliteBoardStore implements BoardStore {
 
   listRunHealth(runIds: number[]): Map<number, RunEventHealth> {
     return fetchRunHealth(this.db, runIds);
+  }
+
+  estimateRunDuration(): RunDurationEstimate | null {
+    return estimateRunDurationQuery(this.db);
   }
 
   /** D3b (blueprint step 1.17) — reads `deferred_slots` directly, the

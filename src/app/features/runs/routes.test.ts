@@ -6,7 +6,12 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource, BoardStore, DaemonStatus } from '../../../ports/board.ts';
+import type {
+  BoardSource,
+  BoardStore,
+  DaemonStatus,
+  RunDurationEstimate,
+} from '../../../ports/board.ts';
 import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
 import type { BoardRequest } from '../../shared/index.ts';
@@ -100,6 +105,7 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   listRunsCalls: Array<{ limit?: number; offset?: number }>;
   listRunEventsCalls: Array<{ id: number; query: { limit?: number; offset?: number } }>;
   listRunHealthCalls: number[][];
+  estimateRunDurationCalls: number[];
 } {
   const listRunsCalls: Array<{ limit?: number; offset?: number }> = [];
   const listRunEventsCalls: Array<{
@@ -107,10 +113,12 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     query: { limit?: number; offset?: number };
   }> = [];
   const listRunHealthCalls: number[][] = [];
+  const estimateRunDurationCalls: number[] = [];
   return {
     listRunsCalls,
     listRunEventsCalls,
     listRunHealthCalls,
+    estimateRunDurationCalls,
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
     updateTracking: () => null,
@@ -130,6 +138,10 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
       return new Map();
     },
     listDeferredSlots: () => ({ rows: [], total: 0 }),
+    estimateRunDuration(): RunDurationEstimate | null {
+      estimateRunDurationCalls.push(1);
+      return { medianMs: 30 * 60_000, sampleSize: 10 };
+    },
     close() {},
     ...overrides,
   };
@@ -241,11 +253,45 @@ test('list: null store (no local db) is a 404 no_local_db', async () => {
 
 // --- GET /api/profiles/:name/runs/:id ---
 
-test('get: 200 for a known id', async () => {
-  const route = findRoute(fakeSource(fakeStore()), '/api/profiles/:name/runs/:id');
+test('get: 200 for a known id; estimatedDurationMs is null for a status: passed run even when the store has enough history to answer, and estimateRunDuration is never even called', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
   const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, SAMPLE_DETAIL);
+  assert.deepEqual(res.body, { ...SAMPLE_DETAIL, estimatedDurationMs: null });
+  assert.deepEqual(store.estimateRunDurationCalls, []);
+});
+
+test('get: estimatedDurationMs is populated (blueprint step 1.18) for a status: running run', async () => {
+  const runningDetail = {
+    ...SAMPLE_DETAIL,
+    status: 'running' as const,
+    finishedAt: null,
+  };
+  const store = fakeStore({
+    getRun: (id) => (id === SAMPLE_SUMMARY.id ? runningDetail : null),
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
+  const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ...runningDetail, estimatedDurationMs: 30 * 60_000 });
+  assert.deepEqual(store.estimateRunDurationCalls, [1]);
+});
+
+test('get: estimatedDurationMs is null for a status: running run when the store has too little history to estimate', async () => {
+  const runningDetail = {
+    ...SAMPLE_DETAIL,
+    status: 'running' as const,
+    finishedAt: null,
+  };
+  const store = fakeStore({
+    getRun: (id) => (id === SAMPLE_SUMMARY.id ? runningDetail : null),
+    estimateRunDuration: () => null,
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
+  const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ...runningDetail, estimatedDurationMs: null });
 });
 
 test('get: 404 for an unknown id', async () => {

@@ -60,7 +60,21 @@ export interface ListRunsResponse {
   limit: number;
   offset: number;
 }
-export type GetRunResponse = RunDetail;
+
+/** `GET /api/profiles/:name/runs/:id`'s response — `RunDetail` plus the
+ * catch-up banner's ETA input (blueprint step 1.18), composed at the route
+ * layer, not baked into the port's own `RunDetail`: this is a profile-wide
+ * aggregate over run HISTORY, not a fact about the one run being fetched,
+ * following the exact precedent `RunListRow extends RunSummary` already
+ * sets. `estimatedDurationMs` is populated ONLY when the fetched run's own
+ * `status === 'running'` — every other status gets `null` without the
+ * handler even calling `store.estimateRunDuration()`. The clamp to a
+ * "remaining" value is explicitly NOT this layer's job — task 26 computes
+ * `max(0, estimatedDurationMs - elapsedMs)` client-side. */
+export interface RunDetailResponse extends RunDetail {
+  estimatedDurationMs: number | null;
+}
+export type GetRunResponse = RunDetailResponse;
 export interface ListRunEventsResponse {
   rows: RunEventRow[];
   total: number;
@@ -142,7 +156,11 @@ function getHandler(source: BoardSource) {
     const id = parseRunId(req);
     const run = store.getRun(id);
     if (!run) throw new HttpError(404, 'not_found', `no such run: ${id}`);
-    const body: GetRunResponse = run;
+    // Only a still-running run needs an ETA — every other status gets
+    // `null` without the (mildly expensive) history query even running.
+    const estimatedDurationMs =
+      run.status === 'running' ? (store.estimateRunDuration()?.medianMs ?? null) : null;
+    const body: GetRunResponse = { ...run, estimatedDurationMs };
     return { status: 200, body };
   };
 }

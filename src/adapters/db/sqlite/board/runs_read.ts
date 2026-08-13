@@ -16,7 +16,8 @@
  * same reason.
  */
 import type { DatabaseSync } from 'node:sqlite';
-import type { RunEventHealth } from '../../../../ports/board.ts';
+import type { RunDurationEstimate, RunEventHealth } from '../../../../ports/board.ts';
+import { MIN_DURATION_SAMPLE_SIZE } from '../../../../ports/board.ts';
 import type {
   RunDetail,
   RunEventRow,
@@ -178,4 +179,58 @@ export function fetchRunHealth(
     result.set(row.run_id, { total: row.total, breakerOpen: row.breaker_hit === 1 });
   }
   return result;
+}
+
+interface RawDurationRow {
+  started_at: string;
+  finished_at: string;
+}
+
+/** Blueprint step 1.18's exact query — reproduced verbatim, not
+ * "simplified": the `LEFT JOIN` + `SUM(CASE WHEN ...)` shape is what makes
+ * a run with zero matching `run_events` fall out as `0 <= 0` (eligible)
+ * rather than `NULL <= NULL` (which SQLite evaluates as `NULL`, silently
+ * excluding the row). The `already_done <= harvested` clause is the actual
+ * discriminator, found by reading what the real short same-day-resume runs
+ * logged — `resumed_from IS NULL` is kept as an independently-valid,
+ * currently-inert guard against a different contamination source (a manual
+ * `jobbunny run --resume`), not the load-bearing clause. */
+const ESTIMATE_DURATION_SQL = `
+WITH counts AS (
+  SELECT r.id,
+    SUM(CASE WHEN e.msg LIKE '%page harvested%' THEN 1 ELSE 0 END) AS harvested,
+    SUM(CASE WHEN e.msg LIKE '%skipping already-done url%' THEN 1 ELSE 0 END) AS already_done
+  FROM runs r
+  LEFT JOIN run_events e ON e.run_id = r.id
+  WHERE r.status = 'passed' AND r.kind IN ('run', 'catchup') AND r.resumed_from IS NULL
+    AND r.finished_at IS NOT NULL
+  GROUP BY r.id
+)
+SELECT r.started_at, r.finished_at
+FROM runs r
+JOIN counts c ON c.id = r.id
+WHERE c.already_done <= c.harvested
+ORDER BY r.started_at DESC
+LIMIT 10
+`;
+
+/** Median duration of the up-to-10 most recent eligible successful runs
+ * (blueprint step 1.18) — `null` below `MIN_DURATION_SAMPLE_SIZE`. Standard
+ * median: ascending-sorted durations, average of the two middle values on
+ * an even sample count. */
+export function estimateRunDurationQuery(db: DatabaseSync): RunDurationEstimate | null {
+  const rows = db.prepare(ESTIMATE_DURATION_SQL).all() as unknown as RawDurationRow[];
+  if (rows.length < MIN_DURATION_SAMPLE_SIZE) return null;
+
+  const durations = rows
+    .map((row) => Date.parse(row.finished_at) - Date.parse(row.started_at))
+    .sort((a, b) => a - b);
+
+  const mid = Math.floor(durations.length / 2);
+  const medianMs =
+    durations.length % 2 === 0
+      ? ((durations[mid - 1] as number) + (durations[mid] as number)) / 2
+      : (durations[mid] as number);
+
+  return { medianMs, sampleSize: durations.length };
 }

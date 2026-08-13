@@ -72,6 +72,20 @@ export interface RunEventHealth {
   breakerOpen: boolean;
 }
 
+/** The catch-up banner's ETA input (blueprint step 1.18) —
+ * `estimateRunDuration()` computes this from run history; the route layer
+ * (`app/features/runs/routes.ts`) folds it into `RunDetailResponse` only
+ * for a `status === 'running'` run, and the CLIENT (task 26) computes
+ * `remaining = max(0, medianMs - elapsedMs)`, never this port. */
+export interface RunDurationEstimate {
+  medianMs: number;
+  sampleSize: number; // how many eligible runs contributed, always >= MIN_DURATION_SAMPLE_SIZE
+}
+
+/** Below this many eligible samples, `estimateRunDuration()` returns `null`
+ * — absence, not a guess, when history is too thin. */
+export const MIN_DURATION_SAMPLE_SIZE = 3;
+
 export type DaemonState = 'running' | 'stopped' | 'stale';
 
 export interface DaemonProfileSchedule {
@@ -171,6 +185,15 @@ export interface BoardStore {
    * `query.date` defaults to today's LOCAL date when absent. `total` is
    * simply `rows.length` — a day's deferred count is never paginated. */
   listDeferredSlots(query: { date?: string }): { rows: DeferredSlotRow[]; total: number };
+  /** Median duration of recent eligible successful runs (blueprint step
+   * 1.18) — scoped to "this profile" implicitly, same convention every
+   * other `BoardStore` method already uses. Eligibility: `status ===
+   * 'passed'`, `kind IN ('run', 'catchup')`, `resumedFrom === null`, and
+   * the LinkedIn same-day-resume discriminator (count of "skipping
+   * already-done url" events <= count of "page harvested" events) —
+   * excludes same-day re-fires with nothing left to scrape. `null` below
+   * `MIN_DURATION_SAMPLE_SIZE` eligible samples. */
+  estimateRunDuration(): RunDurationEstimate | null;
   close(): void;
 }
 
