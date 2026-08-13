@@ -24,11 +24,12 @@
  * (step 1.10) — a non-behavioral split purely to keep this file under the
  * 400-line cap; it imports no adapters, so it needs no `only-wire-imports-
  * adapters` carve-out entry of its own and is re-exported below for every
- * existing import site.
+ * existing import site. `wireDaemonDeferredSlots` similarly lives in the
+ * sibling `./daemon_deferred.ts` (same reason, same non-behavioral split),
+ * re-exported below.
  */
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { SqliteDeferredSlotStore } from '../../adapters/db/sqlite/deferred/index.ts';
 import { SqliteRunIntentStore } from '../../adapters/db/sqlite/intents/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
 import {
@@ -38,13 +39,13 @@ import {
 import { PipelineConfigSchema } from '../../core/config/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
-import type { DeferredSlotRow } from '../../ports/deferred_slots.ts';
 import type { Notifier, NotifyEvent } from '../../ports/notifier.ts';
 import type { PendingIntent } from '../../ports/run_intents.ts';
 import { resolveHome } from '../home/index.ts';
 import { buildNotifier, canonicalDbPath, wireConfigStore } from './builders.ts';
 import type { DaemonWireOverrides } from './daemon_types.ts';
 
+export { wireDaemonDeferredSlots } from './daemon_deferred.ts';
 export type { DaemonWireOverrides } from './daemon_types.ts';
 
 /** Builds the daemon's `DaemonDeps.readRunHistory` function: for each named
@@ -350,45 +351,5 @@ export function wireDaemonHasNotifierConfigured(
     } finally {
       store.close();
     }
-  };
-}
-
-/** Deferred-slot writer/reader (step 1.10, D3b): `withStore` opens a FRESH
- * `SqliteDeferredSlotStore` per call, never memoized (same discipline as
- * every `wireDaemon*` above). The store (task 4) is already fail-soft, so
- * no extra try/catch is needed. Field names below are spread directly into
- * `DaemonDeps` and must stay exact (steps 1.11/1.11a reference them). */
-function withStore<T>(
-  root: string,
-  profile: string,
-  fn: (s: SqliteDeferredSlotStore) => T,
-): T {
-  const s = new SqliteDeferredSlotStore(canonicalDbPath(root, profile));
-  try {
-    return fn(s);
-  } finally {
-    s.close();
-  }
-}
-
-export function wireDaemonDeferredSlots(overrides: DaemonWireOverrides = {}): {
-  recordDeferral: (
-    profile: string,
-    entry: Omit<DeferredSlotRow, 'decidedAt' | 'notifiedAt'> & { decidedAt: string },
-  ) => void;
-  listForDate: (profile: string, runDate: string) => DeferredSlotRow[];
-  listUnnotifiedDatesBefore: (profile: string, beforeDate: string) => string[];
-  markNotified: (profile: string, runDate: string, notifiedAt: string) => void;
-} {
-  const root = overrides.root ?? resolveHome();
-  return {
-    recordDeferral: (profile, entry) =>
-      withStore(root, profile, (store) => store.recordIfAbsent(entry)),
-    listForDate: (profile, runDate) =>
-      withStore(root, profile, (store) => store.listForDate(runDate)),
-    listUnnotifiedDatesBefore: (profile, beforeDate) =>
-      withStore(root, profile, (store) => store.listUnnotifiedDatesBefore(beforeDate)),
-    markNotified: (profile, runDate, notifiedAt) =>
-      withStore(root, profile, (store) => store.markNotified(runDate, notifiedAt)),
   };
 }

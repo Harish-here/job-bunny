@@ -7,7 +7,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import type { NotifyEvent } from '../../ports/notifier.ts';
 import {
-  wireDaemonDeferredSlots,
   wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
   wireDaemonNotifier,
@@ -508,77 +507,4 @@ test('wireDaemonHasNotifierConfigured: true for a profile with a configured noti
   assert.equal(await hasNotifierConfigured('hasnotif-no'), false);
   assert.equal(await hasNotifierConfigured('hasnotif-broken'), false);
   assert.equal(await hasNotifierConfigured('hasnotif-ghost'), false);
-});
-
-// --- wireDaemonDeferredSlots ---
-
-test('wireDaemonDeferredSlots.recordDeferral: writes a row that listForDate for the SAME profile+date then returns', () => {
-  const { recordDeferral, listForDate } = wireDaemonDeferredSlots({ root });
-  recordDeferral('deferred-basic', {
-    runDate: '2026-08-05',
-    slot: '09:00',
-    reasonCode: 'host-asleep',
-    reason: 'host was asleep at the scheduled slot',
-    decidedAt: '2026-08-05T09:05:00.000Z',
-  });
-  assert.deepEqual(listForDate('deferred-basic', '2026-08-05'), [
-    {
-      runDate: '2026-08-05',
-      slot: '09:00',
-      reasonCode: 'host-asleep',
-      reason: 'host was asleep at the scheduled slot',
-      decidedAt: '2026-08-05T09:05:00.000Z',
-      notifiedAt: null,
-    },
-  ]);
-});
-
-test('wireDaemonDeferredSlots.recordDeferral: called twice for the same (profile, runDate, slot) produces exactly one row, reachable through this wiring layer (not just the adapter layer)', () => {
-  const { recordDeferral, listForDate } = wireDaemonDeferredSlots({ root });
-  const entry = {
-    runDate: '2026-08-06',
-    slot: '10:00',
-    reasonCode: 'network-unreachable' as const,
-    reason: 'no network at the scheduled slot',
-    decidedAt: '2026-08-06T10:05:00.000Z',
-  };
-  recordDeferral('deferred-idempotent', entry);
-  recordDeferral('deferred-idempotent', entry);
-  assert.equal(listForDate('deferred-idempotent', '2026-08-06').length, 1);
-});
-
-test('wireDaemonDeferredSlots: listUnnotifiedDatesBefore and markNotified round-trip through this wiring layer', () => {
-  const { recordDeferral, listUnnotifiedDatesBefore, markNotified } =
-    wireDaemonDeferredSlots({ root });
-  recordDeferral('deferred-roundtrip', {
-    runDate: '2026-08-04',
-    slot: '08:00',
-    reasonCode: 'daemon-unavailable',
-    reason: 'daemon was down at the scheduled slot',
-    decidedAt: '2026-08-04T08:05:00.000Z',
-  });
-  assert.deepEqual(listUnnotifiedDatesBefore('deferred-roundtrip', '2026-08-05'), [
-    '2026-08-04',
-  ]);
-  markNotified('deferred-roundtrip', '2026-08-04', '2026-08-05T09:00:00.000Z');
-  assert.deepEqual(listUnnotifiedDatesBefore('deferred-roundtrip', '2026-08-05'), []);
-});
-
-test('wireDaemonDeferredSlots: a profile whose db file does not exist yet degrades reads to [] and never throws on a write', () => {
-  const { recordDeferral, listForDate, listUnnotifiedDatesBefore, markNotified } =
-    wireDaemonDeferredSlots({ root });
-  assert.deepEqual(listForDate('deferred-ghost', '2026-08-05'), []);
-  assert.deepEqual(listUnnotifiedDatesBefore('deferred-ghost', '2026-08-05'), []);
-  assert.doesNotThrow(() =>
-    recordDeferral('deferred-ghost', {
-      runDate: '2026-08-05',
-      slot: '09:00',
-      reasonCode: 'host-asleep',
-      reason: 'host was asleep at the scheduled slot',
-      decidedAt: '2026-08-05T09:05:00.000Z',
-    }),
-  );
-  assert.doesNotThrow(() =>
-    markNotified('deferred-ghost', '2026-08-05', '2026-08-05T09:10:00.000Z'),
-  );
 });
