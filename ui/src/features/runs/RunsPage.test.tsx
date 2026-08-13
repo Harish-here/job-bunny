@@ -2,8 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RunDetail, RunEventRow, RunSummary } from '../../lib/api/types';
-import { RunsPage } from './RunsPage';
+import type {
+  DeferredSlotRow,
+  RunDetail,
+  RunEventRow,
+  RunSummary,
+} from '../../lib/api/types';
+import { RunsPage, todayLocalDate } from './RunsPage';
 
 const ROWS: RunSummary[] = [
   {
@@ -94,12 +99,41 @@ function stubFetch(
      * 9-stage funnel, or a `result: null, failure: null` unrecorded row)
      * instead of the generic `detailFor` fixture. */
     detailOverrides?: Record<number, RunDetail>;
+    /** `GET /deferred-slots` rows — defaults to an empty, resolved
+     * response so every pre-existing test in this file (which predates
+     * D3b) keeps working unchanged. */
+    deferredSlotsRows?: DeferredSlotRow[];
+    /** Never resolves the `/deferred-slots` fetch — the shape a
+     * `deferredQuery.isPending` test needs. */
+    deferredSlotsPending?: boolean;
+    /** `/deferred-slots` -> 500, the shape a `deferredQuery.isError` test
+     * needs, without touching the (separately stubbed) `/runs` response. */
+    deferredSlotsError?: boolean;
   } = {},
 ) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes('/deferred-slots')) {
+        if (opts.deferredSlotsPending) {
+          return new Promise<Response>(() => {}); // never resolves
+        }
+        if (opts.deferredSlotsError) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({
+              error: { code: 'internal', message: 'internal error' },
+            }),
+          } as unknown as Response;
+        }
+        const rows = opts.deferredSlotsRows ?? [];
+        return {
+          ok: true,
+          json: async () => ({ rows, total: rows.length, date: todayLocalDate() }),
+        } as unknown as Response;
+      }
       // RunsPage now calls useRunControl (B-fix: threading onRun into
       // RunDetailView/DiagnosisPanel), which polls these two endpoints
       // independently of the runs list — stub them so the throw-on-
@@ -424,5 +458,89 @@ describe('RunsPage', () => {
       expect(screen.getAllByTestId('run-row')).toHaveLength(2);
     });
     expect(screen.queryByTestId('live-run-header')).not.toBeInTheDocument();
+  });
+
+  it('renders the day-reassurance line with an explicit 0 failed when nothing happened today (D3b)', async () => {
+    // The default ROWS fixture's dates (2026-08-04/05) never equal
+    // `todayLocalDate()`'s real-clock value, so today-scoped counts are
+    // all zero — proving the "0 failed" case is rendered explicitly, not
+    // omitted (data-qa-ids.md's own load-bearing note).
+    stubFetch();
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(`${todayLocalDate()} · 0 runs, 0 slots deferred, 0 failed`),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('scopes runCount/failedCount to TODAY only, excluding other-day rows (D3b)', async () => {
+    const today = todayLocalDate();
+    const todaysPassed: RunSummary = {
+      ...(ROWS[0] as RunSummary),
+      id: 21,
+      date: today,
+      status: 'passed',
+    };
+    const todaysFailed: RunSummary = {
+      ...(ROWS[1] as RunSummary),
+      id: 22,
+      date: today,
+      status: 'failed',
+    };
+    const otherDayFailed: RunSummary = {
+      ...(ROWS[1] as RunSummary),
+      id: 23,
+      date: '2020-01-01',
+      status: 'failed',
+    };
+    const deferredSlotsRows: DeferredSlotRow[] = [1, 2, 3].map((n) => ({
+      runDate: today,
+      slot: `0${n}:00`,
+      reasonCode: 'host-asleep',
+      reason: 'Job Bunny declined to start this run because the host was asleep.',
+      decidedAt: `${today}T0${n}:00:05.000Z`,
+      notifiedAt: null,
+    }));
+    stubFetch({
+      rows: [todaysPassed, todaysFailed, otherDayFailed],
+      deferredSlotsRows,
+    });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(`${today} · 2 runs, 3 slots deferred, 1 failed`),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('deferred region shows exactly one Skeleton while its query is pending (never three, D3b)', async () => {
+    stubFetch({ deferredSlotsPending: true });
+    const { container } = renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+    });
+
+    // The runs-list's own loading skeletons are gone once its rows
+    // render; the deferred region's single Skeleton is the only one left.
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(1);
+  });
+
+  it('a deferred-slots fetch error renders a scoped retry without blanking the runs list next to it (D3b)', async () => {
+    stubFetch({ deferredSlotsError: true });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/couldn't load deferred slots/i)).toBeInTheDocument();
+    });
+    // The runs list itself is unaffected — a deferred-slots failure must
+    // not blank the whole pane it sits in.
+    expect(screen.getAllByTestId('run-row')).toHaveLength(2);
   });
 });

@@ -7,17 +7,41 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
 import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { useRunControl } from '../runcontrol/useRunControl';
+import { DeferredGroup } from './DeferredGroup';
 import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
 import { RunsList } from './RunsList';
+import { classifyOutcome } from './runOutcome';
 import { runQuery, runsKeys } from './runs.queries';
-import { useRun, useRunEvents, useRuns, useSoftErrors } from './useRunsData';
+import {
+  useDeferredSlots,
+  useRun,
+  useRunEvents,
+  useRuns,
+  useSoftErrors,
+} from './useRunsData';
 
 const SKELETON_ROW_KEYS = ['s1', 's2', 's3'];
 const LIVE_POLL_MS = 2500;
 
 function isNoLocalDb(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'no_local_db';
+}
+
+/** Local calendar date as `YYYY-MM-DD` — the SAME local-date convention
+ * `core/schedule/types.ts`'s `formatLocalDate` uses (and the daemon relies
+ * on) but reimplemented here rather than imported: per this task's own
+ * brief, `core/schedule` is not one of the zero-import `core/` modules the
+ * UI is allowed to import at runtime (only `core/datetime`, which has no
+ * today-formatter), so the handful of local getters are duplicated instead.
+ * Exported so `RunsPage.test.tsx` can compute the same "today" its
+ * assertions need without re-deriving the logic a second, divergent way. */
+export function todayLocalDate(): string {
+  const d = new Date();
+  const yyyy = String(d.getFullYear()).padStart(4, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 /** Header freshness chip (R11, B23): reads `dataUpdatedAt`/`isError` off the
@@ -92,6 +116,27 @@ export function RunsPage({ profile }: { profile: string }) {
   const runningRow = rows.find((r) => r.status === 'running') ?? null;
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // D3b (blueprint.md step 1.4) — the day-reassurance line's own data,
+  // scoped to `today` (local, matching the daemon's own convention). No
+  // polling on `deferredQuery`, unlike `runsQuery` — task 22's own design.
+  const today = todayLocalDate();
+  const deferredQuery = useDeferredSlots(profile, today);
+  const deferredRows = deferredQuery.data?.rows ?? [];
+  const deferredCount = deferredRows.length;
+  // `runCount`/`failedCount` scope to TODAY's rows specifically — `rows`
+  // itself (the `/runs` list response) can span more than one day, per
+  // this task's own brief. `failedCount` reuses `classifyOutcome`'s
+  // 'failed'/'crashed' kinds (the same classification `RunsList` already
+  // renders `data-outcome-kind` from) rather than a second, divergent
+  // status check.
+  const todaysRows = rows.filter((r) => r.date === today);
+  const runCount = todaysRows.length;
+  const failedCount = todaysRows.filter((r) => {
+    const kind = classifyOutcome(r, r.softErrors);
+    return kind === 'failed' || kind === 'crashed';
+  }).length;
+  const dayReassuranceText = `${today} · ${runCount} run${runCount === 1 ? '' : 's'}, ${deferredCount} slots deferred, ${failedCount} failed`;
+
   // `classifyOutcome` (runOutcome.ts) can only resolve produced/empty/
   // degraded/unrecorded from a RunDetail's `result`/`failure` blobs, which
   // `listRuns()` never returns — a bare `RunSummary` fails safe to
@@ -142,7 +187,7 @@ export function RunsPage({ profile }: { profile: string }) {
   const events = eventsQuery.data?.rows ?? [];
 
   return (
-    <div className="flex h-full flex-col">
+    <div data-qa="runs-page" className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b p-3">
         <h1 className="text-lg font-semibold font-heading">Runs</h1>
         <div className="flex items-center gap-3">
@@ -168,6 +213,12 @@ export function RunsPage({ profile }: { profile: string }) {
       )}
       <div className="grid flex-1 grid-cols-[minmax(280px,360px)_1fr] overflow-hidden">
         <section className="overflow-y-auto border-r">
+          <p
+            data-qa="runs-day-reassurance"
+            className="p-3 pb-0 text-xs text-muted-foreground"
+          >
+            {dayReassuranceText}
+          </p>
           {noLocalDb ? (
             <div className="p-4 text-sm text-muted-foreground">
               This profile has no local database yet — run the pipeline to populate one.
@@ -185,7 +236,33 @@ export function RunsPage({ profile }: { profile: string }) {
               ))}
             </div>
           ) : (
-            <RunsList rows={listRows} selectedId={selectedId} onSelect={setSelectedId} />
+            <>
+              <RunsList
+                rows={listRows}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
+              {/* Deferred region — a SEPARATE sibling block below RunsList
+                  (blueprint.md §2), never merged into RunsList's own `rows`
+                  prop, which cannot represent a deferred slot without
+                  widening a type five other call sites depend on. Loading
+                  gets exactly ONE Skeleton (never the list's own 3x block —
+                  "or loading itself would look like an alarm"); an error
+                  here is scoped to just this region so it never blanks the
+                  runs list next to it. */}
+              <div className="p-3">
+                {deferredQuery.isPending ? (
+                  <Skeleton className="h-12" />
+                ) : deferredQuery.isError ? (
+                  <ErrorRetry
+                    message="Couldn't load deferred slots — the board server may be unreachable."
+                    onRetry={() => deferredQuery.refetch()}
+                  />
+                ) : (
+                  deferredRows.length > 0 && <DeferredGroup rows={deferredRows} />
+                )}
+              </div>
+            </>
           )}
         </section>
 

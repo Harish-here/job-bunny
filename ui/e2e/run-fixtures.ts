@@ -134,6 +134,34 @@ export async function stubIntents(
   });
 }
 
+/** `GET /deferred-slots` row — `DeferredSlotRow` (`ports/deferred_slots.ts`),
+ * mirrored locally rather than imported, same convention as `RunRow` above. */
+export interface DeferredSlotRow {
+  runDate: string;
+  slot: string;
+  reasonCode: 'host-asleep' | 'network-unreachable' | 'daemon-unavailable';
+  reason: string;
+  decidedAt: string;
+  notifiedAt: string | null;
+}
+
+/** Stubs `GET /deferred-slots` (D3b, task 24) — the `ListDeferredSlotsResponse`
+ * shape from task 19 (`{ rows, total, date }`). Echoes back whichever
+ * `date` the frontend actually requested (`RunsPage.tsx` always passes
+ * `today`) rather than hardcoding one, since this fixture doesn't know
+ * what "today" resolves to at test-run time. */
+export async function stubDeferredSlots(
+  page: Page,
+  rows: DeferredSlotRow[],
+): Promise<void> {
+  await page.route('**/api/profiles/rajni/deferred-slots*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const url = new URL(route.request().url());
+    const date = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
+    await route.fulfill({ json: { rows, total: rows.length, date } });
+  });
+}
+
 export async function stubRunsList(page: Page, rows: RunListRow[]): Promise<void> {
   await page.route('**/api/profiles/rajni/runs*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
