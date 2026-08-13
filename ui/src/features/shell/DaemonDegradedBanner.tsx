@@ -1,17 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
-import { CircleAlert, Copy, X } from 'lucide-react';
+import { CircleAlert, Copy } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { daemonQuery } from '../wizard/wizard.queries';
 
 const RESTART_COMMAND = 'jobbunny serve stop && jobbunny serve start';
 
-/** Global, session-dismissible strip shown when the daemon has stopped
+/** Global, undismissible strip shown when the daemon has stopped
  * starting runs for this profile because its own schema is behind the
  * database's (blueprint.md 0.3 / mockup.html:679-698). Deliberately the
  * only amber element on screen — `text-attention-strong` on every line,
  * `bg-attention/10`/`border-attention` on the strip itself, never
  * `text-attention` (design-scale rule).
+ *
+ * No dismiss control (ux-notes.md §Cuts): the schema-drift Telegram alert
+ * fires only once per daemon lifetime, so a dismissible banner plus an
+ * already-consumed notification would leave a degraded daemon invisible —
+ * the exact silent outage this feature exists to prevent. The banner
+ * clears only when `entry.degraded` itself clears.
  *
  * The copy button duplicates `Step6Launch.tsx`'s `DaemonStartHint` /
  * `RunNowButton.tsx`'s `CopyServeStartButton` clipboard pattern locally —
@@ -20,12 +26,11 @@ const RESTART_COMMAND = 'jobbunny serve stop && jobbunny serve start';
  * convention exists yet, and introducing one is out of this task's
  * proportional scope). */
 export function DaemonDegradedBanner({ profile }: { profile: string }) {
-  const [dismissed, setDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
   const daemon = useQuery(daemonQuery());
 
   const entry = daemon.data?.profiles.find((p) => p.profile === profile);
-  if (!entry || !entry.degraded || dismissed) return null;
+  if (!entry || !entry.degraded) return null;
 
   async function handleCopy() {
     try {
@@ -84,14 +89,6 @@ export function DaemonDegradedBanner({ profile }: { profile: string }) {
             </Button>
           </div>
         </div>
-        <button
-          type="button"
-          aria-label="Dismiss for this session"
-          className="ml-auto border-0 bg-transparent text-attention-strong"
-          onClick={() => setDismissed(true)}
-        >
-          <X className="size-4" />
-        </button>
       </div>
     </div>
   );

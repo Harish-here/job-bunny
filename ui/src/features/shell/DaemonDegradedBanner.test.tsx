@@ -107,7 +107,12 @@ describe('DaemonDegradedBanner', () => {
     expect(copyButton).toHaveTextContent('Copied');
   });
 
-  it('clicking dismiss unmounts the banner in the same render', async () => {
+  // ux-notes.md §Cuts: the degraded condition is not dismissible — dismissing
+  // it would re-create the exact silent outage this banner exists to
+  // prevent (the schema-drift Telegram alert fires only once per daemon
+  // lifetime). This pins the absence: it must fail if a dismiss/close
+  // control of any kind is ever re-added to the degraded banner.
+  it('has no dismiss control while degraded', async () => {
     stubDaemon(
       daemonWith({
         profile: 'rajni',
@@ -120,28 +125,11 @@ describe('DaemonDegradedBanner', () => {
     renderBanner();
     await screen.findByTestId('daemon-degraded-banner');
 
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Dismiss for this session' }),
-    );
-
-    expect(screen.queryByTestId('daemon-degraded-banner')).toBeNull();
-  });
-
-  it('does not invent a data-qa/data-testid for the dismiss button', async () => {
-    stubDaemon(
-      daemonWith({
-        profile: 'rajni',
-        enabled: true,
-        nextRunAt: null,
-        degraded: true,
-        degradedReason: DEGRADED_REASON,
-      }),
-    );
-    renderBanner();
-    const dismissButton = await screen.findByRole('button', {
-      name: 'Dismiss for this session',
-    });
-    expect(dismissButton).not.toHaveAttribute('data-qa');
-    expect(dismissButton).not.toHaveAttribute('data-testid');
+    expect(screen.queryByRole('button', { name: /dismiss/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /close/i })).toBeNull();
+    // Only the copy button should exist inside the banner.
+    expect(
+      screen.getByTestId('daemon-degraded-banner').querySelectorAll('button'),
+    ).toHaveLength(1);
   });
 });

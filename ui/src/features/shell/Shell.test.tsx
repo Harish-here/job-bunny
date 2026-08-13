@@ -234,12 +234,10 @@ describe('Shell', () => {
     }
   });
 
-  // Regression pin for a session-dismissal leak: DaemonDegradedBanner's own
-  // `dismissed` state lives inside the component, so without a
-  // profile-scoped `key` on it in Shell.tsx, dismissing profile A's banner
-  // would silently suppress a newly-degraded profile B's banner too — the
-  // sole in-app signal that B's scheduler has stopped would vanish.
-  it('a session dismissal is per-profile — switching profiles brings the banner back for the new one', async () => {
+  // The degraded banner has no dismiss control (ux-notes.md §Cuts): it
+  // stays visible across a profile switch and reflects whichever profile
+  // is now selected, undismissed, for as long as that profile is degraded.
+  it('the degraded banner has no dismiss control and reflects the newly selected profile on switch', async () => {
     stubFetch({
       daemon: {
         state: 'running',
@@ -270,10 +268,7 @@ describe('Shell', () => {
     expect(await screen.findByTestId('daemon-degraded-cause')).toHaveTextContent(
       'rajni schema is behind',
     );
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Dismiss for this session' }),
-    );
-    expect(screen.queryByTestId('daemon-degraded-banner')).toBeNull();
+    expect(screen.queryByRole('button', { name: /dismiss/i })).toBeNull();
 
     await userEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
     await userEvent.click(await screen.findByRole('option', { name: /harish/ }));
@@ -281,5 +276,6 @@ describe('Shell', () => {
     expect(await screen.findByTestId('daemon-degraded-cause')).toHaveTextContent(
       'harish schema is behind',
     );
+    expect(screen.queryByRole('button', { name: /dismiss/i })).toBeNull();
   });
 });
