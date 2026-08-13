@@ -38,10 +38,13 @@ import {
   type LogDeps,
 } from '../../../ops/daemon/logs/index.ts';
 import { defaultScanDeps, type ScanDeps } from '../../../ops/daemon/scan/index.ts';
+import type { NotifyEvent } from '../../../ports/notifier.ts';
 import type { PendingIntent } from '../../../ports/run_intents.ts';
 import { resolveHome } from '../../home/index.ts';
 import {
+  wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
+  wireDaemonNotifier,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
   wireDaemonSchemaGuard,
@@ -100,6 +103,12 @@ export interface ServeDeps {
   checkSchemaDrift: (
     profiles: readonly string[],
   ) => Map<string, { schemaVersion: number; buildVersion: number }>;
+  /** Real implementation: `cli/wire/daemon.ts`'s `wireDaemonNotifier`.
+   * Never throws. */
+  notify: (profile: string, event: NotifyEvent) => Promise<void>;
+  /** Real implementation: `cli/wire/daemon.ts`'s
+   * `wireDaemonHasNotifierConfigured` (step 0.5a). Never throws. */
+  hasNotifierConfigured: (profile: string) => Promise<boolean>;
   /** Board-queued run intents, real implementation: `cli/wire/daemon.ts`'s
    * `wireDaemonIntents`. Shared by the daemon child (`start.ts`'s
    * `DaemonDeps.readIntents`/`claimIntent`/`attachIntentRun`) so both agree
@@ -152,6 +161,8 @@ function defaultServeDeps(): ServeDeps {
     },
     readRunHistory: wireDaemonRunHistory({ root }),
     checkSchemaDrift: wireDaemonSchemaGuard({ root }),
+    notify: wireDaemonNotifier({ root }),
+    hasNotifierConfigured: wireDaemonHasNotifierConfigured({ root }),
     ...wireDaemonIntents({ root }),
     listLaunchAgentFiles: () => {
       try {

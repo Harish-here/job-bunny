@@ -147,6 +147,8 @@ export function buildDaemonDeps(
     spawnRun,
     readRunHistory: deps.readRunHistory,
     checkSchemaDrift: deps.checkSchemaDrift,
+    notify: deps.notify,
+    hasNotifierConfigured: deps.hasNotifierConfigured,
     readIntents: deps.readIntents,
     claimIntent: deps.claimIntent,
     attachIntentRun: deps.attachIntentRun,

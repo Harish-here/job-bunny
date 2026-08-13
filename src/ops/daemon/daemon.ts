@@ -30,7 +30,9 @@
 
 import type { OwedRun, ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
 import { formatLocalDate, hhMmToMinutes, isRunOwed } from '../../core/schedule/index.ts';
+import type { NotifyEvent } from '../../ports/notifier.ts';
 import type { PendingIntent } from '../../ports/run_intents.ts';
+import { trackSchemaDriftAndNotify } from './alert/index.ts';
 import type { DaemonPidfileDeps } from './pidfile.ts';
 import { readDaemonPidfile, updateDaemonPidfile } from './pidfile.ts';
 import type { ScanDeps } from './scan/index.ts';
@@ -66,6 +68,12 @@ export interface DaemonDeps {
   checkSchemaDrift: (
     profiles: readonly string[],
   ) => Map<string, { schemaVersion: number; buildVersion: number }>;
+  /** Real implementation: `cli/wire/daemon.ts`'s `wireDaemonNotifier`.
+   * Never throws. */
+  notify: (profile: string, event: NotifyEvent) => Promise<void>;
+  /** Real implementation: `cli/wire/daemon.ts`'s
+   * `wireDaemonHasNotifierConfigured` (step 0.5a). Never throws. */
+  hasNotifierConfigured: (profile: string) => Promise<boolean>;
   /** Board-queued run intents that are `pending` and NOT expired, oldest
    * first, across every profile directory under `<root>/profiles` —
    * including profiles with no schedule at all, because "Run now" has to
@@ -188,6 +196,10 @@ export function createDaemon(deps: DaemonDeps): {
     const schemaDrift = deps.checkSchemaDrift(schedules.map((s) => s.profile));
     const activeSchedules = schedules.filter((s) => !schemaDrift.has(s.profile));
     const profileNames = activeSchedules.map((s) => s.profile);
+
+    // Phase 0 (D2 self-heal): track newly-degraded profiles in the
+    // pidfile and dispatch the single, daemon-level T6 alert (AC14).
+    await trackSchemaDriftAndNotify(deps, schemaDrift, schedules, now);
 
     // The daemon's DURABLE evidence — each named profile's own `runs` table,
     // real rows that survive a daemon restart (unlike the pidfile ledger

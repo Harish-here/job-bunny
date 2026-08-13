@@ -118,6 +118,8 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     scan: fakeScanDeps(),
     readRunHistory: () => [],
     checkSchemaDrift: () => new Map(),
+    notify: async () => {},
+    hasNotifierConfigured: async () => false,
     readIntents: () => [],
     claimIntent: () => true,
     attachIntentRun: () => {},
