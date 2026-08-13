@@ -109,6 +109,7 @@ function baseDeps(overrides: Partial<DaemonDeps> = {}): {
     pidfile,
     spawnRun: (async () => 0) as SpawnRun,
     readRunHistory: () => [],
+    checkSchemaDrift: () => new Map(),
     readIntents: () => [],
     claimIntent: () => true,
     attachIntentRun: () => {},
@@ -340,6 +341,30 @@ test('two owed entries run sequentially in (slot, profileName) order', async () 
   await createDaemon(deps).tick();
 
   assert.deepEqual(order, ['start:alpha', 'end:alpha', 'start:zeta', 'end:zeta']);
+});
+
+test('a profile flagged by checkSchemaDrift is excluded from spawning this tick; a healthy profile spawns normally', async () => {
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+  const scan = fakeScanDeps(
+    {
+      [profilePath('harish')]: profileJson({ times: ['14:00'] }),
+      [profilePath('rajni')]: profileJson({ times: ['14:00'] }),
+    },
+    { [PROFILES_DIR]: ['harish', 'rajni'] },
+  );
+  const checkSchemaDrift = (profiles: readonly string[]) =>
+    new Map(
+      profiles
+        .filter((p) => p === 'harish')
+        .map((p) => [p, { schemaVersion: 9, buildVersion: 7 }] as const),
+    );
+  const { deps } = baseDeps({ scan, spawnRun, checkSchemaDrift });
+  await createDaemon(deps).tick();
+  assert.deepEqual(spawnCalls, ['rajni']);
 });
 
 test('the reentrancy guard short-circuits a tick BEFORE it rescans, while the heartbeat still runs', async () => {

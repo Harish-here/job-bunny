@@ -117,6 +117,7 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     logs: fakeLogDeps(),
     scan: fakeScanDeps(),
     readRunHistory: () => [],
+    checkSchemaDrift: () => new Map(),
     readIntents: () => [],
     claimIntent: () => true,
     attachIntentRun: () => {},

@@ -44,6 +44,7 @@ import {
   wireDaemonIntents,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
+  wireDaemonSchemaGuard,
 } from '../../wire/index.ts';
 import { runServeStop } from './lifecycle.ts';
 import { runServeStartChild, runServeStartParent } from './start.ts';
@@ -90,6 +91,15 @@ export interface ServeDeps {
    * (`status.ts`'s "currently owed" line), so both agree on the same
    * durable evidence the tick loop itself uses. */
   readRunHistory: (profiles: readonly string[], date: string) => RunRecord[];
+  /** Per-tick schema-drift detector (Phase 0, D2 self-heal) — real
+   * implementation: `cli/wire/daemon.ts`'s `wireDaemonSchemaGuard`. A
+   * profile present in this tick's returned map is excluded from
+   * spawning entirely THIS tick (R15: an explicit degraded state,
+   * never ticking as if healthy) — never blindly respawned. Must
+   * never throw. */
+  checkSchemaDrift: (
+    profiles: readonly string[],
+  ) => Map<string, { schemaVersion: number; buildVersion: number }>;
   /** Board-queued run intents, real implementation: `cli/wire/daemon.ts`'s
    * `wireDaemonIntents`. Shared by the daemon child (`start.ts`'s
    * `DaemonDeps.readIntents`/`claimIntent`/`attachIntentRun`) so both agree
@@ -141,6 +151,7 @@ function defaultServeDeps(): ServeDeps {
       readProfileJson: wireDaemonScheduleConfig({ root }),
     },
     readRunHistory: wireDaemonRunHistory({ root }),
+    checkSchemaDrift: wireDaemonSchemaGuard({ root }),
     ...wireDaemonIntents({ root }),
     listLaunchAgentFiles: () => {
       try {

@@ -23,6 +23,7 @@ export {
   wireDaemonIntents,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
+  wireDaemonSchemaGuard,
 } from './daemon.ts';
 export type { MigrateWire } from './migrate.ts';
 export { wireMigrate } from './migrate.ts';

@@ -146,6 +146,7 @@ export function buildDaemonDeps(
     pidfile: deps.pidfile,
     spawnRun,
     readRunHistory: deps.readRunHistory,
+    checkSchemaDrift: deps.checkSchemaDrift,
     readIntents: deps.readIntents,
     claimIntent: deps.claimIntent,
     attachIntentRun: deps.attachIntentRun,
