@@ -67,7 +67,7 @@ describe('DaemonDegradedBanner', () => {
     expect(screen.queryByTestId('daemon-degraded-banner')).toBeNull();
   });
 
-  it('renders the cause text verbatim from entry.degradedReason when degraded', async () => {
+  it('renders the cause text with the "Cause:" label, mirroring mockup:686 / ux-notes.md T6', async () => {
     stubDaemon(
       daemonWith({
         profile: 'rajni',
@@ -79,7 +79,30 @@ describe('DaemonDegradedBanner', () => {
     );
     renderBanner();
     expect(await screen.findByTestId('daemon-degraded-banner')).toBeInTheDocument();
-    expect(screen.getByTestId('daemon-degraded-cause').textContent).toBe(DEGRADED_REASON);
+    // Not asserting mere presence of the reason text — the label prefix is
+    // the load-bearing effect (a bare sentence under a capitalised headline
+    // is exactly Bug 2).
+    expect(screen.getByTestId('daemon-degraded-cause').textContent).toBe(
+      `Cause: ${DEGRADED_REASON}`,
+    );
+  });
+
+  it('the banner root is a role="status" live region, so a screen-reader user gets an announcement once the daemon degrades (ux-notes.md §9)', async () => {
+    stubDaemon(
+      daemonWith({
+        profile: 'rajni',
+        enabled: true,
+        nextRunAt: null,
+        degraded: true,
+        degradedReason: DEGRADED_REASON,
+      }),
+    );
+    renderBanner();
+    const banner = await screen.findByTestId('daemon-degraded-banner');
+    // getByRole, not a data-testid lookup — this fails if role="status" is
+    // ever dropped from the banner root, which is the actual bug (a
+    // silently-mounted banner that never announces to assistive tech).
+    expect(screen.getByRole('status')).toBe(banner);
   });
 
   it('clicking the copy button writes the exact restart command and flips to Copied', async () => {

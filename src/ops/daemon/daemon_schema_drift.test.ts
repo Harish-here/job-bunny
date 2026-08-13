@@ -150,7 +150,7 @@ test('schema drift: a notify that resolves true stamps schemaDriftNotifiedAt and
   assert.equal(sent[0]?.level, 'info');
 });
 
-test('schema drift: no scheduled profile has a notifier configured — zero sends, schemaDriftNotifiedAt stays null, and the skip is logged every qualifying tick', async () => {
+test('schema drift: no scheduled profile has a notifier configured — zero sends, schemaDriftNotifiedAt stays null, and the skip is logged ONCE across the whole degraded episode (not every tick — AC14/R15)', async () => {
   const scan = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
     { [PROFILES_DIR]: ['harish'] },
@@ -166,10 +166,60 @@ test('schema drift: no scheduled profile has a notifier configured — zero send
   const daemon = createDaemon(deps);
   await daemon.tick();
   await daemon.tick();
+  await daemon.tick();
   assert.equal(readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifiedAt, null);
   const skips = events.filter(
     (e) => e.event === 'schema-drift-notify-skipped-no-notifier',
   );
-  assert.equal(skips.length, 2);
+  // 3 ticks in one continuous no-notifier episode — exactly one log line,
+  // not one per tick (a 2,880-lines-a-day repeat is the exact outage D2
+  // exists to fix — see qa-report.md Bug 5).
+  assert.equal(skips.length, 1);
   assert.equal(skips[0]?.level, 'warn');
+});
+
+test('schema drift: the no-notifier skip logs again after the episode clears and a new one begins (latch resets, not a one-shot)', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let hasNotifier = false;
+  const { deps, events } = baseDeps({
+    scan,
+    checkSchemaDrift: () => new Map([['harish', { schemaVersion: 8, buildVersion: 7 }]]),
+    hasNotifierConfigured: async () => hasNotifier,
+    // Always fails to deliver, so `schemaDriftNotifiedAt` never stamps —
+    // the daemon-level alert stays eligible for retry, which is what lets
+    // this scenario re-enter the no-notifier branch on a later tick
+    // instead of exiting via the one-shot AC14 alert path.
+    notify: async () => false,
+  });
+  const daemon = createDaemon(deps);
+
+  // Episode 1: no notifier configured for two ticks — logs once.
+  await daemon.tick();
+  await daemon.tick();
+  const skipsAfterEpisode1 = events.filter(
+    (e) => e.event === 'schema-drift-notify-skipped-no-notifier',
+  );
+  assert.equal(skipsAfterEpisode1.length, 1);
+
+  // The episode clears: a notifier becomes available this tick (a sender
+  // is found), so no skip is logged and the latch resets.
+  hasNotifier = true;
+  await daemon.tick();
+  const skipsAfterClear = events.filter(
+    (e) => e.event === 'schema-drift-notify-skipped-no-notifier',
+  );
+  assert.equal(skipsAfterClear.length, 1); // still 1 — the cleared tick logged nothing new.
+
+  // Episode 2 begins: no notifier again — a genuinely new episode, so it
+  // logs again.
+  hasNotifier = false;
+  await daemon.tick();
+  await daemon.tick();
+  const skipsAfterEpisode2 = events.filter(
+    (e) => e.event === 'schema-drift-notify-skipped-no-notifier',
+  );
+  assert.equal(skipsAfterEpisode2.length, 2);
 });

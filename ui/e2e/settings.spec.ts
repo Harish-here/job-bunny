@@ -12,7 +12,7 @@
  * state via `page.request.get`, never the form alone.
  */
 import { expect, type Page, test } from '@playwright/test';
-import { stubDaemonStatus } from './run-fixtures';
+import { stubDaemonStatus, stubDaemonUnreachable } from './run-fixtures';
 import { pinProfile } from './wizard.helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -239,7 +239,10 @@ test("settings: schedule section shows the daemon's degraded state with cause an
 
   const degraded = page.locator('[data-qa="schedule-daemon-status-degraded"]');
   await expect(degraded).toBeVisible();
-  await expect(degraded).toContainText(degradedReason);
+  // Terse "Degraded — schema vN > daemon build vM" form (mockup:717), not
+  // the full sentence — that already appears once in the global banner.
+  await expect(degraded).toContainText('Degraded — schema v8 > daemon build v7');
+  await expect(degraded).not.toContainText(degradedReason);
   await expect(degraded).toContainText('jobbunny serve stop && jobbunny serve start');
   await expect(page.locator('[data-qa="schedule-daemon-status-healthy"]')).toHaveCount(0);
 });
@@ -262,4 +265,67 @@ test("settings: schedule section shows the daemon's healthy state with zero degr
   await expect(page.locator('[data-qa="schedule-daemon-status-degraded"]')).toHaveCount(
     0,
   );
+});
+
+test('settings: schedule section renders the unreachable-daemon error state, and it is never mistaken for the degraded state (Degraded ≠ unreachable, ux-notes.md callout 13)', async ({
+  page,
+}) => {
+  // Same idiom `run-experience.spec.ts` already uses for the Run Now
+  // sidebar's daemon-unknown state, reused here for the Schedule section's
+  // own error state — the gap this test closes.
+  await stubDaemonUnreachable(page);
+  await page.goto('/#/settings/schedule');
+
+  const error = page.locator('[data-qa="schedule-daemon-status-error"]');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText("Can't reach the daemon API");
+  // The distinguishing assertion: an unreachable probe must never render
+  // as degraded — collapsing "we can't tell" into "we know, and it's
+  // broken" is the exact regression this test guards.
+  await expect(page.locator('[data-qa="schedule-daemon-status-degraded"]')).toHaveCount(
+    0,
+  );
+  await expect(page.locator('[data-qa="schedule-daemon-status-healthy"]')).toHaveCount(0);
+
+  // Retry is wired, not inert: it re-issues the GET.
+  let requestCount = 0;
+  page.on('request', (req) => {
+    if (req.url().includes('/api/daemon') && req.method() === 'GET') requestCount++;
+  });
+  const countBefore = requestCount;
+  await error.getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(() => requestCount, { timeout: 5_000 }).toBeGreaterThan(countBefore);
+});
+
+test('settings: schedule section renders the loading skeleton while /api/daemon is genuinely in flight, and nothing else', async ({
+  page,
+}) => {
+  // A held-open route — the query is actually pending, not merely
+  // resolved-fast-enough-to-look-pending, which is the distinction this
+  // test needs to be meaningful.
+  await page.route('**/api/daemon*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.fulfill({
+      status: 200,
+      json: {
+        state: 'running',
+        pid: 4242,
+        startedAt: '2026-08-13T09:00:00.000Z',
+        lastTickAt: new Date().toISOString(),
+        inFlight: null,
+        profiles: [],
+      },
+    });
+  });
+  await page.goto('/#/settings/schedule');
+
+  await expect(page.locator('[data-qa="schedule-daemon-status-loading"]')).toBeVisible();
+  await expect(page.locator('[data-qa="schedule-daemon-status-healthy"]')).toHaveCount(0);
+  await expect(page.locator('[data-qa="schedule-daemon-status-error"]')).toHaveCount(0);
+
+  // ...and it resolves into the healthy state once the request lands.
+  await expect(page.locator('[data-qa="schedule-daemon-status-healthy"]')).toBeVisible({
+    timeout: 5_000,
+  });
 });

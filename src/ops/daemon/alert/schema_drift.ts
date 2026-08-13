@@ -137,12 +137,33 @@ export async function trackSchemaDriftAndNotify(
     }
   }
   if (sender === undefined) {
-    deps.log(
-      'schema-drift-notify-skipped-no-notifier',
-      { degraded: after.degraded.map((d) => d.profile) },
-      'warn',
-    );
+    // Latched, not per-tick (AC14/R15): log the skip once per contiguous
+    // degraded-with-no-notifier episode, not every 30s tick forever — the
+    // 2,880-lines-a-day repeat is the exact outage D2 exists to fix. See
+    // `schemaDriftNoNotifierWarnedAt`'s doc comment in pidfile.ts.
+    if (after.schemaDriftNoNotifierWarnedAt === null) {
+      deps.log(
+        'schema-drift-notify-skipped-no-notifier',
+        { degraded: after.degraded.map((d) => d.profile) },
+        'warn',
+      );
+      updateDaemonPidfile(
+        deps.root,
+        (current) => ({ ...current, schemaDriftNoNotifierWarnedAt: now.toISOString() }),
+        deps.pidfile,
+      );
+    }
     return;
+  }
+
+  // A sender was found this tick — the no-notifier episode (if any) is
+  // over. Reset the latch so a later, genuinely new episode logs again.
+  if (after.schemaDriftNoNotifierWarnedAt !== null) {
+    updateDaemonPidfile(
+      deps.root,
+      (current) => ({ ...current, schemaDriftNoNotifierWarnedAt: null }),
+      deps.pidfile,
+    );
   }
 
   const text = composeSchemaDriftAlertText(after.degraded);

@@ -32,6 +32,21 @@ function asNumberArray(value: unknown): number[] {
     : [];
 }
 
+/** mockup.html:717's terse "Degraded — schema vN > daemon build vM" form,
+ * derived from `degradedReason`'s two `(vN)` version markers
+ * (`degradedReasonText` in `ops/daemon/alert/schema_drift.ts` always emits
+ * "...schema (vN) is newer than...build (vM)...", in that order) — UI-side
+ * only, so the shared `degradedReason` string `jobbunny doctor` also reads
+ * stays untouched (blueprint.md §1 vs §4 step 0.5's contradiction; §1 and
+ * the mockup win, per this task's brief). Falls back to leading with the
+ * status word alone if the two markers are ever missing, rather than
+ * silently rendering nothing. */
+function shortDegradedLabel(reason: string): string {
+  const match = reason.match(/\(v(\d+)\).*?\(v(\d+)\)/);
+  if (!match) return `Degraded — ${reason}`;
+  return `Degraded — schema v${match[1]} > daemon build v${match[2]}`;
+}
+
 // Schedule → profile.json's `schedule` block only. "Next run" reads
 // GET /api/daemon rather than reimplementing the daemon's own scheduling
 // predicate client-side — see Rationale.
@@ -156,8 +171,8 @@ export function ScheduleSection({ profile }: { profile: string }) {
             >
               <CircleAlert className="size-4 shrink-0 text-attention-strong" />
               <div>
-                <span className="text-sm text-attention-strong">
-                  {entry.degradedReason}
+                <span className="text-sm text-attention-strong font-medium">
+                  {shortDegradedLabel(entry.degradedReason ?? '')}
                 </span>
                 <p className="mt-0.5 text-xs text-attention-strong">
                   Fix: <code className="font-mono">{RESTART_COMMAND}</code>

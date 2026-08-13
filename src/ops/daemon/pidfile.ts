@@ -47,6 +47,16 @@ export interface DaemonPidfile {
   // one allowed notification already gone out" (AC14) — conflating the two would either re-notify
   // per newly-degraded profile (violates AC14) or suppress board/doctor detail to match the
   // notification count (wrong information to withhold).
+  schemaDriftNoNotifierWarnedAt: string | null; // DAEMON-LEVEL latch for the "no notifier
+  // configured for any scheduled profile" skip warning (AC14/R15) — same precedent as
+  // `schemaDriftNotifiedAt`: stamped the first tick the skip fires, checked before logging again,
+  // so a contiguous degraded-with-no-notifier episode logs once instead of every 30s tick forever.
+  // Cleared back to null the moment a tick DOES find a sender (the episode is over), so a later,
+  // genuinely new no-notifier episode logs again. Deliberately its own field, not reused from
+  // `schemaDriftNotifiedAt`: that field guards the one delivered ALERT and is never cleared once
+  // stamped (AC14 — at most one alert per daemon lifetime); this field guards a LOG LINE and must
+  // be able to reset mid-lifetime, or a transient notifier misconfiguration would permanently
+  // suppress a real, later no-notifier episode.
 }
 
 export interface DaemonPidfileDeps {
@@ -97,6 +107,7 @@ export function acquireDaemonPidfile(
     attempts: [],
     degraded: [],
     schemaDriftNotifiedAt: null,
+    schemaDriftNoNotifierWarnedAt: null,
   };
   return deps.writeFileSyncExclusive(path, JSON.stringify(initial));
 }
@@ -153,7 +164,10 @@ function parseDegraded(value: unknown): DaemonDegradedEntry[] {
     .filter((entry): entry is DaemonDegradedEntry => entry !== undefined);
 }
 
-function parseSchemaDriftNotifiedAt(value: unknown): string | null {
+/** Shared parser for both nullable-ISO-timestamp latch fields
+ * (`schemaDriftNotifiedAt`, `schemaDriftNoNotifierWarnedAt`) — identical
+ * shape, identical "malformed/absent ⇒ null" fallback. */
+function parseNullableTimestamp(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
@@ -173,7 +187,10 @@ function parsePidfile(raw: string): DaemonPidfile | undefined {
         inFlight: parseInFlight(parsed.inFlight),
         attempts: parsed.attempts as DaemonAttempt[],
         degraded: parseDegraded(parsed.degraded),
-        schemaDriftNotifiedAt: parseSchemaDriftNotifiedAt(parsed.schemaDriftNotifiedAt),
+        schemaDriftNotifiedAt: parseNullableTimestamp(parsed.schemaDriftNotifiedAt),
+        schemaDriftNoNotifierWarnedAt: parseNullableTimestamp(
+          parsed.schemaDriftNoNotifierWarnedAt,
+        ),
       };
     }
     return undefined; // malformed shape — treated the same as unreadable.

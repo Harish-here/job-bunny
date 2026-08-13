@@ -45,6 +45,7 @@ export function DaemonDegradedBanner({ profile }: { profile: string }) {
 
   return (
     <div
+      role="status"
       data-testid="daemon-degraded-banner"
       data-qa="daemon-degraded-banner"
       className="rounded-md border-b border-attention bg-attention/10"
@@ -60,7 +61,7 @@ export function DaemonDegradedBanner({ profile }: { profile: string }) {
             data-qa="daemon-degraded-cause"
             className="mt-1 text-xs text-attention-strong"
           >
-            {entry.degradedReason}
+            Cause: {entry.degradedReason}
           </p>
           <p
             data-testid="daemon-degraded-remedy"

@@ -156,8 +156,12 @@ test('shell: a degraded daemon shows the global banner with cause, remedy, and a
 
   const banner = page.locator('[data-qa="daemon-degraded-banner"]');
   await expect(banner).toBeVisible();
+  // A persistent status region (ux-notes.md §9), not a bare div — the
+  // fallback channel that must still work once the once-per-daemon-lifetime
+  // Telegram alert has already been consumed.
+  await expect(page.getByRole('status')).toContainText(degradedReason);
   await expect(page.locator('[data-qa="daemon-degraded-cause"]')).toHaveText(
-    degradedReason,
+    `Cause: ${degradedReason}`,
   );
   await expect(page.locator('[data-qa="daemon-degraded-command"]')).toContainText(
     'jobbunny serve stop && jobbunny serve start',
