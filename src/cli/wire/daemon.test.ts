@@ -227,16 +227,16 @@ test('wireDaemonSchemaGuard: flags a profile whose schema version exceeds LATEST
   }
   {
     const db = new DatabaseSync(currentDbPath);
-    // LATEST_SCHEMA_VERSION hardcoded as 7 here: this test file may not
+    // LATEST_SCHEMA_VERSION hardcoded as 8 here: this test file may not
     // import src/adapters/** (only daemon.ts itself is carved out — see
     // this file's own header comment).
-    db.exec('PRAGMA user_version = 7');
+    db.exec('PRAGMA user_version = 8');
     db.close();
   }
   const checkSchemaDrift = wireDaemonSchemaGuard({ root });
   const result = checkSchemaDrift(['newer', 'current', 'nodb']);
   assert.deepEqual([...result.keys()], ['newer']);
-  assert.deepEqual(result.get('newer'), { schemaVersion: 9, buildVersion: 7 });
+  assert.deepEqual(result.get('newer'), { schemaVersion: 9, buildVersion: 8 });
   assert.equal(existsSync(join(root, 'profiles', 'nodb', 'data', 'jobbunny.db')), false);
 });
 

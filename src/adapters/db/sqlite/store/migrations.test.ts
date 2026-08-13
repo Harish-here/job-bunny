@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { LATEST_SCHEMA_VERSION, openJobsDb } from './migrations.ts';
+import { LATEST_SCHEMA_VERSION, MIGRATIONS, openJobsDb } from './migrations.ts';
 
 // The committed profiles/rajni/ fixture PROFILE is tracked, but its sqlite
 // DB file is not (profiles/*/data/* is gitignored — see .gitignore) — it
@@ -38,16 +38,33 @@ function userVersion(db: ReturnType<typeof openJobsDb>): number {
     .user_version;
 }
 
+// Replays a prefix of the real MIGRATIONS array (exported by migrations.ts
+// for exactly this purpose) to build a db at an arbitrary prior schema
+// version, instead of hand-duplicating the full CREATE TABLE history for
+// every version under test — the same tables the real migration path would
+// produce, by construction.
+function buildDbAtVersion(dbPath: string, version: number): DatabaseSync {
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  for (let i = 0; i < version; i++) {
+    db.exec(MIGRATIONS[i] as string);
+  }
+  db.exec(`PRAGMA user_version = ${version}`);
+  return db;
+}
+
+function tableNames(db: ReturnType<typeof openJobsDb>): string[] {
+  return (
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+}
+
 test('fresh :memory: db migrates to LATEST_SCHEMA_VERSION with jobs + tracking tables', () => {
   const db = openJobsDb(':memory:');
   assert.equal(userVersion(db), LATEST_SCHEMA_VERSION);
-  const tables = (
-    db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as {
-      name: string;
-    }[]
-  ).map((t) => t.name);
+  const tables = tableNames(db);
   assert.ok(tables.includes('jobs'));
   assert.ok(tables.includes('tracking'));
   db.close();
@@ -83,20 +100,17 @@ test('a db stamped newer than LATEST_SCHEMA_VERSION throws loud', () => {
   const db = openJobsDb(dbPath);
   db.exec('PRAGMA user_version = 99');
   db.close();
-  assert.throws(() => openJobsDb(dbPath), /v99.*newer.*v7/s);
+  assert.throws(
+    () => openJobsDb(dbPath),
+    new RegExp(`v99.*newer.*v${LATEST_SCHEMA_VERSION}`, 's'),
+  );
 });
 
-test('fresh :memory: db lands at v7 with runs + run_events + checkpoints + state_docs + config_docs + run_intents tables', () => {
+test('fresh :memory: db lands at LATEST_SCHEMA_VERSION with runs + run_events + checkpoints + state_docs + config_docs + run_intents + run_progress + deferred_slots tables', () => {
   const db = openJobsDb(':memory:');
   assert.equal(userVersion(db), LATEST_SCHEMA_VERSION);
-  assert.equal(LATEST_SCHEMA_VERSION, 7);
-  const tables = (
-    db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as {
-      name: string;
-    }[]
-  ).map((t) => t.name);
+  assert.equal(LATEST_SCHEMA_VERSION, 8);
+  const tables = tableNames(db);
   assert.ok(tables.includes('jobs'));
   assert.ok(tables.includes('tracking'));
   assert.ok(tables.includes('runs'));
@@ -105,6 +119,8 @@ test('fresh :memory: db lands at v7 with runs + run_events + checkpoints + state
   assert.ok(tables.includes('state_docs'));
   assert.ok(tables.includes('config_docs'));
   assert.ok(tables.includes('run_intents'));
+  assert.ok(tables.includes('run_progress'));
+  assert.ok(tables.includes('deferred_slots'));
   db.close();
 });
 
@@ -120,44 +136,7 @@ test('the run_intents partial unique index exists and guards only pending rows',
 
 test('a v1-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing jobs rows', () => {
   const dbPath = tmpDbPath();
-  // Build a v1 db by hand: only MIGRATIONS[0], stamped user_version=1.
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-  const v1 = new DatabaseSync(dbPath);
-  v1.exec(`
-    CREATE TABLE jobs (
-      id            TEXT PRIMARY KEY,
-      lane          TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      company       TEXT NOT NULL,
-      url           TEXT NOT NULL,
-      seniority     TEXT,
-      location_city TEXT,
-      work_type     TEXT,
-      timezone      TEXT,
-      skills        TEXT,
-      excitement    TEXT,
-      score         REAL,
-      match_reasons TEXT,
-      date_found    TEXT NOT NULL,
-      jd_json       TEXT NOT NULL,
-      synced_at     TEXT NOT NULL,
-      archived      INTEGER NOT NULL DEFAULT 0,
-      archived_at   TEXT
-    );
-    CREATE TABLE tracking (
-      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
-      status           TEXT,
-      comp_range       TEXT,
-      notes            TEXT,
-      contact          TEXT,
-      date_applied     TEXT,
-      next_action      TEXT,
-      next_action_date TEXT,
-      updated_at       TEXT NOT NULL
-    );
-    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
-  `);
-  v1.exec('PRAGMA user_version = 1');
+  const v1 = buildDbAtVersion(dbPath, 1);
   v1.prepare(
     `INSERT INTO jobs (id, lane, title, company, url, date_found, jd_json, synced_at)
      VALUES ('job-1', 'linkedin', 'Engineer', 'Acme', 'https://x', '2026-08-01', '{}', '2026-08-01T00:00:00Z')`,
@@ -170,11 +149,7 @@ test('a v1-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing jobs
     .prepare('SELECT id, company FROM jobs WHERE id = ?')
     .get('job-1') as { id: string; company: string } | undefined;
   assert.equal(row?.company, 'Acme');
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
+  const tables = tableNames(upgraded);
   assert.ok(tables.includes('runs'));
   assert.ok(tables.includes('run_events'));
   assert.ok(tables.includes('checkpoints'));
@@ -183,68 +158,7 @@ test('a v1-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing jobs
 
 test('a v2-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs rows', () => {
   const dbPath = tmpDbPath();
-  // Build a v2 db by hand: MIGRATIONS[0] + MIGRATIONS[1], stamped user_version=2.
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-  const v2 = new DatabaseSync(dbPath);
-  v2.exec(`
-    CREATE TABLE jobs (
-      id            TEXT PRIMARY KEY,
-      lane          TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      company       TEXT NOT NULL,
-      url           TEXT NOT NULL,
-      seniority     TEXT,
-      location_city TEXT,
-      work_type     TEXT,
-      timezone      TEXT,
-      skills        TEXT,
-      excitement    TEXT,
-      score         REAL,
-      match_reasons TEXT,
-      date_found    TEXT NOT NULL,
-      jd_json       TEXT NOT NULL,
-      synced_at     TEXT NOT NULL,
-      archived      INTEGER NOT NULL DEFAULT 0,
-      archived_at   TEXT
-    );
-    CREATE TABLE tracking (
-      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
-      status           TEXT,
-      comp_range       TEXT,
-      notes            TEXT,
-      contact          TEXT,
-      date_applied     TEXT,
-      next_action      TEXT,
-      next_action_date TEXT,
-      updated_at       TEXT NOT NULL
-    );
-    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
-    CREATE TABLE runs (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_date      TEXT NOT NULL,
-      time_dir      TEXT,
-      kind          TEXT NOT NULL,
-      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      status        TEXT NOT NULL,
-      started_at    TEXT NOT NULL,
-      finished_at   TEXT,
-      heartbeat_at  TEXT,
-      result_json   TEXT,
-      failure_json  TEXT,
-      sync_dryrun_json TEXT
-    );
-    CREATE INDEX idx_runs_date ON runs(run_date);
-    CREATE TABLE run_events (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id    INTEGER NOT NULL REFERENCES runs(id),
-      ts        TEXT NOT NULL,
-      level     TEXT NOT NULL,
-      msg       TEXT NOT NULL,
-      data_json TEXT
-    );
-    CREATE INDEX idx_run_events_run ON run_events(run_id);
-  `);
-  v2.exec('PRAGMA user_version = 2');
+  const v2 = buildDbAtVersion(dbPath, 2);
   const { lastInsertRowid } = v2
     .prepare(
       `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
@@ -263,90 +177,13 @@ test('a v2-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
   assert.equal(row?.run_date, '2026-08-06');
   assert.equal(row?.kind, 'run');
   assert.equal(row?.status, 'running');
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
-  assert.ok(tables.includes('checkpoints'));
+  assert.ok(tableNames(upgraded).includes('checkpoints'));
   upgraded.close();
 });
 
 test('a v3-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs + checkpoints rows', () => {
   const dbPath = tmpDbPath();
-  // Build a v3 db by hand: MIGRATIONS[0] + MIGRATIONS[1] + MIGRATIONS[2], stamped user_version=3.
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-  const v3 = new DatabaseSync(dbPath);
-  v3.exec(`
-    CREATE TABLE jobs (
-      id            TEXT PRIMARY KEY,
-      lane          TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      company       TEXT NOT NULL,
-      url           TEXT NOT NULL,
-      seniority     TEXT,
-      location_city TEXT,
-      work_type     TEXT,
-      timezone      TEXT,
-      skills        TEXT,
-      excitement    TEXT,
-      score         REAL,
-      match_reasons TEXT,
-      date_found    TEXT NOT NULL,
-      jd_json       TEXT NOT NULL,
-      synced_at     TEXT NOT NULL,
-      archived      INTEGER NOT NULL DEFAULT 0,
-      archived_at   TEXT
-    );
-    CREATE TABLE tracking (
-      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
-      status           TEXT,
-      comp_range       TEXT,
-      notes            TEXT,
-      contact          TEXT,
-      date_applied     TEXT,
-      next_action      TEXT,
-      next_action_date TEXT,
-      updated_at       TEXT NOT NULL
-    );
-    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
-    CREATE TABLE runs (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_date      TEXT NOT NULL,
-      time_dir      TEXT,
-      kind          TEXT NOT NULL,
-      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      status        TEXT NOT NULL,
-      started_at    TEXT NOT NULL,
-      finished_at   TEXT,
-      heartbeat_at  TEXT,
-      result_json   TEXT,
-      failure_json  TEXT,
-      sync_dryrun_json TEXT
-    );
-    CREATE INDEX idx_runs_date ON runs(run_date);
-    CREATE TABLE run_events (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id    INTEGER NOT NULL REFERENCES runs(id),
-      ts        TEXT NOT NULL,
-      level     TEXT NOT NULL,
-      msg       TEXT NOT NULL,
-      data_json TEXT
-    );
-    CREATE INDEX idx_run_events_run ON run_events(run_id);
-    CREATE TABLE checkpoints (
-      run_date   TEXT    NOT NULL,
-      time_dir   TEXT    NOT NULL,
-      position   INTEGER NOT NULL,
-      stage      TEXT    NOT NULL,
-      payload_json TEXT  NOT NULL,
-      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      created_at TEXT    NOT NULL,
-      PRIMARY KEY (run_date, time_dir, position)
-    );
-    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
-  `);
-  v3.exec('PRAGMA user_version = 3');
+  const v3 = buildDbAtVersion(dbPath, 3);
   const { lastInsertRowid } = v3
     .prepare(
       `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
@@ -367,8 +204,6 @@ test('a v3-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
     | { run_date: string; kind: string; status: string }
     | undefined;
   assert.equal(runRow?.run_date, '2026-08-06');
-  assert.equal(runRow?.kind, 'run');
-  assert.equal(runRow?.status, 'running');
   const checkpointRow = upgraded
     .prepare(
       'SELECT stage, written_by FROM checkpoints WHERE run_date = ? AND time_dir = ? AND position = ?',
@@ -376,95 +211,13 @@ test('a v3-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
     .get('2026-08-06', '09-00', 0) as { stage: string; written_by: number } | undefined;
   assert.equal(checkpointRow?.stage, 'farm');
   assert.equal(checkpointRow?.written_by, lastInsertRowid);
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
-  assert.ok(tables.includes('state_docs'));
+  assert.ok(tableNames(upgraded).includes('state_docs'));
   upgraded.close();
 });
 
 test('a v4-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs + state_docs rows', () => {
   const dbPath = tmpDbPath();
-  // Build a v4 db by hand: MIGRATIONS[0..3], stamped user_version=4.
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-  const v4 = new DatabaseSync(dbPath);
-  v4.exec(`
-    CREATE TABLE jobs (
-      id            TEXT PRIMARY KEY,
-      lane          TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      company       TEXT NOT NULL,
-      url           TEXT NOT NULL,
-      seniority     TEXT,
-      location_city TEXT,
-      work_type     TEXT,
-      timezone      TEXT,
-      skills        TEXT,
-      excitement    TEXT,
-      score         REAL,
-      match_reasons TEXT,
-      date_found    TEXT NOT NULL,
-      jd_json       TEXT NOT NULL,
-      synced_at     TEXT NOT NULL,
-      archived      INTEGER NOT NULL DEFAULT 0,
-      archived_at   TEXT
-    );
-    CREATE TABLE tracking (
-      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
-      status           TEXT,
-      comp_range       TEXT,
-      notes            TEXT,
-      contact          TEXT,
-      date_applied     TEXT,
-      next_action      TEXT,
-      next_action_date TEXT,
-      updated_at       TEXT NOT NULL
-    );
-    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
-    CREATE TABLE runs (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_date      TEXT NOT NULL,
-      time_dir      TEXT,
-      kind          TEXT NOT NULL,
-      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      status        TEXT NOT NULL,
-      started_at    TEXT NOT NULL,
-      finished_at   TEXT,
-      heartbeat_at  TEXT,
-      result_json   TEXT,
-      failure_json  TEXT,
-      sync_dryrun_json TEXT
-    );
-    CREATE INDEX idx_runs_date ON runs(run_date);
-    CREATE TABLE run_events (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id    INTEGER NOT NULL REFERENCES runs(id),
-      ts        TEXT NOT NULL,
-      level     TEXT NOT NULL,
-      msg       TEXT NOT NULL,
-      data_json TEXT
-    );
-    CREATE INDEX idx_run_events_run ON run_events(run_id);
-    CREATE TABLE checkpoints (
-      run_date   TEXT    NOT NULL,
-      time_dir   TEXT    NOT NULL,
-      position   INTEGER NOT NULL,
-      stage      TEXT    NOT NULL,
-      payload_json TEXT  NOT NULL,
-      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      created_at TEXT    NOT NULL,
-      PRIMARY KEY (run_date, time_dir, position)
-    );
-    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
-    CREATE TABLE state_docs (
-      key        TEXT PRIMARY KEY,
-      value_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  v4.exec('PRAGMA user_version = 4');
+  const v4 = buildDbAtVersion(dbPath, 4);
   const { lastInsertRowid } = v4
     .prepare(
       `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
@@ -485,107 +238,17 @@ test('a v4-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
     | { run_date: string; kind: string; status: string }
     | undefined;
   assert.equal(runRow?.run_date, '2026-08-06');
-  assert.equal(runRow?.kind, 'run');
-  assert.equal(runRow?.status, 'running');
   const stateDocRow = upgraded
     .prepare('SELECT value_json FROM state_docs WHERE key = ?')
     .get('farm_seen') as { value_json: string } | undefined;
   assert.equal(stateDocRow?.value_json, '{}');
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
-  assert.ok(tables.includes('config_docs'));
+  assert.ok(tableNames(upgraded).includes('config_docs'));
   upgraded.close();
 });
 
 test('a v5-stamped db upgrades to LATEST_SCHEMA_VERSION with a run_intents table', () => {
   const dbPath = tmpDbPath();
-  // Build a v5 db by hand: MIGRATIONS[0..4] (through config_docs, no
-  // run_intents yet), stamped user_version=5.
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-  const v5 = new DatabaseSync(dbPath);
-  v5.exec(`
-    CREATE TABLE jobs (
-      id            TEXT PRIMARY KEY,
-      lane          TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      company       TEXT NOT NULL,
-      url           TEXT NOT NULL,
-      seniority     TEXT,
-      location_city TEXT,
-      work_type     TEXT,
-      timezone      TEXT,
-      skills        TEXT,
-      excitement    TEXT,
-      score         REAL,
-      match_reasons TEXT,
-      date_found    TEXT NOT NULL,
-      jd_json       TEXT NOT NULL,
-      synced_at     TEXT NOT NULL,
-      archived      INTEGER NOT NULL DEFAULT 0,
-      archived_at   TEXT
-    );
-    CREATE TABLE tracking (
-      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
-      status           TEXT,
-      comp_range       TEXT,
-      notes            TEXT,
-      contact          TEXT,
-      date_applied     TEXT,
-      next_action      TEXT,
-      next_action_date TEXT,
-      updated_at       TEXT NOT NULL
-    );
-    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
-    CREATE TABLE runs (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_date      TEXT NOT NULL,
-      time_dir      TEXT,
-      kind          TEXT NOT NULL,
-      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      status        TEXT NOT NULL,
-      started_at    TEXT NOT NULL,
-      finished_at   TEXT,
-      heartbeat_at  TEXT,
-      result_json   TEXT,
-      failure_json  TEXT,
-      sync_dryrun_json TEXT
-    );
-    CREATE INDEX idx_runs_date ON runs(run_date);
-    CREATE TABLE run_events (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id    INTEGER NOT NULL REFERENCES runs(id),
-      ts        TEXT NOT NULL,
-      level     TEXT NOT NULL,
-      msg       TEXT NOT NULL,
-      data_json TEXT
-    );
-    CREATE INDEX idx_run_events_run ON run_events(run_id);
-    CREATE TABLE checkpoints (
-      run_date   TEXT    NOT NULL,
-      time_dir   TEXT    NOT NULL,
-      position   INTEGER NOT NULL,
-      stage      TEXT    NOT NULL,
-      payload_json TEXT  NOT NULL,
-      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      created_at TEXT    NOT NULL,
-      PRIMARY KEY (run_date, time_dir, position)
-    );
-    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
-    CREATE TABLE state_docs (
-      key        TEXT PRIMARY KEY,
-      value_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE config_docs (
-      key        TEXT PRIMARY KEY,
-      value_text TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  v5.exec('PRAGMA user_version = 5');
+  const v5 = buildDbAtVersion(dbPath, 5);
   v5.prepare(
     `INSERT INTO config_docs (key, value_text, updated_at)
        VALUES ('profile.json', '{}', '2026-08-06T09:00:00Z')`,
@@ -594,13 +257,7 @@ test('a v5-stamped db upgrades to LATEST_SCHEMA_VERSION with a run_intents table
 
   const upgraded = openJobsDb(dbPath);
   assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
-  assert.equal(userVersion(upgraded), 7);
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
-  assert.ok(tables.includes('run_intents'));
+  assert.ok(tableNames(upgraded).includes('run_intents'));
   const configRow = upgraded
     .prepare('SELECT value_text FROM config_docs WHERE key = ?')
     .get('profile.json') as { value_text: string } | undefined;
@@ -608,115 +265,9 @@ test('a v5-stamped db upgrades to LATEST_SCHEMA_VERSION with a run_intents table
   upgraded.close();
 });
 
-test('fresh :memory: db lands at v7 with a run_progress table', () => {
-  const db = openJobsDb(':memory:');
-  assert.equal(userVersion(db), LATEST_SCHEMA_VERSION);
-  assert.equal(LATEST_SCHEMA_VERSION, 7);
-  const tables = (
-    db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as {
-      name: string;
-    }[]
-  ).map((t) => t.name);
-  assert.ok(tables.includes('run_progress'));
-  db.close();
-});
-
 test('a v6-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs rows, adding run_progress', () => {
   const dbPath = tmpDbPath();
-  // Build a v6 db by hand: MIGRATIONS[0..5] (through run_intents), stamped
-  // user_version=6.
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-  const v6 = new DatabaseSync(dbPath);
-  v6.exec(`
-    CREATE TABLE jobs (
-      id            TEXT PRIMARY KEY,
-      lane          TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      company       TEXT NOT NULL,
-      url           TEXT NOT NULL,
-      seniority     TEXT,
-      location_city TEXT,
-      work_type     TEXT,
-      timezone      TEXT,
-      skills        TEXT,
-      excitement    TEXT,
-      score         REAL,
-      match_reasons TEXT,
-      date_found    TEXT NOT NULL,
-      jd_json       TEXT NOT NULL,
-      synced_at     TEXT NOT NULL,
-      archived      INTEGER NOT NULL DEFAULT 0,
-      archived_at   TEXT
-    );
-    CREATE TABLE tracking (
-      job_id           TEXT PRIMARY KEY REFERENCES jobs(id),
-      status           TEXT,
-      comp_range       TEXT,
-      notes            TEXT,
-      contact          TEXT,
-      date_applied     TEXT,
-      next_action      TEXT,
-      next_action_date TEXT,
-      updated_at       TEXT NOT NULL
-    );
-    CREATE INDEX idx_jobs_archived_date_found ON jobs(archived, date_found);
-    CREATE TABLE runs (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_date      TEXT NOT NULL,
-      time_dir      TEXT,
-      kind          TEXT NOT NULL,
-      resumed_from  INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      status        TEXT NOT NULL,
-      started_at    TEXT NOT NULL,
-      finished_at   TEXT,
-      heartbeat_at  TEXT,
-      result_json   TEXT,
-      failure_json  TEXT,
-      sync_dryrun_json TEXT
-    );
-    CREATE INDEX idx_runs_date ON runs(run_date);
-    CREATE TABLE run_events (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id    INTEGER NOT NULL REFERENCES runs(id),
-      ts        TEXT NOT NULL,
-      level     TEXT NOT NULL,
-      msg       TEXT NOT NULL,
-      data_json TEXT
-    );
-    CREATE INDEX idx_run_events_run ON run_events(run_id);
-    CREATE TABLE checkpoints (
-      run_date   TEXT    NOT NULL,
-      time_dir   TEXT    NOT NULL,
-      position   INTEGER NOT NULL,
-      stage      TEXT    NOT NULL,
-      payload_json TEXT  NOT NULL,
-      written_by INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-      created_at TEXT    NOT NULL,
-      PRIMARY KEY (run_date, time_dir, position)
-    );
-    CREATE INDEX idx_checkpoints_date ON checkpoints(run_date);
-    CREATE TABLE state_docs (
-      key        TEXT PRIMARY KEY,
-      value_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE config_docs (
-      key        TEXT PRIMARY KEY,
-      value_text TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE run_intents (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      requested_at   TEXT NOT NULL,
-      status         TEXT NOT NULL,
-      claimed_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL
-    );
-    CREATE UNIQUE INDEX idx_run_intents_one_pending
-      ON run_intents(status) WHERE status = 'pending';
-  `);
-  v6.exec('PRAGMA user_version = 6');
+  const v6 = buildDbAtVersion(dbPath, 6);
   const { lastInsertRowid } = v6
     .prepare(
       `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
@@ -727,25 +278,108 @@ test('a v6-stamped db upgrades to LATEST_SCHEMA_VERSION preserving existing runs
 
   const upgraded = openJobsDb(dbPath);
   assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
-  assert.equal(userVersion(upgraded), 7);
   const runRow = upgraded
     .prepare('SELECT run_date, kind, status FROM runs WHERE id = ?')
     .get(lastInsertRowid) as
     | { run_date: string; kind: string; status: string }
     | undefined;
   assert.equal(runRow?.run_date, '2026-08-06');
-  assert.equal(runRow?.kind, 'run');
-  assert.equal(runRow?.status, 'running');
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
-  assert.ok(tables.includes('run_progress'));
+  assert.ok(tableNames(upgraded).includes('run_progress'));
   upgraded.close();
 });
 
-test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> v7 without data loss', {
+test('a v7-stamped db upgrades to v8 adding deferred_slots + runs.catchup_slots_json, preserving existing runs rows', () => {
+  const dbPath = tmpDbPath();
+  const v7 = buildDbAtVersion(dbPath, 7);
+  const { lastInsertRowid } = v7
+    .prepare(
+      `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
+       VALUES ('2026-08-06', '09-00', 'run', 'running', '2026-08-06T09:00:00Z')`,
+    )
+    .run();
+  v7.close();
+
+  const upgraded = openJobsDb(dbPath);
+  assert.equal(userVersion(upgraded), 8);
+  assert.equal(userVersion(upgraded), LATEST_SCHEMA_VERSION);
+
+  // The pre-existing run row survives, and its new nullable column reads
+  // NULL — never a default value that would misrepresent a pre-migration
+  // run as covering zero catch-up slots.
+  const runRow = upgraded
+    .prepare('SELECT run_date, kind, status, catchup_slots_json FROM runs WHERE id = ?')
+    .get(lastInsertRowid) as
+    | {
+        run_date: string;
+        kind: string;
+        status: string;
+        catchup_slots_json: string | null;
+      }
+    | undefined;
+  assert.equal(runRow?.run_date, '2026-08-06');
+  assert.equal(runRow?.kind, 'run');
+  assert.equal(runRow?.status, 'running');
+  assert.equal(runRow?.catchup_slots_json, null);
+
+  assert.ok(tableNames(upgraded).includes('deferred_slots'));
+  upgraded.close();
+});
+
+test('deferred_slots has exactly the 6 documented columns with the expected types/nullability', () => {
+  const db = openJobsDb(':memory:');
+  const columns = (
+    db.prepare('PRAGMA table_info(deferred_slots)').all() as {
+      name: string;
+      type: string;
+      notnull: number;
+      pk: number;
+    }[]
+  ).map((c) => ({ name: c.name, type: c.type, notnull: c.notnull, pk: c.pk }));
+  assert.deepEqual(columns, [
+    { name: 'id', type: 'INTEGER', notnull: 0, pk: 1 },
+    { name: 'run_date', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'slot', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'reason_code', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'reason', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'decided_at', type: 'TEXT', notnull: 1, pk: 0 },
+    { name: 'notified_at', type: 'TEXT', notnull: 0, pk: 0 },
+  ]);
+  db.close();
+});
+
+test('idx_deferred_slots_one_per_slot is a UNIQUE index and the constraint actually fires', () => {
+  const db = openJobsDb(':memory:');
+  const indexRow = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?")
+    .get('idx_deferred_slots_one_per_slot') as { sql: string } | undefined;
+  assert.ok(indexRow);
+  assert.match(indexRow.sql, /UNIQUE INDEX/);
+  assert.match(indexRow.sql, /\(run_date, slot\)/);
+
+  db.prepare(
+    `INSERT INTO deferred_slots (run_date, slot, reason_code, reason, decided_at)
+       VALUES ('2026-08-13', '09:00', 'host-asleep', 'laptop asleep', '2026-08-13T09:05:00Z')`,
+  ).run();
+  assert.throws(() => {
+    db.prepare(
+      `INSERT INTO deferred_slots (run_date, slot, reason_code, reason, decided_at)
+         VALUES ('2026-08-13', '09:00', 'network-unreachable', 'no network', '2026-08-13T09:06:00Z')`,
+    ).run();
+  }, /UNIQUE constraint failed/);
+  db.close();
+});
+
+test('idx_deferred_slots_date exists', () => {
+  const db = openJobsDb(':memory:');
+  const indexRow = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?")
+    .get('idx_deferred_slots_date') as { sql: string } | undefined;
+  assert.ok(indexRow);
+  assert.match(indexRow.sql, /\(run_date\)/);
+  db.close();
+});
+
+test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> LATEST_SCHEMA_VERSION without data loss', {
   skip: existsSync(RAJNI_FIXTURE_DB)
     ? false
     : 'no local profiles/rajni/data/jobbunny.db present (gitignored — not present on a fresh checkout/CI)',
@@ -763,15 +397,23 @@ test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> v7
 
   const before = new DatabaseSync(copyPath);
   let versionBefore = userVersion(before);
-  if (versionBefore === 7) {
-    // The local rajni fixture has already migrated to v7 on this machine
+  if (versionBefore >= 7) {
+    // The local rajni fixture has already migrated past v6 on this machine
     // (it's gitignored — never present on a fresh checkout/CI, so this
-    // branch never runs there). The v6->v7 step is a pure ADD (only
-    // `run_progress` — see migrations.ts), so reverting THIS DISPOSABLE
-    // COPY to v6 shape (drop that one table, stamp the version back down)
-    // exercises the real v6->v7 migration this test is named for, on real
-    // production-shaped data, without ever touching the live fixture file.
+    // branch never runs there). The v6->v7 and v7->v8 steps are pure ADDs
+    // (new tables/column only — see migrations.ts), so reverting THIS
+    // DISPOSABLE COPY to v6 shape (drop the tables/column added after v6,
+    // stamp the version back down) exercises the real upgrade path this
+    // test is named for, on real production-shaped data, without ever
+    // touching the live fixture file.
+    before.exec('DROP TABLE IF EXISTS deferred_slots');
     before.exec('DROP TABLE IF EXISTS run_progress');
+    const runsCols = (
+      before.prepare('PRAGMA table_info(runs)').all() as { name: string }[]
+    ).map((c) => c.name);
+    if (runsCols.includes('catchup_slots_json')) {
+      before.exec('ALTER TABLE runs DROP COLUMN catchup_slots_json');
+    }
     before.exec('PRAGMA user_version = 6');
     versionBefore = userVersion(before);
   }
@@ -788,12 +430,9 @@ test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> v7
     upgraded.prepare('SELECT COUNT(*) AS c FROM jobs').get() as { c: number }
   ).c;
   assert.equal(jobsAfter, jobsBefore);
-  const tables = (
-    upgraded
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as { name: string }[]
-  ).map((t) => t.name);
+  const tables = tableNames(upgraded);
   assert.ok(tables.includes('run_progress'));
+  assert.ok(tables.includes('deferred_slots'));
   upgraded.close();
 
   rmSync(tmpDir, { recursive: true, force: true });
