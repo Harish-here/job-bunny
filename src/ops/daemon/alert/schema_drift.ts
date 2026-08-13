@@ -65,6 +65,17 @@ export function composeSchemaDriftAlertText(
   ].join('\n');
 }
 
+/** Short, single-profile "mirrors T6's cause line" sentence — the
+ * per-profile drill-down text both the board (`ports/board.ts`'s
+ * `DaemonProfileSchedule.degradedReason`, step 0.8) and `jobbunny
+ * doctor` (step 0.9) show. Deliberately distinct from
+ * `composeSchemaDriftAlertText`, which is the daemon-level, possibly
+ * multi-profile T6 ALERT text — this is always exactly one profile's
+ * own sentence. */
+export function degradedReasonText(entry: DaemonDegradedEntry): string {
+  return `the database schema (v${entry.schemaVersion}) is newer than the running daemon's build (v${entry.buildVersion}). This happens after an update that changes the schema.`;
+}
+
 /** Phase 0 (D2 self-heal): (1) records every newly-degraded profile
  * (present in `schemaDrift` this tick, not yet in the pidfile's
  * `degraded` array) — accurate detection for board/doctor drill-down,

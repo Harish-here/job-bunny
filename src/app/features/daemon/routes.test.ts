@@ -54,8 +54,20 @@ function defaultStatus(): DaemonStatus {
     lastTickAt: '2026-08-07T09:59:30.000Z',
     inFlight: { profile: 'rajni', pid: 4300, startedAt: '2026-08-07T09:59:00.000Z' },
     profiles: [
-      { profile: 'harish', enabled: true, nextRunAt: '2026-08-08T03:30:00.000Z' },
-      { profile: 'rajni', enabled: false, nextRunAt: null },
+      {
+        profile: 'harish',
+        enabled: true,
+        nextRunAt: '2026-08-08T03:30:00.000Z',
+        degraded: false,
+        degradedReason: null,
+      },
+      {
+        profile: 'rajni',
+        enabled: false,
+        nextRunAt: null,
+        degraded: false,
+        degradedReason: null,
+      },
     ],
   };
 }
@@ -76,7 +88,13 @@ test('daemon: a stopped daemon reports nulls and still lists profiles', async ()
     lastTickAt: null,
     inFlight: null,
     profiles: [
-      { profile: 'rajni', enabled: true, nextRunAt: '2026-08-08T03:30:00.000Z' },
+      {
+        profile: 'rajni',
+        enabled: true,
+        nextRunAt: '2026-08-08T03:30:00.000Z',
+        degraded: false,
+        degradedReason: null,
+      },
     ],
   };
   const route = findRoute(fakeSource(async () => status));

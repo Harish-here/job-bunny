@@ -50,6 +50,9 @@ function sendRawRequest(port: number, raw: string): Promise<string> {
 const PROFILES: BoardProfile[] = [{ name: 'p1', connector: 'sqlite', hasDb: true }];
 const TEST_VERSION = '0.0.0-test';
 
+const NOT_DEGRADED = { degraded: false, degradedReason: null } as const;
+const NEXT = '2026-08-08T03:30:00.000Z';
+
 const FAKE_DAEMON_STATUS: DaemonStatus = {
   state: 'stopped',
   pid: null,
@@ -781,9 +784,7 @@ test('GET /api/daemon reports the daemon state', async () => {
     startedAt: '2026-08-07T00:00:00.000Z',
     lastTickAt: '2026-08-07T09:59:30.000Z',
     inFlight: null,
-    profiles: [
-      { profile: 'rajni', enabled: true, nextRunAt: '2026-08-08T03:30:00.000Z' },
-    ],
+    profiles: [{ profile: 'rajni', enabled: true, nextRunAt: NEXT, ...NOT_DEGRADED }],
   };
   const server = createBoardServer({
     source: fakeSource({ readDaemonStatus: async () => status }),

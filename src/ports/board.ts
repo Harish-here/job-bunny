@@ -78,6 +78,8 @@ export interface DaemonProfileSchedule {
   enabled: boolean;
   /** ISO 8601 UTC, or `null` when the profile has no enabled schedule. */
   nextRunAt: string | null;
+  degraded: boolean;
+  degradedReason: string | null; // human-readable, mirrors T6's cause line, null when not degraded
 }
 
 export interface DaemonStatus {
