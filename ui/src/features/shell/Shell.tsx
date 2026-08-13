@@ -144,22 +144,24 @@ export function Shell() {
   }
 
   return (
-    <div className="flex">
-      <Sidebar
-        route={route}
-        profile={profile}
-        profiles={profiles}
-        version={appInfo.data?.version}
-        collapsed={collapsed}
-        mascot={mascot}
-        runControl={control}
-        onChoose={setStored}
-        onNavigate={navigate}
-        onToggleCollapsed={() => setCollapsed(!collapsed)}
-      />
-      <main className="flex-1">
-        <Page route={route} profile={profile} />
-      </main>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          route={route}
+          profile={profile}
+          profiles={profiles}
+          version={appInfo.data?.version}
+          collapsed={collapsed}
+          mascot={mascot}
+          runControl={control}
+          onChoose={setStored}
+          onNavigate={navigate}
+          onToggleCollapsed={() => setCollapsed(!collapsed)}
+        />
+        <main className="flex-1">
+          <Page route={route} profile={profile} />
+        </main>
+      </div>
     </div>
   );
 }

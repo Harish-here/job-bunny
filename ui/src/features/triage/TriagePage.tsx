@@ -114,7 +114,7 @@ export function TriagePage({ profile }: { profile: string }) {
       : undefined;
 
   return (
-    <div className="grid h-screen grid-cols-[minmax(280px,360px)_1fr]">
+    <div className="grid h-full grid-cols-[minmax(280px,360px)_1fr]">
       <section className="flex flex-col overflow-y-auto border-r">
         <div className="flex flex-col gap-2 border-b p-3">
           <div className="flex items-center justify-between gap-2">

@@ -57,7 +57,7 @@ export function Sidebar({
       data-testid="sidebar"
       data-collapsed={collapsed ? 'true' : 'false'}
       className={cn(
-        'flex h-screen shrink-0 flex-col gap-4 border-r border-sidebar-border',
+        'flex h-full shrink-0 flex-col gap-4 border-r border-sidebar-border',
         'bg-sidebar p-3 text-sidebar-foreground hop',
         collapsed ? 'w-14' : 'w-56',
       )}
