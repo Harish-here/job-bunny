@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline Stability Hardening — Mid-fi Mockup</title>
+<!--
+  Standalone design artifact rendered literally from ux-notes.md. Not application code —
+  no build step, no framework, zero external requests. The real app uses Geist (body) /
+  Nunito Variable (headings); this mockup substitutes the system font stack below so it
+  renders identically offline from file://. Every colour/spacing/radius/type literal below
+  is copied from dossier §3's Design Scale table; the only deviations are dossier §9's three
+  named exceptions (plus one flagged in the mockup's own NOTES — see the return report).
+-->
+<style>
+:root{
+  /* ===== §3 Design Scale — colour tokens, exact hex from the dossier table (light only) ===== */
+  --background:#faf8fd;
+  --foreground:#3d2c55;
+  --card:#ffffff;
+  --muted:#f1ecf8;
+  --muted-foreground:#6e5b87;
+  --border:#e4dbf0;
+  --primary:#7b5ea7;
+  --accent:#efe8fa;
+  --destructive:#d64545;
+  --attention:#ff8a3d;
+  --attention-strong:#a04a06;
+  --success:#4caf6e;
+  --success-strong:#26703f;
+  --amber:#c98a2e;
+  --ring:#7b5ea7;
+  /* §3 radii — --radius:1rem, calc() derivations */
+  --radius-sm:9.6px;   /* calc(--radius * .6) */
+  --radius-md:12.8px;  /* calc(--radius * .8) */
+  --radius-lg:16px;    /* var(--radius) — row/card default */
+  --radius-xl:22.4px;  /* calc(--radius * 1.4) */
+  /* §3 motion */
+  --ease-hop:cubic-bezier(0.34,1.56,0.64,1);
+  --duration-hop:150ms;
+  /* §3 fonts — real app: Geist / Nunito Variable / SFMono; substituted for offline render */
+  --font-sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-heading:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:var(--font-sans);background:var(--background);color:var(--foreground);font-size:14px;line-height:1.45}
+h1,h2,h3,p,ul,ol{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px} /* §9 a11y: inherited outline-ring/50, nothing custom */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media (prefers-reduced-motion: reduce){ *{animation:none !important;transition:none !important} }
+
+/* ===== §3 spacing utilities — literal px values from the table, one class per cited utility ===== */
+.gap-1{gap:4px}            /* gap-1 = 4px */
+.gap-1_5{gap:6px}          /* gap-1.5 = 6px */
+.gap-2{gap:8px}            /* gap-2 = 8px */
+.gap-3{gap:12px}           /* gap-3 = 12px */
+.gap-4{gap:16px}           /* gap-4 = 16px */
+.p-2{padding:8px}
+.p-3{padding:12px}
+.p-4{padding:16px}
+.px-2_5{padding-left:10px;padding-right:10px}   /* px-2.5 = 10px */
+.px-3{padding-left:12px;padding-right:12px}
+.px-4{padding-left:16px;padding-right:16px}
+.py-1{padding-top:4px;padding-bottom:4px}
+.py-2{padding-top:8px;padding-bottom:8px}
+.py-3{padding-top:12px;padding-bottom:12px}
+.pl-4{padding-left:16px}
+.size-2{width:8px;height:8px}
+.size-3_5{width:14px;height:14px}   /* size-3.5 = 14px */
+.size-4{width:16px;height:16px}
+
+/* ===== §3 type ramp ===== */
+.text-xs{font-size:12px;line-height:16px}
+.text-sm{font-size:14px;line-height:20px}
+.text-base{font-size:16px;line-height:24px}
+.text-2xl{font-size:24px;line-height:32px;font-family:var(--font-heading)}
+.font-medium{font-weight:500}
+.font-heading{font-family:var(--font-heading);font-weight:700}
+.font-mono{font-family:var(--font-mono)}
+.text-muted{color:var(--muted-foreground)}
+.text-fg{color:var(--foreground)}
+.text-destructive{color:var(--destructive)}
+.text-success-strong{color:var(--success-strong)}
+.text-attention-strong{color:var(--attention-strong)}
+.text-primary{color:var(--primary)}
+
+/* ===== §3 radii + borders ===== */
+.rounded-lg{border-radius:var(--radius-lg)}
+.rounded-md{border-radius:var(--radius-md)}
+.border{border:1px solid var(--border)}
+.border-dashed{border-style:dashed}
+.border-b{border-bottom:1px solid var(--border)}
+.bg-card{background:var(--card)}
+.bg-muted{background:var(--muted)}
+
+/* ===== §9 exception #2 — opacity modifiers on scale colours (bg-muted/30, bg-attention/10; also
+   bg-muted/50, explicitly instructed by dossier §5 for daemon-degraded-command — same class of
+   modifier, flagged in NOTES since §9's table names /30 and /10 but not /50 verbatim) ===== */
+.bg-muted-30{background:rgba(241,236,248,.30)}
+.bg-muted-50{background:rgba(241,236,248,.50)}
+.bg-attention-10{background:rgba(255,138,61,.10)}
+
+.flex{display:flex}
+.flex-col{flex-direction:column}
+.items-center{align-items:center}
+.items-baseline{align-items:baseline}
+.items-start{align-items:flex-start}
+.justify-between{justify-content:space-between}
+.flex-wrap{flex-wrap:wrap}
+.icon{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:inline-block;vertical-align:middle;flex-shrink:0}
+.icon[aria-hidden]{pointer-events:none}
+
+/* ===== header strip (dossier rule #2) ===== */
+.header-strip{position:sticky;top:0;z-index:70;background:var(--card);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;flex-wrap:wrap;gap:22px;align-items:center;font-size:.75rem}
+.header-strip .field{display:flex;gap:6px;align-items:baseline}
+.header-strip .k{color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.05em;font-size:.62rem}
+.header-strip .v{font-family:var(--font-mono);font-weight:600}
+
+/* ===== frame chrome — presentation scaffolding, not a shipped component ===== */
+.frame{margin:26px 20px;border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;background:var(--background)}
+.frame-title{background:var(--muted);padding:10px 16px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.frame-title h2{font-size:.95rem;font-weight:700}
+.frame-title p{font-size:.74rem;color:var(--muted-foreground)}
+.frame-body{padding:16px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:.68rem;background:var(--card);border:1px solid var(--border);padding:2px 9px;border-radius:999px;color:var(--muted-foreground)}
+.caption{font-size:.78rem;color:var(--muted-foreground);margin:6px 0 14px}
+
+/* ===== callout badges (rule #4) ===== */
+.callout{display:inline-flex;width:19px;height:19px;border-radius:50%;background:var(--primary);color:#fff;font-size:.62rem;font-weight:700;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;box-shadow:0 1px 3px rgba(61,44,85,.25)}
+.callout:hover{filter:brightness(1.12)}
+
+/* ===== icon legend (§0) ===== */
+.legend-table{width:100%;border-collapse:collapse;font-size:.8rem}
+.legend-table th,.legend-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.legend-glyph{display:flex;align-items:center;gap:8px}
+.legend-emoji{font-size:1.05rem}
+
+/* ===== Telegram phone frames ===== */
+.tg-grid{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.tg-screen{width:290px}
+.tg-screen h3{font-size:.82rem;font-weight:700;display:flex;align-items:center;gap:6px}
+.tg-screen .tg-cap{font-size:.68rem;color:var(--muted-foreground);margin:2px 0 8px}
+.phone{border:6px solid var(--foreground);border-radius:28px;background:#000;padding:6px;box-shadow:0 6px 18px rgba(61,44,85,.18)}
+.phone-notch{width:60px;height:6px;background:var(--foreground);border-radius:4px;margin:0 auto 6px}
+.tg-bubble{background:#e8f4ea;border-radius:14px 14px 14px 4px;padding:10px 12px;min-height:120px}
+.tg-bubble pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);font-size:11px;line-height:1.5;color:#1c3a24}
+.tg-timestamp{font-size:9px;color:#4c7a55;text-align:right;margin-top:4px}
+
+/* ===== S1 app shell (mid-fi, in-app idiom) ===== */
+.app-shell{display:grid;grid-template-columns:160px 1fr;background:var(--card);border-radius:var(--radius-md);box-shadow:0 0 0 1px var(--border);overflow:hidden}
+.app-sidebar{background:var(--muted);border-right:1px solid var(--border);padding:12px 8px;font-size:.78rem}
+.app-nav{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:2px}
+.app-nav li{padding:6px 8px;border-radius:8px;color:var(--muted-foreground)}
+.app-nav li.active{background:var(--card);color:var(--primary);font-weight:600;box-shadow:0 0 0 1px var(--border)}
+.app-main{padding:0}
+.runs-header{display:flex;justify-content:space-between;align-items:center}
+.freshness{font-size:.68rem;color:var(--muted-foreground);font-family:var(--font-mono)}
+.btn-outline{background:var(--card);border:1px solid var(--border);padding:5px 11px;border-radius:8px;font-size:.75rem}
+.list-col{display:flex;flex-direction:column;gap:8px;padding:12px}
+
+/* ===== run row (produced / catch-up) ===== */
+.run-row{display:flex;align-items:flex-start;gap:9px;border-radius:var(--radius-lg);background:var(--card)}
+.run-row.produced{border:1px solid var(--border)}
+.run-num{font-family:var(--font-heading);font-weight:700}
+.run-body{flex:1;min-width:0}
+.run-label-line{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.run-label{font-size:.85rem;font-weight:600}
+.run-sub{font-size:.72rem;color:var(--muted-foreground);margin-top:2px}
+.badge-pill{display:inline-flex;align-items:center;font-size:.66rem;font-weight:600;background:var(--accent);color:var(--primary);border-radius:999px;padding:2px 9px}
+
+/* ===== deferred group ===== */
+.deferred-group{background:var(--card)}
+.dg-header{display:flex;align-items:baseline;flex-wrap:wrap}
+.dg-numslot{font-family:var(--font-heading);font-weight:700;color:var(--muted-foreground);margin-left:auto}
+.dg-entry{display:flex;align-items:baseline;gap:6px;color:var(--foreground)}
+.dg-toggle{background:none;border:0;color:var(--primary);font-size:.72rem;text-decoration:underline;padding:0}
+.dg-entries.collapsed{display:none}
+
+/* ===== catch-up banner ===== */
+.catchup-banner{background:var(--card)}
+.cb-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.progress-track{height:6px;border-radius:999px;background:var(--muted);overflow:hidden}
+.progress-fill{height:100%;background:var(--primary);border-radius:999px}
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--primary);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.btn-primary{background:var(--primary);color:#fff;border:0;padding:6px 13px;border-radius:8px;font-size:.78rem;font-weight:600}
+.btn-secondary{background:var(--card);border:1px solid var(--border);padding:6px 13px;border-radius:8px;font-size:.78rem;font-weight:600}
+
+/* ===== states demo panels — a generic toggle mechanism reused by every stateful component ===== */
+.st-toggle-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.st-btn{border:1px solid var(--border);background:var(--card);padding:4px 12px;border-radius:999px;font-size:.72rem}
+.st-btn[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
+.st-panel>[data-variant]{display:none}
+.st-panel[data-state="default"]>[data-variant="default"]{display:block}
+.st-panel[data-state="empty"]>[data-variant="empty"]{display:block}
+.st-panel[data-state="loading"]>[data-variant="loading"]{display:block}
+.st-panel[data-state="error"]>[data-variant="error"]{display:block}
+.st-panel[data-state="success"]>[data-variant="success"]{display:block}
+.st-panel[data-state="healthy"]>[data-variant="healthy"]{display:block}
+.st-panel[data-state="degraded"]>[data-variant="degraded"]{display:block}
+
+/* ===== skeleton ===== */
+.skel{background:linear-gradient(90deg,var(--muted) 25%,var(--card) 37%,var(--muted) 63%);background-size:400% 100%;animation:shimmer 1.4s ease infinite;border-radius:8px}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+.skel-h12{height:48px}
+.skel-h8{height:32px;width:160px}
+
+/* ===== error retry / empty ===== */
+.error-retry{border:1px solid var(--border);background:rgba(214,69,69,.08);border-radius:var(--radius-lg);padding:14px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.empty-card{border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;text-align:center;color:var(--muted-foreground);display:flex;flex-direction:column;align-items:center;gap:8px}
+
+/* ===== daemon degraded strip ===== */
+.degraded-strip{border-bottom:1px solid var(--attention)}
+.degraded-strip-inner{display:flex;gap:12px;align-items:flex-start}
+.degraded-close{margin-left:auto;background:none;border:0;color:var(--attention-strong)}
+.command-block{font-family:var(--font-mono)}
+.copy-btn{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:.68rem}
+
+/* ===== settings schedule panel ===== */
+.settings-panel{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--card);padding:14px}
+.daemon-status-line{display:flex;align-items:center;gap:8px}
+
+/* ===== efficiency comparison ===== */
+.eff-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.eff-table th,.eff-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+.eff-today{color:var(--muted-foreground)}
+.eff-designed{color:var(--success-strong);font-weight:600}
+
+/* ===== annotation panel ===== */
+.annotations{padding:20px;background:var(--card);margin:26px 20px;border-radius:var(--radius-xl);box-shadow:0 0 0 1px var(--border)}
+.annotation-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.annotation-row:last-child{border-bottom:0}
+.annotation-text{font-size:.82rem}
+.annotation-text b{display:block;margin-bottom:2px}
+.back-link{font-size:.68rem;margin-left:6px}
+footer.foot{padding:20px;text-align:center;font-size:.7rem;color:var(--muted-foreground)}
+.gap-mkup{display:flex;flex-direction:column;gap:12px}
+</style>
+</head>
+<body>
+
+<!-- ============== inline icon sprite (hand-drawn, lucide-style, 24x24 stroke, zero external requests) ============== -->
+<svg style="display:none" aria-hidden="true">
+<defs>
+<symbol id="icon-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.5 2.5L16 9"/></symbol>
+<symbol id="icon-triangle-alert" viewBox="0 0 24 24"><path d="M10.3 3.9L2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.2"/><circle cx="12" cy="16.3" r="0.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-circle-pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="10" y1="9" x2="10" y2="15"/><line x1="14" y1="9" x2="14" y2="15"/></symbol>
+<symbol id="icon-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.3" r="0.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="1.5"/></symbol>
+<symbol id="icon-wifi-off" viewBox="0 0 24 24"><path d="M1 9a16 16 0 0 1 4.3-2.8"/><path d="M8.5 4.4A16 16 0 0 1 23 9"/><path d="M5 13a10 10 0 0 1 3-2"/><path d="M13 13a10 10 0 0 1 3.5 1.4"/><path d="M9 17a4 4 0 0 1 4 0"/><circle cx="12" cy="20" r="0.7" fill="currentColor" stroke="none"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+<symbol id="icon-database-x" viewBox="0 0 24 24"><path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 6v12c0 1.7 3.6 3 8 3 1.6 0 3.1-.2 4.4-.5"/><path d="M20 6v5"/><line x1="16.5" y1="14.5" x2="21.5" y2="19.5"/><line x1="21.5" y1="14.5" x2="16.5" y2="19.5"/></symbol>
+<symbol id="icon-unplug" viewBox="0 0 24 24"><path d="M9 3v4"/><path d="M15 3v4"/><path d="M7 7h10l-1 5a5 5 0 0 1-5 4c-2.8 0-5-2.2-5-4z"/><path d="M12 16v3"/><line x1="3.5" y1="20.5" x2="9" y2="15"/></symbol>
+<symbol id="icon-heart-off" viewBox="0 0 24 24"><path d="M20.4 15.6A6 6 0 0 0 21 12c0-3-2.5-5-5-5-1.4 0-2.6.6-3.5 1.6" opacity=".5"/><path d="M4.5 8a5 5 0 0 0 .7 6.6l6.3 5.9 3-2.8" opacity=".5"/><line x1="2" y1="2" x2="22" y2="22"/></symbol>
+<symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></symbol>
+<symbol id="icon-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+</defs>
+</svg>
+<!-- NOTE: Unplug + HeartOff are defined (per the mockup rule's required icon vocabulary) but not
+     used anywhere below — the dossier gives them no role in this feature. Flagged in the return. -->
+
+<!-- ============== header strip ============== -->
+<header class="header-strip">
+  <div class="field"><span class="k">Feature</span><span class="v">Pipeline Stability Hardening</span></div>
+  <div class="field"><span class="k">Slug</span><span class="v">pipeline-stability-hardening</span></div>
+  <div class="field"><span class="k">Date</span><span class="v">2026-08-13</span></div>
+  <div class="field"><span class="k">Spec</span><span class="v">docs/product/pipeline-stability-hardening/spec.md</span></div>
+</header>
+
+<!-- ======================================================================= -->
+<!-- Icon vocabulary legend — dossier §0 -->
+<!-- ======================================================================= -->
+<section class="frame" id="icon-legend" data-qa="tg-icon-legend">
+  <div class="frame-title"><div><h2>Icon vocabulary — the cross-surface spine of this feature</h2><p>dossier §0</p></div></div>
+  <div class="frame-body">
+    <table class="legend-table">
+      <thead><tr><th>Icon</th><th>Means</th><th>Board equivalent</th><th>Is it a failure?</th></tr></thead>
+      <tbody>
+        <tr><td><div class="legend-glyph"><span class="legend-emoji">✅</span><svg class="icon text-success-strong"><use href="#icon-circle-check"></use></svg></div></td><td>Run passed</td><td><code>CircleCheck</code> / <code>text-success-strong</code></td><td>No</td></tr>
+        <tr><td><div class="legend-glyph"><span class="legend-emoji">🔴</span><svg class="icon text-destructive"><use href="#icon-triangle-alert"></use></svg></div></td><td>Run failed</td><td><code>TriangleAlert</code> / <code>text-destructive</code></td><td>Yes</td></tr>
+        <tr><td><div class="legend-glyph"><span class="legend-emoji">🔴 NEW FAILURE</span></div></td><td>A <i>second, different</i> failure</td><td>n/a (message-only)</td><td>Yes</td></tr>
+        <tr><td><div class="legend-glyph"><span class="legend-emoji">⏸️</span><svg class="icon text-muted"><use href="#icon-circle-pause"></use></svg></div></td><td>Slots deferred — system declined to start</td><td><code>CirclePause</code> / <code>text-muted-foreground</code></td><td><b>No</b></td></tr>
+        <tr><td><div class="legend-glyph"><span class="legend-emoji">⚠️</span><svg class="icon text-attention-strong"><use href="#icon-circle-alert"></use></svg></div></td><td>Daemon degraded — scheduler is down</td><td><code>CircleAlert</code> / <code>text-attention-strong</code></td><td>Not a run</td></tr>
+      </tbody>
+    </table>
+    <p class="caption">Three meanings, three icons, one board colour each. ⏸️ is deliberately not in the red family and not in the green family — the only chroma-free state (U1).</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Telegram message shapes — dossier §4, T1–T6 (+ no-catchup variant) -->
+<!-- ======================================================================= -->
+<section class="frame" id="telegram">
+  <div class="frame-title"><div><h2>Telegram message shapes — the primary surface</h2><p>Phone-framed plaintext blocks. No <code>parse_mode</code> — hierarchy comes only from emoji, the separator, indentation and UPPERCASE.</p></div></div>
+  <div class="frame-body">
+    <div class="tg-grid">
+
+      <div class="tg-screen">
+        <h3>T1 — First failure of a signature</h3>
+        <p class="tg-cap">R17 · unchanged from today — the Jakob anchor every other message varies from. Existing <code>formatDigest</code> shape (dossier §0), reconstructed here since the dossier gives no literal T1 block (it only says "existing output, verbatim") — see NOTES.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-first-failure"><pre>🔴 Job Bunny — harish (2026-08-11 15:49)
+────────────────
+Failed at stage: farm
+
+Funnel:
+  • reconcile: 0 → 0
+  ...</pre></div>
+        </div>
+      </div>
+
+      <div class="tg-screen">
+        <h3>T2 — Daily reminder while still failing <a href="#c8" class="callout" aria-label="callout 8">8</a></h3>
+        <p class="tg-cap">R18 · same 🔴 banner — a softer icon would understate it. The first body line is the whole design.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-failure-reminder"><pre>🔴 Job Bunny — harish (2026-08-12 19:43)
+────────────────
+STILL FAILING (x6) — no new problem.
+Same failure since 2026-08-11 15:49.
+This is the once-a-day reminder, not a new alert.
+Failed at stage: farm</pre></div>
+        </div>
+      </div>
+
+      <div class="tg-screen">
+        <h3>T3 — Different signature while another is suppressed <a href="#c7" class="callout" aria-label="callout 7">7</a></h3>
+        <p class="tg-cap">R19 / AC17 · the hardest one — must break through and be unmistakable for T2.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-new-signature"><pre>🔴 NEW FAILURE — Job Bunny — harish (2026-08-13 09:14)
+────────────────
+This is a DIFFERENT failure from the one already reported.
+
+  NOW:        stage "source" — HTTP 429 from greenhouse
+  STILL OPEN: stage "farm" — stalled: no beat()
+              (x6, since 2026-08-11 15:49)</pre></div>
+        </div>
+      </div>
+
+      <div class="tg-screen">
+        <h3>T4 — Deferred-day summary <a href="#c9" class="callout" aria-label="callout 9">9</a></h3>
+        <p class="tg-cap">R21, the target experience · fires once, at the first opportunity after the day's last slot passes its grace window — in practice on wake.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-deferred-day"><pre>⏸️ Job Bunny — harish (2026-08-12)
+────────────────
+Today's runs were deferred. Nothing failed.
+
+Job Bunny declined to start 5 runs because the host
+was asleep and could not reach the network.
+
+  • 09:00 — deferred (host asleep)
+  • 11:30 — deferred (host asleep)
+  • 14:00 — deferred (host asleep)
+  • 16:30 — deferred (host asleep)
+  • 19:00 — deferred (host asleep)
+
+No job data was scraped today.
+Catch-up run starting now — digest to follow.</pre></div>
+        </div>
+      </div>
+
+      <div class="tg-screen">
+        <h3>T4 variant — no catch-up will fire</h3>
+        <p class="tg-cap"><code>tg-deferred-day-no-catchup</code> · same body, last line replaced.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-deferred-day-no-catchup"><pre>⏸️ Job Bunny — harish (2026-08-12)
+────────────────
+Today's runs were deferred. Nothing failed.
+
+Job Bunny declined to start 5 runs because the host
+was asleep and could not reach the network.
+
+  • 09:00 — deferred (host asleep)
+  • 11:30 — deferred (host asleep)
+  • 14:00 — deferred (host asleep)
+  • 16:30 — deferred (host asleep)
+  • 19:00 — deferred (host asleep)
+
+No job data was scraped today.
+Next scheduled slot: tomorrow 09:00.</pre></div>
+        </div>
+      </div>
+
+      <div class="tg-screen">
+        <h3>T5 — Catch-up run digest</h3>
+        <p class="tg-cap">R10 / AC11 · standard ✅/🔴 digest plus one label line immediately after the separator, before the funnel.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-catchup-digest"><pre>✅ Job Bunny — harish (2026-08-12 20:40)
+────────────────
+CATCH-UP RUN — stood in for 5 missed slots.
+(09:00, 11:30, 14:00, 16:30, 19:00)
+
+Funnel:
+  • reconcile: 0 → 0
+  ...</pre></div>
+        </div>
+      </div>
+
+      <div class="tg-screen">
+        <h3>T6 — Daemon degraded</h3>
+        <p class="tg-cap">R13 / R14 · <code>kind: 'alert'</code>, sent once. Cause and remedy — the operator should not have to derive the fix.</p>
+        <div class="phone"><div class="phone-notch"></div>
+          <div class="tg-bubble" data-qa="tg-daemon-degraded"><pre>⚠️ Job Bunny — daemon degraded
+
+The scheduler has STOPPED starting runs.
+
+Cause: the database schema (v7) is newer than the
+running daemon's build (v6). This happens after an
+update that changes the schema.
+
+Fix: restart the daemon —
+  jobbunny serve stop
+  jobbunny serve start
+
+No scheduled runs will start until you do.</pre></div>
+        </div>
+      </div>
+
+    </div>
+    <p class="caption">Incident-day message count under this design: <b>2</b> (T4 + T5). Today: <b>6</b>.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S1 — Runs page, deferred day — the target picture -->
+<!-- ======================================================================= -->
+<section class="frame" id="s1">
+  <div class="frame-title"><div><h2>S1 — Runs page, deferred day</h2><p>The target picture · dossier §5 S1, top-to-bottom order</p></div><span class="chip">no new page — reshape of the existing Runs page</span></div>
+  <div class="frame-body">
+    <div class="app-shell" data-qa="runs-page">
+      <aside class="app-sidebar">
+        <ul class="app-nav">
+          <li>Triage</li><li>Tracker</li><li class="active">Runs</li><li>Analytics</li><li>Setup &amp; Health</li><li>Settings</li>
+        </ul>
+      </aside>
+      <div class="app-main">
+        <div class="runs-header border-b p-3">
+          <div class="runs-header">
+            <h1 style="font-size:1.05rem;font-weight:700">Runs</h1>
+            <div class="flex items-center gap-2">
+              <span class="freshness">Updated 12s ago</span>
+              <button class="btn-outline"><svg class="icon" style="width:12px;height:12px"><use href="#icon-refresh"></use></svg> Refresh</button>
+            </div>
+          </div>
+        </div>
+        <div class="list-col">
+          <!-- 2. day reassurance line -->
+          <p class="text-xs text-muted" data-qa="runs-day-reassurance">2026-08-12 · 1 run, 5 slots deferred, 0 failed <a href="#c14" class="callout" aria-label="callout 14" style="margin-left:4px">14</a></p>
+
+          <!-- 3. the catch-up run row — the one visually distinct element -->
+          <div class="run-row produced p-3 gap-3" data-qa="run-row-catchup">
+            <a href="#c6" class="callout" aria-label="callout 6" style="margin-top:2px">6</a>
+            <svg class="icon text-success-strong" style="width:20px;height:20px"><use href="#icon-circle-check"></use></svg>
+            <div class="run-body">
+              <div class="run-label-line"><span class="run-num text-2xl">47</span><span class="run-label">Catch-up run</span><span class="badge-pill">Catch-up</span></div>
+              <div class="run-sub">Stood in for 5 slots</div>
+            </div>
+          </div>
+
+          <!-- 4. the deferred group -->
+          <div class="deferred-group rounded-lg border border-dashed px-3 py-2 gap-1 flex flex-col" data-qa="deferred-group">
+            <a href="#c2" class="callout" aria-label="callout 2" style="position:relative;top:-4px">2</a>
+            <div class="dg-header gap-2" data-qa="deferred-group-header">
+              <a href="#c1" class="callout" aria-label="callout 1">1</a>
+              <svg class="icon text-muted size-4"><use href="#icon-circle-pause"></use></svg>
+              <span class="text-sm font-medium">5 slots deferred</span>
+              <span class="text-sm text-muted">host asleep</span>
+              <span class="dg-numslot">— <a href="#c4" class="callout" aria-label="callout 4">4</a></span>
+            </div>
+            <p class="text-xs text-muted" data-qa="deferred-group-reason">Job Bunny declined to start these runs because the host was asleep. <a href="#c3" class="callout" aria-label="callout 3">3</a></p>
+            <div class="dg-entries flex flex-col gap-1">
+              <div class="dg-entry pl-4 text-xs" data-qa="deferred-slot-entry-1"><span data-qa="deferred-slot-time-1">09:00</span><span>·</span><span data-qa="deferred-slot-reason-1">host asleep</span></div>
+              <div class="dg-entry pl-4 text-xs" data-qa="deferred-slot-entry-2"><span data-qa="deferred-slot-time-2">11:30</span><span>·</span><span data-qa="deferred-slot-reason-2">host asleep</span></div>
+              <div class="dg-entry pl-4 text-xs" data-qa="deferred-slot-entry-3"><span data-qa="deferred-slot-time-3">14:00</span><span>·</span><span data-qa="deferred-slot-reason-3">host asleep</span></div>
+              <div class="dg-entry pl-4 text-xs" data-qa="deferred-slot-entry-4"><span data-qa="deferred-slot-time-4">16:30</span><span>·</span><span data-qa="deferred-slot-reason-4">host asleep</span></div>
+              <div class="dg-entry pl-4 text-xs" data-qa="deferred-slot-entry-5"><span data-qa="deferred-slot-time-5">19:00</span><span>·</span><span data-qa="deferred-slot-reason-5">host asleep</span></div>
+            </div>
+            <button class="dg-toggle" data-qa="deferred-group-toggle" aria-expanded="true">Collapse <a href="#c5" class="callout" aria-label="callout 5" style="margin-left:2px">5</a></button>
+          </div>
+
+          <!-- 5. older runs, unchanged -->
+          <p class="text-xs text-muted" style="font-style:italic">Older runs continue below, unchanged — the existing produced / failed / crashed / degraded / unrecorded species (previous dossier). Not respecified here; no new copy invented for them.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Runs list — five states (dossier §6 row 1) -->
+<!-- ======================================================================= -->
+<section class="frame" id="runs-list-states">
+  <div class="frame-title"><div><h2>Runs list — states</h2><p>dossier §6 · all five reachable via the toggle below</p></div></div>
+  <div class="frame-body">
+    <div class="st-toggle-bar" role="group" aria-label="Runs list state" data-toggle-target="rl-panel">
+      <button class="st-btn" data-state="default" aria-pressed="true">Default</button>
+      <button class="st-btn" data-state="empty" aria-pressed="false">Empty</button>
+      <button class="st-btn" data-state="loading" aria-pressed="false">Loading</button>
+      <button class="st-btn" data-state="error" aria-pressed="false">Error</button>
+      <button class="st-btn" data-state="success" aria-pressed="false">Success</button>
+    </div>
+    <div class="st-panel" id="rl-panel" data-state="default">
+      <div data-variant="default"><p class="caption">Mixed rows + deferred group — see S1 above for the full rendering (the catch-up row plus the always-rendered five-entry deferred group).</p></div>
+      <div data-variant="empty">
+        <div class="empty-card" data-qa="runs-list-empty">
+          <svg class="icon text-muted" style="width:26px;height:26px"><use href="#icon-circle"></use></svg>
+          <p>No runs recorded yet.</p>
+          <button class="btn-primary">Run now</button>
+        </div>
+        <p class="caption">Existing "No runs recorded yet" copy; the deferred group is simply absent.</p>
+      </div>
+      <div data-variant="loading">
+        <div class="flex flex-col gap-2" data-qa="runs-list-loading">
+          <div class="skel skel-h12"></div>
+          <div class="skel skel-h12"></div>
+          <div class="skel skel-h12"></div>
+        </div>
+        <p class="caption">3× <code>Skeleton h-12 w-full</code> (existing idiom) — the deferred group renders as <b>one</b> skeleton, not five, or loading itself would look like an alarm.</p>
+      </div>
+      <div data-variant="error">
+        <div class="error-retry" data-qa="runs-list-error">
+          <svg class="icon text-destructive"><use href="#icon-triangle-alert"></use></svg>
+          <p class="text-destructive">Couldn't load runs.</p>
+          <button class="btn-secondary">Retry</button>
+        </div>
+        <p class="caption">Existing <code>ErrorRetry</code> pattern.</p>
+      </div>
+      <div data-variant="success">
+        <div class="run-row produced p-3 gap-3">
+          <svg class="icon text-success-strong" style="width:20px;height:20px"><use href="#icon-circle-check"></use></svg>
+          <div class="run-body">
+            <div class="run-label-line"><span class="run-num text-2xl">47</span><span class="run-label">Catch-up run</span><span class="badge-pill">Catch-up</span></div>
+            <div class="run-sub">Stood in for 5 slots</div>
+          </div>
+        </div>
+        <p class="caption">Catch-up <code>produced</code> row, green check, real number — same element as <code>run-row-catchup</code> above, isolated here for the state demo (no duplicate id).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Deferred group — remaining states (dossier §6 row 2) -->
+<!-- ======================================================================= -->
+<section class="frame" id="deferred-group-states">
+  <div class="frame-title"><div><h2>Deferred group — states</h2><p>dossier §6 · Default (5 entries expanded) is the S1 rendering above</p></div></div>
+  <div class="frame-body">
+    <div class="st-toggle-bar" role="group" aria-label="Deferred group state">
+      <button class="st-btn" data-state="empty" aria-pressed="true">Empty</button>
+      <button class="st-btn" data-state="loading" aria-pressed="false">Loading</button>
+      <button class="st-btn" data-state="error" aria-pressed="false">Error</button>
+      <button class="st-btn" data-state="success" aria-pressed="false">Success</button>
+    </div>
+    <div class="st-panel" data-state="empty">
+      <div data-variant="empty"><p class="caption">Never empty by construction — R25: the group only exists if ≥1 slot was deferred. Nothing renders.</p></div>
+      <div data-variant="loading">
+        <div class="skel skel-h12" style="max-width:420px"></div>
+        <p class="caption">Single <code>Skeleton h-12</code> — never five, or the loading state itself would read as an alarm.</p>
+      </div>
+      <div data-variant="error">
+        <div class="deferred-group rounded-lg border border-dashed px-3 py-2 gap-1 flex flex-col" style="max-width:420px">
+          <div class="dg-header gap-2">
+            <svg class="icon text-muted size-4"><use href="#icon-circle-pause"></use></svg>
+            <span class="text-sm font-medium">5 slots deferred</span>
+            <span class="dg-numslot">—</span>
+          </div>
+          <p class="text-xs text-destructive">reason unavailable</p>
+        </div>
+        <p class="caption">Reason text missing ⇒ render <code>reason unavailable</code> and flag it — a blank reason is a defect per the spec's own metric (dossier §11 item 4).</p>
+      </div>
+      <div data-variant="success"><p class="caption">Group present + a passing catch-up above it — see S1's full rendering above.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S2 — Runs page, catch-up in progress -->
+<!-- ======================================================================= -->
+<section class="frame" id="s2">
+  <div class="frame-title"><div><h2>S2 — Runs page, catch-up in progress</h2><p>dossier §5 S2 · extends <code>LiveRunHeader</code></p></div></div>
+  <div class="frame-body">
+    <div class="gap-mkup">
+
+      <div>
+        <h3 style="font-size:.85rem;margin-bottom:6px">Variant 2a — stoppable (R11 delivered)</h3>
+        <div class="catchup-banner bg-muted-30 border-b px-4 py-3 flex flex-col gap-2" data-qa="catchup-banner" style="border-radius:var(--radius-md)">
+          <div class="cb-row">
+            <span class="text-sm font-medium" data-qa="catchup-banner-label">Catch-up run — farm 2/10</span>
+            <span class="text-xs text-muted font-mono">3m 41s elapsed</span>
+          </div>
+          <p class="text-xs text-muted" data-qa="catchup-banner-standin">Standing in for 3 missed slots (14:00, 16:30, 19:00)</p>
+          <div class="progress-track" data-qa="catchup-banner-progress"><div class="progress-fill" style="width:20%"></div></div>
+          <p class="text-xs text-muted" data-qa="catchup-banner-why">Chrome is open because Job Bunny is catching up on today's missed slots. <a href="#c10" class="callout" aria-label="callout 10">10</a></p>
+          <div class="cb-row">
+            <div class="flex items-center gap-2"><span class="pulse-dot"></span><span class="text-xs text-muted" data-qa="catchup-banner-eta">~19 min left</span></div>
+            <button class="btn-secondary" data-qa="catchup-banner-stop">Stop catch-up <a href="#c11" class="callout" aria-label="callout 11" style="margin-left:4px">11</a></button>
+          </div>
+        </div>
+        <p class="caption">Confirms inline before acting: "Stop it? This slot won't be retried today" — one attempt per day (R8b) means stopping forfeits the day.</p>
+      </div>
+
+      <div>
+        <h3 style="font-size:.85rem;margin-bottom:6px">Variant 2b — not stoppable (R11 cut)</h3>
+        <div class="catchup-banner bg-muted-30 border-b px-4 py-3 flex flex-col gap-2" style="border-radius:var(--radius-md)">
+          <div class="cb-row">
+            <span class="text-sm font-medium">Catch-up run — farm 2/10</span>
+            <span class="text-xs text-muted font-mono">3m 41s elapsed</span>
+          </div>
+          <p class="text-xs text-muted">Standing in for 3 missed slots (14:00, 16:30, 19:00)</p>
+          <div class="progress-track"><div class="progress-fill" style="width:20%"></div></div>
+          <p class="text-xs text-muted">Chrome is open because Job Bunny is catching up on today's missed slots.</p>
+          <div class="cb-row">
+            <div class="flex items-center gap-2"><span class="pulse-dot"></span><span class="text-xs text-muted">~19 min left</span></div>
+            <span class="text-xs font-medium text-muted" data-qa="catchup-banner-stop-unavailable">Runs to completion — about 19 min left.</span>
+          </div>
+        </div>
+        <p class="caption">No button. Honest dead-end avoidance: we say it cannot be stopped rather than offering a control that does nothing.</p>
+      </div>
+
+      <div>
+        <h3 style="font-size:.85rem;margin-bottom:6px">Catch-up banner — remaining states</h3>
+        <div class="st-toggle-bar" role="group" aria-label="Catch-up banner state">
+          <button class="st-btn" data-state="loading" aria-pressed="true">Loading</button>
+          <button class="st-btn" data-state="error" aria-pressed="false">Error</button>
+          <button class="st-btn" data-state="success" aria-pressed="false">Success</button>
+          <button class="st-btn" data-state="empty" aria-pressed="false">Empty</button>
+        </div>
+        <div class="st-panel" data-state="loading">
+          <div data-variant="loading">
+            <div class="catchup-banner bg-muted-30 px-4 py-3" style="border-radius:var(--radius-md);max-width:420px"><span class="text-sm font-medium">Catch-up run — starting…</span></div>
+            <p class="caption">Mirrors the existing "Running — starting…" state.</p>
+          </div>
+          <div data-variant="error">
+            <div class="catchup-banner bg-muted-30 px-4 py-3 flex items-center gap-2" style="border-radius:var(--radius-md);max-width:420px">
+              <svg class="icon text-attention-strong"><use href="#icon-wifi-off"></use></svg>
+              <span class="text-sm">Disconnected — last update 34s ago</span>
+              <button class="btn-secondary" style="margin-left:auto">Retry</button>
+            </div>
+            <p class="caption">Existing liveness path — same treatment as any live-strip disconnect.</p>
+          </div>
+          <div data-variant="success"><p class="caption">Banner unmounts; the row reappears in the list as a normal <code>produced</code> row (see Runs list — Success above).</p></div>
+          <div data-variant="empty"><p class="caption">n/a — the banner only mounts while a catch-up run is actually live.</p></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S3 — Run detail, catch-up run -->
+<!-- ======================================================================= -->
+<section class="frame" id="s3">
+  <div class="frame-title"><div><h2>S3 — Run detail, catch-up run</h2><p>dossier §5 S3 · existing detail view plus two additions in the outcome header</p></div></div>
+  <div class="frame-body">
+    <div class="settings-panel" data-qa="run-detail-catchup" style="max-width:520px">
+      <div class="run-label-line">
+        <span class="run-num text-2xl">47</span>
+        <span class="run-label">Catch-up run</span>
+        <span class="badge-pill" data-qa="run-detail-catchup-badge">Catch-up</span>
+      </div>
+      <p class="text-xs text-muted" data-qa="run-detail-covered-slots" style="margin-top:8px">Covered slots: 09:00, 11:30, 14:00, 16:30, 19:00</p>
+    </div>
+    <p class="caption">Answers "what did this actually replace?" without leaving the page. No states table — S3 is not a row in dossier §6.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S4 — Daemon degraded: global strip + Settings → Schedule -->
+<!-- ======================================================================= -->
+<section class="frame" id="s4">
+  <div class="frame-title"><div><h2>S4 — Daemon degraded</h2><p>dossier §5 S4 · two placements, because the operator may arrive from either direction</p></div></div>
+  <div class="frame-body">
+    <div class="gap-mkup">
+
+      <div>
+        <h3 style="font-size:.85rem;margin-bottom:6px">Global shell strip <a href="#c13" class="callout" aria-label="callout 13">13</a></h3>
+        <div class="degraded-strip bg-attention-10" data-qa="daemon-degraded-banner" style="border-radius:var(--radius-md)">
+          <div class="degraded-strip-inner p-3">
+            <svg class="icon text-attention-strong" style="margin-top:2px"><use href="#icon-circle-alert"></use></svg>
+            <div style="flex:1">
+              <p class="text-sm font-medium text-attention-strong">The scheduler has STOPPED starting runs.</p>
+              <p class="text-xs text-attention-strong" data-qa="daemon-degraded-cause" style="margin-top:4px">Cause: the database schema (v7) is newer than the running daemon's build (v6). This happens after an update that changes the schema.</p>
+              <p class="text-xs text-attention-strong" data-qa="daemon-degraded-remedy" style="margin-top:4px">Fix: restart the daemon —</p>
+              <div class="command-block bg-muted-50 text-xs px-3 py-2 flex items-center gap-2" data-qa="daemon-degraded-command" style="margin-top:6px;border-radius:6px;max-width:320px">
+                <span>jobbunny serve stop &amp;&amp; jobbunny serve start</span>
+                <button class="copy-btn" data-qa="daemon-degraded-copy-button" style="margin-left:auto"><svg class="icon" style="width:12px;height:12px"><use href="#icon-copy"></use></svg> Copy</button>
+                <a href="#c12" class="callout" aria-label="callout 12">12</a>
+              </div>
+            </div>
+            <button class="degraded-close" aria-label="Dismiss for this session"><svg class="icon"><use href="#icon-x"></use></svg></button>
+          </div>
+        </div>
+        <p class="caption">Persistent, dismissible per-session only — undismissible across sessions, since the condition genuinely persists until the daemon restarts. The only amber thing on screen. Mascot: existing <code>asleep</code> state (<code>fill-muted-foreground</code>) — no new asset.</p>
+      </div>
+
+      <div>
+        <h3 style="font-size:.85rem;margin-bottom:6px">Settings → Schedule status line</h3>
+        <div class="st-toggle-bar" role="group" aria-label="Daemon status state">
+          <button class="st-btn" data-state="healthy" aria-pressed="true">Healthy</button>
+          <button class="st-btn" data-state="degraded" aria-pressed="false">Degraded</button>
+          <button class="st-btn" data-state="loading" aria-pressed="false">Loading</button>
+          <button class="st-btn" data-state="error" aria-pressed="false">Error</button>
+        </div>
+        <div class="settings-panel st-panel" id="schedule-daemon-status" data-qa="schedule-daemon-status" data-state="healthy" style="max-width:420px">
+          <p class="text-sm" style="margin-bottom:8px">Next run (saved): 2026-08-13 09:00</p>
+          <div data-variant="healthy" class="daemon-status-line" data-qa="schedule-daemon-status-healthy">
+            <svg class="icon text-success-strong" style="width:10px;height:10px"><use href="#icon-circle"></use></svg>
+            <span class="text-sm">Running · last tick 12s ago</span>
+          </div>
+          <div data-variant="degraded" class="daemon-status-line" data-qa="schedule-daemon-status-degraded">
+            <svg class="icon text-attention-strong"><use href="#icon-circle-alert"></use></svg>
+            <div>
+              <span class="text-sm text-attention-strong font-medium">Degraded — schema v7 &gt; daemon build v6</span>
+              <p class="text-xs text-attention-strong" style="margin-top:2px">Fix: <code class="font-mono">jobbunny serve stop &amp;&amp; jobbunny serve start</code></p>
+            </div>
+          </div>
+          <div data-variant="loading">
+            <div class="skel skel-h8" data-qa="schedule-daemon-status-loading"></div>
+          </div>
+          <div data-variant="error" class="daemon-status-line" data-qa="schedule-daemon-status-error">
+            <svg class="icon text-destructive"><use href="#icon-database-x"></use></svg>
+            <div><span class="text-sm text-destructive">Can't reach the daemon API</span> <button class="btn-secondary" style="margin-left:8px">Retry</button></div>
+          </div>
+        </div>
+        <p class="caption">Degraded ≠ unreachable: schema drift ("we know, and it's broken") is kept visually distinct from the API being unreachable ("we can't tell") — exactly as <code>LiveRunHeader</code> already separates <code>stalled</code> from <code>disconnected</code>. Success = post-restart return to Healthy; the banner clears itself, no manual dismiss.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Contrast frame — dossier §7 -->
+<!-- ======================================================================= -->
+<section class="frame" id="efficiency">
+  <div class="frame-title"><div><h2>Today vs designed</h2><p>dossier §7 · the lid-closed day, end to end</p></div></div>
+  <div class="frame-body">
+    <table class="eff-table" data-qa="efficiency-comparison">
+      <thead><tr><th></th><th>Today</th><th>Designed</th></tr></thead>
+      <tbody>
+        <tr><td>Notifications received</td><td class="eff-today">6 identical</td><td class="eff-designed">2 (T4 + T5)</td></tr>
+        <tr><td>Actions to learn the cause</td><td class="eff-today">open board → runs → open a red row → read failure → still wrong → read <code>daemon.log</code></td><td class="eff-designed">0 — the phone message says it</td></tr>
+        <tr><td>Board clicks to confirm</td><td class="eff-today">4+</td><td class="eff-designed">1 (open Runs), optional</td></tr>
+        <tr><td>Terminal required</td><td class="eff-today">yes</td><td class="eff-designed">no</td></tr>
+      </tbody>
+    </table>
+    <p class="caption">Cut by this pass (dossier §7): a start-of-catch-up Telegram ping (folded into T4's last line); a "recovered" notification (already cut by the spec); a dedicated deferred-slot detail view; per-reason icons for deferred entries; a dismiss control on the degraded banner.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Annotation panel — callouts 1–14, verbatim from dossier §8 -->
+<!-- ======================================================================= -->
+<section class="annotations" id="annotations">
+  <h2 style="font-size:1rem;margin-bottom:4px">Numbered callouts (dossier §8, verbatim)</h2>
+  <div class="annotation-row" id="c1"><a href="#deferred-group" class="callout" aria-label="callout 1 source">1</a><div class="annotation-text"><b>No status badge for deferred.</b> It joins the <code>unrecorded</code> dashed-outline species (<code>RunsList.tsx:85-89</code>), not the badge family. A fifth badge colour would read as a fifth way to fail. <i>(U1; Von Restorff)</i><a href="#deferred-group" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c2"><a href="#deferred-group" class="callout" aria-label="callout 2 source">2</a><div class="annotation-text"><b>Five entries, one group.</b> Grouping is what kills the "five alarms" scan; the five entries stay individually rendered so AC19 holds literally. <i>(Miller / chunking)</i><a href="#deferred-group" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c3"><a href="#deferred-group" class="callout" aria-label="callout 3 source">3</a><div class="annotation-text"><b>Reason text at full weight.</b> The repo's own rule — calm by <i>fewer elements, never fainter text</i> (<code>RunsList.tsx:92-98</code>). The reason is the payload; it must not be greyed.<a href="#deferred-group" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c4"><a href="#deferred-group" class="callout" aria-label="callout 4 source">4</a><div class="annotation-text"><b><code>—</code> in the number slot, never <code>0</code>.</b> Existing rule at <code>RunsList.tsx:108-111</code>: a literal <code>0</code> misreads as a zero-yield run. Deferred inherits it.<a href="#deferred-group" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c5"><a href="#deferred-group" class="callout" aria-label="callout 5 source">5</a><div class="annotation-text"><b>Deferred rows are not clickable.</b> Not runs, no detail, no dead end. Expansion is in place. <i>(User control)</i><a href="#deferred-group" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c6"><a href="#s1" class="callout" aria-label="callout 6 source">6</a><div class="annotation-text"><b>The catch-up row is the one distinct element.</b> On a lid-closed day the eye must land on what covered the day, not on what didn't run. <i>(Von Restorff, inverted — this changed the whole screen's hierarchy)</i><a href="#s1" class="back-link">↩ back to S1</a></div></div>
+  <div class="annotation-row" id="c7"><a href="#telegram" class="callout" aria-label="callout 7 source">7</a><div class="annotation-text"><b><code>NEW FAILURE</code> prefix + explicit contrast sentence.</b> Plaintext has no bold; UPPERCASE plus a literal "this is a DIFFERENT failure" is the only reliable break-through. <i>(R19/AC17; the constraint that <code>parse_mode</code> is unset directly forced this)</i><a href="#telegram" class="back-link">↩ back to T3</a></div></div>
+  <div class="annotation-row" id="c8"><a href="#telegram" class="callout" aria-label="callout 8 source">8</a><div class="annotation-text"><b>"This is the once-a-day reminder, not a new alert."</b> One line that prevents the incident's actual harm — N pages read as N events.<a href="#telegram" class="back-link">↩ back to T2</a></div></div>
+  <div class="annotation-row" id="c9"><a href="#telegram" class="callout" aria-label="callout 9 source">9</a><div class="annotation-text"><b>T4 carries the catch-up start notice.</b> Removes a whole message while making the 28-minute interruption expected rather than surprising. <i>(Doherty, at human scale; U2)</i><a href="#telegram" class="back-link">↩ back to T4</a></div></div>
+  <div class="annotation-row" id="c10"><a href="#s2" class="callout" aria-label="callout 10 source">10</a><div class="annotation-text"><b>Name Chrome, not the pipeline.</b> The operator's felt symptom is a browser window opening. <i>(Jakob's Law — this changed the banner copy from "catch-up in progress" to naming the artifact)</i><a href="#s2" class="back-link">↩ back to S2</a></div></div>
+  <div class="annotation-row" id="c11"><a href="#s2" class="callout" aria-label="callout 11 source">11</a><div class="annotation-text"><b>Stop confirms before acting.</b> One catch-up per day (R8b), so stopping forfeits the day. The operator must be told before the click, not after. <i>(Error prevention; variant 2a only)</i><a href="#s2" class="back-link">↩ back to S2</a></div></div>
+  <div class="annotation-row" id="c12"><a href="#s4" class="callout" aria-label="callout 12 source">12</a><div class="annotation-text"><b>Remedy is copyable, in <code>font-mono</code>.</b> Mirrors the existing command-hint treatment at <code>Step6Launch.tsx:91-113</code>. <i>(Tesler — the system carries the remedy, not the operator's memory)</i><a href="#s4" class="back-link">↩ back to S4</a></div></div>
+  <div class="annotation-row" id="c13"><a href="#s4" class="callout" aria-label="callout 13 source">13</a><div class="annotation-text"><b>Degraded ≠ unreachable.</b> <code>/api/daemon</code> failing is "we can't tell"; schema drift is "we know, and it's broken." Kept visually distinct, exactly as <code>LiveRunHeader</code> already separates <code>stalled</code> from <code>disconnected</code> (<code>LiveRunHeader.tsx:32-39</code>).<a href="#s4" class="back-link">↩ back to S4</a></div></div>
+  <div class="annotation-row" id="c14"><a href="#s1" class="callout" aria-label="callout 14 source">14</a><div class="annotation-text"><b>Deferrals never count as failures</b> in badges, Mascot, or summaries. <i>(U1)</i><a href="#s1" class="back-link">↩ back to S1</a></div></div>
+</section>
+
+<footer class="foot">Standalone mid-fi mockup — docs/product/pipeline-stability-hardening/mockup.html — not imported by any application code.</footer>
+
+<script>
+(function () {
+  document.querySelectorAll('.st-toggle-bar').forEach(function (bar) {
+    var panel = bar.nextElementSibling;
+    while (panel && !panel.classList.contains('st-panel')) { panel = panel.nextElementSibling; }
+    if (!panel) return;
+    var buttons = bar.querySelectorAll('.st-btn');
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        buttons.forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+        b.setAttribute('aria-pressed', 'true');
+        panel.setAttribute('data-state', b.dataset.state);
+      });
+    });
+  });
+  document.querySelectorAll('[data-qa="deferred-group-toggle"]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var group = btn.closest('.deferred-group');
+      var entries = group.querySelector('.dg-entries');
+      var collapsed = entries.classList.toggle('collapsed');
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.innerHTML = collapsed ? 'Expand' : 'Collapse <a href="#c5" class="callout" aria-label="callout 5" style="margin-left:2px">5</a>';
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -3,9 +3,11 @@
 Job Bunny is a single-user, local-first tool. There is exactly one persona, and they wear two
 hats. Every product decision resolves against this one person.
 
-Status: v1.1, derived 2026-08-10 during the `run-experience-overhaul` spec and confirmed in that
-spec's interview round 1. Derived from repo recon + the orchestrator's grounding, then corrected
-against the user's own answers. Refine this file on every product run — it is not frozen.
+Status: v1.2, derived 2026-08-10 during the `run-experience-overhaul` spec and confirmed in that
+spec's interview round 1; extended 2026-08-13 during the `pipeline-stability-hardening` spec,
+which closed the open discovery-channel question. Derived from repo recon + the orchestrator's
+grounding, then corrected against the user's own answers. Refine this file on every product run —
+it is not frozen.
 
 ---
 
@@ -90,12 +92,20 @@ job-searching and who built their own pipeline rather than trust a job board's f
   live view is what they check when they *did* just click Run Now.
 - **Closed (Q2):** the number that answers "did this run do anything useful" is **jobs that
   survived the filter onto the board**, with high-match count as a secondary signal.
+- **Closed 2026-08-13 (`pipeline-stability-hardening`, Q2b): Telegram first.** A failed run is
+  discovered via the **Telegram digest**, read on a phone; the board is opened afterwards as the
+  diagnostic drill-down surface. This resolves the question v1.1 left open, and it has two
+  standing design consequences:
+  - **Alert quality is load-bearing, not cosmetic.** The digest is the primary signal, so
+    notification correctness (dedup, and never suppressing a *different* failure) is a
+    first-class product requirement rather than a nicety. Evidence: the 2026-08-12 incident sent
+    six identical failure pages overnight, all of them wrong about the cause.
+  - **The board optimises for drill-down from an alert, not for at-a-glance monitoring.** The
+    user arrives already knowing something is wrong and wanting to know *what*. Designs that
+    assume the board is being watched are designing for the minority case — the same correction
+    already recorded above for live run-watching.
 
 ### Still open (?)
 
-- (?) Whether a failed run is discovered via Telegram digest first, or by opening the board.
-  Not resolved because the Telegram path was out of scope for the run-experience-overhaul
-  spec. Worth closing on a future run — it determines whether the board is the first place a
-  problem is seen or the second.
 - (?) How much of the job-search happens outside Job Bunny (direct applications, referrals),
   which would bound how much of the user's attention this tool can legitimately claim.
