@@ -133,7 +133,13 @@ describe('ScheduleSection', () => {
     stubDaemon({
       ...IDLE_DAEMON,
       profiles: [
-        { profile: 'rajni', enabled: true, nextRunAt: '2026-08-09T09:00:00.000Z' },
+        {
+          profile: 'rajni',
+          enabled: true,
+          nextRunAt: '2026-08-09T09:00:00.000Z',
+          degraded: false,
+          degradedReason: null,
+        },
       ],
     });
     renderSection();
