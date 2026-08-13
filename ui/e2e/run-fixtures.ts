@@ -46,13 +46,17 @@ export interface RunRow {
   id: number;
   date: string;
   timeDir: string | null;
-  kind: 'run' | 'stage' | 'reconcile';
+  kind: 'run' | 'stage' | 'reconcile' | 'catchup';
   resumedFrom: number | null;
   status: 'running' | 'passed' | 'failed' | 'crashed';
   startedAt: string;
   finishedAt: string | null;
   heartbeatAt: string | null;
   progress: RunProgress | null;
+  /** `null` for every non-catch-up run; the missed local `HH:MM` slots a
+   * `kind: 'catchup'` run stood in for otherwise (`ports/run_store.ts`'s
+   * `RunRow`). */
+  catchupSlots: string[] | null;
 }
 
 /** One `GET /runs` list row — `RunSummary` + the health-gate inputs
@@ -90,11 +94,19 @@ export interface RunFailure {
 }
 
 /** `GET /runs/:id` response — `RunDetail` (`ports/run_store.ts`): a
- * `RunRow` plus the three opaque blobs. */
+ * `RunRow` plus the three opaque blobs, plus the catch-up banner's ETA
+ * input (`GetRunResponse`, `app/features/runs/routes.ts`, blueprint step
+ * 1.18). Optional (not every existing fixture cares, and the real backend
+ * only ever populates it for a `status: 'running'` row) — Playwright's
+ * `route.fulfill({ json })` drops an `undefined` key entirely, so an
+ * omitted field here reaches the client exactly like a genuinely absent
+ * one, landing on `LiveRunHeader`'s own `estimatedDurationMs = null`
+ * default. */
 export interface RunDetailFixture extends RunRow {
   result: { stages: FunnelStage[] } | null;
   failure: RunFailure | null;
   syncDryrun: unknown;
+  estimatedDurationMs?: number | null;
 }
 
 function makeDefaultRow(overrides: Partial<RunRow> & { id: number }): RunRow {
@@ -109,6 +121,7 @@ function makeDefaultRow(overrides: Partial<RunRow> & { id: number }): RunRow {
     finishedAt: now,
     heartbeatAt: now,
     progress: null,
+    catchupSlots: null,
     ...overrides,
   };
 }
