@@ -517,6 +517,44 @@ describe('RunsPage', () => {
     });
   });
 
+  it('places the deferred group above the run rows, not below all of them (BUG 3)', async () => {
+    // With just 2 rows the off-screen symptom itself isn't reproducible
+    // (both bug and fix scroll into view identically at that size) — the
+    // assertion below checks *document order* directly rather than
+    // relying on viewport position, so it still catches the regression
+    // regardless of row count. `ROWS` (>1 row) is used anyway to match
+    // the bug's own reproduction condition, not because the assertion
+    // needs it.
+    const deferredSlotsRows: DeferredSlotRow[] = [
+      {
+        runDate: todayLocalDate(),
+        slot: '09:00',
+        reasonCode: 'host-asleep',
+        reason: 'Job Bunny declined to start this run because the host was asleep.',
+        decidedAt: `${todayLocalDate()}T09:00:05.000Z`,
+        notifiedAt: null,
+      },
+    ];
+    stubFetch({ deferredSlotsRows });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('deferred-group')).toBeInTheDocument();
+    });
+
+    const deferredGroup = screen.getByTestId('deferred-group');
+    const firstRunRow = screen.getAllByTestId('run-row')[0] as HTMLElement;
+    // DOCUMENT_POSITION_FOLLOWING set on the comparison target means
+    // `firstRunRow` comes AFTER `deferredGroup` in the DOM — i.e. the
+    // group precedes the run rows, matching mockup.html's S1 order
+    // (day reassurance -> catch-up row -> deferred group -> older runs).
+    const position = deferredGroup.compareDocumentPosition(firstRunRow);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('deferred region shows exactly one Skeleton while its query is pending (never three, D3b)', async () => {
     stubFetch({ deferredSlotsPending: true });
     const { container } = renderPage();

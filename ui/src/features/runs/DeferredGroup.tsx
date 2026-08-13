@@ -12,11 +12,6 @@ import type { DeferredSlotRow } from '../../lib/api/types';
  * (mirrors `EvidenceSection.tsx`'s own `EVIDENCE_ITEM` convention). */
 const DEFERRED_ITEM = 'deferred';
 
-/** The literal fallback text for an empty `row.reason` (R23's mandatory-
- * reason metric, ux-notes.md §11 item 4's acknowledged BE gap: the DB's
- * `NOT NULL` constraint doesn't prevent an empty string). */
-const REASON_UNAVAILABLE = 'reason unavailable';
-
 /** Short header word per `reasonCode` (spec.md's own literal examples,
  * "host asleep" / "network unreachable"; "daemon unavailable" follows the
  * same pattern). Branches off `reasonCode`, never `reason` text, per
@@ -121,6 +116,14 @@ export function DeferredGroup({ rows }: { rows: DeferredSlotRow[] }) {
           {groupReasonSentence(rows)}
         </p>
         <AccordionContent>
+          {/* Each entry's reason is the SAME short `REASON_CODE_WORD` the
+              header already renders (mockup.html ~475, ux-notes.md §5 S1
+              item 4: "each `09:00 · host asleep`") — never `row.reason`'s
+              full declined-to-start sentence. Rendering the long sentence
+              per entry (BUG 4) stacked five near-identical paragraphs and
+              recreated the "five alarms" scan the grouping exists to kill
+              (ux-notes.md §5 callouts 2/3); `blueprint.md:117` prescribed
+              the `reason` string, but the mockup and ux-notes win. */}
           <div className="flex flex-col gap-1">
             {rows.map((row, i) => {
               const n = i + 1;
@@ -143,7 +146,7 @@ export function DeferredGroup({ rows }: { rows: DeferredSlotRow[] }) {
                     data-testid={`deferred-slot-reason-${n}`}
                     className="text-xs"
                   >
-                    {row.reason === '' ? REASON_UNAVAILABLE : row.reason}
+                    {REASON_CODE_WORD[row.reasonCode]}
                   </span>
                 </div>
               );

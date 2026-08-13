@@ -32,7 +32,7 @@ describe('DeferredGroup — R25 never empty by construction', () => {
 });
 
 describe('DeferredGroup — five entries render (toHaveLength(5), not a comment)', () => {
-  it('renders exactly five deferred-slot-entry elements, each with correct time/reason', () => {
+  it('renders exactly five deferred-slot-entry elements, each with correct time/short reason', () => {
     render(<DeferredGroup rows={FIVE_ROWS} />);
     const entries = screen.getAllByTestId(/^deferred-slot-entry-\d+$/);
     expect(entries).toHaveLength(5);
@@ -40,30 +40,49 @@ describe('DeferredGroup — five entries render (toHaveLength(5), not a comment)
     FIVE_ROWS.forEach((row, i) => {
       const n = i + 1;
       expect(screen.getByTestId(`deferred-slot-time-${n}`)).toHaveTextContent(row.slot);
+      // Short label (mockup's `host asleep`), not the full `row.reason`
+      // sentence — BUG 4.
       expect(screen.getByTestId(`deferred-slot-reason-${n}`)).toHaveTextContent(
-        row.reason,
+        'host asleep',
       );
     });
   });
 });
 
-describe('DeferredGroup — empty reason fallback (per-entry, not whole-group)', () => {
-  it('renders "reason unavailable" only on the entry whose reason is an empty string', () => {
+describe('DeferredGroup — entry reason is the short label, not the full sentence (BUG 4)', () => {
+  it('renders the reasonCode short label per entry and never the long declined-to-start sentence', () => {
     const rows: DeferredSlotRow[] = [
+      slot({ slot: '09:00', reasonCode: 'host-asleep' }),
       slot({
-        slot: '09:00',
-        reason: 'Job Bunny declined to start this run because the host was asleep.',
+        slot: '11:30',
+        reasonCode: 'network-unreachable',
+        reason:
+          'Job Bunny declined to start this run because the network was unreachable.',
       }),
-      slot({ slot: '11:30', reason: '' }),
+      slot({
+        slot: '13:00',
+        reasonCode: 'daemon-unavailable',
+        reason: "Job Bunny's scheduler was not running during this scheduled window.",
+      }),
     ];
     render(<DeferredGroup rows={rows} />);
 
-    expect(screen.getByTestId('deferred-slot-reason-1')).not.toHaveTextContent(
-      'reason unavailable',
+    const reason1 = screen.getByTestId('deferred-slot-reason-1');
+    expect(reason1).toHaveTextContent('host asleep');
+    expect(reason1.textContent).not.toContain(
+      'Job Bunny declined to start this run because the host was asleep.',
     );
-    expect(screen.getByText('reason unavailable')).toBeInTheDocument();
-    expect(screen.getByTestId('deferred-slot-reason-2')).toHaveTextContent(
-      'reason unavailable',
+
+    const reason2 = screen.getByTestId('deferred-slot-reason-2');
+    expect(reason2).toHaveTextContent('network unreachable');
+    expect(reason2.textContent).not.toContain(
+      'Job Bunny declined to start this run because the network was unreachable.',
+    );
+
+    const reason3 = screen.getByTestId('deferred-slot-reason-3');
+    expect(reason3).toHaveTextContent('daemon unavailable');
+    expect(reason3.textContent).not.toContain(
+      "Job Bunny's scheduler was not running during this scheduled window.",
     );
   });
 });

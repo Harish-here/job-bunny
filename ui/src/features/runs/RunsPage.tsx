@@ -242,19 +242,18 @@ export function RunsPage({ profile }: { profile: string }) {
             </div>
           ) : (
             <>
-              <RunsList
-                rows={listRows}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-              />
-              {/* Deferred region — a SEPARATE sibling block below RunsList
-                  (blueprint.md §2), never merged into RunsList's own `rows`
-                  prop, which cannot represent a deferred slot without
-                  widening a type five other call sites depend on. Loading
-                  gets exactly ONE Skeleton (never the list's own 3x block —
-                  "or loading itself would look like an alarm"); an error
-                  here is scoped to just this region so it never blanks the
-                  runs list next to it. */}
+              {/* Deferred region — a SEPARATE sibling block ABOVE RunsList
+                  (mockup.html S1 DOM order: day reassurance -> catch-up row
+                  -> deferred group -> older runs; BUG 3 — a prior version of
+                  this placed it below the whole list, which put it
+                  off-screen on any day with more than a couple of runs),
+                  never merged into RunsList's own `rows` prop, which cannot
+                  represent a deferred slot without widening a type five
+                  other call sites depend on. Loading gets exactly ONE
+                  Skeleton (never the list's own 3x block — "or loading
+                  itself would look like an alarm"); an error here is scoped
+                  to just this region so it never blanks the runs list next
+                  to it. */}
               <div className="p-3">
                 {deferredQuery.isPending ? (
                   <Skeleton className="h-12" />
@@ -267,6 +266,11 @@ export function RunsPage({ profile }: { profile: string }) {
                   deferredRows.length > 0 && <DeferredGroup rows={deferredRows} />
                 )}
               </div>
+              <RunsList
+                rows={listRows}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
             </>
           )}
         </section>
