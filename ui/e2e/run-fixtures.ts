@@ -250,6 +250,39 @@ export async function stubDaemonUnreachable(page: Page): Promise<void> {
   });
 }
 
+export interface DaemonProfileScheduleFixture {
+  profile: string;
+  enabled: boolean;
+  nextRunAt: string | null;
+  degraded: boolean;
+  degradedReason: string | null;
+}
+
+/** GET /api/daemon -> 200, a full DaemonStatus payload with the given
+ * `profiles` array — for scenarios that need the daemon status query to
+ * resolve successfully with specific per-profile degraded state, unlike
+ * `stubDaemonUnreachable` above (which simulates the probe itself
+ * failing). */
+export async function stubDaemonStatus(
+  page: Page,
+  profiles: DaemonProfileScheduleFixture[],
+): Promise<void> {
+  await page.route('**/api/daemon*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({
+      status: 200,
+      json: {
+        state: 'running',
+        pid: 4242,
+        startedAt: '2026-08-13T09:00:00.000Z',
+        lastTickAt: new Date().toISOString(),
+        inFlight: null,
+        profiles,
+      },
+    });
+  });
+}
+
 /** Shared "wait for the poll to genuinely retry" timeout — the daemon
  * query's default `retry: 1` backs off ~1s before settling into its
  * error state, so assertions gated on that need more than Playwright's

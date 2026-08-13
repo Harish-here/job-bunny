@@ -13,6 +13,7 @@ import { SettingsPage } from '../settings/SettingsPage';
 import { TrackerPage } from '../tracker/TrackerPage';
 import { TriagePage } from '../triage/TriagePage';
 import { WizardPage } from '../wizard/WizardPage';
+import { DaemonDegradedBanner } from './DaemonDegradedBanner';
 import { pickMascotState } from './mascotState';
 import { Sidebar } from './Sidebar';
 import { useAppInfo } from './useAppInfo';
@@ -145,6 +146,7 @@ export function Shell() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
+      <DaemonDegradedBanner profile={profile} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           route={route}
