@@ -233,6 +233,8 @@ test("settings: schedule section shows the daemon's degraded state with cause an
       nextRunAt: null,
       degraded: true,
       degradedReason,
+      schemaVersion: 8,
+      buildVersion: 7,
     },
   ]);
   await page.goto('/#/settings/schedule');
@@ -257,6 +259,8 @@ test("settings: schedule section shows the daemon's healthy state with zero degr
       nextRunAt: '2026-08-13T11:30:00.000Z',
       degraded: false,
       degradedReason: null,
+      schemaVersion: null,
+      buildVersion: null,
     },
   ]);
   await page.goto('/#/settings/schedule');

@@ -256,6 +256,8 @@ export interface DaemonProfileScheduleFixture {
   nextRunAt: string | null;
   degraded: boolean;
   degradedReason: string | null;
+  schemaVersion: number | null;
+  buildVersion: number | null;
 }
 
 /** GET /api/daemon -> 200, a full DaemonStatus payload with the given

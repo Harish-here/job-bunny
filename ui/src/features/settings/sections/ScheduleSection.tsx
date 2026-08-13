@@ -21,6 +21,25 @@ const DEFAULT_WEEKDAYS = [1, 2, 3, 4, 5];
 const DEFAULT_GRACE_MINUTES = 90;
 const RESTART_COMMAND = 'jobbunny serve stop && jobbunny serve start';
 
+/** mockup.html:717's terse "Degraded — schema vN > daemon build vM" form,
+ * read directly off the two structured fields the daemon status payload
+ * carries (`schemaVersion`/`buildVersion`) rather than re-derived by regex
+ * over `degradedReason`'s prose — the "kill the regex stage-guess" pattern
+ * this repo already tore out once elsewhere. Falls back to the full reason
+ * sentence when either field is null (a stale pidfile entry from before
+ * these fields existed), so the degraded posture is never silently
+ * unrendered. */
+function degradedLabel(entry: {
+  schemaVersion: number | null;
+  buildVersion: number | null;
+  degradedReason: string | null;
+}): string {
+  if (entry.schemaVersion != null && entry.buildVersion != null) {
+    return `Degraded — schema v${entry.schemaVersion} > daemon build v${entry.buildVersion}`;
+  }
+  return `Degraded — ${entry.degradedReason}`;
+}
+
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((v): v is string => typeof v === 'string')
@@ -30,21 +49,6 @@ function asNumberArray(value: unknown): number[] {
   return Array.isArray(value)
     ? value.filter((v): v is number => typeof v === 'number')
     : [];
-}
-
-/** mockup.html:717's terse "Degraded — schema vN > daemon build vM" form,
- * derived from `degradedReason`'s two `(vN)` version markers
- * (`degradedReasonText` in `ops/daemon/alert/schema_drift.ts` always emits
- * "...schema (vN) is newer than...build (vM)...", in that order) — UI-side
- * only, so the shared `degradedReason` string `jobbunny doctor` also reads
- * stays untouched (blueprint.md §1 vs §4 step 0.5's contradiction; §1 and
- * the mockup win, per this task's brief). Falls back to leading with the
- * status word alone if the two markers are ever missing, rather than
- * silently rendering nothing. */
-function shortDegradedLabel(reason: string): string {
-  const match = reason.match(/\(v(\d+)\).*?\(v(\d+)\)/);
-  if (!match) return `Degraded — ${reason}`;
-  return `Degraded — schema v${match[1]} > daemon build v${match[2]}`;
 }
 
 // Schedule → profile.json's `schedule` block only. "Next run" reads
@@ -172,7 +176,7 @@ export function ScheduleSection({ profile }: { profile: string }) {
               <CircleAlert className="size-4 shrink-0 text-attention-strong" />
               <div>
                 <span className="text-sm text-attention-strong font-medium">
-                  {shortDegradedLabel(entry.degradedReason ?? '')}
+                  {degradedLabel(entry)}
                 </span>
                 <p className="mt-0.5 text-xs text-attention-strong">
                   Fix: <code className="font-mono">{RESTART_COMMAND}</code>

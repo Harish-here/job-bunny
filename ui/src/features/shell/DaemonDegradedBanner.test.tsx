@@ -60,6 +60,8 @@ describe('DaemonDegradedBanner', () => {
         nextRunAt: null,
         degraded: false,
         degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
       }),
     );
     renderBanner();
@@ -75,6 +77,8 @@ describe('DaemonDegradedBanner', () => {
         nextRunAt: null,
         degraded: true,
         degradedReason: DEGRADED_REASON,
+        schemaVersion: 7,
+        buildVersion: 6,
       }),
     );
     renderBanner();
@@ -95,6 +99,8 @@ describe('DaemonDegradedBanner', () => {
         nextRunAt: null,
         degraded: true,
         degradedReason: DEGRADED_REASON,
+        schemaVersion: 7,
+        buildVersion: 6,
       }),
     );
     renderBanner();
@@ -113,6 +119,8 @@ describe('DaemonDegradedBanner', () => {
         nextRunAt: null,
         degraded: true,
         degradedReason: DEGRADED_REASON,
+        schemaVersion: 7,
+        buildVersion: 6,
       }),
     );
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -143,6 +151,8 @@ describe('DaemonDegradedBanner', () => {
         nextRunAt: null,
         degraded: true,
         degradedReason: DEGRADED_REASON,
+        schemaVersion: 7,
+        buildVersion: 6,
       }),
     );
     renderBanner();

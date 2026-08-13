@@ -80,6 +80,8 @@ export interface DaemonProfileSchedule {
   nextRunAt: string | null;
   degraded: boolean;
   degradedReason: string | null; // human-readable, mirrors T6's cause line, null when not degraded
+  schemaVersion: number | null; // the profile's own DB schema version when degraded, else null
+  buildVersion: number | null; // this daemon build's LATEST_SCHEMA_VERSION when degraded, else null
 }
 
 export interface DaemonStatus {

@@ -150,6 +150,8 @@ export interface DaemonProfileSchedule {
   nextRunAt: string | null;
   degraded: boolean;
   degradedReason: string | null;
+  schemaVersion: number | null;
+  buildVersion: number | null;
 }
 
 export interface DaemonStatus {

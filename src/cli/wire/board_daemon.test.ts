@@ -150,6 +150,10 @@ test('a scheduled profile flagged as degraded in the pidfile surfaces degraded=t
   assert.equal(harish?.degraded, true);
   assert.match(harish?.degradedReason ?? '', /v8/);
   assert.match(harish?.degradedReason ?? '', /v7/);
+  assert.equal(harish?.schemaVersion, 8);
+  assert.equal(harish?.buildVersion, 7);
   assert.equal(rajni?.degraded, false);
   assert.equal(rajni?.degradedReason, null);
+  assert.equal(rajni?.schemaVersion, null);
+  assert.equal(rajni?.buildVersion, null);
 });

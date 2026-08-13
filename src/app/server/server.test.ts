@@ -49,8 +49,8 @@ function sendRawRequest(port: number, raw: string): Promise<string> {
 
 const PROFILES: BoardProfile[] = [{ name: 'p1', connector: 'sqlite', hasDb: true }];
 const TEST_VERSION = '0.0.0-test';
-
-const NOT_DEGRADED = { degraded: false, degradedReason: null } as const;
+const NO_VERSIONS = { schemaVersion: null, buildVersion: null } as const;
+const NOT_DEGRADED = { degraded: false, degradedReason: null, ...NO_VERSIONS } as const;
 const NEXT = '2026-08-08T03:30:00.000Z';
 
 const FAKE_DAEMON_STATUS: DaemonStatus = {

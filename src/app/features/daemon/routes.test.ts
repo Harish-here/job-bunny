@@ -60,6 +60,8 @@ function defaultStatus(): DaemonStatus {
         nextRunAt: '2026-08-08T03:30:00.000Z',
         degraded: false,
         degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
       },
       {
         profile: 'rajni',
@@ -67,6 +69,8 @@ function defaultStatus(): DaemonStatus {
         nextRunAt: null,
         degraded: false,
         degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
       },
     ],
   };
@@ -94,6 +98,8 @@ test('daemon: a stopped daemon reports nulls and still lists profiles', async ()
         nextRunAt: '2026-08-08T03:30:00.000Z',
         degraded: false,
         degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
       },
     ],
   };
