@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import type { JD } from '../../../../core/jd/index.ts';
+import { formatLocalDate } from '../../../../core/schedule/index.ts';
 import { SqliteRunStore } from '../runs/index.ts';
 import { openJobsDb, SqliteStore } from '../store/index.ts';
 import { SqliteBoardStore } from './board.ts';
@@ -469,4 +470,108 @@ test('listRunEvents: ascending order, total count, limit/offset paginate; unknow
   );
 
   assert.deepEqual(board.listRunEvents(999999, {}), { rows: [], total: 0 });
+});
+
+// --- listDeferredSlots (D3b — read surface over `deferred_slots`) ---
+
+/** Inserts directly against `deferred_slots` — this test file has no
+ * `SqliteDeferredSlotStore` writer (task 4's daemon-side adapter, a
+ * SEPARATE port/adapter pair); raw SQL is the correct way to seed the
+ * table `SqliteBoardStore`'s own reader queries. */
+function insertDeferredSlot(
+  db: DatabaseSync,
+  row: {
+    runDate: string;
+    slot: string;
+    reasonCode: string;
+    reason: string;
+    decidedAt: string;
+    notifiedAt?: string | null;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO deferred_slots (run_date, slot, reason_code, reason, decided_at, notified_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    row.runDate,
+    row.slot,
+    row.reasonCode,
+    row.reason,
+    row.decidedAt,
+    row.notifiedAt ?? null,
+  );
+}
+
+test('listDeferredSlots: empty table returns { rows: [], total: 0 } for an explicit date', () => {
+  const { board } = freshDbs();
+  assert.deepEqual(board.listDeferredSlots({ date: '2026-08-05' }), {
+    rows: [],
+    total: 0,
+  });
+});
+
+test('listDeferredSlots: scopes rows by run_date and orders by slot', () => {
+  const { db, board } = freshDbs();
+  insertDeferredSlot(db, {
+    runDate: '2026-08-05',
+    slot: '19:00',
+    reasonCode: 'host-asleep',
+    reason: 'host was asleep',
+    decidedAt: '2026-08-05T19:00:05.000Z',
+  });
+  insertDeferredSlot(db, {
+    runDate: '2026-08-05',
+    slot: '09:00',
+    reasonCode: 'network-unreachable',
+    reason: 'no network',
+    decidedAt: '2026-08-05T09:00:05.000Z',
+    notifiedAt: '2026-08-06T00:00:00.000Z',
+  });
+  // A different date's row must never leak into the '2026-08-05' page.
+  insertDeferredSlot(db, {
+    runDate: '2026-08-06',
+    slot: '09:00',
+    reasonCode: 'daemon-unavailable',
+    reason: 'daemon down',
+    decidedAt: '2026-08-06T09:00:05.000Z',
+  });
+
+  const { rows, total } = board.listDeferredSlots({ date: '2026-08-05' });
+  assert.equal(total, 2);
+  assert.deepEqual(
+    rows.map((r) => r.slot),
+    ['09:00', '19:00'],
+  );
+  assert.deepEqual(rows[0], {
+    runDate: '2026-08-05',
+    slot: '09:00',
+    reasonCode: 'network-unreachable',
+    reason: 'no network',
+    decidedAt: '2026-08-05T09:00:05.000Z',
+    notifiedAt: '2026-08-06T00:00:00.000Z',
+  });
+  assert.equal(rows[1]?.notifiedAt, null);
+});
+
+test('listDeferredSlots: defaults to today (local) when date is omitted', () => {
+  const { db, board } = freshDbs();
+  const today = formatLocalDate(new Date());
+  insertDeferredSlot(db, {
+    runDate: today,
+    slot: '10:00',
+    reasonCode: 'host-asleep',
+    reason: 'host was asleep',
+    decidedAt: `${today}T10:00:05.000Z`,
+  });
+  insertDeferredSlot(db, {
+    runDate: '2000-01-01',
+    slot: '10:00',
+    reasonCode: 'host-asleep',
+    reason: 'host was asleep',
+    decidedAt: '2000-01-01T10:00:05.000Z',
+  });
+
+  const { rows, total } = board.listDeferredSlots({});
+  assert.equal(total, 1);
+  assert.equal(rows[0]?.runDate, today);
 });

@@ -1,6 +1,7 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
 import type { ConfigDocKey } from './config_store.ts';
+import type { DeferredSlotRow } from './deferred_slots.ts';
 import type { DoctorReport } from './doctor.ts';
 import type { RunIntentStore } from './run_intents.ts';
 import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
@@ -162,6 +163,14 @@ export interface BoardStore {
    * soft-errors fetch. Ids with no warn/error events are simply absent
    * from the map. */
   listRunHealth(runIds: number[]): Map<number, RunEventHealth>;
+  /** Deferred-slot visibility (D3b, blueprint step 1.17) — reads the SAME
+   * `deferred_slots` table the daemon's `SqliteDeferredSlotStore`
+   * (`ports/deferred_slots.ts`, a SEPARATE port/adapter pair) writes, but
+   * through this store's OWN read query, exactly like `listRuns`/`getRun`
+   * are a separate reader over `runs` from `SqliteRunStore`'s writer.
+   * `query.date` defaults to today's LOCAL date when absent. `total` is
+   * simply `rows.length` — a day's deferred count is never paginated. */
+  listDeferredSlots(query: { date?: string }): { rows: DeferredSlotRow[]; total: number };
   close(): void;
 }
 

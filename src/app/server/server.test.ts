@@ -94,28 +94,17 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   const patchCalls: Array<{ id: string; patch: TrackingPatch }> = [];
   return {
     patchCalls,
-    listJobs(): { rows: []; total: number } {
-      return { rows: [], total: 0 };
-    },
-    getJob() {
-      return null;
-    },
+    listJobs: () => ({ rows: [], total: 0 }),
+    getJob: () => null,
     updateTracking(id, patch) {
       patchCalls.push({ id, patch });
       return { jobId: id, updatedAt: '2026-08-02T00:00:00.000Z', status: 'Applied' };
     },
-    listRuns() {
-      return { rows: [], total: 0 };
-    },
-    getRun() {
-      return null;
-    },
-    listRunEvents() {
-      return { rows: [], total: 0 };
-    },
-    listRunHealth() {
-      return new Map();
-    },
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
+    listRunHealth: () => new Map(),
+    listDeferredSlots: () => ({ rows: [], total: 0 }),
     close() {},
     ...overrides,
   };

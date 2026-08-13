@@ -10,7 +10,9 @@
  * `routes.ts` + `soft_errors.ts` — plus `index.ts`).
  */
 import { z } from 'zod';
+import { formatLocalDate } from '../../../core/schedule/index.ts';
 import type { BoardSource } from '../../../ports/board.ts';
+import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../../shared/index.ts';
 import { HttpError, param } from '../../shared/index.ts';
@@ -27,6 +29,13 @@ const ListRunEventsQuerySchema = z.object({
 });
 
 const RunIdSchema = z.coerce.number().int().positive();
+
+/** `z.iso.date()` is the codebase's established convention for a bare
+ * YYYY-MM-DD query param (`app/features/board/routes.ts`'s
+ * `dateFrom`/`dateTo`), reused here rather than a hand-rolled regex. */
+const ListDeferredSlotsQuerySchema = z.object({
+  date: z.iso.date().optional(),
+});
 
 /** Well above any realistic personal-scale run's warn+error volume — the
  * same "hundreds not millions" scale reasoning `reconcile.ts`'s own doc
@@ -59,6 +68,15 @@ export interface ListRunEventsResponse {
   offset: number;
 }
 export type GetSoftErrorsResponse = SoftErrorSummary;
+
+/** D3b (blueprint step 1.17) — `date` is the RESOLVED date (today, local,
+ * when the request omitted `?date=`), never the raw query value, so the
+ * UI never has to re-derive "what date did this page actually show". */
+export interface ListDeferredSlotsResponse {
+  rows: DeferredSlotRow[];
+  total: number;
+  date: string;
+}
 
 function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
   const parsed = schema.safeParse(data);
@@ -168,6 +186,23 @@ function softErrorsHandler(source: BoardSource) {
   };
 }
 
+/** D3b (blueprint step 1.17) — the board's read surface for deferred
+ * slots. `date` defaults to today (local) when the query param is absent;
+ * mirrors `listHandler`'s own limit/offset-default-in-the-envelope
+ * pattern, computed independently of `SqliteBoardStore.listDeferredSlots`'s
+ * own identical default (that store method must still default correctly
+ * when called directly, e.g. from a future non-HTTP caller). */
+function listDeferredSlotsHandler(source: BoardSource) {
+  return async (req: BoardRequest): Promise<BoardResponse> => {
+    const store = await openStoreOrThrow(source, req);
+    const q = parseOrThrow(ListDeferredSlotsQuerySchema, Object.fromEntries(req.query));
+    const date = q.date ?? formatLocalDate(new Date());
+    const { rows, total } = store.listDeferredSlots({ date });
+    const body: ListDeferredSlotsResponse = { rows, total, date };
+    return { status: 200, body };
+  };
+}
+
 export function makeRunsRoutes(source: BoardSource): RouteDef[] {
   return [
     { method: 'GET', path: '/api/profiles/:name/runs', handler: listHandler(source) },
@@ -181,6 +216,11 @@ export function makeRunsRoutes(source: BoardSource): RouteDef[] {
       method: 'GET',
       path: '/api/profiles/:name/runs/:id/soft-errors',
       handler: softErrorsHandler(source),
+    },
+    {
+      method: 'GET',
+      path: '/api/profiles/:name/deferred-slots',
+      handler: listDeferredSlotsHandler(source),
     },
   ];
 }

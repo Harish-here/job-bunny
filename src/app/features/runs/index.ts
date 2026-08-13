@@ -1,3 +1,4 @@
+export type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 export type {
   RunDetail,
   RunEventRow,
@@ -7,6 +8,7 @@ export type {
 export type {
   GetRunResponse, // RunDetail
   GetSoftErrorsResponse, // SoftErrorSummary
+  ListDeferredSlotsResponse, // { rows: DeferredSlotRow[]; total: number; date: string }
   ListRunEventsResponse, // { rows: RunEventRow[]; total: number; limit: number; offset: number }
   ListRunsResponse, // { rows: RunListRow[]; total: number; limit: number; offset: number }
   RunListRow, // RunSummary + softErrors: SoftErrorSummary (health-gate inputs, no per-row fetch)

@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { BoardSource, BoardStore, DaemonStatus } from '../../../ports/board.ts';
+import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
@@ -128,6 +129,7 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
       listRunHealthCalls.push(runIds);
       return new Map();
     },
+    listDeferredSlots: () => ({ rows: [], total: 0 }),
     close() {},
     ...overrides,
   };
@@ -391,5 +393,101 @@ test('soft-errors: non-numeric id is a 400 validation error', async () => {
     () => route.handler(req({ params: { name: 'rajni', id: 'abc' } })),
     400,
     'validation',
+  );
+});
+
+// --- GET /api/profiles/:name/deferred-slots ---
+
+function fakeDeferredSlot(overrides: Partial<DeferredSlotRow> = {}): DeferredSlotRow {
+  return {
+    runDate: '2026-08-13',
+    slot: '09:00',
+    reasonCode: 'host-asleep',
+    reason: 'host was asleep',
+    decidedAt: '2026-08-13T09:00:05.000Z',
+    notifiedAt: null,
+    ...overrides,
+  };
+}
+
+const TODAY_SLOTS: DeferredSlotRow[] = [
+  fakeDeferredSlot({ slot: '05:00' }),
+  fakeDeferredSlot({ slot: '09:00' }),
+  fakeDeferredSlot({ slot: '13:00' }),
+  fakeDeferredSlot({ slot: '17:00' }),
+  fakeDeferredSlot({ slot: '21:00' }),
+];
+
+const OTHER_DATE_SLOTS: DeferredSlotRow[] = [
+  fakeDeferredSlot({ runDate: '2026-07-01', slot: '10:00' }),
+];
+
+test('deferred-slots: a profile with 5 deferred rows for today returns exactly those 5', async () => {
+  const listDeferredSlotsCalls: Array<{ date?: string }> = [];
+  const store = fakeStore({
+    listDeferredSlots(query) {
+      listDeferredSlotsCalls.push(query);
+      return { rows: TODAY_SLOTS, total: TODAY_SLOTS.length };
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/deferred-slots');
+  const res = await route.handler(req({ params: { name: 'rajni' } }));
+  assert.equal(res.status, 200);
+  const body = res.body as { rows: DeferredSlotRow[]; total: number; date: string };
+  assert.equal(body.rows.length, 5);
+  assert.deepEqual(body.rows, TODAY_SLOTS);
+  assert.equal(body.total, 5);
+  // date defaults to today (local) — a fixed regex shape check, not a
+  // literal date, so this test never rots at midnight.
+  assert.match(body.date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(listDeferredSlotsCalls[0]?.date, body.date);
+});
+
+test("deferred-slots: ?date=YYYY-MM-DD scopes to a different date's rows", async () => {
+  const listDeferredSlotsCalls: Array<{ date?: string }> = [];
+  const store = fakeStore({
+    listDeferredSlots(query) {
+      listDeferredSlotsCalls.push(query);
+      return { rows: OTHER_DATE_SLOTS, total: OTHER_DATE_SLOTS.length };
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/deferred-slots');
+  const res = await route.handler(
+    req({
+      params: { name: 'rajni' },
+      query: new URLSearchParams({ date: '2026-07-01' }),
+    }),
+  );
+  assert.equal(res.status, 200);
+  const body = res.body as { rows: DeferredSlotRow[]; total: number; date: string };
+  assert.deepEqual(body.rows, OTHER_DATE_SLOTS);
+  assert.equal(body.total, 1);
+  assert.equal(body.date, '2026-07-01');
+  assert.deepEqual(listDeferredSlotsCalls, [{ date: '2026-07-01' }]);
+});
+
+test('deferred-slots: malformed ?date= is a 400 validation error', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/deferred-slots');
+  await assertHttpError(
+    () =>
+      route.handler(
+        req({
+          params: { name: 'rajni' },
+          query: new URLSearchParams({ date: 'not-a-date' }),
+        }),
+      ),
+    400,
+    'validation',
+  );
+});
+
+test('deferred-slots: null store (no local db) is a 404 no_local_db, same shape as every other runs route', async () => {
+  const route = findRoute(fakeSource(null), '/api/profiles/:name/deferred-slots');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'notion-only' } })),
+    404,
+    'no_local_db',
+    'profile has no local database (pure-Notion profiles are read via Notion)',
   );
 });
