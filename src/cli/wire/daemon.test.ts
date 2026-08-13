@@ -5,8 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
+import type { NotifyEvent } from '../../ports/notifier.ts';
 import {
+  wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
+  wireDaemonNotifier,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
   wireDaemonSchemaGuard,
@@ -388,4 +391,101 @@ test('wireDaemonIntents.attachIntentRun: leaves claimed_run_id null when the onl
 
     assert.equal(readClaimedRunId(dbPath, intentId), null);
   });
+});
+
+// --- wireDaemonNotifier / wireDaemonHasNotifierConfigured ---
+
+test('wireDaemonNotifier: a profile with no profile.json at all degrades to a no-op, never throws', async () => {
+  const notify = wireDaemonNotifier({ root });
+  await assert.doesNotReject(() =>
+    notify('notify-ghost', { kind: 'alert', profile: 'notify-ghost', text: 'hi' }),
+  );
+});
+
+test('wireDaemonNotifier: a malformed profile.json degrades to a no-op, never throws', async () => {
+  await mkdir(join(root, 'profiles', 'notify-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-broken', 'profile.json'),
+    'not valid json {{{',
+  );
+  const notify = wireDaemonNotifier({ root });
+  await assert.doesNotReject(() =>
+    notify('notify-broken', { kind: 'alert', profile: 'notify-broken', text: 'hi' }),
+  );
+});
+
+test('wireDaemonNotifier: a valid config sends the event via the configured notifier', async () => {
+  await mkdir(join(root, 'profiles', 'notify-ok'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-ok', 'profile.json'),
+    JSON.stringify({
+      connector: 'sqlite',
+      notifiers: ['fake'],
+      settings: { fake: { chatId: 1 } },
+    }),
+  );
+  const sent: NotifyEvent[] = [];
+  const notify = wireDaemonNotifier({
+    root,
+    buildNotifier: (name) => ({
+      name,
+      send: async (event) => {
+        sent.push(event);
+      },
+    }),
+  });
+  const event: NotifyEvent = {
+    kind: 'alert',
+    profile: 'notify-ok',
+    text: 'daemon degraded',
+  };
+  await notify('notify-ok', event);
+  assert.deepEqual(sent, [event]);
+});
+
+test('wireDaemonNotifier: a notifier send rejection is logged via the injected log callback, never thrown', async () => {
+  await mkdir(join(root, 'profiles', 'notify-fails'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-fails', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: ['fake'], settings: {} }),
+  );
+  const logs: string[] = [];
+  const notify = wireDaemonNotifier({
+    root,
+    buildNotifier: (name) => ({
+      name,
+      send: async () => {
+        throw new Error('boom');
+      },
+    }),
+    log: (event) => logs.push(event),
+  });
+  await assert.doesNotReject(() =>
+    notify('notify-fails', { kind: 'alert', profile: 'notify-fails', text: 'x' }),
+  );
+  assert.equal(logs.length, 1);
+  assert.match(logs.at(0) ?? '', /boom/);
+});
+
+test('wireDaemonHasNotifierConfigured: true for a profile with a configured notifier; false for none configured, and false for a malformed profile.json', async () => {
+  await mkdir(join(root, 'profiles', 'hasnotif-yes'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-yes', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: ['telegram'] }),
+  );
+  await mkdir(join(root, 'profiles', 'hasnotif-no'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-no', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: [] }),
+  );
+  await mkdir(join(root, 'profiles', 'hasnotif-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-broken', 'profile.json'),
+    'not valid json',
+  );
+  const hasNotifierConfigured = wireDaemonHasNotifierConfigured({ root });
+  assert.equal(await hasNotifierConfigured('hasnotif-yes'), true);
+  assert.equal(await hasNotifierConfigured('hasnotif-no'), false);
+  assert.equal(await hasNotifierConfigured('hasnotif-broken'), false);
+  assert.equal(await hasNotifierConfigured('hasnotif-ghost'), false);
 });

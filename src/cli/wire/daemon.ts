@@ -28,12 +28,14 @@ import {
   LATEST_SCHEMA_VERSION,
   readSchemaVersionReadonly,
 } from '../../adapters/db/sqlite/store/index.ts';
+import { PipelineConfigSchema } from '../../core/config/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
 import type { RunStore } from '../../ports/index.ts';
+import type { Notifier, NotifyEvent } from '../../ports/notifier.ts';
 import type { PendingIntent } from '../../ports/run_intents.ts';
 import { resolveHome } from '../home/index.ts';
-import { canonicalDbPath, wireConfigStore } from './builders.ts';
+import { buildNotifier, canonicalDbPath, wireConfigStore } from './builders.ts';
 
 export interface DaemonWireOverrides {
   /** the data home; default `resolveHome()` — same resolution as
@@ -46,6 +48,15 @@ export interface DaemonWireOverrides {
    * filesystem, to prove a failure on one call never carries into the
    * next (see `readRunHistory`'s own doc comment). */
   makeRunStore?: (dbPath: string) => Pick<RunStore, 'listRunTimeDirs' | 'close'>;
+  /** test-only seam: overrides how a notifier is constructed from a
+   * config-doc notifier name. Default builds a real notifier via
+   * `./builders.ts`'s `buildNotifier`. */
+  buildNotifier?: (name: string, settings: unknown) => Notifier;
+  /** test-only seam: overrides how a per-notifier send failure is
+   * logged. Default is a no-op — the real caller (`ops/daemon/
+   * daemon.ts`'s `runOwedBatch`) already logs its own notify-related
+   * events via its own richer `DaemonDeps.log`. */
+  log?: (event: string, data?: Record<string, unknown>) => void;
 }
 
 /** Builds the daemon's `DaemonDeps.readRunHistory` function: for each named
@@ -258,5 +269,87 @@ export function wireDaemonIntents(overrides: DaemonWireOverrides = {}): {
         // Swallowed — see this function's own doc comment.
       }
     },
+  };
+}
+
+/** Builds the daemon-reachable notifier (step 0.5): per call, reads the
+ * NAMED profile's `profile.json` fresh (readonly-lift `ConfigStore`,
+ * mirroring `wireDaemonScheduleConfig`'s discipline — no memoization, one
+ * profile's failure must never blind another's future call), parses it
+ * with the same `PipelineConfigSchema` every other config reader uses, and
+ * — only on success — builds each configured notifier and sends `event` to
+ * all of them via `Promise.allSettled`, exactly mirroring `compose.ts`'s
+ * `ctx.notify` (see its doc comment there). A missing or malformed
+ * `profile.json`, or a notifier that fails to construct or send, is never
+ * fatal to the caller: this function NEVER throws or rejects — it is the
+ * daemon's own "guaranteed alert" path (step 0.6) and must survive every
+ * per-profile failure mode `wireDaemonScheduleConfig` already tolerates. */
+export function wireDaemonNotifier(
+  overrides: DaemonWireOverrides = {},
+): (profile: string, event: NotifyEvent) => Promise<void> {
+  const root = overrides.root ?? resolveHome();
+  const build = overrides.buildNotifier ?? buildNotifier;
+  const log = overrides.log ?? (() => {});
+  return async (profile, event) => {
+    const store = wireConfigStore(profile, { root, liftMode: 'readonly' });
+    let notifierNames: string[];
+    let settings: Record<string, unknown>;
+    try {
+      const text = await store.readText('profile.json');
+      const parsed = PipelineConfigSchema.safeParse(JSON.parse(text ?? ''));
+      if (!parsed.success) return; // malformed profile.json — no-op, never throws.
+      notifierNames = parsed.data.notifiers;
+      settings = parsed.data.settings;
+    } catch {
+      return; // missing profile.json / JSON.parse failure — no-op, never throws.
+    } finally {
+      store.close();
+    }
+
+    let notifiers: Notifier[];
+    try {
+      notifiers = notifierNames.map((name) => build(name, settings[name]));
+    } catch (err) {
+      log(
+        `notify: failed to build a notifier for profile ${profile}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return;
+    }
+
+    const results = await Promise.allSettled(notifiers.map((n) => n.send(event)));
+    for (const [i, result] of results.entries()) {
+      if (result.status === 'rejected') {
+        const name = notifiers[i]?.name ?? `notifier[${i}]`;
+        const reason =
+          result.reason instanceof Error ? result.reason.message : String(result.reason);
+        log(`notify: ${name} failed: ${reason}`);
+      }
+    }
+  };
+}
+
+/** Sibling query (step 0.5a): does a profile have at least one notifier
+ * configured, without constructing or sending anything? Exists so the
+ * daemon's step-0.6 dispatch can pick a sender profile deterministically —
+ * picking one that turns out to have zero notifiers configured would mean
+ * the one guaranteed alert in this design goes silently nowhere. Same
+ * read/parse path and same never-throws posture as `wireDaemonNotifier`. */
+export function wireDaemonHasNotifierConfigured(
+  overrides: DaemonWireOverrides = {},
+): (profile: string) => Promise<boolean> {
+  const root = overrides.root ?? resolveHome();
+  return async (profile) => {
+    const store = wireConfigStore(profile, { root, liftMode: 'readonly' });
+    try {
+      const text = await store.readText('profile.json');
+      const parsed = PipelineConfigSchema.safeParse(JSON.parse(text ?? ''));
+      return parsed.success && parsed.data.notifiers.length > 0;
+    } catch {
+      return false;
+    } finally {
+      store.close();
+    }
   };
 }
