@@ -171,6 +171,7 @@ export function buildDaemonDeps(
     listForDate: deps.listForDate,
     listUnnotifiedDatesBefore: deps.listUnnotifiedDatesBefore,
     markNotified: deps.markNotified,
+    hasCatchupRun: deps.hasCatchupRun,
     // step 1.12 (task 14, numbered AFTER this one) wires the REAL catch-up
     // executor here (the same `spawnRun` reused, widened to accept
     // `standingInFor`) — this placeholder exists only because

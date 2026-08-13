@@ -33,8 +33,10 @@ import {
   formatLocalDate,
   hhMmToMinutes,
   isRunOwed,
+  nextFireAt,
   parseLocal,
 } from '../../core/schedule/index.ts';
+import { composeDeferredDaySummary } from '../observability/report/index.ts';
 import { trackSchemaDriftAndNotify } from './alert/index.ts';
 import type { DaemonDeps } from './deps.ts';
 import {
@@ -264,6 +266,43 @@ export function createDaemon(deps: DaemonDeps): {
     // straight through, no cast (structural subset, same precedent as
     // `trackSchemaDriftAndNotify` above).
     await runDeferredSweepAndCatchup(deps, now, date, activeSchedules, history, gate);
+
+    // step 1.11a (coordinator-added, 2026-08-13) — the day-rollover
+    // backstop: a lid that stays closed for a WHOLE calendar day means
+    // step 1.11's own T4 guard never fires for that day (it only ever
+    // evaluates `today`), and no live catch-up ever runs either. This
+    // THIRD, separate loop retrospectively covers every PAST date still
+    // carrying unnotified `deferred_slots` rows, once per tick, per
+    // scheduled profile — iterating the FULL `schedules` list (not
+    // `activeSchedules`), since a profile currently excluded by today's
+    // schema-drift check can still owe a summary for an earlier date.
+    for (const profile of schedules.map((s) => s.profile)) {
+      const staleDates = deps.listUnnotifiedDatesBefore(profile, date);
+      for (const staleDate of staleDates) {
+        const hadCatchup = deps.hasCatchupRun(profile, staleDate);
+        if (!hadCatchup) {
+          const slots = deps.listForDate(profile, staleDate);
+          const scheduleForProfile = schedules.find((s) => s.profile === profile);
+          const nextRun = scheduleForProfile
+            ? nextFireAt(now, [scheduleForProfile])
+            : null;
+          const text = composeDeferredDaySummary({
+            profile,
+            date: staleDate,
+            slots: slots.map((r) => ({ slot: r.slot, reasonCode: r.reasonCode })),
+            catchupFired: false,
+            nextRunAt: nextRun?.at.toISOString() ?? null,
+          });
+          await deps.notify(profile, { kind: 'digest', profile, text });
+        }
+        // Unconditional — a date already covered by a same-day T5 digest
+        // (the catch-up DID eventually run, just not detected by THIS
+        // mechanism until later) still needs its rows marked, so the
+        // query stops returning it on future ticks (see this step's own
+        // done-when case (c)).
+        deps.markNotified(profile, staleDate, now.toISOString());
+      }
+    }
   }
 
   async function tick(): Promise<void> {

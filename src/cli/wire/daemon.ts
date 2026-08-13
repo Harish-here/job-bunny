@@ -334,6 +334,32 @@ export function wireDaemonNotifier(
   };
 }
 
+/** Builds `DaemonDeps.hasCatchupRun` (step 1.11a): mirrors
+ * `wireDaemonRunHistory`'s EXACT discipline — `existsSync`-checked FIRST (a
+ * never-run profile must not have its db created as a side effect of a
+ * retrospective sweep query), then a FRESH `SqliteRunStore` per call,
+ * closed in `finally`, never memoized. `SqliteRunStore.hasRunOfKind` is
+ * already fail-soft at the adapter layer (degrades to `false` on any
+ * storage error, task 5/6), so no extra try/catch is needed here. */
+export function wireDaemonHasCatchupRun(
+  overrides: DaemonWireOverrides = {},
+): (profile: string, date: string) => boolean {
+  const root = overrides.root ?? resolveHome();
+  const makeRunStore =
+    overrides.makeRunStore ?? ((dbPath: string) => new SqliteRunStore(dbPath));
+
+  return (profile, date) => {
+    const dbPath = canonicalDbPath(root, profile);
+    if (!existsSync(dbPath)) return false; // never run — do not create it.
+    const store = makeRunStore(dbPath);
+    try {
+      return store.hasRunOfKind(date, 'catchup');
+    } finally {
+      store.close();
+    }
+  };
+}
+
 /** Sibling query (step 0.5a): does a profile have at least one notifier
  * configured, without constructing or sending anything? Exists so the
  * daemon's step-0.6 dispatch can pick a sender profile deterministically —

@@ -75,6 +75,13 @@ export interface DaemonDeps {
   listForDate: (profile: string, runDate: string) => DeferredSlotRow[];
   listUnnotifiedDatesBefore: (profile: string, beforeDate: string) => string[];
   markNotified: (profile: string, runDate: string, notifiedAt: string) => void;
+  /** step 1.11a — the retrospective (past-day) sweep's own catch-up check:
+   * did a `kind: 'catchup'` run happen on `date` for `profile`? Real
+   * implementation: `cli/wire/daemon.ts`'s `wireDaemonHasCatchupRun`,
+   * consulting the durable `runs` table (`RunStoreReader.hasRunOfKind`) —
+   * not the pidfile, since only `runs` can answer this across a daemon
+   * restart or a day that has already rolled over. Never throws. */
+  hasCatchupRun: (profile: string, date: string) => boolean;
   /** step 1.12 (task 14) — spawns the catch-up run. This task only adds
    * the FIELD (so this file's own catch-up decision compiles and its
    * tests can inject a fake); task 14 wires the real implementation in. */

@@ -128,6 +128,7 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     listForDate: () => [],
     listUnnotifiedDatesBefore: () => [],
     markNotified: () => {},
+    hasCatchupRun: () => false,
     listLaunchAgentFiles: () => [],
     spawn,
     nodeBin: 'node',

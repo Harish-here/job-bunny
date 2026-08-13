@@ -174,6 +174,11 @@ export function baseDeps(overrides: Partial<DaemonDeps> = {}): {
     listForDate: deferredStore.listForDate,
     listUnnotifiedDatesBefore: deferredStore.listUnnotifiedDatesBefore,
     markNotified: deferredStore.markNotified,
+    // No prior catch-up run by default — daemon_gate.test.ts's own retro
+    // sweep cases override this; every OTHER existing test never seeds a
+    // PAST-dated deferred_slots row, so `listUnnotifiedDatesBefore` always
+    // returns `[]` for them and this default is never actually exercised.
+    hasCatchupRun: () => false,
     spawnCatchup: async () => 0,
     log: (event, data, level) => {
       events.push({ event, data, level });

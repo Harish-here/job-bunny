@@ -44,6 +44,7 @@ import type { PendingIntent } from '../../../ports/run_intents.ts';
 import { resolveHome } from '../../home/index.ts';
 import {
   wireDaemonDeferredSlots,
+  wireDaemonHasCatchupRun,
   wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
   wireDaemonNotifier,
@@ -138,6 +139,9 @@ export interface ServeDeps {
   listForDate: (profile: string, runDate: string) => DeferredSlotRow[];
   listUnnotifiedDatesBefore: (profile: string, beforeDate: string) => string[];
   markNotified: (profile: string, runDate: string, notifiedAt: string) => void;
+  /** step 1.11a — real implementation: `cli/wire/daemon.ts`'s
+   * `wireDaemonHasCatchupRun`. Never throws. */
+  hasCatchupRun: (profile: string, date: string) => boolean;
   listLaunchAgentFiles(): string[];
   spawn: SpawnFn;
   nodeBin: string;
@@ -188,6 +192,7 @@ function defaultServeDeps(): ServeDeps {
     ...wireDaemonIntents({ root }),
     probeReachable: wireDaemonReachabilityProbe({ root }),
     ...wireDaemonDeferredSlots({ root }),
+    hasCatchupRun: wireDaemonHasCatchupRun({ root }),
     listLaunchAgentFiles: () => {
       try {
         return fsReaddirSync(path.join(home, 'Library', 'LaunchAgents'));

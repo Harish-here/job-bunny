@@ -19,8 +19,12 @@ export interface DaemonWireOverrides {
    * real `SqliteRunStore`. Tests use this to inject a store that behaves
    * as though a prior open/query failed, WITHOUT touching the real
    * filesystem, to prove a failure on one call never carries into the
-   * next (see `readRunHistory`'s own doc comment). */
-  makeRunStore?: (dbPath: string) => Pick<RunStore, 'listRunTimeDirs' | 'close'>;
+   * next (see `readRunHistory`'s own doc comment). Also reused by
+   * `wireDaemonHasCatchupRun` (step 1.11a), hence `hasRunOfKind` in the
+   * `Pick`. */
+  makeRunStore?: (
+    dbPath: string,
+  ) => Pick<RunStore, 'listRunTimeDirs' | 'hasRunOfKind' | 'close'>;
   /** test-only seam: overrides how a notifier is constructed from a
    * config-doc notifier name. Default builds a real notifier via
    * `./builders.ts`'s `buildNotifier`. */

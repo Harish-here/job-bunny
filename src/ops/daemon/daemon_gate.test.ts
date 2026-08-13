@@ -303,3 +303,152 @@ test('trap 5: the catch-up fires even when earlier slots the same day already su
   assert.equal(spawnCatchupCalls.length, 1); // fires regardless of the two earlier successes.
   assert.deepEqual(spawnCatchupCalls[0]?.standingInFor, ['14:00', '16:30', '19:00']);
 });
+
+// step 1.11a (coordinator-added) — the retrospective, past-day sweep: a lid
+// that stays closed for a WHOLE calendar day means step 1.11's own live T4/
+// catch-up mechanism never runs for that day at all (it only ever evaluates
+// `today`). `weekdays: []` keeps `harish` OUT of today's own live per-entry
+// loop and deferred sweep in every case below, so only the new retrospective
+// loop is under test.
+
+test('1.11a(a): 5 unnotified deferred rows dated yesterday, no catchup run that date -> exactly one no-catchup-variant notify, and markNotified called once for that date', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], weekdays: [] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const notifyCalls: string[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(MONDAY_14_04), // today = 2026-07-27.
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return true;
+    },
+    hasCatchupRun: () => false,
+  });
+  let markNotifiedCalls = 0;
+  const realMarkNotified = deps.markNotified;
+  deps.markNotified = (profile, runDate, notifiedAt) => {
+    markNotifiedCalls += 1;
+    realMarkNotified(profile, runDate, notifiedAt);
+  };
+  for (let i = 0; i < 5; i++) {
+    deps.recordDeferral('harish', {
+      runDate: '2026-07-26',
+      slot: `0${9 + i}:00`,
+      reasonCode: 'host-asleep',
+      reason: 'asleep',
+      decidedAt: '2026-07-26T20:00:00.000Z',
+    });
+  }
+
+  await createDaemon(deps).tick();
+
+  assert.equal(notifyCalls.length, 1);
+  assert.match(notifyCalls[0] ?? '', /Next scheduled slot:/);
+  assert.doesNotMatch(notifyCalls[0] ?? '', /Catch-up run starting now/);
+  assert.equal(markNotifiedCalls, 1);
+  assert.ok(deps.listForDate('harish', '2026-07-26').every((r) => r.notifiedAt !== null));
+});
+
+test('1.11a(b): repeated ticks after the date is covered send zero further notify calls (idempotent via notifiedAt) — call COUNT stays at 1', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], weekdays: [] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let nowMs = new Date(MONDAY_14_04).getTime();
+  const notifyCalls: string[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(nowMs),
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return true;
+    },
+    hasCatchupRun: () => false,
+  });
+  deps.recordDeferral('harish', {
+    runDate: '2026-07-26',
+    slot: '09:00',
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+    decidedAt: '2026-07-26T20:00:00.000Z',
+  });
+  const daemon = createDaemon(deps);
+
+  for (let i = 0; i < 6; i++) {
+    await daemon.tick();
+    nowMs += 30_000;
+  }
+
+  assert.equal(notifyCalls.length, 1);
+});
+
+test("1.11a(c): yesterday DID have a kind:'catchup' run -> zero notify calls, but markNotified is still called once (so the query stays empty going forward)", async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], weekdays: [] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const notifyCalls: string[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(MONDAY_14_04),
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return true;
+    },
+    hasCatchupRun: (profile, date) => profile === 'harish' && date === '2026-07-26',
+  });
+  deps.recordDeferral('harish', {
+    runDate: '2026-07-26',
+    slot: '09:00',
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+    decidedAt: '2026-07-26T20:00:00.000Z',
+  });
+
+  await createDaemon(deps).tick();
+
+  assert.equal(notifyCalls.length, 0);
+  assert.ok(
+    deps.listForDate('harish', '2026-07-26').every((r) => r.notifiedAt !== null),
+    'markNotified must still run so the query stays empty going forward',
+  );
+});
+
+test('1.11a(d): two distinct past unnotified dates produce exactly two notify calls, one per date', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], weekdays: [] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const notifyCalls: string[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(MONDAY_14_04),
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return true;
+    },
+    hasCatchupRun: () => false,
+  });
+  deps.recordDeferral('harish', {
+    runDate: '2026-07-25',
+    slot: '09:00',
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+    decidedAt: '2026-07-25T20:00:00.000Z',
+  });
+  deps.recordDeferral('harish', {
+    runDate: '2026-07-26',
+    slot: '09:00',
+    reasonCode: 'network-unreachable',
+    reason: 'no network',
+    decidedAt: '2026-07-26T20:00:00.000Z',
+  });
+
+  await createDaemon(deps).tick();
+
+  assert.equal(notifyCalls.length, 2);
+  assert.ok(deps.listForDate('harish', '2026-07-25').every((r) => r.notifiedAt !== null));
+  assert.ok(deps.listForDate('harish', '2026-07-26').every((r) => r.notifiedAt !== null));
+});

@@ -21,6 +21,7 @@ export { loadFilterConfig, loadPipelineConfig } from './config.ts';
 export type { DaemonWireOverrides } from './daemon.ts';
 export {
   wireDaemonDeferredSlots,
+  wireDaemonHasCatchupRun,
   wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
   wireDaemonNotifier,
