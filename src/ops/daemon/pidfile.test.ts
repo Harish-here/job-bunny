@@ -430,6 +430,116 @@ test('updateDaemonPidfile + readDaemonPidfile: a second lastGateDecline write ov
   });
 });
 
+test('acquireDaemonPidfile: seeds slotGateDeclines and deferredNotifyAttempts as empty arrays', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.slotGateDeclines, []);
+  assert.deepEqual(stored?.deferredNotifyAttempts, []);
+});
+
+test('parsePidfile: an old-shape pidfile with no slotGateDeclines/deferredNotifyAttempts keys parses with safe empty-array defaults', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.slotGateDeclines, []);
+  assert.deepEqual(stored?.deferredNotifyAttempts, []);
+});
+
+test('parsePidfile: a malformed slotGateDeclines/deferredNotifyAttempts entry (missing a field, or an invalid reasonCode) is dropped, not trusted', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+      slotGateDeclines: [
+        { profile: 'harish', date: '2026-07-27', slot: '09:00' }, // missing reasonCode/reason/at.
+        {
+          profile: 'harish',
+          date: '2026-07-27',
+          slot: '11:30',
+          reasonCode: 'daemon-unavailable', // valid for DeferredSlotRow, invalid here.
+          reason: 'x',
+          at: '2026-07-27T09:15:00.000Z',
+        },
+      ],
+      deferredNotifyAttempts: [{ profile: 'harish' }], // missing date/at.
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.slotGateDeclines, []);
+  assert.deepEqual(stored?.deferredNotifyAttempts, []);
+});
+
+// `parsePidfile` builds its return as an explicit field list, so a field
+// added to the `DaemonPidfile` interface alone (with no matching line in
+// that return construction) is silently dropped on the very next read —
+// direct round-trip tests, not merely transitive coverage via `daemon.ts`,
+// are the ones that catch that class of bug (same rationale as the
+// `degraded`/`schemaDrift*` round-trip test above).
+test('updateDaemonPidfile + readDaemonPidfile: slotGateDeclines round-trips through a write/read cycle', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      slotGateDeclines: [
+        {
+          profile: 'harish',
+          date: '2026-07-27',
+          slot: '09:00',
+          reasonCode: 'network-unreachable',
+          reason: 'net down',
+          at: '2026-07-27T09:15:00.000Z',
+        },
+      ],
+    }),
+    deps,
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.slotGateDeclines, [
+    {
+      profile: 'harish',
+      date: '2026-07-27',
+      slot: '09:00',
+      reasonCode: 'network-unreachable',
+      reason: 'net down',
+      at: '2026-07-27T09:15:00.000Z',
+    },
+  ]);
+});
+
+test('updateDaemonPidfile + readDaemonPidfile: deferredNotifyAttempts round-trips through a write/read cycle', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      deferredNotifyAttempts: [
+        { profile: 'harish', date: '2026-07-27', at: '2026-07-27T20:00:00.000Z' },
+      ],
+    }),
+    deps,
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.deferredNotifyAttempts, [
+    { profile: 'harish', date: '2026-07-27', at: '2026-07-27T20:00:00.000Z' },
+  ]);
+});
+
 test('defaultDaemonPidfileDeps: builds a working real-fs deps object shape', () => {
   const deps = defaultDaemonPidfileDeps();
   assert.equal(typeof deps.now, 'function');

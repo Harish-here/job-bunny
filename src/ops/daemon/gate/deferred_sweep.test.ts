@@ -8,7 +8,10 @@ import {
   updateDaemonPidfile,
 } from '../pidfile.ts';
 import { fakeDeferredSlotStore, fakePidfileDeps, ROOT } from '../testkit/index.ts';
-import { runDeferredSweepAndCatchup } from './deferred_sweep.ts';
+import {
+  runDeferredSweepAndCatchup,
+  runRetrospectiveDeferredSweep,
+} from './deferred_sweep.ts';
 import type { ReachabilityGateDecision } from './reachability_gate.ts';
 
 const NOW = new Date(2026, 6, 27, 20, 0); // 2026-07-27 20:00, well past every slot's grace.
@@ -242,24 +245,33 @@ test('runDeferredSweepAndCatchup: recordDeferral is called only here — never s
   assert.deepEqual(deferred.rows.get('harish') ?? [], []);
 });
 
-test('runDeferredSweepAndCatchup: a candidate whose grace window was gated names the pidfile lastGateDecline reason', async () => {
+test("runDeferredSweepAndCatchup (bug 1): a candidate with a per-slot slotGateDeclines entry is attributed to THAT slot's own reason, not the live gate", async () => {
   const { deps, pidfile, deferred } = buildDeps();
-  // 09:00 slot, 30-minute grace (09:00-09:30). A gate decline stamped at
-  // 09:15 (inside that window) should be attributed to the recorded row.
+  // Seeds exactly what `applyGateDecline` itself would have written on a
+  // tick where 09:00 was still owed (within grace) and gate-declined —
+  // see reachability_gate.test.ts's own upsert test for that half.
   updateDaemonPidfile(
     ROOT,
     (current) => ({
       ...current,
-      lastGateDecline: {
-        reasonCode: 'network-unreachable',
-        reason:
-          'Job Bunny declined to start this run because the network was unreachable.',
-        at: new Date(2026, 6, 27, 9, 15).toISOString(),
-      },
+      slotGateDeclines: [
+        {
+          profile: 'harish',
+          date: '2026-07-27',
+          slot: '09:00',
+          reasonCode: 'network-unreachable',
+          reason:
+            'Job Bunny declined to start this run because the network was unreachable.',
+          at: new Date(2026, 6, 27, 9, 15).toISOString(),
+        },
+      ],
     }),
     pidfile,
   );
   const schedule: ProfileSchedule = { ...SCHEDULE, times: ['09:00'], graceMinutes: 30 };
+  // The LIVE gate this tick is OPEN (host awake, network fine by 20:00) —
+  // proof the per-slot record, not the current tick's own gate reading,
+  // drives the attribution.
   await runDeferredSweepAndCatchup(
     deps,
     NOW,
@@ -270,7 +282,7 @@ test('runDeferredSweepAndCatchup: a candidate whose grace window was gated names
   assert.equal(deferred.rows.get('harish')?.[0]?.reasonCode, 'network-unreachable');
 });
 
-test('runDeferredSweepAndCatchup: no lastGateDecline within the slot window falls back to daemon-unavailable', async () => {
+test('runDeferredSweepAndCatchup (bug 1): no slotGateDeclines entry and an open gate falls back to daemon-unavailable', async () => {
   const { deps, deferred } = buildDeps();
   const schedule: ProfileSchedule = { ...SCHEDULE, times: ['09:00'], graceMinutes: 30 };
   await runDeferredSweepAndCatchup(
@@ -281,6 +293,79 @@ test('runDeferredSweepAndCatchup: no lastGateDecline within the slot window fall
     OPEN_GATE,
   );
   assert.equal(deferred.rows.get('harish')?.[0]?.reasonCode, 'daemon-unavailable');
+});
+
+test("runDeferredSweepAndCatchup (bug 1, the QA-reported canonical case): a whole-day-asleep batch with ZERO per-slot records falls back to the LIVE gate reason, not daemon-unavailable — this is the spec's own worked example", async () => {
+  // Reproduces the exact real-world shape: the host was asleep across
+  // every one of today's slots, so NO tick ever ran to observe any of them
+  // individually (zero `slotGateDeclines` entries) — the FIRST tick after
+  // waking is the one processing all 5 as already-expired candidates, and
+  // its own live `gate` (declined, host-asleep) is the only evidence that
+  // ever existed for why they were never served. Before the fix, this
+  // produced 5x `daemon-unavailable` ("the scheduler was not running") —
+  // the wrong diagnosis; the host was asleep, not the daemon down.
+  const { deps, deferred } = buildDeps();
+  await runDeferredSweepAndCatchup(
+    deps,
+    NOW,
+    '2026-07-27',
+    candidatesFor(NOW, [SCHEDULE], []),
+    CLOSED_GATE, // host-asleep — the only tick that ever ran.
+  );
+  const rows = deferred.rows.get('harish') ?? [];
+  assert.equal(rows.length, 5);
+  assert.ok(
+    rows.every((r) => r.reasonCode === 'host-asleep'),
+    `expected every row to read host-asleep, got: ${rows.map((r) => r.reasonCode).join(', ')}`,
+  );
+});
+
+test("runDeferredSweepAndCatchup (bug 1): distinct per-slot reasons are never conflated — each candidate keeps its OWN slot's attribution", async () => {
+  const { deps, pidfile, deferred } = buildDeps();
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      slotGateDeclines: [
+        {
+          profile: 'harish',
+          date: '2026-07-27',
+          slot: '09:00',
+          reasonCode: 'network-unreachable',
+          reason: 'net down',
+          at: new Date(2026, 6, 27, 9, 15).toISOString(),
+        },
+        {
+          profile: 'harish',
+          date: '2026-07-27',
+          slot: '11:30',
+          reasonCode: 'host-asleep',
+          reason: 'asleep',
+          at: new Date(2026, 6, 27, 11, 40).toISOString(),
+        },
+      ],
+    }),
+    pidfile,
+  );
+  // 14:00, 16:30, 19:00 have no per-slot record at all — with the gate OPEN
+  // this tick (nothing live to fall back to either), they land on
+  // daemon-unavailable, distinctly from the first two.
+  await runDeferredSweepAndCatchup(
+    deps,
+    NOW,
+    '2026-07-27',
+    candidatesFor(NOW, [SCHEDULE], []),
+    OPEN_GATE,
+  );
+  const rows = deferred.rows.get('harish') ?? [];
+  const byslot = Object.fromEntries(rows.map((r) => [r.slot, r.reasonCode]));
+  assert.deepEqual(byslot, {
+    '09:00': 'network-unreachable',
+    '11:30': 'host-asleep',
+    '14:00': 'daemon-unavailable',
+    '16:30': 'daemon-unavailable',
+    '19:00': 'daemon-unavailable',
+  });
 });
 
 test('runDeferredSweepAndCatchup: hasCatchupRun stops a second spawn after a daemon restart clears the pidfile attempts ledger (R8)', async () => {
@@ -323,9 +408,9 @@ test('runDeferredSweepAndCatchup: hasCatchupRun stops a second spawn after a dae
   assert.equal(spawnCalls.length, 1); // exactly once across BOTH calls.
 });
 
-test('runDeferredSweepAndCatchup: listForDate returning [] (recordDeferral fail-soft) never triggers a notify storm', async () => {
+test('runDeferredSweepAndCatchup (bug 6): a persistent deferred_slots write failure is throttled to at most one warn/attempt per hour, AND still produces a message — the day is no longer silently lost', async () => {
   const notifyCalls: string[] = [];
-  const { deps } = buildDeps({
+  const { deps, events } = buildDeps({
     notify: async (profile) => {
       notifyCalls.push(profile);
       return true;
@@ -337,28 +422,137 @@ test('runDeferredSweepAndCatchup: listForDate returning [] (recordDeferral fail-
   // was asked to write, even though `candidates.length > 0`.
   deps.listForDate = () => [];
 
+  let now = NOW;
   for (let i = 0; i < 20; i++) {
     await runDeferredSweepAndCatchup(
       deps,
-      NOW,
+      now,
       '2026-07-27',
-      candidatesFor(NOW, [SCHEDULE], []),
+      candidatesFor(now, [SCHEDULE], []),
       OPEN_GATE,
     );
+    now = new Date(now.getTime() + 30_000); // 20 ticks, 30s apart — 10 minutes total.
   }
 
-  assert.equal(notifyCalls.length, 0);
+  // Old behavior: 0 messages ever, and a 'deferred-rows-missing' warn on
+  // EVERY one of the 20 ticks. New behavior: still throttled to one
+  // attempt (all 20 ticks stay within the 1-hour window), but that ONE
+  // attempt actually sends — the day is no longer silently lost.
+  assert.equal(notifyCalls.length, 1);
+  assert.equal(events.filter((e) => e.event === 'deferred-rows-missing').length, 1);
+
+  // Past the 1-hour throttle window: a second attempt is made.
+  now = new Date(NOW.getTime() + 61 * 60_000);
+  await runDeferredSweepAndCatchup(
+    deps,
+    now,
+    '2026-07-27',
+    candidatesFor(now, [SCHEDULE], []),
+    OPEN_GATE,
+  );
+  assert.equal(notifyCalls.length, 2);
+  assert.equal(events.filter((e) => e.event === 'deferred-rows-missing').length, 2);
 });
 
-test('runDeferredSweepAndCatchup: a failed same-day T4 send is never stamped notified — the next call retries', async () => {
+test('runDeferredSweepAndCatchup (bug 2): a failing same-day T4 send is throttled to at most once per hour, not every tick', async () => {
   const notifyCalls: number[] = [];
   const { deps, deferred } = buildDeps({
     notify: async () => {
       notifyCalls.push(1);
-      return false; // delivery failed.
+      return false; // delivery failed, every time.
     },
   });
 
+  let now = NOW;
+  // 5 ticks, 30s apart — well within the 1-hour throttle window.
+  for (let i = 0; i < 5; i++) {
+    await runDeferredSweepAndCatchup(
+      deps,
+      now,
+      '2026-07-27',
+      candidatesFor(now, [SCHEDULE], []),
+      OPEN_GATE,
+    );
+    now = new Date(now.getTime() + 30_000);
+  }
+  assert.equal(notifyCalls.length, 1);
+  assert.ok(
+    (deferred.rows.get('harish') ?? []).every((r) => r.notifiedAt === null),
+    'a failed send must never stamp notifiedAt',
+  );
+
+  // Past the throttle window — the next call retries (never hard-latched).
+  now = new Date(NOW.getTime() + 61 * 60_000);
+  await runDeferredSweepAndCatchup(
+    deps,
+    now,
+    '2026-07-27',
+    candidatesFor(now, [SCHEDULE], []),
+    OPEN_GATE,
+  );
+  assert.equal(notifyCalls.length, 2);
+});
+
+test('runDeferredSweepAndCatchup (bug 2 escalation): a SUCCEEDING notify with a fail-soft markNotified that never actually persists must still be throttled, not resent every tick', async () => {
+  const notifyCalls: number[] = [];
+  const { deps } = buildDeps({
+    notify: async () => {
+      notifyCalls.push(1);
+      return true; // "delivered" every time...
+    },
+  });
+  // ...but the write that should record it never sticks (fail-soft DB
+  // error, silently swallowed) — `notifiedAt` stays null forever, so
+  // `t4AlreadySentToday` never becomes true on its own.
+  deps.markNotified = () => {};
+
+  let now = NOW;
+  for (let i = 0; i < 5; i++) {
+    await runDeferredSweepAndCatchup(
+      deps,
+      now,
+      '2026-07-27',
+      candidatesFor(now, [SCHEDULE], []),
+      OPEN_GATE,
+    );
+    now = new Date(now.getTime() + 30_000);
+  }
+  assert.equal(
+    notifyCalls.length,
+    1,
+    'a succeeding send must not repeat every tick just because the write silently failed to stick',
+  );
+});
+
+test('runDeferredSweepAndCatchup (bug 5): the first same-day T4 says the catch-up is starting now', async () => {
+  const notifyCalls: string[] = [];
+  const { deps } = buildDeps({
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return true;
+    },
+  });
+  await runDeferredSweepAndCatchup(
+    deps,
+    NOW,
+    '2026-07-27',
+    candidatesFor(NOW, [SCHEDULE], []),
+    OPEN_GATE,
+  );
+  assert.match(notifyCalls[0] ?? '', /Catch-up run starting now/);
+});
+
+test("runDeferredSweepAndCatchup (bug 5): once the day's catch-up has already fired, a LATER retry of a previously-failed T4 no longer claims a fresh one is starting", async () => {
+  const notifyCalls: string[] = [];
+  let notifyShouldSucceed = false;
+  const { deps } = buildDeps({
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return notifyShouldSucceed;
+    },
+  });
+  // Tick 1: notify FAILS, but the gate is open so the catch-up itself
+  // still ledgers and spawns — message and spawn are decoupled.
   await runDeferredSweepAndCatchup(
     deps,
     NOW,
@@ -367,21 +561,106 @@ test('runDeferredSweepAndCatchup: a failed same-day T4 send is never stamped not
     OPEN_GATE,
   );
   assert.equal(notifyCalls.length, 1);
-  assert.ok(
-    (deferred.rows.get('harish') ?? []).every((r) => r.notifiedAt === null),
-    'a failed send must never stamp notifiedAt',
-  );
+  assert.match(notifyCalls[0] ?? '', /Catch-up run starting now/);
 
+  // An hour later (past the throttle window) — the catch-up has ALREADY
+  // fired (ledgered on tick 1); the retry must not claim a fresh one is
+  // starting.
+  notifyShouldSucceed = true;
+  const later = new Date(NOW.getTime() + 61 * 60_000);
+  await runDeferredSweepAndCatchup(
+    deps,
+    later,
+    '2026-07-27',
+    candidatesFor(later, [SCHEDULE], []),
+    OPEN_GATE,
+  );
+  assert.equal(notifyCalls.length, 2);
+  assert.doesNotMatch(notifyCalls[1] ?? '', /Catch-up run starting now/);
+  assert.match(notifyCalls[1] ?? '', /Next scheduled slot:/);
+});
+
+test('runDeferredSweepAndCatchup (bug 7): catchupGateFresh=false suppresses the catch-up gate-declined log (a reused, cached decision, not a fresh probe)', async () => {
+  const { deps, events } = buildDeps();
   await runDeferredSweepAndCatchup(
     deps,
     NOW,
     '2026-07-27',
     candidatesFor(NOW, [SCHEDULE], []),
-    OPEN_GATE,
+    CLOSED_GATE,
+    false,
   );
-  assert.equal(
-    notifyCalls.length,
-    2,
-    'the next call retries since notifiedAt stayed null',
+  assert.ok(
+    !events.some((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup'),
   );
+});
+
+test('runDeferredSweepAndCatchup (bug 7): catchupGateFresh defaults to true — the log still fires when the parameter is omitted (regression)', async () => {
+  const { deps, events } = buildDeps();
+  await runDeferredSweepAndCatchup(
+    deps,
+    NOW,
+    '2026-07-27',
+    candidatesFor(NOW, [SCHEDULE], []),
+    CLOSED_GATE,
+  );
+  assert.ok(
+    events.some((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup'),
+  );
+});
+
+test('runRetrospectiveDeferredSweep (bug 2): a failing retrospective send is throttled to at most once per hour, not every tick', async () => {
+  const notifyCalls: number[] = [];
+  const { deps } = buildDeps({
+    notify: async () => {
+      notifyCalls.push(1);
+      return false;
+    },
+  });
+  for (let i = 0; i < 5; i++) {
+    deps.recordDeferral('harish', {
+      runDate: '2026-07-26',
+      slot: `0${9 + i}:00`,
+      reasonCode: 'host-asleep',
+      reason: 'asleep',
+      decidedAt: '2026-07-26T20:00:00.000Z',
+    });
+  }
+  const schedule: ProfileSchedule = { ...SCHEDULE, weekdays: [] };
+
+  let now = NOW;
+  for (let i = 0; i < 5; i++) {
+    await runRetrospectiveDeferredSweep(deps, now, '2026-07-27', [schedule]);
+    now = new Date(now.getTime() + 30_000);
+  }
+  assert.equal(notifyCalls.length, 1);
+
+  now = new Date(NOW.getTime() + 61 * 60_000);
+  await runRetrospectiveDeferredSweep(deps, now, '2026-07-27', [schedule]);
+  assert.equal(notifyCalls.length, 2);
+});
+
+test('runRetrospectiveDeferredSweep (bug 2): a successful send marks the date notified so no further attempts happen at all', async () => {
+  const notifyCalls: number[] = [];
+  const { deps } = buildDeps({
+    notify: async () => {
+      notifyCalls.push(1);
+      return true;
+    },
+  });
+  deps.recordDeferral('harish', {
+    runDate: '2026-07-26',
+    slot: '09:00',
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+    decidedAt: '2026-07-26T20:00:00.000Z',
+  });
+  const schedule: ProfileSchedule = { ...SCHEDULE, weekdays: [] };
+
+  let now = NOW;
+  for (let i = 0; i < 5; i++) {
+    await runRetrospectiveDeferredSweep(deps, now, '2026-07-27', [schedule]);
+    now = new Date(now.getTime() + 30_000);
+  }
+  assert.equal(notifyCalls.length, 1);
 });

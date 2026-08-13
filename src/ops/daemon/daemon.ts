@@ -38,8 +38,10 @@ import {
 } from '../../core/schedule/index.ts';
 import { trackSchemaDriftAndNotify } from './alert/index.ts';
 import type { DaemonDeps } from './deps.ts';
+import type { CatchupGateCache, ReachabilityGateDecision } from './gate/index.ts';
 import {
   applyGateDecline,
+  computeCatchupOnlyGate,
   computeReachabilityGate,
   runDeferredSweepAndCatchup,
   runRetrospectiveDeferredSweep,
@@ -65,6 +67,9 @@ export function createDaemon(deps: DaemonDeps): {
   stop(): void;
 } {
   let ticking = false;
+  // Bug 7 — catch-up-only tick gate cache; see `computeCatchupOnlyGate`'s
+  // own doc comment (`gate/reachability_gate.ts`) for why it lives here.
+  let catchupGateCache: CatchupGateCache | undefined;
   // D10, relocated: `serve stop` kills the daemon BEFORE the in-flight
   // child precisely so the daemon's own `await deps.spawnRun(...)` can
   // never resolve and spawn the NEXT owed entry. That ordering only holds
@@ -183,12 +188,28 @@ export function createDaemon(deps: DaemonDeps): {
     // step 1.11 (D1/D1b/D3b) — computed ONCE per batch (`gate/
     // reachability_gate.ts`): a suspend gap or unreachable network
     // declines every owed entry THIS tick. Reused by the catch-up below.
-    const gate = await computeReachabilityGate(
-      previousLastTickAt,
-      now,
-      sorted.length > 0 || expired.length > 0,
-      deps.probeReachable,
-    );
+    // Bug 7: a catch-up-ONLY tick uses `computeCatchupOnlyGate` instead —
+    // see its own doc comment.
+    let gate: ReachabilityGateDecision;
+    let catchupGateFresh = true; // suppresses the catch-up's own log line on a cache hit.
+    if (sorted.length === 0 && expired.length > 0) {
+      const result = await computeCatchupOnlyGate(
+        catchupGateCache,
+        now,
+        previousLastTickAt,
+        deps.probeReachable,
+      );
+      gate = result.gate;
+      catchupGateCache = result.cache;
+      catchupGateFresh = result.fresh;
+    } else {
+      gate = await computeReachabilityGate(
+        previousLastTickAt,
+        now,
+        sorted.length > 0 || expired.length > 0,
+        deps.probeReachable,
+      );
+    }
 
     for (const owed of sorted) {
       // Checked BEFORE this entry's revalidate/ledger/spawn sequence, so a
@@ -214,6 +235,7 @@ export function createDaemon(deps: DaemonDeps): {
           deps.pidfile,
           deps.log,
           owed.profile,
+          owed.date,
           owed.slot,
           gate,
           now,
@@ -282,7 +304,7 @@ export function createDaemon(deps: DaemonDeps): {
     // SAME `expired` candidates computed above for the reachability gate —
     // no re-derivation. `deps` passes straight through, no cast (structural
     // subset, same precedent as `trackSchemaDriftAndNotify` above).
-    await runDeferredSweepAndCatchup(deps, now, date, expired, gate);
+    await runDeferredSweepAndCatchup(deps, now, date, expired, gate, catchupGateFresh);
 
     // step 1.11a (coordinator-added, 2026-08-13), split into
     // `gate/deferred_sweep.ts`'s `runRetrospectiveDeferredSweep` purely to

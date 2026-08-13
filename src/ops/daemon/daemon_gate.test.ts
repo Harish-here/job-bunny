@@ -463,3 +463,169 @@ test('1.11a(d): two distinct past unnotified dates produce exactly two notify ca
   assert.ok(deps.listForDate('harish', '2026-07-25').every((r) => r.notifiedAt !== null));
   assert.ok(deps.listForDate('harish', '2026-07-26').every((r) => r.notifiedAt !== null));
 });
+
+// Bug 1 (pipeline-stability-hardening QA, 2026-08-14) — the spec's OWN
+// worked example: the host is asleep across every one of today's 5 slots,
+// wakes at 20:12. Before the fix, every one of the 5 deferred rows read
+// `daemon-unavailable` ("the scheduler was not running during today's
+// scheduled window") — the wrong diagnosis, since the daemon PROCESS never
+// stopped; the HOST was asleep. All 5 rows must read `host-asleep`, and
+// T4's own text must say so.
+
+test('bug 1 (the canonical lid-closed day): host asleep across all 5 slots, wakes 20:12 — every deferred row reads host-asleep, and T4 says the host was asleep, not that the scheduler was not running', async () => {
+  const scan = fakeScanDeps(
+    {
+      [profilePath('harish')]: profileJson({
+        times: ['09:00', '11:30', '14:00', '16:30', '19:00'],
+        graceMinutes: 30,
+      }),
+    },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const notifyCalls: string[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(2026, 6, 27, 20, 12), // wakes 20:12 — well past every slot's grace.
+    notify: async (_profile, event) => {
+      notifyCalls.push(event.text);
+      return true;
+    },
+  });
+  // The host slept from before 09:00 straight through to 20:12 — the
+  // daemon process itself never ticked in between, so `lastTickAt` is
+  // still whatever it was at the very start of that window (well before
+  // 09:00), producing a gap far past SUSPECTED_SUSPEND_GAP_MS on THIS,
+  // the very first tick since.
+  updateDaemonPidfile(
+    deps.root,
+    (c) => ({ ...c, lastTickAt: new Date(2026, 6, 27, 8, 0).toISOString() }),
+    deps.pidfile,
+  );
+
+  await createDaemon(deps).tick();
+
+  const rows = deps.listForDate('harish', '2026-07-27');
+  assert.equal(rows.length, 5);
+  assert.ok(
+    rows.every((r) => r.reasonCode === 'host-asleep'),
+    `expected every row to read host-asleep, got: ${rows.map((r) => r.reasonCode).join(', ')}`,
+  );
+  assert.equal(notifyCalls.length, 1);
+  const text = notifyCalls[0] ?? '';
+  assert.ok(text.includes('because the host'), text);
+  assert.ok(text.includes('was asleep'), text);
+  assert.ok(!text.includes('scheduler was not running'), text);
+});
+
+// Bug 7 (pipeline-stability-hardening QA, 2026-08-14) — a catch-up-only
+// tick (no real owed slot entries, only a lingering expired catch-up
+// candidate) used to re-probe DNS and re-log `gate-declined` on EVERY 30s
+// tick for as long as the catch-up stayed gate-declined (measured: 240
+// ticks -> 240 log lines and 240 DNS probes). Both must now be bounded to
+// at most once per hour.
+
+test('bug 7: a catch-up-only tick that stays gate-declined re-probes DNS and re-logs gate-declined at most once per hour, not every tick', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let nowMs = new Date(2026, 6, 27, 9, 30).getTime(); // grace (09:00-09:05) already expired.
+  let probed = 0;
+  const { deps, events } = baseDeps({
+    scan,
+    now: () => new Date(nowMs),
+    probeReachable: async () => {
+      probed += 1;
+      return false; // stays unreachable throughout.
+    },
+  });
+  const daemon = createDaemon(deps);
+
+  // 6 ticks, 30s apart — well within the 1-hour throttle window.
+  for (let i = 0; i < 6; i++) {
+    await daemon.tick();
+    nowMs += 30_000;
+  }
+  assert.equal(
+    probed,
+    1,
+    'must not re-probe DNS every tick for the same declined catch-up',
+  );
+  assert.equal(
+    events.filter((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup')
+      .length,
+    1,
+  );
+
+  // Advance PAST the 1-hour throttle window in steps small enough
+  // (100s < SUSPECTED_SUSPEND_GAP_MS's 2 minutes) that no individual tick
+  // trips the SUSPEND detector — this exercises the reachability-PROBE
+  // retry path specifically, not a suspected-suspend one.
+  for (let i = 0; i < 40; i++) {
+    await daemon.tick();
+    nowMs += 100_000;
+  }
+  assert.equal(
+    probed,
+    2,
+    'a fresh probe must eventually happen once the interval elapses',
+  );
+  assert.equal(
+    events.filter((e) => e.event === 'gate-declined' && e.data?.slot === 'catchup')
+      .length,
+    2,
+  );
+});
+
+test('bug 7: once the network recovers, the catch-up-only cache clears and the very next tick re-probes fresh (no stale decline linger)', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  let nowMs = new Date(2026, 6, 27, 9, 30).getTime();
+  let probed = 0;
+  let reachable = false;
+  const spawnCatchupCalls: number[] = [];
+  const { deps } = baseDeps({
+    scan,
+    now: () => new Date(nowMs),
+    probeReachable: async () => {
+      probed += 1;
+      return reachable;
+    },
+    spawnCatchup: async () => {
+      spawnCatchupCalls.push(1);
+      return 0;
+    },
+  });
+  const daemon = createDaemon(deps);
+
+  await daemon.tick(); // declined, network down — populates the cache.
+  nowMs += 30_000;
+  await daemon.tick(); // still within the throttle window — cached, no re-probe.
+  assert.equal(probed, 1);
+
+  // Network recovers WITHIN the same throttle window the cache would
+  // otherwise still be honoring — the daemon must not blindly trust a
+  // stale "still declined" cache once it re-probes and finds it healthy.
+  // Advance past the throttle window in small (<2min) steps, one tick at a
+  // time, so no individual tick trips the suspend detector instead —
+  // stopping the moment the fresh (post-recovery) probe actually happens,
+  // since every tick after that keeps re-probing (nothing left to cache —
+  // an OPEN gate is never cached, by design: only a DECLINE is), which is
+  // a separate, pre-existing "known-served" concern outside this bug's
+  // own scope (see this task's own report).
+  reachable = true;
+  let iterations = 0;
+  while (probed < 2 && iterations < 100) {
+    await daemon.tick();
+    nowMs += 100_000;
+    iterations += 1;
+  }
+  assert.equal(
+    probed,
+    2,
+    'a fresh probe must happen once reachable again, past the throttle window',
+  );
+  assert.equal(spawnCatchupCalls.length, 1); // the catch-up now actually spawns.
+});

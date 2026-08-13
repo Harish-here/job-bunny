@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { acquireDaemonPidfile, readDaemonPidfile } from '../pidfile.ts';
 import { fakePidfileDeps } from '../testkit/index.ts';
-import { applyGateDecline, computeReachabilityGate } from './reachability_gate.ts';
+import {
+  applyGateDecline,
+  CATCHUP_GATE_RETRY_INTERVAL_MS,
+  type CatchupGateCache,
+  computeCatchupOnlyGate,
+  computeReachabilityGate,
+} from './reachability_gate.ts';
 
 const NOW = new Date(2026, 6, 27, 14, 4);
 
@@ -78,6 +84,7 @@ test('applyGateDecline: logs gate-declined and stamps lastGateDecline for a reas
     pidfile,
     (event, data) => events.push({ event, data }),
     'harish',
+    '2026-07-27',
     '14:00',
     {
       declined: true,
@@ -98,4 +105,161 @@ test('applyGateDecline: logs gate-declined and stamps lastGateDecline for a reas
     reason: 'Job Bunny declined to start this run because the host was asleep.',
     at: NOW.toISOString(),
   });
+});
+
+test('applyGateDecline: upserts a per-slot entry into slotGateDeclines (bug 1) — a second decline for the SAME slot replaces, not duplicates', () => {
+  const pidfile = fakePidfileDeps();
+  acquireDaemonPidfile('/fake/root', 1, pidfile);
+  const noop = () => {};
+  applyGateDecline(
+    '/fake/root',
+    pidfile,
+    noop,
+    'harish',
+    '2026-07-27',
+    '09:00',
+    {
+      declined: true,
+      reasonCode: 'network-unreachable',
+      reason: 'Job Bunny declined to start this run because the network was unreachable.',
+    },
+    new Date(2026, 6, 27, 9, 5),
+  );
+  // A DIFFERENT slot's own decline, a different reason — must not clobber
+  // or merge with 09:00's own entry.
+  applyGateDecline(
+    '/fake/root',
+    pidfile,
+    noop,
+    'harish',
+    '2026-07-27',
+    '11:30',
+    {
+      declined: true,
+      reasonCode: 'host-asleep',
+      reason: 'Job Bunny declined to start this run because the host was asleep.',
+    },
+    new Date(2026, 6, 27, 11, 40),
+  );
+  // A later tick's decline for the SAME 09:00 slot — replaces its own
+  // entry, does not accumulate a second row for it.
+  applyGateDecline(
+    '/fake/root',
+    pidfile,
+    noop,
+    'harish',
+    '2026-07-27',
+    '09:00',
+    {
+      declined: true,
+      reasonCode: 'host-asleep',
+      reason: 'Job Bunny declined to start this run because the host was asleep.',
+    },
+    new Date(2026, 6, 27, 9, 25),
+  );
+
+  const pf = readDaemonPidfile('/fake/root', pidfile);
+  assert.equal(pf?.slotGateDeclines.length, 2);
+  const slot0900 = pf?.slotGateDeclines.find((d) => d.slot === '09:00');
+  const slot1130 = pf?.slotGateDeclines.find((d) => d.slot === '11:30');
+  assert.equal(slot0900?.reasonCode, 'host-asleep'); // replaced, not the first reason.
+  assert.equal(slot1130?.reasonCode, 'host-asleep');
+});
+
+test('computeCatchupOnlyGate (bug 7): no cache -> probes fresh and populates the cache on a decline', async () => {
+  let probed = 0;
+  const result = await computeCatchupOnlyGate(undefined, NOW, undefined, async () => {
+    probed += 1;
+    return false;
+  });
+  assert.equal(probed, 1);
+  assert.equal(result.fresh, true);
+  assert.equal(result.gate.declined, true);
+  assert.equal(result.gate.reasonCode, 'network-unreachable');
+  assert.equal(result.cache?.reasonCode, 'network-unreachable');
+  assert.equal(result.cache?.at, NOW.getTime());
+});
+
+test('computeCatchupOnlyGate (bug 7): a fresh cache within the interval is reused — no probe call, fresh: false', async () => {
+  let probed = 0;
+  const cache: CatchupGateCache = {
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+    at: NOW.getTime() - 1000, // 1s ago — well within the interval.
+  };
+  const result = await computeCatchupOnlyGate(cache, NOW, undefined, async () => {
+    probed += 1;
+    return true;
+  });
+  assert.equal(probed, 0);
+  assert.equal(result.fresh, false);
+  assert.deepEqual(result.gate, {
+    declined: true,
+    reasonCode: 'host-asleep',
+    reason: 'asleep',
+  });
+  assert.equal(result.cache, cache); // unchanged.
+});
+
+test('computeCatchupOnlyGate (bug 7): a cache exactly at the interval boundary is still reused (inclusive)', async () => {
+  let probed = 0;
+  const cache: CatchupGateCache = {
+    reasonCode: 'network-unreachable',
+    reason: 'down',
+    at: NOW.getTime() - CATCHUP_GATE_RETRY_INTERVAL_MS,
+  };
+  const result = await computeCatchupOnlyGate(cache, NOW, undefined, async () => {
+    probed += 1;
+    return true;
+  });
+  assert.equal(probed, 0);
+  assert.equal(result.fresh, false);
+});
+
+test('computeCatchupOnlyGate (bug 7): past the interval, re-probes fresh and replaces the cache', async () => {
+  let probed = 0;
+  const staleCache: CatchupGateCache = {
+    reasonCode: 'network-unreachable',
+    reason: 'down',
+    at: NOW.getTime() - CATCHUP_GATE_RETRY_INTERVAL_MS - 1,
+  };
+  const result = await computeCatchupOnlyGate(staleCache, NOW, undefined, async () => {
+    probed += 1;
+    return false;
+  });
+  assert.equal(probed, 1);
+  assert.equal(result.fresh, true);
+  assert.equal(result.cache?.at, NOW.getTime());
+});
+
+test('computeCatchupOnlyGate (bug 7): a fresh probe that finds things reachable clears the cache entirely', async () => {
+  const staleCache: CatchupGateCache = {
+    reasonCode: 'network-unreachable',
+    reason: 'down',
+    at: NOW.getTime() - CATCHUP_GATE_RETRY_INTERVAL_MS - 1,
+  };
+  const result = await computeCatchupOnlyGate(
+    staleCache,
+    NOW,
+    undefined,
+    async () => true,
+  );
+  assert.equal(result.gate.declined, false);
+  assert.equal(result.cache, undefined);
+});
+
+test('computeCatchupOnlyGate (bug 7): a large previousLastTickAt gap declines host-asleep without ever probing, even with no prior cache', async () => {
+  let probed = 0;
+  const result = await computeCatchupOnlyGate(
+    undefined,
+    NOW,
+    new Date(NOW.getTime() - 5 * 60_000).toISOString(),
+    async () => {
+      probed += 1;
+      return true;
+    },
+  );
+  assert.equal(probed, 0);
+  assert.equal(result.gate.reasonCode, 'host-asleep');
+  assert.equal(result.cache?.reasonCode, 'host-asleep');
 });
