@@ -6,6 +6,7 @@
  * non-behavioral file-size splits) — not a `only-wire-imports-adapters`
  * carve-out file itself, since it imports no adapters, just port types.
  */
+import type { ReachabilityProbeDeps } from '../../ops/daemon/reachability/index.ts';
 import type { RunStore } from '../../ports/index.ts';
 import type { Notifier } from '../../ports/notifier.ts';
 
@@ -29,4 +30,9 @@ export interface DaemonWireOverrides {
    * daemon.ts`'s `runOwedBatch`) already logs its own notify-related
    * events via its own richer `DaemonDeps.log`. */
   log?: (event: string, data?: Record<string, unknown>) => void;
+  /** test-only seam (step 1.8/1.11): overrides the reachability probe's
+   * own deps (a fake `lookup`, a short `timeoutMs`) so a test can drive
+   * `wireDaemonReachabilityProbe` without touching real DNS. Default:
+   * `defaultReachabilityProbeDeps()`. */
+  reachabilityProbeDeps?: ReachabilityProbeDeps;
 }

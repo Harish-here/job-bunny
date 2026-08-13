@@ -13,6 +13,7 @@
  */
 import { join } from 'node:path';
 import type { ProfileSchedule } from '../../../core/schedule/index.ts';
+import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { DaemonDeps, SpawnRun } from '../daemon.ts';
 import type { DaemonPidfileDeps } from '../pidfile.ts';
 import { acquireDaemonPidfile, readDaemonPidfile } from '../pidfile.ts';
@@ -93,6 +94,47 @@ export function readLastTickAt(deps: DaemonDeps): string | undefined {
   return readDaemonPidfile(deps.root, deps.pidfile)?.lastTickAt;
 }
 
+/** In-memory fake mirroring `DeferredSlotStore`'s own contract (task 4) —
+ * `recordDeferral` is idempotent per (runDate, slot), `markNotified` marks
+ * EVERY row for a date, `listUnnotifiedDatesBefore` returns distinct dates
+ * strictly before the cutoff with at least one unnotified row. Used by
+ * `daemon_gate.test.ts` to exercise the T4/catch-up sequencing end-to-end
+ * without a real sqlite store. */
+export function fakeDeferredSlotStore(): {
+  recordDeferral: DaemonDeps['recordDeferral'];
+  listForDate: DaemonDeps['listForDate'];
+  listUnnotifiedDatesBefore: DaemonDeps['listUnnotifiedDatesBefore'];
+  markNotified: DaemonDeps['markNotified'];
+  rows: Map<string, DeferredSlotRow[]>;
+} {
+  const rows = new Map<string, DeferredSlotRow[]>();
+  return {
+    rows,
+    recordDeferral(profile, entry) {
+      const list = rows.get(profile) ?? [];
+      if (list.some((r) => r.runDate === entry.runDate && r.slot === entry.slot)) return;
+      list.push({ ...entry, notifiedAt: null });
+      rows.set(profile, list);
+    },
+    listForDate(profile, runDate) {
+      return (rows.get(profile) ?? []).filter((r) => r.runDate === runDate);
+    },
+    listUnnotifiedDatesBefore(profile, beforeDate) {
+      const dates = new Set(
+        (rows.get(profile) ?? [])
+          .filter((r) => r.notifiedAt === null && r.runDate < beforeDate)
+          .map((r) => r.runDate),
+      );
+      return [...dates].sort();
+    },
+    markNotified(profile, runDate, notifiedAt) {
+      for (const r of rows.get(profile) ?? []) {
+        if (r.runDate === runDate) r.notifiedAt = notifiedAt;
+      }
+    },
+  };
+}
+
 export function baseDeps(overrides: Partial<DaemonDeps> = {}): {
   deps: DaemonDeps;
   events: Array<{
@@ -109,6 +151,8 @@ export function baseDeps(overrides: Partial<DaemonDeps> = {}): {
   const pidfile = fakePidfileDeps();
   acquireDaemonPidfile(ROOT, 5000, pidfile);
 
+  const deferredStore = fakeDeferredSlotStore();
+
   const deps: DaemonDeps = {
     root: ROOT,
     profilesDir: PROFILES_DIR,
@@ -122,6 +166,15 @@ export function baseDeps(overrides: Partial<DaemonDeps> = {}): {
     readIntents: () => [],
     claimIntent: () => true,
     attachIntentRun: () => {},
+    // Reachable/no-suspend by default (regression posture — "behaves
+    // exactly as today" — see daemon_gate.test.ts for the suspend/
+    // unreachable-gate cases, which override this).
+    probeReachable: async () => true,
+    recordDeferral: deferredStore.recordDeferral,
+    listForDate: deferredStore.listForDate,
+    listUnnotifiedDatesBefore: deferredStore.listUnnotifiedDatesBefore,
+    markNotified: deferredStore.markNotified,
+    spawnCatchup: async () => 0,
     log: (event, data, level) => {
       events.push({ event, data, level });
     },

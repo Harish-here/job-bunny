@@ -51,8 +51,12 @@ test('a second tick during an in-flight run short-circuits on the guard but stil
   const daemon = createDaemon(deps);
 
   const firstTick = daemon.tick();
-  await Promise.resolve();
-  await Promise.resolve(); // let the heartbeat write and ledger append settle.
+  // Enough microtask flushes for the batch (schedule scan, gate probe,
+  // ledger append) to reach the spawn — no hardcoded hop count, matching
+  // the "stop() during an in-flight child" test's own polling style.
+  for (let i = 0; i < 20 && !events.some((e) => e.event === 'spawn'); i++) {
+    await Promise.resolve();
+  }
 
   const beforeSecondTick = readLastTickAt(deps);
   nowMs += 1000;
@@ -305,6 +309,13 @@ test('the reentrancy guard short-circuits a tick BEFORE it rescans, while the he
   assert.equal(profileScans, 1); // guard short-circuited BEFORE the rescan.
   assert.notEqual(readLastTickAt(deps), beforeSecondTick); // heartbeat still advanced.
 
+  // Enough microtask flushes for the first tick's own batch (schedule
+  // scan, gate probe, ledger append) to reach `spawnRun` and assign
+  // `resolveSpawn` — no hardcoded hop count, matching the "stop() during
+  // an in-flight child" test's own polling style elsewhere in this file.
+  for (let i = 0; i < 20 && !resolveSpawn; i++) {
+    await Promise.resolve();
+  }
   resolveSpawn?.(0);
   await firstTick;
 });

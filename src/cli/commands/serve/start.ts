@@ -166,6 +166,20 @@ export function buildDaemonDeps(
     readIntents: deps.readIntents,
     claimIntent: deps.claimIntent,
     attachIntentRun: deps.attachIntentRun,
+    probeReachable: deps.probeReachable,
+    recordDeferral: deps.recordDeferral,
+    listForDate: deps.listForDate,
+    listUnnotifiedDatesBefore: deps.listUnnotifiedDatesBefore,
+    markNotified: deps.markNotified,
+    // step 1.12 (task 14, numbered AFTER this one) wires the REAL catch-up
+    // executor here (the same `spawnRun` reused, widened to accept
+    // `standingInFor`) — this placeholder exists only because
+    // `DaemonDeps.spawnCatchup` is a required field this task's own type
+    // addition introduced; task 14 replaces it, not adds it.
+    spawnCatchup: async (target) => {
+      log('catchup-spawn-not-wired', { profile: target.profile }, 'error');
+      return 1;
+    },
     log,
     now: () => new Date(),
   };

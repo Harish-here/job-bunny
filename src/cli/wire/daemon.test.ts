@@ -10,6 +10,7 @@ import {
   wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
   wireDaemonNotifier,
+  wireDaemonReachabilityProbe,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
   wireDaemonSchemaGuard,
@@ -507,4 +508,24 @@ test('wireDaemonHasNotifierConfigured: true for a profile with a configured noti
   assert.equal(await hasNotifierConfigured('hasnotif-no'), false);
   assert.equal(await hasNotifierConfigured('hasnotif-broken'), false);
   assert.equal(await hasNotifierConfigured('hasnotif-ghost'), false);
+});
+
+test('wireDaemonReachabilityProbe: pre-bound to zero args, true on a resolving lookup, false on a rejecting one — never throws', async () => {
+  const okProbe = wireDaemonReachabilityProbe({
+    reachabilityProbeDeps: {
+      lookup: async () => ({ address: '1.2.3.4' }),
+      timeoutMs: 1000,
+    },
+  });
+  assert.equal(await okProbe(), true);
+
+  const failProbe = wireDaemonReachabilityProbe({
+    reachabilityProbeDeps: {
+      lookup: async () => {
+        throw new Error('ENOTFOUND');
+      },
+      timeoutMs: 1000,
+    },
+  });
+  assert.equal(await failProbe(), false);
 });

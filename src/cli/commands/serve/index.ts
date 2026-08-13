@@ -38,13 +38,16 @@ import {
   type LogDeps,
 } from '../../../ops/daemon/logs/index.ts';
 import { defaultScanDeps, type ScanDeps } from '../../../ops/daemon/scan/index.ts';
+import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { NotifyEvent } from '../../../ports/notifier.ts';
 import type { PendingIntent } from '../../../ports/run_intents.ts';
 import { resolveHome } from '../../home/index.ts';
 import {
+  wireDaemonDeferredSlots,
   wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
   wireDaemonNotifier,
+  wireDaemonReachabilityProbe,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
   wireDaemonSchemaGuard,
@@ -120,6 +123,21 @@ export interface ServeDeps {
   readIntents: (now: Date) => PendingIntent[];
   claimIntent: (profile: string, intentId: number) => boolean;
   attachIntentRun: (profile: string, intentId: number, since: string) => void;
+  /** step 1.8/1.11 — real implementation: `cli/wire/daemon.ts`'s
+   * `wireDaemonReachabilityProbe`, already pre-bound to zero args. Never
+   * throws or rejects. */
+  probeReachable: () => Promise<boolean>;
+  /** step 1.10/1.11 (D3b) — real implementation: `cli/wire/daemon.ts`'s
+   * `wireDaemonDeferredSlots` (task 11), spread into these four flat
+   * fields — same precedent as `readIntents`/`claimIntent`/
+   * `attachIntentRun` above. */
+  recordDeferral: (
+    profile: string,
+    entry: Omit<DeferredSlotRow, 'decidedAt' | 'notifiedAt'> & { decidedAt: string },
+  ) => void;
+  listForDate: (profile: string, runDate: string) => DeferredSlotRow[];
+  listUnnotifiedDatesBefore: (profile: string, beforeDate: string) => string[];
+  markNotified: (profile: string, runDate: string, notifiedAt: string) => void;
   listLaunchAgentFiles(): string[];
   spawn: SpawnFn;
   nodeBin: string;
@@ -168,6 +186,8 @@ function defaultServeDeps(): ServeDeps {
     notify: wireDaemonNotifier({ root }),
     hasNotifierConfigured: wireDaemonHasNotifierConfigured({ root }),
     ...wireDaemonIntents({ root }),
+    probeReachable: wireDaemonReachabilityProbe({ root }),
+    ...wireDaemonDeferredSlots({ root }),
     listLaunchAgentFiles: () => {
       try {
         return fsReaddirSync(path.join(home, 'Library', 'LaunchAgents'));

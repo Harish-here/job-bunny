@@ -39,6 +39,10 @@ import {
 import { PipelineConfigSchema } from '../../core/config/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
+import {
+  defaultReachabilityProbeDeps,
+  probeReachable,
+} from '../../ops/daemon/reachability/index.ts';
 import type { Notifier, NotifyEvent } from '../../ports/notifier.ts';
 import type { PendingIntent } from '../../ports/run_intents.ts';
 import { resolveHome } from '../home/index.ts';
@@ -352,4 +356,16 @@ export function wireDaemonHasNotifierConfigured(
       store.close();
     }
   };
+}
+
+/** Builds `DaemonDeps.probeReachable` (step 1.8/1.11): pre-bound to zero
+ * args here, at the wiring layer — mirrors `wireDaemonNotifier`/
+ * `wireDaemonHasNotifierConfigured`'s own already-curried shape, so
+ * `ops/daemon/daemon.ts` never sees the raw `ReachabilityProbeDeps`-taking
+ * function. `probeReachable` itself never throws or rejects. */
+export function wireDaemonReachabilityProbe(
+  overrides: DaemonWireOverrides = {},
+): () => Promise<boolean> {
+  const deps = overrides.reachabilityProbeDeps ?? defaultReachabilityProbeDeps();
+  return () => probeReachable(deps);
 }

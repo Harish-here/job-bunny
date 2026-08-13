@@ -1,5 +1,6 @@
 export {
   baseDeps,
+  fakeDeferredSlotStore,
   fakePidfileDeps,
   fakeScanDeps,
   PROFILES_DIR,
