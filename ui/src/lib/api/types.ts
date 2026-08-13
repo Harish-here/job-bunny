@@ -23,8 +23,10 @@ export type {
   ProfilesResponse,
 } from '../../../../src/app/features/profiles/index.ts';
 export type {
+  DeferredSlotRow,
   GetRunResponse,
   GetSoftErrorsResponse,
+  ListDeferredSlotsResponse,
   ListRunEventsResponse,
   ListRunsResponse,
   RunDetail,
