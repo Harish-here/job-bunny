@@ -50,12 +50,16 @@ function detail(overrides: {
   status: RunSummary['status'];
   result?: unknown;
   failure?: unknown;
+  kind?: RunSummary['kind'];
+  catchupSlots?: string[] | null;
 }): RunDetail {
   return {
     ...BASE_SUMMARY,
     status: overrides.status,
     result: overrides.result ?? null,
     failure: overrides.failure ?? null,
+    kind: overrides.kind ?? BASE_SUMMARY.kind,
+    catchupSlots: overrides.catchupSlots ?? null,
     syncDryrun: null,
   };
 }
@@ -334,5 +338,55 @@ describe('RunDetailView — threads onRun into the diagnosis panel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Run again' }));
     expect(onRun).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Task 29 (blueprint.md step 1.8): OutcomeHeader gains the "Catch-up" badge
+// + a covered-slots line, both gated purely on `run.kind === 'catchup'` —
+// orthogonal to `OutcomeKind` (design-scale.md), same as task 25's row
+// extension, so a plain `produced` fixture with `kind: 'catchup'` covers it.
+describe('RunDetailView — catch-up extension (blueprint.md 1.8)', () => {
+  it('a catchup run shows the "Catch-up" badge and the covered-slots line, exact text', () => {
+    const run = detail({
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      kind: 'catchup',
+      catchupSlots: ['14:00', '16:30', '19:00'],
+    });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    expect(screen.getByText('Catch-up')).toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-covered-slots')).toHaveTextContent(
+      'Covered slots: 14:00, 16:30, 19:00',
+    );
+  });
+
+  it('a non-catchup run shows neither the badge nor the covered-slots line', () => {
+    const run = detail({
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      kind: 'run',
+    });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    expect(screen.queryByText('Catch-up')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-covered-slots')).not.toBeInTheDocument();
+  });
+
+  it('a FAILED catchup run still shows the badge (judgment call: badge renders regardless of isFailedHeadline)', () => {
+    const run = detail({
+      status: 'failed',
+      result: null,
+      failure: { stage: 'structure', error: 'boom', elapsedMs: 500 },
+      kind: 'catchup',
+      catchupSlots: ['09:00', '11:30'],
+    });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    expect(screen.getByText(/Failed at stage: structure/)).toBeInTheDocument();
+    expect(screen.getByText('Catch-up')).toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-covered-slots')).toHaveTextContent(
+      'Covered slots: 09:00, 11:30',
+    );
   });
 });

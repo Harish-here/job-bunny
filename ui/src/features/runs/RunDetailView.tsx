@@ -127,14 +127,32 @@ function OutcomeHeader({
       className="flex flex-wrap items-start justify-between gap-3"
     >
       {isFailedHeadline ? (
-        <div className="text-sm text-destructive">
-          Failed at stage: {failedStage}
-          {failureError != null && ` — ${failureError}`}
+        <div className="flex items-baseline gap-2 text-sm text-destructive">
+          <span>
+            Failed at stage: {failedStage}
+            {failureError != null && ` — ${failureError}`}
+          </span>
+          {run.kind === 'catchup' && (
+            <Badge
+              variant="outline"
+              className="border-transparent bg-accent text-primary"
+            >
+              Catch-up
+            </Badge>
+          )}
         </div>
       ) : (
         <div className="flex items-baseline gap-2">
           <span className="font-heading text-2xl">{newMatchCount(run.result)}</span>
           <span className="text-sm text-muted-foreground">{outcomeLabel(kind, run)}</span>
+          {run.kind === 'catchup' && (
+            <Badge
+              variant="outline"
+              className="border-transparent bg-accent text-primary"
+            >
+              Catch-up
+            </Badge>
+          )}
         </div>
       )}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -202,6 +220,15 @@ export function RunDetailView({
           failedStage={failedStage}
           failureError={failureError}
         />
+
+        {run.kind === 'catchup' && (
+          <p
+            data-testid="run-detail-covered-slots"
+            className="text-xs text-muted-foreground"
+          >
+            Covered slots: {(run.catchupSlots ?? []).join(', ')}
+          </p>
+        )}
 
         {DIAGNOSIS_KINDS.has(kind) && (
           <div data-testid="rundetail-diagnosis-panel">
