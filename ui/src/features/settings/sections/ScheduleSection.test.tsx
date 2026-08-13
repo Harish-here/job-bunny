@@ -191,6 +191,30 @@ describe('ScheduleSection', () => {
     // is a handful of milliseconds, never exactly 12000ms.
   });
 
+  it("a stopped daemon renders 'Not running', never the healthy testid", async () => {
+    stubDoc();
+    stubDaemon({ ...IDLE_DAEMON, state: 'stopped', lastTickAt: null });
+    renderSection();
+    const status = await screen.findByTestId('schedule-daemon-status-stopped');
+    expect(status).toHaveTextContent('Not running');
+    expect(status).toHaveTextContent('jobbunny serve start');
+    expect(
+      screen.queryByTestId('schedule-daemon-status-healthy'),
+    ).not.toBeInTheDocument();
+  });
+
+  it("a stale daemon renders 'Wedged', never the healthy testid", async () => {
+    stubDoc();
+    const lastTickAt = new Date(Date.now() - 600_000).toISOString(); // 10m ago.
+    stubDaemon({ ...IDLE_DAEMON, state: 'stale', lastTickAt });
+    renderSection();
+    const status = await screen.findByTestId('schedule-daemon-status-stale');
+    expect(status).toHaveTextContent(/Wedged · last tick 60[0-4]s ago/);
+    expect(
+      screen.queryByTestId('schedule-daemon-status-healthy'),
+    ).not.toBeInTheDocument();
+  });
+
   it('degraded daemon status renders the exact degradedReason and the remedy command in font-mono', async () => {
     stubDoc();
     const degradedReason =

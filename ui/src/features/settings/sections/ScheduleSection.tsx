@@ -164,6 +164,32 @@ export function ScheduleSection({ profile }: { profile: string }) {
                 </p>
               </div>
             </div>
+          ) : daemon.data?.state === 'stopped' ? (
+            <div
+              data-qa="schedule-daemon-status-stopped"
+              data-testid="schedule-daemon-status-stopped"
+              className="flex items-center gap-2"
+            >
+              <Circle className="size-2.5 shrink-0 fill-current text-destructive" />
+              <span className="text-sm text-destructive">
+                Not running — start it:{' '}
+                <code className="font-mono text-muted-foreground">
+                  jobbunny serve start
+                </code>
+              </span>
+            </div>
+          ) : daemon.data?.state === 'stale' ? (
+            <div
+              data-qa="schedule-daemon-status-stale"
+              data-testid="schedule-daemon-status-stale"
+              className="flex items-center gap-2"
+            >
+              <CircleAlert className="size-4 shrink-0 text-attention-strong" />
+              <span className="text-sm text-attention-strong">
+                Wedged
+                {lastTickSeconds != null ? ` · last tick ${lastTickSeconds}s ago` : ''}
+              </span>
+            </div>
           ) : (
             <div
               data-qa="schedule-daemon-status-healthy"

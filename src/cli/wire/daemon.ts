@@ -283,10 +283,17 @@ export function wireDaemonIntents(overrides: DaemonWireOverrides = {}): {
  * `profile.json`, or a notifier that fails to construct or send, is never
  * fatal to the caller: this function NEVER throws or rejects — it is the
  * daemon's own "guaranteed alert" path (step 0.6) and must survive every
- * per-profile failure mode `wireDaemonScheduleConfig` already tolerates. */
+ * per-profile failure mode `wireDaemonScheduleConfig` already tolerates.
+ *
+ * Returns whether delivery actually happened (`true` iff at least one
+ * configured notifier's `send` resolved) rather than just "ran without
+ * throwing" — a missing `TELEGRAM_BOT_TOKEN`, a 401, or a timed-out fetch
+ * all resolve this to `false` so the caller (`trackSchemaDriftAndNotify`)
+ * can retry on a later tick instead of permanently stamping delivery that
+ * never happened. */
 export function wireDaemonNotifier(
   overrides: DaemonWireOverrides = {},
-): (profile: string, event: NotifyEvent) => Promise<void> {
+): (profile: string, event: NotifyEvent) => Promise<boolean> {
   const root = overrides.root ?? resolveHome();
   const build = overrides.buildNotifier ?? buildNotifier;
   const log = overrides.log ?? (() => {});
@@ -297,11 +304,11 @@ export function wireDaemonNotifier(
     try {
       const text = await store.readText('profile.json');
       const parsed = PipelineConfigSchema.safeParse(JSON.parse(text ?? ''));
-      if (!parsed.success) return; // malformed profile.json — no-op, never throws.
+      if (!parsed.success) return false; // malformed profile.json — no-op, never throws.
       notifierNames = parsed.data.notifiers;
       settings = parsed.data.settings;
     } catch {
-      return; // missing profile.json / JSON.parse failure — no-op, never throws.
+      return false; // missing profile.json / JSON.parse failure — no-op, never throws.
     } finally {
       store.close();
     }
@@ -315,18 +322,22 @@ export function wireDaemonNotifier(
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      return;
+      return false;
     }
 
     const results = await Promise.allSettled(notifiers.map((n) => n.send(event)));
+    let sentAny = false;
     for (const [i, result] of results.entries()) {
       if (result.status === 'rejected') {
         const name = notifiers[i]?.name ?? `notifier[${i}]`;
         const reason =
           result.reason instanceof Error ? result.reason.message : String(result.reason);
         log(`notify: ${name} failed: ${reason}`);
+      } else {
+        sentAny = true;
       }
     }
+    return sentAny;
   };
 }
 

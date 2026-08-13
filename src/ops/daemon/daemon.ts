@@ -69,8 +69,9 @@ export interface DaemonDeps {
     profiles: readonly string[],
   ) => Map<string, { schemaVersion: number; buildVersion: number }>;
   /** Real implementation: `cli/wire/daemon.ts`'s `wireDaemonNotifier`.
-   * Never throws. */
-  notify: (profile: string, event: NotifyEvent) => Promise<void>;
+   * Never throws; resolves `true` iff at least one configured notifier's
+   * `send` actually succeeded — see that function's own doc comment. */
+  notify: (profile: string, event: NotifyEvent) => Promise<boolean>;
   /** Real implementation: `cli/wire/daemon.ts`'s
    * `wireDaemonHasNotifierConfigured` (step 0.5a). Never throws. */
   hasNotifierConfigured: (profile: string) => Promise<boolean>;

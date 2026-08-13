@@ -395,26 +395,38 @@ test('wireDaemonIntents.attachIntentRun: leaves claimed_run_id null when the onl
 
 // --- wireDaemonNotifier / wireDaemonHasNotifierConfigured ---
 
-test('wireDaemonNotifier: a profile with no profile.json at all degrades to a no-op, never throws', async () => {
+test('wireDaemonNotifier: a profile with no profile.json at all degrades to a no-op, never throws, resolves false', async () => {
   const notify = wireDaemonNotifier({ root });
-  await assert.doesNotReject(() =>
-    notify('notify-ghost', { kind: 'alert', profile: 'notify-ghost', text: 'hi' }),
-  );
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-ghost', {
+      kind: 'alert',
+      profile: 'notify-ghost',
+      text: 'hi',
+    });
+  });
+  assert.equal(result, false);
 });
 
-test('wireDaemonNotifier: a malformed profile.json degrades to a no-op, never throws', async () => {
+test('wireDaemonNotifier: a malformed profile.json degrades to a no-op, never throws, resolves false', async () => {
   await mkdir(join(root, 'profiles', 'notify-broken'), { recursive: true });
   await writeFile(
     join(root, 'profiles', 'notify-broken', 'profile.json'),
     'not valid json {{{',
   );
   const notify = wireDaemonNotifier({ root });
-  await assert.doesNotReject(() =>
-    notify('notify-broken', { kind: 'alert', profile: 'notify-broken', text: 'hi' }),
-  );
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-broken', {
+      kind: 'alert',
+      profile: 'notify-broken',
+      text: 'hi',
+    });
+  });
+  assert.equal(result, false);
 });
 
-test('wireDaemonNotifier: a valid config sends the event via the configured notifier', async () => {
+test('wireDaemonNotifier: a valid config sends the event via the configured notifier and resolves true', async () => {
   await mkdir(join(root, 'profiles', 'notify-ok'), { recursive: true });
   await writeFile(
     join(root, 'profiles', 'notify-ok', 'profile.json'),
@@ -439,11 +451,12 @@ test('wireDaemonNotifier: a valid config sends the event via the configured noti
     profile: 'notify-ok',
     text: 'daemon degraded',
   };
-  await notify('notify-ok', event);
+  const result = await notify('notify-ok', event);
   assert.deepEqual(sent, [event]);
+  assert.equal(result, true);
 });
 
-test('wireDaemonNotifier: a notifier send rejection is logged via the injected log callback, never thrown', async () => {
+test('wireDaemonNotifier: a notifier send rejection is logged via the injected log callback, never thrown, resolves false', async () => {
   await mkdir(join(root, 'profiles', 'notify-fails'), { recursive: true });
   await writeFile(
     join(root, 'profiles', 'notify-fails', 'profile.json'),
@@ -460,9 +473,15 @@ test('wireDaemonNotifier: a notifier send rejection is logged via the injected l
     }),
     log: (event) => logs.push(event),
   });
-  await assert.doesNotReject(() =>
-    notify('notify-fails', { kind: 'alert', profile: 'notify-fails', text: 'x' }),
-  );
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-fails', {
+      kind: 'alert',
+      profile: 'notify-fails',
+      text: 'x',
+    });
+  });
+  assert.equal(result, false);
   assert.equal(logs.length, 1);
   assert.match(logs.at(0) ?? '', /boom/);
 });

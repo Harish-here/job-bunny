@@ -103,9 +103,13 @@ export interface ServeDeps {
   checkSchemaDrift: (
     profiles: readonly string[],
   ) => Map<string, { schemaVersion: number; buildVersion: number }>;
-  /** Real implementation: `cli/wire/daemon.ts`'s `wireDaemonNotifier`.
-   * Never throws. */
-  notify: (profile: string, event: NotifyEvent) => Promise<void>;
+  /** Real implementation: `cli/wire/daemon.ts`'s `wireDaemonNotifier`, built
+   * here with the default no-op `log` — `start.ts`'s `buildDaemonDeps`
+   * REBUILDS this with the daemon child's own real `log` before it ever
+   * reaches `DaemonDeps`, so `serve status`/other callers of `ServeDeps`
+   * directly get this default, no-op-logging instance instead. Never
+   * throws; resolves `true` iff at least one send succeeded. */
+  notify: (profile: string, event: NotifyEvent) => Promise<boolean>;
   /** Real implementation: `cli/wire/daemon.ts`'s
    * `wireDaemonHasNotifierConfigured` (step 0.5a). Never throws. */
   hasNotifierConfigured: (profile: string) => Promise<boolean>;

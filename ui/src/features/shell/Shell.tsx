@@ -146,7 +146,10 @@ export function Shell() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <DaemonDegradedBanner profile={profile} />
+      {/* key={profile}: a session dismissal is per-profile — remounting on
+          profile switch resets `dismissed` so dismissing profile A's
+          banner never suppresses a newly-degraded profile B's. */}
+      <DaemonDegradedBanner key={profile} profile={profile} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           route={route}

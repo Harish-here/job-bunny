@@ -762,11 +762,20 @@ test('a real profiles/rajni fixture db (copied to a temp path) upgrades v6 -> v7
   }
 
   const before = new DatabaseSync(copyPath);
-  const versionBefore = userVersion(before);
-  assert.ok(
-    versionBefore === 6 || versionBefore === 7,
-    `fixture is at v${versionBefore} — expected v6 or v7`,
-  );
+  let versionBefore = userVersion(before);
+  if (versionBefore === 7) {
+    // The local rajni fixture has already migrated to v7 on this machine
+    // (it's gitignored — never present on a fresh checkout/CI, so this
+    // branch never runs there). The v6->v7 step is a pure ADD (only
+    // `run_progress` — see migrations.ts), so reverting THIS DISPOSABLE
+    // COPY to v6 shape (drop that one table, stamp the version back down)
+    // exercises the real v6->v7 migration this test is named for, on real
+    // production-shaped data, without ever touching the live fixture file.
+    before.exec('DROP TABLE IF EXISTS run_progress');
+    before.exec('PRAGMA user_version = 6');
+    versionBefore = userVersion(before);
+  }
+  assert.equal(versionBefore, 6, `fixture copy is at v${versionBefore} — expected v6`);
   const jobsBefore = (
     before.prepare('SELECT COUNT(*) AS c FROM jobs').get() as { c: number }
   ).c;

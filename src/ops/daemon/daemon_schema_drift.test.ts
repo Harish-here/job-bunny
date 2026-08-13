@@ -38,6 +38,7 @@ test('schema drift: two profiles degrading in the same tick produce exactly one 
     hasNotifierConfigured: async () => true,
     notify: async (profile, event) => {
       notifyCalls.push({ profile, text: event.text });
+      return true;
     },
   });
   await createDaemon(deps).tick();
@@ -66,6 +67,7 @@ test('schema drift: a third profile degrading on a later tick does not trigger a
     hasNotifierConfigured: async () => true,
     notify: async (profile) => {
       notifyCalls.push(profile);
+      return true;
     },
   });
   const daemon = createDaemon(deps);
@@ -93,10 +95,59 @@ test('schema drift: the alphabetically-first scheduled profile without a notifie
     hasNotifierConfigured: async (profile) => profile === 'beta',
     notify: async (profile) => {
       notifyCalls.push(profile);
+      return true;
     },
   });
   await createDaemon(deps).tick();
   assert.deepEqual(notifyCalls, ['beta']);
+});
+
+test('schema drift: a notify that resolves false (delivery never happened) never stamps schemaDriftNotifiedAt, and the next qualifying tick retries', async () => {
+  const notifyCalls: string[] = [];
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const { deps, events } = baseDeps({
+    scan,
+    checkSchemaDrift: () => new Map([['harish', { schemaVersion: 8, buildVersion: 7 }]]),
+    hasNotifierConfigured: async () => true,
+    notify: async (profile) => {
+      notifyCalls.push(profile);
+      return false; // e.g. a missing token, a 401, a timed-out fetch.
+    },
+  });
+  const daemon = createDaemon(deps);
+  await daemon.tick();
+  await daemon.tick();
+  // Every qualifying tick retried — a stamped success would have
+  // suppressed the second call.
+  assert.equal(notifyCalls.length, 2);
+  assert.equal(readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifiedAt, null);
+  const failures = events.filter((e) => e.event === 'schema-drift-notify-failed');
+  assert.equal(failures.length, 2);
+  assert.equal(failures[0]?.level, 'warn');
+});
+
+test('schema drift: a notify that resolves true stamps schemaDriftNotifiedAt and logs schema-drift-notify-sent', async () => {
+  const scan = fakeScanDeps(
+    { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
+    { [PROFILES_DIR]: ['harish'] },
+  );
+  const { deps, events } = baseDeps({
+    scan,
+    checkSchemaDrift: () => new Map([['harish', { schemaVersion: 8, buildVersion: 7 }]]),
+    hasNotifierConfigured: async () => true,
+    notify: async () => true,
+  });
+  await createDaemon(deps).tick();
+  assert.notEqual(
+    readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifiedAt,
+    null,
+  );
+  const sent = events.filter((e) => e.event === 'schema-drift-notify-sent');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.level, 'info');
 });
 
 test('schema drift: no scheduled profile has a notifier configured — zero sends, schemaDriftNotifiedAt stays null, and the skip is logged every qualifying tick', async () => {

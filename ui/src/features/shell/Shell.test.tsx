@@ -21,6 +21,7 @@ function stubFetch(opts: {
   failProfiles?: 'always' | 'once';
   profiles?: BoardProfile[];
   version?: string;
+  daemon?: Record<string, unknown>;
 }) {
   let profileCalls = 0;
   const impl = vi.fn(async (input: RequestInfo | URL) => {
@@ -75,14 +76,15 @@ function stubFetch(opts: {
     if (url.includes('/api/daemon')) {
       return {
         ok: true,
-        json: async () => ({
-          state: 'running',
-          pid: null,
-          startedAt: null,
-          lastTickAt: null,
-          inFlight: null,
-          profiles: [],
-        }),
+        json: async () =>
+          opts.daemon ?? {
+            state: 'running',
+            pid: null,
+            startedAt: null,
+            lastTickAt: null,
+            inFlight: null,
+            profiles: [],
+          },
       } as unknown as Response;
     }
     throw new Error(`unexpected fetch url: ${url}`);
@@ -230,5 +232,54 @@ describe('Shell', () => {
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
+  });
+
+  // Regression pin for a session-dismissal leak: DaemonDegradedBanner's own
+  // `dismissed` state lives inside the component, so without a
+  // profile-scoped `key` on it in Shell.tsx, dismissing profile A's banner
+  // would silently suppress a newly-degraded profile B's banner too — the
+  // sole in-app signal that B's scheduler has stopped would vanish.
+  it('a session dismissal is per-profile — switching profiles brings the banner back for the new one', async () => {
+    stubFetch({
+      daemon: {
+        state: 'running',
+        pid: null,
+        startedAt: null,
+        lastTickAt: null,
+        inFlight: null,
+        profiles: [
+          {
+            profile: 'rajni',
+            enabled: true,
+            nextRunAt: null,
+            degraded: true,
+            degradedReason: 'rajni schema is behind',
+          },
+          {
+            profile: 'harish',
+            enabled: true,
+            nextRunAt: null,
+            degraded: true,
+            degradedReason: 'harish schema is behind',
+          },
+        ],
+      },
+    });
+    renderShell();
+
+    expect(await screen.findByTestId('daemon-degraded-cause')).toHaveTextContent(
+      'rajni schema is behind',
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Dismiss for this session' }),
+    );
+    expect(screen.queryByTestId('daemon-degraded-banner')).toBeNull();
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Profile' }));
+    await userEvent.click(await screen.findByRole('option', { name: /harish/ }));
+
+    expect(await screen.findByTestId('daemon-degraded-cause')).toHaveTextContent(
+      'harish schema is behind',
+    );
   });
 });

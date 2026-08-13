@@ -10,7 +10,12 @@ import { readDaemonPidfile, updateDaemonPidfile } from '../pidfile.ts';
 export interface SchemaDriftAlertDeps {
   root: string;
   pidfile: DaemonPidfileDeps;
-  notify: (profile: string, event: NotifyEvent) => Promise<void>;
+  /** Resolves `true` iff at least one configured notifier actually sent —
+   * see `wireDaemonNotifier`'s own doc comment. `trackSchemaDriftAndNotify`
+   * below stamps `schemaDriftNotifiedAt` ONLY on `true`, so a `false` (no
+   * notifier configured for anyone, or every send failed — missing token,
+   * 401, timeout) leaves the alert eligible for retry on a later tick. */
+  notify: (profile: string, event: NotifyEvent) => Promise<boolean>;
   hasNotifierConfigured: (profile: string) => Promise<boolean>;
   log: (
     event: string,
@@ -141,7 +146,21 @@ export async function trackSchemaDriftAndNotify(
   }
 
   const text = composeSchemaDriftAlertText(after.degraded);
-  await deps.notify(sender, { kind: 'alert', profile: sender, text });
+  const sent = await deps.notify(sender, { kind: 'alert', profile: sender, text });
+  if (!sent) {
+    // Delivery never happened (missing token, a 401, a timed-out fetch —
+    // see `wireDaemonNotifier`'s doc comment): leave `schemaDriftNotifiedAt`
+    // null so the NEXT qualifying tick retries, instead of permanently
+    // suppressing the one guaranteed alert on a send that never landed.
+    deps.log(
+      'schema-drift-notify-failed',
+      { profile: sender, degraded: after.degraded.map((d) => d.profile) },
+      'warn',
+    );
+    return;
+  }
+
+  deps.log('schema-drift-notify-sent', { profile: sender }, 'info');
   updateDaemonPidfile(
     deps.root,
     (current) => ({ ...current, schemaDriftNotifiedAt: now.toISOString() }),
