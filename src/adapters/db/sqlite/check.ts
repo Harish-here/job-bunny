@@ -6,9 +6,8 @@
  * `{ name, run() }` shape of adapters/db/notion/check.ts; run() never throws.
  */
 import { existsSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import type { DoctorCheck, DoctorFinding } from '../../../ports/doctor.ts';
-import { LATEST_SCHEMA_VERSION } from './store/index.ts';
+import { LATEST_SCHEMA_VERSION, readSchemaVersionReadonly } from './store/index.ts';
 
 export interface SqliteDbCheckDeps {
   path: string;
@@ -26,33 +25,26 @@ export function sqliteDbCheck(deps: SqliteDbCheckDeps): DoctorCheck {
           detail: `no database yet at ${deps.path} — created on first run`,
         };
       }
-      let db: DatabaseSync | undefined;
-      try {
-        db = new DatabaseSync(deps.path, { readOnly: true });
-        const version = (
-          db.prepare('PRAGMA user_version').get() as { user_version: number }
-        ).user_version;
-        if (version > LATEST_SCHEMA_VERSION) {
-          return {
-            check: name,
-            status: 'red',
-            detail: `database schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
-          };
-        }
-        return {
-          check: name,
-          status: 'ok',
-          detail: `database openable (schema v${version})`,
-        };
-      } catch (err) {
+      const version = readSchemaVersionReadonly(deps.path);
+      if (version === undefined) {
         return {
           check: name,
           status: 'red',
-          detail: `database not openable: ${err instanceof Error ? err.message : String(err)}`,
+          detail: `database not openable at ${deps.path}`,
         };
-      } finally {
-        db?.close();
       }
+      if (version > LATEST_SCHEMA_VERSION) {
+        return {
+          check: name,
+          status: 'red',
+          detail: `database schema v${version} is newer than this build supports (v${LATEST_SCHEMA_VERSION})`,
+        };
+      }
+      return {
+        check: name,
+        status: 'ok',
+        detail: `database openable (schema v${version})`,
+      };
     },
   };
 }
