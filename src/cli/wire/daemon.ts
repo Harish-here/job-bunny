@@ -19,9 +19,16 @@
  * `canonicalDbPath` directly at its one use site; the old
  * `resolveProfileDbPath` (a `readFileSync`+`JSON.parse`+settings-walk) is
  * dead and removed (`daemon.test.ts` never named it directly).
+ *
+ * `DaemonWireOverrides` itself lives in the sibling `./daemon_types.ts`
+ * (step 1.10) — a non-behavioral split purely to keep this file under the
+ * 400-line cap; it imports no adapters, so it needs no `only-wire-imports-
+ * adapters` carve-out entry of its own and is re-exported below for every
+ * existing import site.
  */
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { SqliteDeferredSlotStore } from '../../adapters/db/sqlite/deferred/index.ts';
 import { SqliteRunIntentStore } from '../../adapters/db/sqlite/intents/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
 import {
@@ -31,33 +38,14 @@ import {
 import { PipelineConfigSchema } from '../../core/config/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
-import type { RunStore } from '../../ports/index.ts';
+import type { DeferredSlotRow } from '../../ports/deferred_slots.ts';
 import type { Notifier, NotifyEvent } from '../../ports/notifier.ts';
 import type { PendingIntent } from '../../ports/run_intents.ts';
 import { resolveHome } from '../home/index.ts';
 import { buildNotifier, canonicalDbPath, wireConfigStore } from './builders.ts';
+import type { DaemonWireOverrides } from './daemon_types.ts';
 
-export interface DaemonWireOverrides {
-  /** the data home; default `resolveHome()` — same resolution as
-   * `compose.ts`/`wireBoard` in `builders.ts`/`board.ts`. */
-  root?: string;
-  /** test-only seam: overrides how a run-history reader is constructed for
-   * a resolved db path that is already known to exist. Default builds a
-   * real `SqliteRunStore`. Tests use this to inject a store that behaves
-   * as though a prior open/query failed, WITHOUT touching the real
-   * filesystem, to prove a failure on one call never carries into the
-   * next (see `readRunHistory`'s own doc comment). */
-  makeRunStore?: (dbPath: string) => Pick<RunStore, 'listRunTimeDirs' | 'close'>;
-  /** test-only seam: overrides how a notifier is constructed from a
-   * config-doc notifier name. Default builds a real notifier via
-   * `./builders.ts`'s `buildNotifier`. */
-  buildNotifier?: (name: string, settings: unknown) => Notifier;
-  /** test-only seam: overrides how a per-notifier send failure is
-   * logged. Default is a no-op — the real caller (`ops/daemon/
-   * daemon.ts`'s `runOwedBatch`) already logs its own notify-related
-   * events via its own richer `DaemonDeps.log`. */
-  log?: (event: string, data?: Record<string, unknown>) => void;
-}
+export type { DaemonWireOverrides } from './daemon_types.ts';
 
 /** Builds the daemon's `DaemonDeps.readRunHistory` function: for each named
  * profile, checks whether that profile's own `jobbunny.db` file EXISTS
@@ -362,5 +350,45 @@ export function wireDaemonHasNotifierConfigured(
     } finally {
       store.close();
     }
+  };
+}
+
+/** Deferred-slot writer/reader (step 1.10, D3b): `withStore` opens a FRESH
+ * `SqliteDeferredSlotStore` per call, never memoized (same discipline as
+ * every `wireDaemon*` above). The store (task 4) is already fail-soft, so
+ * no extra try/catch is needed. Field names below are spread directly into
+ * `DaemonDeps` and must stay exact (steps 1.11/1.11a reference them). */
+function withStore<T>(
+  root: string,
+  profile: string,
+  fn: (s: SqliteDeferredSlotStore) => T,
+): T {
+  const s = new SqliteDeferredSlotStore(canonicalDbPath(root, profile));
+  try {
+    return fn(s);
+  } finally {
+    s.close();
+  }
+}
+
+export function wireDaemonDeferredSlots(overrides: DaemonWireOverrides = {}): {
+  recordDeferral: (
+    profile: string,
+    entry: Omit<DeferredSlotRow, 'decidedAt' | 'notifiedAt'> & { decidedAt: string },
+  ) => void;
+  listForDate: (profile: string, runDate: string) => DeferredSlotRow[];
+  listUnnotifiedDatesBefore: (profile: string, beforeDate: string) => string[];
+  markNotified: (profile: string, runDate: string, notifiedAt: string) => void;
+} {
+  const root = overrides.root ?? resolveHome();
+  return {
+    recordDeferral: (profile, entry) =>
+      withStore(root, profile, (store) => store.recordIfAbsent(entry)),
+    listForDate: (profile, runDate) =>
+      withStore(root, profile, (store) => store.listForDate(runDate)),
+    listUnnotifiedDatesBefore: (profile, beforeDate) =>
+      withStore(root, profile, (store) => store.listUnnotifiedDatesBefore(beforeDate)),
+    markNotified: (profile, runDate, notifiedAt) =>
+      withStore(root, profile, (store) => store.markNotified(runDate, notifiedAt)),
   };
 }
