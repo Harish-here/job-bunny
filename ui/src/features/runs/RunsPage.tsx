@@ -209,6 +209,11 @@ export function RunsPage({ profile }: { profile: string }) {
           pollError={isError}
           lastUpdatedAt={runsQuery.dataUpdatedAt}
           onRetry={() => runsQuery.refetch()}
+          estimatedDurationMs={
+            detailQuery.data?.id === runningRow.id
+              ? detailQuery.data.estimatedDurationMs
+              : null
+          }
         />
       )}
       <div className="grid flex-1 grid-cols-[minmax(280px,360px)_1fr] overflow-hidden">

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   DeferredSlotRow,
+  GetRunResponse,
   RunDetail,
   RunEventRow,
   RunSummary,
@@ -542,5 +543,98 @@ describe('RunsPage', () => {
     // The runs list itself is unaffected — a deferred-slots failure must
     // not blank the whole pane it sits in.
     expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+  });
+
+  // Task 27 (blueprint step 1.6a): `estimatedDurationMs` threads from
+  // `RunsPage`'s already-fetched `detailQuery` into `LiveRunHeader`, but
+  // ONLY when the selected/detail-viewed run is the SAME run as the live
+  // one — never a stale or mismatched value from a different selection.
+  // `LiveRunHeader`'s own `catchup-banner-eta` text (rendered only for a
+  // `kind: 'catchup'`, heartbeat-fresh running row) is the simplest
+  // observable proxy per this file's existing convention of asserting on
+  // rendered DOM rather than spying on child components.
+  describe('estimatedDurationMs threading into LiveRunHeader (task 27)', () => {
+    const RUNNING_CATCHUP: RunSummary = {
+      id: 30,
+      date: todayLocalDate(),
+      timeDir: '09-00',
+      kind: 'catchup',
+      resumedFrom: null,
+      status: 'running',
+      startedAt: new Date(Date.now() - 5_000).toISOString(),
+      finishedAt: null,
+      heartbeatAt: new Date().toISOString(),
+      progress: null,
+      catchupSlots: ['09:00'],
+    };
+    const OLDER_ROW = ROWS[0] as RunSummary; // status: 'passed', id 2
+
+    it("passes the detail query's exact estimatedDurationMs when the selected run matches the running row", async () => {
+      const runningDetail: GetRunResponse = {
+        ...detailFor(RUNNING_CATCHUP),
+        estimatedDurationMs: 25 * 60_000,
+      };
+      // Running row first -> default-selected (RunsPage selects rows[0] on
+      // load), so detailQuery.data.id === runningRow.id from the start.
+      stubFetch({
+        rows: [RUNNING_CATCHUP, OLDER_ROW],
+        detailOverrides: { 30: runningDetail },
+      });
+      const { container } = renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('live-run-header')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(
+          container.querySelector('[data-qa="catchup-banner-eta"]'),
+        ).toHaveTextContent('~25 min left');
+      });
+      expect(
+        container.querySelector('[data-qa="catchup-banner-stop-unavailable"]'),
+      ).toHaveTextContent('about 25 min left');
+    });
+
+    it('passes null (not a stale/mismatched value) once the operator selects a different, non-running row', async () => {
+      const runningDetail: GetRunResponse = {
+        ...detailFor(RUNNING_CATCHUP),
+        estimatedDurationMs: 40 * 60_000,
+      };
+      // Running row is default-selected first, so the strip briefly shows
+      // its own real estimate — this is the exact "prior selection" the
+      // guard must not leak once the operator clicks elsewhere.
+      stubFetch({
+        rows: [RUNNING_CATCHUP, OLDER_ROW],
+        detailOverrides: { 30: runningDetail },
+      });
+      const { container } = renderPage();
+
+      await waitFor(() => {
+        expect(
+          container.querySelector('[data-qa="catchup-banner-eta"]'),
+        ).toHaveTextContent('~40 min left');
+      });
+
+      // Operator clicks an older, finished row while the catch-up run is
+      // still live in the background — selectedId now diverges from
+      // runningRow.id.
+      await waitFor(() => {
+        expect(screen.getAllByTestId('run-row')).toHaveLength(2);
+      });
+      await userEvent.click(screen.getAllByTestId('run-row')[1] as HTMLElement);
+
+      // The live header is still rendered (the catch-up run is still
+      // running) but must now show the no-estimate copy, never the stale
+      // 40-minute value from the earlier, matching selection.
+      expect(screen.getByTestId('live-run-header')).toBeInTheDocument();
+      await waitFor(() => {
+        const eta = container.querySelector('[data-qa="catchup-banner-eta"]');
+        expect(eta).toHaveTextContent(/elapsed/);
+        expect(eta).not.toHaveTextContent('40 min left');
+      });
+      expect(
+        container.querySelector('[data-qa="catchup-banner-stop-unavailable"]'),
+      ).toHaveTextContent('Runs to completion.');
+    });
   });
 });
