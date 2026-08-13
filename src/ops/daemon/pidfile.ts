@@ -57,6 +57,17 @@ export interface DaemonPidfile {
   // stamped (AC14 — at most one alert per daemon lifetime); this field guards a LOG LINE and must
   // be able to reset mid-lifetime, or a transient notifier misconfiguration would permanently
   // suppress a real, later no-notifier episode.
+  schemaDriftNotifyFailedAt: string | null; // DAEMON-LEVEL interval throttle for a sender FOUND
+  // but the send itself failing (missing token, a 401, a timed-out fetch — the twin of
+  // `schemaDriftNoNotifierWarnedAt`'s "no sender at all" case, same file, same shape). A hard
+  // latch like the other two would be wrong here: a failed send deliberately never stamps
+  // `schemaDriftNotifiedAt` (see `trackSchemaDriftAndNotify`'s doc comment), so the one guaranteed
+  // alert must stay retryable — but retrying every 30s tick forever reproduces the exact
+  // 2,880-lines/2,880-API-calls-a-day outage D2 exists to fix. So this field is a retry-interval
+  // gate, not a one-shot: stamped on a failed send, checked before the NEXT attempt (skip both the
+  // send and the log line while less than `SCHEMA_DRIFT_NOTIFY_RETRY_MS` has elapsed since it), and
+  // cleared back to null the moment a send succeeds, so a later, genuinely new failure attempts
+  // immediately rather than waiting out a stale interval.
 }
 
 export interface DaemonPidfileDeps {
@@ -108,6 +119,7 @@ export function acquireDaemonPidfile(
     degraded: [],
     schemaDriftNotifiedAt: null,
     schemaDriftNoNotifierWarnedAt: null,
+    schemaDriftNotifyFailedAt: null,
   };
   return deps.writeFileSyncExclusive(path, JSON.stringify(initial));
 }
@@ -164,9 +176,10 @@ function parseDegraded(value: unknown): DaemonDegradedEntry[] {
     .filter((entry): entry is DaemonDegradedEntry => entry !== undefined);
 }
 
-/** Shared parser for both nullable-ISO-timestamp latch fields
- * (`schemaDriftNotifiedAt`, `schemaDriftNoNotifierWarnedAt`) — identical
- * shape, identical "malformed/absent ⇒ null" fallback. */
+/** Shared parser for the nullable-ISO-timestamp latch/throttle fields
+ * (`schemaDriftNotifiedAt`, `schemaDriftNoNotifierWarnedAt`,
+ * `schemaDriftNotifyFailedAt`) — identical shape, identical
+ * "malformed/absent ⇒ null" fallback. */
 function parseNullableTimestamp(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
@@ -190,6 +203,9 @@ function parsePidfile(raw: string): DaemonPidfile | undefined {
         schemaDriftNotifiedAt: parseNullableTimestamp(parsed.schemaDriftNotifiedAt),
         schemaDriftNoNotifierWarnedAt: parseNullableTimestamp(
           parsed.schemaDriftNoNotifierWarnedAt,
+        ),
+        schemaDriftNotifyFailedAt: parseNullableTimestamp(
+          parsed.schemaDriftNotifyFailedAt,
         ),
       };
     }

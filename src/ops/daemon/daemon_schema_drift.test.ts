@@ -9,6 +9,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS } from './alert/index.ts';
 import { createDaemon } from './daemon.ts';
 import { readDaemonPidfile } from './pidfile.ts';
 import {
@@ -102,31 +103,65 @@ test('schema drift: the alphabetically-first scheduled profile without a notifie
   assert.deepEqual(notifyCalls, ['beta']);
 });
 
-test('schema drift: a notify that resolves false (delivery never happened) never stamps schemaDriftNotifiedAt, and the next qualifying tick retries', async () => {
+test('schema drift: a notify that resolves false (delivery never happened) never stamps schemaDriftNotifiedAt, retries are interval-throttled (not every tick), and a later success clears the throttle for immediate retry on the next failure', async () => {
   const notifyCalls: string[] = [];
+  let notifyResult = false;
   const scan = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['14:00'] }) },
     { [PROFILES_DIR]: ['harish'] },
   );
+  let nowMs = Date.parse('2026-08-13T10:00:00.000Z');
   const { deps, events } = baseDeps({
     scan,
     checkSchemaDrift: () => new Map([['harish', { schemaVersion: 8, buildVersion: 7 }]]),
     hasNotifierConfigured: async () => true,
     notify: async (profile) => {
       notifyCalls.push(profile);
-      return false; // e.g. a missing token, a 401, a timed-out fetch.
+      return notifyResult;
     },
+    now: () => new Date(nowMs),
   });
   const daemon = createDaemon(deps);
-  await daemon.tick();
-  await daemon.tick();
-  // Every qualifying tick retried — a stamped success would have
-  // suppressed the second call.
-  assert.equal(notifyCalls.length, 2);
+
+  // (a) N ticks (5, well over the "one per tick" naive count) inside the
+  // 1-hour retry interval produce exactly ONE send attempt and ONE log
+  // line — every tick after the first is throttled entirely (no attempt,
+  // no log), not just de-duplicated in the log.
+  for (let i = 0; i < 5; i++) {
+    await daemon.tick();
+    nowMs += 5 * 60_000; // 5 minutes apart — 25 minutes total, still < 1h.
+  }
+  assert.equal(notifyCalls.length, 1);
   assert.equal(readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifiedAt, null);
-  const failures = events.filter((e) => e.event === 'schema-drift-notify-failed');
-  assert.equal(failures.length, 2);
+  assert.notEqual(
+    readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifyFailedAt,
+    null,
+  );
+  let failures = events.filter((e) => e.event === 'schema-drift-notify-failed');
+  assert.equal(failures.length, 1);
   assert.equal(failures[0]?.level, 'warn');
+
+  // (b) Advancing PAST the retry interval produces a SECOND attempt.
+  nowMs += SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS + 1;
+  await daemon.tick();
+  assert.equal(notifyCalls.length, 2);
+  failures = events.filter((e) => e.event === 'schema-drift-notify-failed');
+  assert.equal(failures.length, 2);
+
+  // (c) A SUCCESSFUL send clears schemaDriftNotifyFailedAt, so a later
+  // failure attempts immediately instead of waiting out a stale interval.
+  notifyResult = true;
+  nowMs += SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS + 1;
+  await daemon.tick();
+  assert.equal(notifyCalls.length, 3);
+  assert.notEqual(
+    readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifiedAt,
+    null,
+  );
+  assert.equal(
+    readDaemonPidfile(deps.root, deps.pidfile)?.schemaDriftNotifyFailedAt,
+    null,
+  );
 });
 
 test('schema drift: a notify that resolves true stamps schemaDriftNotifiedAt and logs schema-drift-notify-sent', async () => {

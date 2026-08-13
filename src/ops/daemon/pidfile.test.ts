@@ -236,6 +236,31 @@ test('parsePidfile: an old-shape pidfile with no degraded/schemaDriftNotifiedAt 
   const stored = readDaemonPidfile(ROOT, deps);
   assert.deepEqual(stored?.degraded, []);
   assert.equal(stored?.schemaDriftNotifiedAt, null);
+  // Absent key ⇒ null, same fallback as the other nullable-timestamp
+  // latch/throttle fields — direct assertion (not transitive-only via the
+  // round-trip test below), since `parsePidfile` builds its return as an
+  // explicit field list where a field added to the interface alone is
+  // silently dropped on the next read.
+  assert.equal(stored?.schemaDriftNoNotifierWarnedAt, null);
+  assert.equal(stored?.schemaDriftNotifyFailedAt, null);
+});
+
+test('parsePidfile: a malformed schemaDriftNoNotifierWarnedAt/schemaDriftNotifyFailedAt (non-string) parses to null, not trusted', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+      schemaDriftNoNotifierWarnedAt: 12345,
+      schemaDriftNotifyFailedAt: { not: 'a string' },
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.equal(stored?.schemaDriftNoNotifierWarnedAt, null);
+  assert.equal(stored?.schemaDriftNotifyFailedAt, null);
 });
 
 test('parsePidfile: a malformed degraded entry (missing a required field) is dropped, not trusted', () => {
@@ -254,7 +279,7 @@ test('parsePidfile: a malformed degraded entry (missing a required field) is dro
   assert.deepEqual(stored?.degraded, []);
 });
 
-test('updateDaemonPidfile + readDaemonPidfile: degraded and schemaDriftNotifiedAt round-trip through a write/read cycle', () => {
+test('updateDaemonPidfile + readDaemonPidfile: degraded, schemaDriftNotifiedAt, schemaDriftNoNotifierWarnedAt, and schemaDriftNotifyFailedAt round-trip through a write/read cycle', () => {
   const deps = fakeDeps();
   acquireDaemonPidfile(ROOT, 1000, deps);
   updateDaemonPidfile(
@@ -270,6 +295,8 @@ test('updateDaemonPidfile + readDaemonPidfile: degraded and schemaDriftNotifiedA
         },
       ],
       schemaDriftNotifiedAt: '2026-08-13T10:05:00.000Z',
+      schemaDriftNoNotifierWarnedAt: '2026-08-13T10:06:00.000Z',
+      schemaDriftNotifyFailedAt: '2026-08-13T10:07:00.000Z',
     }),
     deps,
   );
@@ -283,6 +310,14 @@ test('updateDaemonPidfile + readDaemonPidfile: degraded and schemaDriftNotifiedA
     },
   ]);
   assert.equal(stored?.schemaDriftNotifiedAt, '2026-08-13T10:05:00.000Z');
+  // Direct assertions on the two fields the transitive-only coverage gap
+  // was about: `parsePidfile` builds its return as an explicit field
+  // list, so a field added to the `DaemonPidfile` interface alone (with no
+  // matching line in that return construction) is silently dropped on the
+  // very next read — this is the class of bug the direct round-trip catches
+  // and a transitive test (e.g. via `daemon.ts`) would not reliably.
+  assert.equal(stored?.schemaDriftNoNotifierWarnedAt, '2026-08-13T10:06:00.000Z');
+  assert.equal(stored?.schemaDriftNotifyFailedAt, '2026-08-13T10:07:00.000Z');
 });
 
 test('defaultDaemonPidfileDeps: builds a working real-fs deps object shape', () => {

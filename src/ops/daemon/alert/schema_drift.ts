@@ -81,6 +81,19 @@ export function degradedReasonText(entry: DaemonDegradedEntry): string {
   return `the database schema (v${entry.schemaVersion}) is newer than the running daemon's build (v${entry.buildVersion}). This happens after an update that changes the schema.`;
 }
 
+/** Minimum gap between consecutive send ATTEMPTS once a sender exists but a
+ * prior attempt failed (missing token, a 401, a timed-out fetch) — the
+ * `schemaDriftNotifyFailedAt` throttle in `trackSchemaDriftAndNotify` below.
+ * A failed send deliberately never stamps `schemaDriftNotifiedAt` (the one
+ * guaranteed alert must stay retryable — see that field's own doc comment),
+ * so without this gate every 30s tick would re-attempt forever: the exact
+ * 2,880-lines/2,880-API-calls-a-day outage D2 exists to fix, just shifted
+ * one branch over (sender found, send failed, vs. no sender at all). One
+ * hour bounds worst-case retries to ~24/day while still landing the alert
+ * within an hour of the underlying problem (e.g. a revoked token) being
+ * fixed. */
+export const SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS = 60 * 60_000;
+
 /** Phase 0 (D2 self-heal): (1) records every newly-degraded profile
  * (present in `schemaDrift` this tick, not yet in the pidfile's
  * `degraded` array) — accurate detection for board/doctor drill-down,
@@ -166,17 +179,38 @@ export async function trackSchemaDriftAndNotify(
     );
   }
 
+  // A sender was found but a PRIOR attempt failed: throttle re-attempts to
+  // at most once per `SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS`, or this branch
+  // hammers the sender's notify() (and logs a warn line) every 30s tick
+  // forever — the exact repeated-line/repeated-API-call shape D2 exists to
+  // eliminate, just on the "sender found, send failed" twin of the
+  // no-notifier branch above. Skip BOTH the send attempt and the log line
+  // entirely while still within the interval — not just the log line.
+  if (after.schemaDriftNotifyFailedAt !== null) {
+    const elapsed = now.getTime() - Date.parse(after.schemaDriftNotifyFailedAt);
+    if (Number.isFinite(elapsed) && elapsed <= SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS) {
+      return;
+    }
+  }
+
   const text = composeSchemaDriftAlertText(after.degraded);
   const sent = await deps.notify(sender, { kind: 'alert', profile: sender, text });
   if (!sent) {
     // Delivery never happened (missing token, a 401, a timed-out fetch —
     // see `wireDaemonNotifier`'s doc comment): leave `schemaDriftNotifiedAt`
-    // null so the NEXT qualifying tick retries, instead of permanently
+    // null so a LATER qualifying tick retries, instead of permanently
     // suppressing the one guaranteed alert on a send that never landed.
+    // Stamp `schemaDriftNotifyFailedAt` so that retry is interval-bounded
+    // (see its doc comment in pidfile.ts) rather than every-tick.
     deps.log(
       'schema-drift-notify-failed',
       { profile: sender, degraded: after.degraded.map((d) => d.profile) },
       'warn',
+    );
+    updateDaemonPidfile(
+      deps.root,
+      (current) => ({ ...current, schemaDriftNotifyFailedAt: now.toISOString() }),
+      deps.pidfile,
     );
     return;
   }
@@ -184,7 +218,11 @@ export async function trackSchemaDriftAndNotify(
   deps.log('schema-drift-notify-sent', { profile: sender }, 'info');
   updateDaemonPidfile(
     deps.root,
-    (current) => ({ ...current, schemaDriftNotifiedAt: now.toISOString() }),
+    (current) => ({
+      ...current,
+      schemaDriftNotifiedAt: now.toISOString(),
+      schemaDriftNotifyFailedAt: null,
+    }),
     deps.pidfile,
   );
 }
