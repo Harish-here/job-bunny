@@ -36,7 +36,7 @@ export function JobPage({ profile, id }: { profile: string; id: string }) {
   const jobQuery = useJob(profile, id);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       <div className="border-b p-3">
         <Button
           type="button"

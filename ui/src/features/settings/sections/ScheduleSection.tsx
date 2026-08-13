@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Circle, CircleAlert, DatabaseX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   formatInstant,
@@ -8,6 +9,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { Switch } from '../../../components/ui/switch';
 import { daemonQuery } from '../../wizard/wizard.queries';
 import { DocFormGate } from '../DocFormGate';
@@ -17,6 +19,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DEFAULT_WEEKDAYS = [1, 2, 3, 4, 5];
 const DEFAULT_GRACE_MINUTES = 90;
+const RESTART_COMMAND = 'jobbunny serve stop && jobbunny serve start';
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
@@ -27,6 +30,21 @@ function asNumberArray(value: unknown): number[] {
   return Array.isArray(value)
     ? value.filter((v): v is number => typeof v === 'number')
     : [];
+}
+
+/** mockup.html:717's terse "Degraded — schema vN > daemon build vM" form,
+ * derived from `degradedReason`'s two `(vN)` version markers
+ * (`degradedReasonText` in `ops/daemon/alert/schema_drift.ts` always emits
+ * "...schema (vN) is newer than...build (vM)...", in that order) — UI-side
+ * only, so the shared `degradedReason` string `jobbunny doctor` also reads
+ * stays untouched (blueprint.md §1 vs §4 step 0.5's contradiction; §1 and
+ * the mockup win, per this task's brief). Falls back to leading with the
+ * status word alone if the two markers are ever missing, rather than
+ * silently rendering nothing. */
+function shortDegradedLabel(reason: string): string {
+  const match = reason.match(/\(v(\d+)\).*?\(v(\d+)\)/);
+  if (!match) return `Degraded — ${reason}`;
+  return `Degraded — schema v${match[1]} > daemon build v${match[2]}`;
 }
 
 // Schedule → profile.json's `schedule` block only. "Next run" reads
@@ -101,6 +119,10 @@ export function ScheduleSection({ profile }: { profile: string }) {
       : 'Next run (saved): no upcoming run';
   const nextRunTitle =
     entry?.nextRunAt != null ? formatInstantTitle(entry.nextRunAt, now) : undefined;
+  const lastTickSeconds =
+    daemon.data?.lastTickAt != null
+      ? Math.round((Date.now() - Date.parse(daemon.data.lastTickAt)) / 1000)
+      : null;
 
   return (
     <DocFormGate
@@ -117,6 +139,86 @@ export function ScheduleSection({ profile }: { profile: string }) {
         >
           {nextRunLabel}
         </p>
+        <div data-qa="schedule-daemon-status" data-testid="schedule-daemon-status">
+          {daemon.isLoading ? (
+            <Skeleton
+              data-qa="schedule-daemon-status-loading"
+              data-testid="schedule-daemon-status-loading"
+              className="h-8 w-40"
+            />
+          ) : daemon.isError ? (
+            <div
+              data-qa="schedule-daemon-status-error"
+              data-testid="schedule-daemon-status-error"
+              className="flex items-center gap-2 text-sm text-destructive"
+            >
+              <DatabaseX className="size-4 shrink-0" />
+              <span>Can't reach the daemon API</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => daemon.refetch()}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : entry?.degraded ? (
+            <div
+              data-qa="schedule-daemon-status-degraded"
+              data-testid="schedule-daemon-status-degraded"
+              className="flex items-center gap-2"
+            >
+              <CircleAlert className="size-4 shrink-0 text-attention-strong" />
+              <div>
+                <span className="text-sm text-attention-strong font-medium">
+                  {shortDegradedLabel(entry.degradedReason ?? '')}
+                </span>
+                <p className="mt-0.5 text-xs text-attention-strong">
+                  Fix: <code className="font-mono">{RESTART_COMMAND}</code>
+                </p>
+              </div>
+            </div>
+          ) : daemon.data?.state === 'stopped' ? (
+            <div
+              data-qa="schedule-daemon-status-stopped"
+              data-testid="schedule-daemon-status-stopped"
+              className="flex items-center gap-2"
+            >
+              <Circle className="size-2.5 shrink-0 fill-current text-destructive" />
+              <span className="text-sm text-destructive">
+                Not running — start it:{' '}
+                <code className="font-mono text-muted-foreground">
+                  jobbunny serve start
+                </code>
+              </span>
+            </div>
+          ) : daemon.data?.state === 'stale' ? (
+            <div
+              data-qa="schedule-daemon-status-stale"
+              data-testid="schedule-daemon-status-stale"
+              className="flex items-center gap-2"
+            >
+              <CircleAlert className="size-4 shrink-0 text-attention-strong" />
+              <span className="text-sm text-attention-strong">
+                Wedged
+                {lastTickSeconds != null ? ` · last tick ${lastTickSeconds}s ago` : ''}
+              </span>
+            </div>
+          ) : (
+            <div
+              data-qa="schedule-daemon-status-healthy"
+              data-testid="schedule-daemon-status-healthy"
+              className="flex items-center gap-2"
+            >
+              <Circle className="size-2.5 shrink-0 fill-current text-success-strong" />
+              <span className="text-sm">
+                Running
+                {lastTickSeconds != null ? ` · last tick ${lastTickSeconds}s ago` : ''}
+              </span>
+            </div>
+          )}
+        </div>
         <Field>
           <div className="flex items-center justify-between gap-2">
             <FieldLabel>Enabled</FieldLabel>

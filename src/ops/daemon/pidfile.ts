@@ -27,12 +27,47 @@ export interface DaemonInFlight {
   startedAt: string; // ISO 8601
 }
 
+export interface DaemonDegradedEntry {
+  profile: string;
+  schemaVersion: number;
+  buildVersion: number;
+  detectedAt: string; // ISO 8601
+}
+
 export interface DaemonPidfile {
   pid: number;
   startedAt: string; // ISO 8601
   lastTickAt: string; // ISO 8601
   inFlight?: DaemonInFlight;
   attempts: DaemonAttempt[];
+  degraded: DaemonDegradedEntry[]; // per-profile detection — today's + any still-unresolved prior entries
+  schemaDriftNotifiedAt: string | null; // DAEMON-LEVEL, NOT per-profile — guards the single T6 send
+  // (step 0.6). Kept as a separate field from `degraded` on purpose: `degraded` answers "which
+  // profiles are affected" (board/doctor drill-down, step 0.8/0.9); this field answers "has the
+  // one allowed notification already gone out" (AC14) — conflating the two would either re-notify
+  // per newly-degraded profile (violates AC14) or suppress board/doctor detail to match the
+  // notification count (wrong information to withhold).
+  schemaDriftNoNotifierWarnedAt: string | null; // DAEMON-LEVEL latch for the "no notifier
+  // configured for any scheduled profile" skip warning (AC14/R15) — same precedent as
+  // `schemaDriftNotifiedAt`: stamped the first tick the skip fires, checked before logging again,
+  // so a contiguous degraded-with-no-notifier episode logs once instead of every 30s tick forever.
+  // Cleared back to null the moment a tick DOES find a sender (the episode is over), so a later,
+  // genuinely new no-notifier episode logs again. Deliberately its own field, not reused from
+  // `schemaDriftNotifiedAt`: that field guards the one delivered ALERT and is never cleared once
+  // stamped (AC14 — at most one alert per daemon lifetime); this field guards a LOG LINE and must
+  // be able to reset mid-lifetime, or a transient notifier misconfiguration would permanently
+  // suppress a real, later no-notifier episode.
+  schemaDriftNotifyFailedAt: string | null; // DAEMON-LEVEL interval throttle for a sender FOUND
+  // but the send itself failing (missing token, a 401, a timed-out fetch — the twin of
+  // `schemaDriftNoNotifierWarnedAt`'s "no sender at all" case, same file, same shape). A hard
+  // latch like the other two would be wrong here: a failed send deliberately never stamps
+  // `schemaDriftNotifiedAt` (see `trackSchemaDriftAndNotify`'s doc comment), so the one guaranteed
+  // alert must stay retryable — but retrying every 30s tick forever reproduces the exact
+  // 2,880-lines/2,880-API-calls-a-day outage D2 exists to fix. So this field is a retry-interval
+  // gate, not a one-shot: stamped on a failed send, checked before the NEXT attempt (skip both the
+  // send and the log line while less than `SCHEMA_DRIFT_NOTIFY_RETRY_MS` has elapsed since it), and
+  // cleared back to null the moment a send succeeds, so a later, genuinely new failure attempts
+  // immediately rather than waiting out a stale interval.
 }
 
 export interface DaemonPidfileDeps {
@@ -81,6 +116,10 @@ export function acquireDaemonPidfile(
     startedAt: deps.now().toISOString(),
     lastTickAt: deps.now().toISOString(),
     attempts: [],
+    degraded: [],
+    schemaDriftNotifiedAt: null,
+    schemaDriftNoNotifierWarnedAt: null,
+    schemaDriftNotifyFailedAt: null,
   };
   return deps.writeFileSyncExclusive(path, JSON.stringify(initial));
 }
@@ -106,6 +145,45 @@ function parseInFlight(value: unknown): DaemonInFlight | undefined {
   return undefined;
 }
 
+/** Shape-checks a single `degraded` entry: mirrors `parseInFlight` — every
+ * field must match its expected type or the entry is dropped, not trusted. */
+function parseDegradedEntry(value: unknown): DaemonDegradedEntry | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Partial<DaemonDegradedEntry>;
+  if (
+    typeof candidate.profile === 'string' &&
+    typeof candidate.schemaVersion === 'number' &&
+    typeof candidate.buildVersion === 'number' &&
+    typeof candidate.detectedAt === 'string'
+  ) {
+    return {
+      profile: candidate.profile,
+      schemaVersion: candidate.schemaVersion,
+      buildVersion: candidate.buildVersion,
+      detectedAt: candidate.detectedAt,
+    };
+  }
+  return undefined;
+}
+
+/** A single malformed entry never rejects the whole array — same posture
+ * as `parseInFlight`'s "malformed ⇒ drop, not trust." A non-array value
+ * (or an absent one) is treated as an empty list, not an error. */
+function parseDegraded(value: unknown): DaemonDegradedEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => parseDegradedEntry(entry))
+    .filter((entry): entry is DaemonDegradedEntry => entry !== undefined);
+}
+
+/** Shared parser for the nullable-ISO-timestamp latch/throttle fields
+ * (`schemaDriftNotifiedAt`, `schemaDriftNoNotifierWarnedAt`,
+ * `schemaDriftNotifyFailedAt`) — identical shape, identical
+ * "malformed/absent ⇒ null" fallback. */
+function parseNullableTimestamp(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
 function parsePidfile(raw: string): DaemonPidfile | undefined {
   try {
     const parsed = JSON.parse(raw) as Partial<DaemonPidfile>;
@@ -121,6 +199,14 @@ function parsePidfile(raw: string): DaemonPidfile | undefined {
         lastTickAt: parsed.lastTickAt,
         inFlight: parseInFlight(parsed.inFlight),
         attempts: parsed.attempts as DaemonAttempt[],
+        degraded: parseDegraded(parsed.degraded),
+        schemaDriftNotifiedAt: parseNullableTimestamp(parsed.schemaDriftNotifiedAt),
+        schemaDriftNoNotifierWarnedAt: parseNullableTimestamp(
+          parsed.schemaDriftNoNotifierWarnedAt,
+        ),
+        schemaDriftNotifyFailedAt: parseNullableTimestamp(
+          parsed.schemaDriftNotifyFailedAt,
+        ),
       };
     }
     return undefined; // malformed shape — treated the same as unreadable.

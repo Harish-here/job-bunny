@@ -148,6 +148,8 @@ export interface DaemonProfileSchedule {
   profile: string;
   enabled: boolean;
   nextRunAt: string | null;
+  degraded: boolean;
+  degradedReason: string | null;
 }
 
 export interface DaemonStatus {

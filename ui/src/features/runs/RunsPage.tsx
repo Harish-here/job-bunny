@@ -142,7 +142,7 @@ export function RunsPage({ profile }: { profile: string }) {
   const events = eventsQuery.data?.rows ?? [];
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b p-3">
         <h1 className="text-lg font-semibold font-heading">Runs</h1>
         <div className="flex items-center gap-3">

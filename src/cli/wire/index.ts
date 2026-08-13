@@ -20,9 +20,12 @@ export type { ConfigLoaderDeps } from './config.ts';
 export { loadFilterConfig, loadPipelineConfig } from './config.ts';
 export type { DaemonWireOverrides } from './daemon.ts';
 export {
+  wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
+  wireDaemonNotifier,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
+  wireDaemonSchemaGuard,
 } from './daemon.ts';
 export type { MigrateWire } from './migrate.ts';
 export { wireMigrate } from './migrate.ts';

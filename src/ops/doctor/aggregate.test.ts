@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DoctorCheck, DoctorFinding } from '../../ports/doctor.ts';
 import type { DaemonPidfileDeps } from '../daemon/index.ts';
-import { acquireDaemonPidfile } from '../daemon/index.ts';
+import { acquireDaemonPidfile, updateDaemonPidfile } from '../daemon/index.ts';
 import {
   claudeOnPathCheck,
   configLegacyDivergenceCheck,
@@ -67,6 +67,64 @@ test('daemonLivenessCheck: a six-minute-old heartbeat on a live pid warns "wedge
   }).run();
   assert.equal(finding.status, 'warn');
   assert.match(finding.detail, /wedged/);
+});
+
+test('daemonLivenessCheck: a degraded profile warns with the schema versions and the remedy', async () => {
+  const now = Date.parse('2026-07-27T14:04:00.000Z');
+  const daemonPidfile = fakeDaemonPidfileDeps(now);
+  acquireDaemonPidfile('/fake/root', 1000, daemonPidfile);
+  updateDaemonPidfile(
+    '/fake/root',
+    (current) => ({
+      ...current,
+      degraded: [
+        {
+          profile: 'harish',
+          schemaVersion: 8,
+          buildVersion: 7,
+          detectedAt: '2026-08-13T10:00:00.000Z',
+        },
+      ],
+    }),
+    daemonPidfile,
+  );
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'warn');
+  assert.match(finding.detail, /v8/);
+  assert.match(finding.detail, /v7/);
+  assert.match(finding.detail, /jobbunny serve stop/);
+  assert.match(finding.detail, /jobbunny serve start/);
+});
+
+test('daemonLivenessCheck: a degraded entry for a DIFFERENT profile does not warn this profile', async () => {
+  const now = Date.parse('2026-07-27T14:04:00.000Z');
+  const daemonPidfile = fakeDaemonPidfileDeps(now);
+  acquireDaemonPidfile('/fake/root', 1000, daemonPidfile);
+  updateDaemonPidfile(
+    '/fake/root',
+    (current) => ({
+      ...current,
+      degraded: [
+        {
+          profile: 'rajni',
+          schemaVersion: 8,
+          buildVersion: 7,
+          detectedAt: '2026-08-13T10:00:00.000Z',
+        },
+      ],
+    }),
+    daemonPidfile,
+  );
+  const finding = await daemonLivenessCheck({
+    profileName: 'harish',
+    root: '/fake/root',
+    daemonPidfile,
+  }).run();
+  assert.equal(finding.status, 'ok');
 });
 
 // aggregate.ts composes each check's file path with `path.join(root, ...)`,

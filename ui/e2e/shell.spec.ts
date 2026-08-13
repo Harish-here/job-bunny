@@ -17,6 +17,7 @@
  * suite proves.
  */
 import { expect, type Page, test } from '@playwright/test';
+import { stubDaemonStatus } from './run-fixtures';
 
 async function pinProfile(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -125,4 +126,48 @@ test('shell: the mascot renders with a named state', async ({ page }) => {
 
   const name = await mascot.getAttribute('aria-label');
   expect(name).toBeTruthy();
+});
+
+test('shell: a degraded daemon shows the global banner with cause, remedy, and a working copy button', async ({
+  page,
+}) => {
+  const degradedReason =
+    "the database schema (v8) is newer than the running daemon's build (v7). This happens after an update that changes the schema.";
+  await stubDaemonStatus(page, [
+    {
+      profile: 'rajni',
+      enabled: true,
+      nextRunAt: null,
+      degraded: true,
+      degradedReason,
+    },
+  ]);
+  // Chromium denies `clipboard-write` by default in a fresh Playwright
+  // context (unlike a real user's browser, which grants it transparently
+  // on a same-origin, user-gesture-triggered write) — without this grant
+  // `handleCopy`'s `navigator.clipboard.writeText` throws `NotAllowedError`
+  // and the button's label never flips, independent of any app bug. This
+  // is a permission grant, not a `clipboard.readText()` assertion, so it
+  // doesn't reintroduce the pattern this test's "Resolved" note avoids.
+  await page.context().grantPermissions(['clipboard-write'], {
+    origin: 'http://127.0.0.1:4199',
+  });
+  await page.goto('/#/triage');
+
+  const banner = page.locator('[data-qa="daemon-degraded-banner"]');
+  await expect(banner).toBeVisible();
+  // A persistent status region (ux-notes.md §9), not a bare div — the
+  // fallback channel that must still work once the once-per-daemon-lifetime
+  // Telegram alert has already been consumed.
+  await expect(page.getByRole('status')).toContainText(degradedReason);
+  await expect(page.locator('[data-qa="daemon-degraded-cause"]')).toHaveText(
+    `Cause: ${degradedReason}`,
+  );
+  await expect(page.locator('[data-qa="daemon-degraded-command"]')).toContainText(
+    'jobbunny serve stop && jobbunny serve start',
+  );
+
+  const copyButton = page.locator('[data-qa="daemon-degraded-copy-button"]');
+  await copyButton.click();
+  await expect(copyButton).toHaveText(/Copied/);
 });

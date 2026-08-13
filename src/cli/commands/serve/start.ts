@@ -23,6 +23,7 @@ import {
 } from '../../../ops/daemon/logs/index.ts';
 import { createDaemonLogger } from '../../../ops/observability/index.ts';
 import { computeRunCapMs } from '../../../pipeline/stages/budgets.ts';
+import { wireDaemonNotifier } from '../../wire/index.ts';
 import { LEGACY_PLIST_REGEX, migrationCleanupBlock, type ServeDeps } from './index.ts';
 
 /** One 30s tick plus a 5s margin (D22/A15.4) — see `isDaemonPidfileStale`'s
@@ -133,7 +134,17 @@ export async function runServeStartParent(deps: ServeDeps): Promise<number> {
  * verify the wiring (in particular `readIntents`/`claimIntent`/
  * `attachIntentRun`, threaded through unchanged) without invoking
  * `runServeStartChild` itself, which installs real `SIGTERM`/`SIGINT`
- * handlers that call `process.exit(0)`. */
+ * handlers that call `process.exit(0)`.
+ *
+ * `notify` is deliberately REBUILT here (via `wireDaemonNotifier`) rather
+ * than passed straight through from `deps.notify` — `ServeDeps.notify`'s
+ * default (`defaultServeDeps()`) is wired with a no-op `log`, since at
+ * that point in wiring the daemon child's real logger doesn't exist yet.
+ * Rebuilding it here, against this call's own `log`, means a failed T6
+ * delivery (missing token, a 401, a timed-out fetch) actually lands a
+ * `schema-drift-notify-failed` line in `daemon.log` instead of vanishing
+ * into a no-op — the exact silent-failure mode this wiring exists to
+ * close (see `schema_drift.ts`'s own doc comment). */
 export function buildDaemonDeps(
   deps: ServeDeps,
   spawnRun: DaemonDeps['spawnRun'],
@@ -146,6 +157,12 @@ export function buildDaemonDeps(
     pidfile: deps.pidfile,
     spawnRun,
     readRunHistory: deps.readRunHistory,
+    checkSchemaDrift: deps.checkSchemaDrift,
+    notify: wireDaemonNotifier({
+      root: deps.root,
+      log: (e) => log('schema-drift-notify-failed', { detail: e }, 'warn'),
+    }),
+    hasNotifierConfigured: deps.hasNotifierConfigured,
     readIntents: deps.readIntents,
     claimIntent: deps.claimIntent,
     attachIntentRun: deps.attachIntentRun,

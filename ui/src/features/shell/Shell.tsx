@@ -13,6 +13,7 @@ import { SettingsPage } from '../settings/SettingsPage';
 import { TrackerPage } from '../tracker/TrackerPage';
 import { TriagePage } from '../triage/TriagePage';
 import { WizardPage } from '../wizard/WizardPage';
+import { DaemonDegradedBanner } from './DaemonDegradedBanner';
 import { pickMascotState } from './mascotState';
 import { Sidebar } from './Sidebar';
 import { useAppInfo } from './useAppInfo';
@@ -144,22 +145,25 @@ export function Shell() {
   }
 
   return (
-    <div className="flex">
-      <Sidebar
-        route={route}
-        profile={profile}
-        profiles={profiles}
-        version={appInfo.data?.version}
-        collapsed={collapsed}
-        mascot={mascot}
-        runControl={control}
-        onChoose={setStored}
-        onNavigate={navigate}
-        onToggleCollapsed={() => setCollapsed(!collapsed)}
-      />
-      <main className="flex-1">
-        <Page route={route} profile={profile} />
-      </main>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <DaemonDegradedBanner profile={profile} />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          route={route}
+          profile={profile}
+          profiles={profiles}
+          version={appInfo.data?.version}
+          collapsed={collapsed}
+          mascot={mascot}
+          runControl={control}
+          onChoose={setStored}
+          onNavigate={navigate}
+          onToggleCollapsed={() => setCollapsed(!collapsed)}
+        />
+        <main className="flex-1">
+          <Page route={route} profile={profile} />
+        </main>
+      </div>
     </div>
   );
 }

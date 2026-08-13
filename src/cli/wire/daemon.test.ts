@@ -5,10 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
+import type { NotifyEvent } from '../../ports/notifier.ts';
 import {
+  wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
+  wireDaemonNotifier,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
+  wireDaemonSchemaGuard,
 } from './daemon.ts';
 
 // This test file may not import `src/adapters/**` directly (no test-file
@@ -211,6 +215,31 @@ test('wireDaemonScheduleConfig: a profile with a valid profile.json and no db st
   assert.equal(await readProfileJson(join(root, 'profiles'), 'scancfg-ok'), raw);
 });
 
+// --- wireDaemonSchemaGuard ---
+
+test('wireDaemonSchemaGuard: flags a profile whose schema version exceeds LATEST_SCHEMA_VERSION, leaves a current-version profile out, and skips a profile with no db file at all', async () => {
+  const newerDbPath = await seedProfileDir('newer');
+  const currentDbPath = await seedProfileDir('current');
+  {
+    const db = new DatabaseSync(newerDbPath);
+    db.exec('PRAGMA user_version = 9');
+    db.close();
+  }
+  {
+    const db = new DatabaseSync(currentDbPath);
+    // LATEST_SCHEMA_VERSION hardcoded as 7 here: this test file may not
+    // import src/adapters/** (only daemon.ts itself is carved out — see
+    // this file's own header comment).
+    db.exec('PRAGMA user_version = 7');
+    db.close();
+  }
+  const checkSchemaDrift = wireDaemonSchemaGuard({ root });
+  const result = checkSchemaDrift(['newer', 'current', 'nodb']);
+  assert.deepEqual([...result.keys()], ['newer']);
+  assert.deepEqual(result.get('newer'), { schemaVersion: 9, buildVersion: 7 });
+  assert.equal(existsSync(join(root, 'profiles', 'nodb', 'data', 'jobbunny.db')), false);
+});
+
 // --- wireDaemonIntents ---
 //
 // `readIntents` scans the WHOLE `<root>/profiles` directory, so unlike
@@ -362,4 +391,120 @@ test('wireDaemonIntents.attachIntentRun: leaves claimed_run_id null when the onl
 
     assert.equal(readClaimedRunId(dbPath, intentId), null);
   });
+});
+
+// --- wireDaemonNotifier / wireDaemonHasNotifierConfigured ---
+
+test('wireDaemonNotifier: a profile with no profile.json at all degrades to a no-op, never throws, resolves false', async () => {
+  const notify = wireDaemonNotifier({ root });
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-ghost', {
+      kind: 'alert',
+      profile: 'notify-ghost',
+      text: 'hi',
+    });
+  });
+  assert.equal(result, false);
+});
+
+test('wireDaemonNotifier: a malformed profile.json degrades to a no-op, never throws, resolves false', async () => {
+  await mkdir(join(root, 'profiles', 'notify-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-broken', 'profile.json'),
+    'not valid json {{{',
+  );
+  const notify = wireDaemonNotifier({ root });
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-broken', {
+      kind: 'alert',
+      profile: 'notify-broken',
+      text: 'hi',
+    });
+  });
+  assert.equal(result, false);
+});
+
+test('wireDaemonNotifier: a valid config sends the event via the configured notifier and resolves true', async () => {
+  await mkdir(join(root, 'profiles', 'notify-ok'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-ok', 'profile.json'),
+    JSON.stringify({
+      connector: 'sqlite',
+      notifiers: ['fake'],
+      settings: { fake: { chatId: 1 } },
+    }),
+  );
+  const sent: NotifyEvent[] = [];
+  const notify = wireDaemonNotifier({
+    root,
+    buildNotifier: (name) => ({
+      name,
+      send: async (event) => {
+        sent.push(event);
+      },
+    }),
+  });
+  const event: NotifyEvent = {
+    kind: 'alert',
+    profile: 'notify-ok',
+    text: 'daemon degraded',
+  };
+  const result = await notify('notify-ok', event);
+  assert.deepEqual(sent, [event]);
+  assert.equal(result, true);
+});
+
+test('wireDaemonNotifier: a notifier send rejection is logged via the injected log callback, never thrown, resolves false', async () => {
+  await mkdir(join(root, 'profiles', 'notify-fails'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-fails', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: ['fake'], settings: {} }),
+  );
+  const logs: string[] = [];
+  const notify = wireDaemonNotifier({
+    root,
+    buildNotifier: (name) => ({
+      name,
+      send: async () => {
+        throw new Error('boom');
+      },
+    }),
+    log: (event) => logs.push(event),
+  });
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-fails', {
+      kind: 'alert',
+      profile: 'notify-fails',
+      text: 'x',
+    });
+  });
+  assert.equal(result, false);
+  assert.equal(logs.length, 1);
+  assert.match(logs.at(0) ?? '', /boom/);
+});
+
+test('wireDaemonHasNotifierConfigured: true for a profile with a configured notifier; false for none configured, and false for a malformed profile.json', async () => {
+  await mkdir(join(root, 'profiles', 'hasnotif-yes'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-yes', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: ['telegram'] }),
+  );
+  await mkdir(join(root, 'profiles', 'hasnotif-no'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-no', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: [] }),
+  );
+  await mkdir(join(root, 'profiles', 'hasnotif-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-broken', 'profile.json'),
+    'not valid json',
+  );
+  const hasNotifierConfigured = wireDaemonHasNotifierConfigured({ root });
+  assert.equal(await hasNotifierConfigured('hasnotif-yes'), true);
+  assert.equal(await hasNotifierConfigured('hasnotif-no'), false);
+  assert.equal(await hasNotifierConfigured('hasnotif-broken'), false);
+  assert.equal(await hasNotifierConfigured('hasnotif-ghost'), false);
 });

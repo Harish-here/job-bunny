@@ -9,6 +9,7 @@ import type {
   DoctorReport,
   DoctorStatus,
 } from '../../ports/doctor.ts';
+import { degradedReasonText } from '../daemon/alert/index.ts';
 import {
   defaultDaemonPidfileDeps,
   HEARTBEAT_STALE_MS,
@@ -198,6 +199,16 @@ export function daemonLivenessCheck(opts: CoreCheckOpts): DoctorCheck {
             `${Math.round(HEARTBEAT_STALE_MS / 60_000)} minutes. A machine that just woke ` +
             'from sleep can trigger this transiently for up to one tick interval; this ' +
             'check is advisory and deliberately does not re-check before reporting.',
+        };
+      }
+      const degradedEntry = file.degraded.find((d) => d.profile === opts.profileName);
+      if (degradedEntry) {
+        return {
+          check: name,
+          status: 'warn',
+          detail:
+            `daemon degraded for this profile: ${degradedReasonText(degradedEntry)} ` +
+            'Restart the daemon: jobbunny serve stop && jobbunny serve start.',
         };
       }
       return {
