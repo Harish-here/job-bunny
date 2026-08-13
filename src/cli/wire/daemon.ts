@@ -24,6 +24,10 @@ import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { SqliteRunIntentStore } from '../../adapters/db/sqlite/intents/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
+import {
+  LATEST_SCHEMA_VERSION,
+  readSchemaVersionReadonly,
+} from '../../adapters/db/sqlite/store/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
 import type { RunStore } from '../../ports/index.ts';
@@ -88,6 +92,33 @@ export function wireDaemonRunHistory(
       }
     }
     return records;
+  };
+}
+
+/** Per-profile, per-tick schema-drift detector (Phase 0, D2 self-heal).
+ * Never throws — a profile with no db file yet, or one that fails to
+ * open for any reason, simply contributes nothing to the returned map
+ * (readSchemaVersionReadonly's own fail-soft posture, step 0.1). */
+export function wireDaemonSchemaGuard(
+  overrides: DaemonWireOverrides = {},
+): (
+  profiles: readonly string[],
+) => Map<string, { schemaVersion: number; buildVersion: number }> {
+  const root = overrides.root ?? resolveHome();
+  return (profiles) => {
+    const result = new Map<string, { schemaVersion: number; buildVersion: number }>();
+    for (const profile of profiles) {
+      const dbPath = canonicalDbPath(root, profile);
+      if (!existsSync(dbPath)) continue; // never-run profile — do not create it.
+      const version = readSchemaVersionReadonly(dbPath);
+      if (version !== undefined && version > LATEST_SCHEMA_VERSION) {
+        result.set(profile, {
+          schemaVersion: version,
+          buildVersion: LATEST_SCHEMA_VERSION,
+        });
+      }
+    }
+    return result;
   };
 }
 
