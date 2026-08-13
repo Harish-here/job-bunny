@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { type DedupState, decideNotification } from './dedup.ts';
+import { type DedupState, DedupStateSchema, decideNotification } from './dedup.ts';
 
 const T0 = '2026-08-11T15:49:00.000Z';
 const DAY_MS = 24 * 60 * 60_000;
@@ -115,4 +115,15 @@ test('24h boundary: exactly 24h since lastNotifiedAt reminds; 24h - 1ms suppress
     lastNotifiedAt: T0,
     consecutiveCount: 2,
   });
+});
+
+test('DedupStateSchema parses a well-formed DedupState and rejects a malformed one', () => {
+  const state: DedupState = {
+    signature: 'farm::stalled',
+    firstSeenAt: T0,
+    lastNotifiedAt: T0,
+    consecutiveCount: 1,
+  };
+  assert.deepEqual(DedupStateSchema.parse(state), state);
+  assert.throws(() => DedupStateSchema.parse({ signature: 'farm::stalled' }));
 });

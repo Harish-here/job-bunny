@@ -158,7 +158,17 @@ function fakeCtx(
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: {} as PipelineCtx['storage'],
-    stateStore: {} as PipelineCtx['stateStore'],
+    // `notify/failure_dedup.json` — real behavior for the `'failed'`-outcome
+    // notify path (task 1.16): no prior state, writes succeed. The
+    // dedicated dedup scenarios (multi-run persistence, a throwing
+    // `writeDoc`) live in `run.dedup.test.ts`.
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,

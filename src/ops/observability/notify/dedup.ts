@@ -1,9 +1,22 @@
+import { z } from 'zod';
+
 export interface DedupState {
   signature: string;
   firstSeenAt: string;
   lastNotifiedAt: string;
   consecutiveCount: number;
 }
+
+/** Zod counterpart of `DedupState`, for `ctx.stateStore.readDoc`'s ingress
+ * validation (task 1.16, `cli/commands/run.ts`) — task 16's own brief
+ * specified only the TS `interface`; this schema is this task's addition,
+ * matching that shape exactly field-for-field. */
+export const DedupStateSchema = z.object({
+  signature: z.string(),
+  firstSeenAt: z.string(),
+  lastNotifiedAt: z.string(),
+  consecutiveCount: z.number(),
+}) satisfies z.ZodType<DedupState>;
 
 export type DedupAction =
   | { action: 'send'; nextState: DedupState }
