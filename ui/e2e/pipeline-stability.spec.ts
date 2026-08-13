@@ -194,3 +194,73 @@ test('runs page: a running catch-up with no duration estimate shows elapsed-only
   );
   await expect(page.locator('[data-qa="catchup-banner"]')).not.toContainText('min left');
 });
+
+// Step 1.9 — e2e for run detail catch-up (task 30). Cross-surface
+// consistency pair is `run-row-catchup` (task 25's "Stood in for N
+// slots" subline, a COUNT) vs. `run-detail-covered-slots` (task 29's
+// "Covered slots: ..." list) — NOT the catch-up banner
+// (`catchup-banner-standin`), which is out of scope: the banner and this
+// row/detail pairing depict two different runs in the mockup (3 slots vs.
+// 5), and the banner only exists for a run that's still `running`, which
+// this test's `passed`, already-completed catch-up run deliberately is
+// not. Both counts are anchored to ONE fixture's `catchupSlots` array via
+// ONE navigation — a real consistency check, not two surfaces
+// independently agreeing on a shared bug. `RunDetailView.tsx` renders
+// this element as `data-testid="run-detail-covered-slots"` (not
+// `data-qa`, unlike its sibling ids from the same task) — a pre-existing
+// naming inconsistency in already-landed markup this test observes
+// rather than corrects.
+test('run detail: a catch-up run shows what it covered without leaving the page', async ({
+  page,
+}) => {
+  const coveredSlots = ['09:00', '11:30', '14:00', '16:30', '19:00'];
+  const row: RunListRow = {
+    ...makeRow({
+      id: 701,
+      status: 'passed',
+      kind: 'catchup',
+      catchupSlots: coveredSlots,
+    }),
+    softErrors: { total: 0, groups: [], breakerOpen: false },
+  };
+  const detail: RunDetailFixture = {
+    ...row,
+    result: { stages: [] },
+    failure: null,
+    syncDryrun: null,
+  };
+
+  await stubIntents(page, []);
+  await stubRunsList(page, [row]);
+  await stubRunDetail(page, detail);
+  await stubSoftErrors(page, row.id, { total: 0, groups: [], breakerOpen: false });
+  await stubEvents(page, row.id, []);
+  await stubDeferredSlots(page, []);
+
+  await page.goto('/#/runs');
+
+  // Single row -> `RunsPage` auto-selects it, so its detail is already
+  // showing without a click ("without leaving the page" / one navigation).
+  const subline = page.locator(
+    '[data-qa="run-row-catchup"] [data-testid="run-row-subline"]',
+  );
+  await expect(subline).toBeVisible();
+  const sublineText = (await subline.textContent()) ?? '';
+  const sublineMatch = sublineText.match(/Stood in for (\d+) slot/);
+  expect(sublineMatch).not.toBeNull();
+  const sublineCount = Number(sublineMatch?.[1]);
+
+  const covered = page.locator('[data-testid="run-detail-covered-slots"]');
+  await expect(covered).toBeVisible();
+  const coveredText = (await covered.textContent()) ?? '';
+  const coveredMatch = coveredText.match(/Covered slots: (.+)$/);
+  expect(coveredMatch).not.toBeNull();
+  const coveredCount = (coveredMatch?.[1] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0).length;
+
+  expect(sublineCount).toBe(coveredSlots.length);
+  expect(coveredCount).toBe(coveredSlots.length);
+  expect(sublineCount).toBe(coveredCount);
+});
