@@ -94,13 +94,23 @@ export async function sendFailureDigest(
   const errorText = extractFailureError(detail?.failure);
   const signature = `${result.failedStage ?? 'unknown'}::${normalizeFailureText(errorText)}`;
 
-  // `readDoc` returning `undefined` (first-ever failure, or a missing/
-  // corrupt doc) is "no prior state" — `decideNotification` always sends in
+  // `readDoc` returning `undefined` (first-ever failure, or a genuinely
+  // absent key) is "no prior state" — `decideNotification` always sends in
   // that case, per the port's own contract: fails toward MORE notification.
-  const prior: DedupState | undefined = await ctx.stateStore.readDoc(
-    FAILURE_DEDUP_KEY,
-    DedupStateSchema,
-  );
+  // A row that EXISTS but fails to parse against `DedupStateSchema` THROWS
+  // (`ports/state_store.ts`'s own documented contract) — caught here and
+  // treated the same as "no prior state" so a corrupt/stale dedup doc can
+  // only ever cost next time's bookkeeping, never this run's own failure
+  // notification (the same fails-toward-more-notification posture as the
+  // `writeDoc` guard below).
+  let prior: DedupState | undefined;
+  try {
+    prior = await ctx.stateStore.readDoc(FAILURE_DEDUP_KEY, DedupStateSchema);
+  } catch (err) {
+    ctx.logger.warn('failed to read failure-dedup state', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   const action = decideNotification(prior, signature, nowIso);
 
   if (action.action === 'send' || action.action === 'remind') {
@@ -111,14 +121,24 @@ export async function sendFailureDigest(
       action.action === 'send' && prior !== undefined && prior.signature !== signature
         ? prettySignature(prior.signature)
         : undefined;
+    // T3's "STILL OPEN" line describes the SUPPRESSED (prior) signature, so
+    // its count/since must come from `prior`'s own accumulated state, not
+    // `action.nextState` — `decideNotification` RESETS `nextState` to
+    // `consecutiveCount: 1`/`firstSeenAt: now` for the new signature that
+    // just broke through, which is right for the NEW signature but wrong
+    // for describing how long/how often the OLD one has recurred.
+    const [count, firstSeenAt] =
+      suppressedSignature !== undefined && prior !== undefined
+        ? [prior.consecutiveCount, prior.firstSeenAt]
+        : [action.nextState.consecutiveCount, action.nextState.firstSeenAt];
     await ctx.notify({
       kind: 'digest',
       profile,
       text: composeFailureNotice(
         formatDigest(result, { dryRun }),
         action.action,
-        action.nextState.consecutiveCount,
-        action.nextState.firstSeenAt,
+        count,
+        firstSeenAt,
         suppressedSignature,
       ),
     });

@@ -98,13 +98,19 @@ function fakeRunDetail(failure: unknown): RunDetail {
  * `ctx.runStore.getRun(runId)` returns as `.failure` — the RunFailure-
  * shaped blob `sendFailureDigest` reads back (never threaded through
  * `RunResult`, AC8). */
-function fakeRunStore(failureRef: { current: unknown }): { store: RunStore } {
+function fakeRunStore(failureRef: { current: unknown }): {
+  store: RunStore;
+  events: Array<{ level: string; msg: string }>;
+} {
   let nextId = 1;
+  const events: Array<{ level: string; msg: string }> = [];
   const store: RunStore = {
     startRun() {
       return nextId++;
     },
-    appendEvents() {},
+    appendEvents(_runId, rows) {
+      for (const row of rows) events.push({ level: row.level, msg: row.msg });
+    },
     heartbeat() {},
     recordProgress() {},
     recordFailure() {},
@@ -133,13 +139,15 @@ function fakeRunStore(failureRef: { current: unknown }): { store: RunStore } {
     },
     close() {},
   };
-  return { store };
+  return { store, events };
 }
 
 /** Persists ONE doc across however many `readDoc`/`writeDoc` calls this
  * fake sees — real cross-run dedup state, not reset between `runCommand`
  * invocations that share this same fake instance. */
-function fakeStateStore(opts: { writeShouldThrow?: boolean } = {}): {
+function fakeStateStore(
+  opts: { writeShouldThrow?: boolean; readShouldThrow?: boolean } = {},
+): {
   store: StateStore;
   reads: string[];
   writes: Array<{ key: string; value: unknown }>;
@@ -148,8 +156,15 @@ function fakeStateStore(opts: { writeShouldThrow?: boolean } = {}): {
   const reads: string[] = [];
   const writes: Array<{ key: string; value: unknown }> = [];
   const store: StateStore = {
-    async readDoc(key) {
+    async readDoc(key, schema) {
       reads.push(key);
+      // Mirrors the real sqlite adapter's own contract
+      // (`ports/state_store.ts`: "throws on schema mismatch") — a doc that
+      // EXISTS but fails to parse against the caller's schema throws,
+      // rather than returning `undefined`.
+      if (opts.readShouldThrow && doc !== undefined) {
+        schema.parse({ notAValidDedupState: true });
+      }
       return doc as never;
     },
     async writeDoc(key, value) {
@@ -203,6 +218,17 @@ const T0 = new Date('2026-08-11T15:49:00.000Z');
 const PLUS_1H = new Date(T0.getTime() + 60 * 60_000);
 const PLUS_25H = new Date(T0.getTime() + 25 * 60 * 60_000);
 
+/** Mirrors `composeFailureNotice`'s own private `formatSince` (local-time
+ * `YYYY-MM-DD HH:MM`) so the T3 assertion below stays correct under
+ * whatever timezone the test happens to run in, rather than hardcoding a
+ * single machine's local rendering of `T0`. */
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+function localStamp(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 /** `writes[i].value` as a `DedupState`, asserting the entry actually
  * exists first — avoids unsafe optional chaining into a cast. */
 function writeStateAt(
@@ -252,6 +278,50 @@ test('AC16: two failures with the same signature within 24h — first sends, sec
   assert.match(remindText, /STILL FAILING \(x3\)/);
 });
 
+test('a readDoc failure (existing doc fails schema validation) is logged, not fatal — the run still notifies, per "fails toward MORE notification"', async () => {
+  const notified: NotifyEvent[] = [];
+  const { store: stateStore } = fakeStateStore();
+  const failureRef = {
+    current: { stage: 'farm', error: 'stalled: no beat() within 360000ms' },
+  };
+  // `runStore` (and its `events` buffer) is shared across BOTH runs below —
+  // `run.ts` replaces `ctx.logger` with a `RunStoreLogger` wrapping this
+  // exact store (`createRunLogger`), so this is the only place a `warn()`
+  // call made deep inside `sendFailureDigest` is observable from the test.
+  const { store: runStore, events } = fakeRunStore(failureRef);
+  const ctx = fakeCtx(notified, runStore, stateStore);
+
+  // First run writes a doc, so the SECOND run's readDoc has something to
+  // (fail to) parse.
+  await run(ctx, failedResult('farm'), T0);
+  assert.equal(notified.length, 1);
+
+  const { store: throwingStateStore } = fakeStateStore({ readShouldThrow: true });
+  // Seed the throwing store with a prior doc via one silent write, then
+  // exercise it — mirrors a real profile's dedup doc existing but no
+  // longer matching `DedupStateSchema` (e.g. after a future shape change),
+  // reproducing the real sqlite adapter's own documented "throws on schema
+  // mismatch" contract (`ports/state_store.ts`), not a synthetic one.
+  await throwingStateStore.writeDoc('notify/failure_dedup.json', {
+    signature: 'farm::stalled',
+    firstSeenAt: T0.toISOString(),
+    lastNotifiedAt: T0.toISOString(),
+    consecutiveCount: 1,
+  });
+  const ctx2 = fakeCtx(notified, runStore, throwingStateStore);
+
+  const code = await run(ctx2, failedResult('farm'), PLUS_1H);
+  assert.equal(code, 1, 'exit code reflects the run outcome');
+  assert.equal(
+    notified.length,
+    2,
+    'a readDoc throw must not swallow the failure notification — this run still notifies',
+  );
+  const warnings = events.filter((e) => e.level === 'warn');
+  assert.equal(warnings.length, 1, 'the readDoc failure is logged, not silently dropped');
+  assert.match(warnings[0]?.msg ?? '', /failed to read failure-dedup state/);
+});
+
 test('AC17: a different signature while a prior one is (would be) suppressed sends immediately, with the T3 wrapper text', async () => {
   const notified: NotifyEvent[] = [];
   const { store: stateStore } = fakeStateStore();
@@ -275,6 +345,13 @@ test('AC17: a different signature while a prior one is (would be) suppressed sen
   assert.match(text, /NEW FAILURE/);
   assert.match(text, /DIFFERENT failure/);
   assert.match(text, /STILL OPEN/);
+  // The "STILL OPEN" line describes the SUPPRESSED (old) signature's own
+  // accumulated state — one send at T0 plus one suppress at PLUS_1H makes
+  // consecutiveCount 2, firstSeenAt still T0 — NOT the new signature's own
+  // freshly-reset `nextState` (consecutiveCount 1, firstSeenAt PLUS_1H),
+  // which would tell the operator the old failure just started when it had
+  // actually recurred twice since T0.
+  assert.match(text, new RegExp(`\\(x2, since ${localStamp(T0)}\\)`));
 });
 
 test('AC18: a passing run while a failure signature is suppressed still sends its digest, bypassing dedup entirely', async () => {
