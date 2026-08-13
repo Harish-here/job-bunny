@@ -112,6 +112,9 @@ function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
     pruneRunsOlderThan() {
       return 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
   return { store, started, findRunIdCalls };

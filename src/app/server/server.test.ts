@@ -243,6 +243,7 @@ test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mount
             finishedAt: '2026-08-05T09:05:00.000Z',
             heartbeatAt: '2026-08-05T09:04:00.000Z',
             progress: null,
+            catchupSlots: null,
           },
         ],
         total: 1,
@@ -527,11 +528,10 @@ test('close() calls source.close()', async () => {
     logger: silentLogger,
     version: TEST_VERSION,
   });
-  const { port } = await server.listen(0);
+  await server.listen(0);
   assert.equal(closed.value, false);
   await server.close();
   assert.equal(closed.value, true);
-  void port;
 });
 
 test('one http log line is emitted per request, including error responses', async () => {

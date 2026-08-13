@@ -117,6 +117,9 @@ function fakeRunStore(): {
     pruneRunsOlderThan() {
       return 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
   return { store, started, finished };

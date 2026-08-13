@@ -57,6 +57,7 @@ const SAMPLE_SUMMARY: RunSummary = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:04:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const SAMPLE_DETAIL: RunDetail = {

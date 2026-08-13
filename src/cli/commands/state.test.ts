@@ -76,6 +76,7 @@ function fakeCtx(store: Map<string, unknown>): PipelineCtx {
       findRunId: () => null,
       listRunTimeDirs: () => [],
       pruneRunsOlderThan: () => 0,
+      hasRunOfKind: () => false,
       close: () => {},
     },
     checkpointStore: {

@@ -3,7 +3,7 @@
  * design — node:sqlite is sync (mirrors ports/board.ts). WRITER methods are
  * fail-soft in implementations: a failure warns once on stderr and never
  * throws (observability must never red a run). */
-export type RunKind = 'run' | 'stage' | 'reconcile';
+export type RunKind = 'run' | 'stage' | 'reconcile' | 'catchup';
 export type RunStatus = 'running' | 'passed' | 'failed' | 'crashed';
 
 export interface RunEventRow {
@@ -24,6 +24,7 @@ export interface RunSummary {
   finishedAt: string | null;
   heartbeatAt: string | null;
   progress: RunProgress | null;
+  catchupSlots: string[] | null;
 }
 
 /** Per-run, per-stage progress (persist-to-db R3). One row per run, upserted
@@ -65,6 +66,7 @@ export interface RunStoreWriter {
     kind: RunKind;
     resumedFrom?: number;
     startedAt: string;
+    catchupSlots?: string[];
   }): number;
   /** Batched insert, one transaction. Also bumps heartbeat_at. */
   appendEvents(runId: number, events: RunEventRow[]): void;
@@ -106,6 +108,13 @@ export interface RunStoreReader {
   /** Deletes runs (+ their events) with date strictly older than
    * today − ttlDays; never today's. Returns the number of runs deleted. */
   pruneRunsOlderThan(today: string, ttlDays: number): number;
+  /** True iff a run of `kind` exists for `date` — durable (survives daemon
+   * restart AND day rollover), unlike the pidfile's attempts ledger, which
+   * is pruned to only today's entries (D19's "A9" comment) and resets on
+   * every `serve stop`/`start`. Added for step 1.11a's retrospective sweep:
+   * "did a catch-up actually run for a PAST date" cannot be answered from
+   * the pidfile at all once the date has rolled over — `runs` can. */
+  hasRunOfKind(date: string, kind: RunKind): boolean;
 }
 
 export interface RunStore extends RunStoreWriter, RunStoreReader {
