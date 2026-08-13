@@ -12,6 +12,7 @@
  * state via `page.request.get`, never the form alone.
  */
 import { expect, type Page, test } from '@playwright/test';
+import { stubDaemonStatus } from './run-fixtures';
 import { pinProfile } from './wizard.helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -218,4 +219,47 @@ test("settings: invalid JSON in the escape hatch is rejected inline with the ser
   );
   // A failed save must never stomp the user's in-progress (invalid) edit.
   await expect(textarea).toHaveValue('{not valid json');
+});
+
+test("settings: schedule section shows the daemon's degraded state with cause and remedy", async ({
+  page,
+}) => {
+  const degradedReason =
+    "the database schema (v8) is newer than the running daemon's build (v7). This happens after an update that changes the schema.";
+  await stubDaemonStatus(page, [
+    {
+      profile: 'rajni',
+      enabled: true,
+      nextRunAt: null,
+      degraded: true,
+      degradedReason,
+    },
+  ]);
+  await page.goto('/#/settings/schedule');
+
+  const degraded = page.locator('[data-qa="schedule-daemon-status-degraded"]');
+  await expect(degraded).toBeVisible();
+  await expect(degraded).toContainText(degradedReason);
+  await expect(degraded).toContainText('jobbunny serve stop && jobbunny serve start');
+  await expect(page.locator('[data-qa="schedule-daemon-status-healthy"]')).toHaveCount(0);
+});
+
+test("settings: schedule section shows the daemon's healthy state with zero degraded markup", async ({
+  page,
+}) => {
+  await stubDaemonStatus(page, [
+    {
+      profile: 'rajni',
+      enabled: true,
+      nextRunAt: '2026-08-13T11:30:00.000Z',
+      degraded: false,
+      degradedReason: null,
+    },
+  ]);
+  await page.goto('/#/settings/schedule');
+
+  await expect(page.locator('[data-qa="schedule-daemon-status-healthy"]')).toBeVisible();
+  await expect(page.locator('[data-qa="schedule-daemon-status-degraded"]')).toHaveCount(
+    0,
+  );
 });
