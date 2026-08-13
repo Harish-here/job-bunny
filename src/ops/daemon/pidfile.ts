@@ -27,12 +27,26 @@ export interface DaemonInFlight {
   startedAt: string; // ISO 8601
 }
 
+export interface DaemonDegradedEntry {
+  profile: string;
+  schemaVersion: number;
+  buildVersion: number;
+  detectedAt: string; // ISO 8601
+}
+
 export interface DaemonPidfile {
   pid: number;
   startedAt: string; // ISO 8601
   lastTickAt: string; // ISO 8601
   inFlight?: DaemonInFlight;
   attempts: DaemonAttempt[];
+  degraded: DaemonDegradedEntry[]; // per-profile detection — today's + any still-unresolved prior entries
+  schemaDriftNotifiedAt: string | null; // DAEMON-LEVEL, NOT per-profile — guards the single T6 send
+  // (step 0.6). Kept as a separate field from `degraded` on purpose: `degraded` answers "which
+  // profiles are affected" (board/doctor drill-down, step 0.8/0.9); this field answers "has the
+  // one allowed notification already gone out" (AC14) — conflating the two would either re-notify
+  // per newly-degraded profile (violates AC14) or suppress board/doctor detail to match the
+  // notification count (wrong information to withhold).
 }
 
 export interface DaemonPidfileDeps {
@@ -81,6 +95,8 @@ export function acquireDaemonPidfile(
     startedAt: deps.now().toISOString(),
     lastTickAt: deps.now().toISOString(),
     attempts: [],
+    degraded: [],
+    schemaDriftNotifiedAt: null,
   };
   return deps.writeFileSyncExclusive(path, JSON.stringify(initial));
 }
@@ -106,6 +122,41 @@ function parseInFlight(value: unknown): DaemonInFlight | undefined {
   return undefined;
 }
 
+/** Shape-checks a single `degraded` entry: mirrors `parseInFlight` — every
+ * field must match its expected type or the entry is dropped, not trusted. */
+function parseDegradedEntry(value: unknown): DaemonDegradedEntry | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Partial<DaemonDegradedEntry>;
+  if (
+    typeof candidate.profile === 'string' &&
+    typeof candidate.schemaVersion === 'number' &&
+    typeof candidate.buildVersion === 'number' &&
+    typeof candidate.detectedAt === 'string'
+  ) {
+    return {
+      profile: candidate.profile,
+      schemaVersion: candidate.schemaVersion,
+      buildVersion: candidate.buildVersion,
+      detectedAt: candidate.detectedAt,
+    };
+  }
+  return undefined;
+}
+
+/** A single malformed entry never rejects the whole array — same posture
+ * as `parseInFlight`'s "malformed ⇒ drop, not trust." A non-array value
+ * (or an absent one) is treated as an empty list, not an error. */
+function parseDegraded(value: unknown): DaemonDegradedEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => parseDegradedEntry(entry))
+    .filter((entry): entry is DaemonDegradedEntry => entry !== undefined);
+}
+
+function parseSchemaDriftNotifiedAt(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
 function parsePidfile(raw: string): DaemonPidfile | undefined {
   try {
     const parsed = JSON.parse(raw) as Partial<DaemonPidfile>;
@@ -121,6 +172,8 @@ function parsePidfile(raw: string): DaemonPidfile | undefined {
         lastTickAt: parsed.lastTickAt,
         inFlight: parseInFlight(parsed.inFlight),
         attempts: parsed.attempts as DaemonAttempt[],
+        degraded: parseDegraded(parsed.degraded),
+        schemaDriftNotifiedAt: parseSchemaDriftNotifiedAt(parsed.schemaDriftNotifiedAt),
       };
     }
     return undefined; // malformed shape — treated the same as unreadable.

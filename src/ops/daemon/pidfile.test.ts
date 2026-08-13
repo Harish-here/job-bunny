@@ -222,6 +222,69 @@ test('releaseDaemonPidfile: is a no-op when the pidfile is already absent', () =
   assert.doesNotThrow(() => releaseDaemonPidfile(ROOT, deps));
 });
 
+test('parsePidfile: an old-shape pidfile with no degraded/schemaDriftNotifiedAt keys parses with safe defaults', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.degraded, []);
+  assert.equal(stored?.schemaDriftNotifiedAt, null);
+});
+
+test('parsePidfile: a malformed degraded entry (missing a required field) is dropped, not trusted', () => {
+  const deps = fakeDeps();
+  setRaw(
+    deps,
+    JSON.stringify({
+      pid: 1,
+      startedAt: '2026-07-27T14:00:00.000Z',
+      lastTickAt: '2026-07-27T14:00:00.000Z',
+      attempts: [],
+      degraded: [{ profile: 'harish' }],
+    }),
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.degraded, []);
+});
+
+test('updateDaemonPidfile + readDaemonPidfile: degraded and schemaDriftNotifiedAt round-trip through a write/read cycle', () => {
+  const deps = fakeDeps();
+  acquireDaemonPidfile(ROOT, 1000, deps);
+  updateDaemonPidfile(
+    ROOT,
+    (current) => ({
+      ...current,
+      degraded: [
+        {
+          profile: 'harish',
+          schemaVersion: 8,
+          buildVersion: 7,
+          detectedAt: '2026-08-13T10:00:00.000Z',
+        },
+      ],
+      schemaDriftNotifiedAt: '2026-08-13T10:05:00.000Z',
+    }),
+    deps,
+  );
+  const stored = readDaemonPidfile(ROOT, deps);
+  assert.deepEqual(stored?.degraded, [
+    {
+      profile: 'harish',
+      schemaVersion: 8,
+      buildVersion: 7,
+      detectedAt: '2026-08-13T10:00:00.000Z',
+    },
+  ]);
+  assert.equal(stored?.schemaDriftNotifiedAt, '2026-08-13T10:05:00.000Z');
+});
+
 test('defaultDaemonPidfileDeps: builds a working real-fs deps object shape', () => {
   const deps = defaultDaemonPidfileDeps();
   assert.equal(typeof deps.now, 'function');
