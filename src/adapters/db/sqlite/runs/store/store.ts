@@ -22,16 +22,17 @@ import type {
   RunStatus,
   RunStore,
   RunSummary,
-} from '../../../../ports/run_store.ts';
-import { openJobsDb } from '../store/index.ts';
+} from '../../../../../ports/run_store.ts';
+import { openJobsDb } from '../../store/index.ts';
 import {
   mapProgressRow,
   PROGRESS_JOIN,
   type ProgressInput,
   progressRowValues,
-  type RawProgressRow,
+  type RunRow,
   UPSERT_PROGRESS_SQL,
-} from './progress.ts';
+} from '../progress.ts';
+import { decodeCatchupSlots, encodeCatchupSlots } from './catchup.ts';
 
 export const RUN_HEARTBEAT_STALE_MS = 10 * 60_000;
 
@@ -54,24 +55,6 @@ interface RunStoreDeps {
   now?: () => Date;
   warn?: (msg: string) => void;
 }
-
-// Extends RawProgressRow (progress.ts) for the LEFT JOIN run_progress
-// columns — all null when the run has no progress row.
-interface RunRow extends RawProgressRow {
-  id: number;
-  run_date: string;
-  time_dir: string | null;
-  kind: RunKind;
-  resumed_from: number | null;
-  status: RunStatus;
-  started_at: string;
-  finished_at: string | null;
-  heartbeat_at: string | null;
-  result_json: string | null;
-  failure_json: string | null;
-  sync_dryrun_json: string | null;
-}
-
 interface RunEventRawRow {
   ts: string;
   level: string;
@@ -128,6 +111,7 @@ export class SqliteRunStore implements RunStore {
       finishedAt: row.finished_at,
       heartbeatAt: row.heartbeat_at,
       progress: mapProgressRow(row),
+      catchupSlots: decodeCatchupSlots(row.catchup_slots_json),
     };
   }
 
@@ -137,6 +121,7 @@ export class SqliteRunStore implements RunStore {
     kind: RunKind;
     resumedFrom?: number;
     startedAt: string;
+    catchupSlots?: string[];
   }): number {
     const db = this.open();
     if (!db) return -1;
@@ -147,8 +132,8 @@ export class SqliteRunStore implements RunStore {
       ).run(this.staleCutoff());
       const result = db
         .prepare(
-          `INSERT INTO runs (run_date, time_dir, kind, resumed_from, status, started_at)
-           VALUES (?, ?, ?, ?, 'running', ?)`,
+          `INSERT INTO runs (run_date, time_dir, kind, resumed_from, status, started_at, catchup_slots_json)
+           VALUES (?, ?, ?, ?, 'running', ?, ?)`,
         )
         .run(
           meta.date,
@@ -156,6 +141,7 @@ export class SqliteRunStore implements RunStore {
           meta.kind,
           meta.resumedFrom ?? null,
           meta.startedAt,
+          encodeCatchupSlots(meta.catchupSlots),
         );
       return Number(result.lastInsertRowid);
     } catch (err) {
@@ -345,6 +331,20 @@ export class SqliteRunStore implements RunStore {
     } catch (err) {
       this.warnOnce(`SqliteRunStore.findRunId failed: ${String(err)}`);
       return null;
+    }
+  }
+
+  hasRunOfKind(date: string, kind: RunKind): boolean {
+    const db = this.open();
+    if (!db) return false;
+    try {
+      const row = db
+        .prepare('SELECT 1 FROM runs WHERE run_date = ? AND kind = ? LIMIT 1')
+        .get(date, kind);
+      return row !== undefined;
+    } catch (err) {
+      this.warnOnce(`SqliteRunStore.hasRunOfKind failed: ${String(err)}`);
+      return false;
     }
   }
 

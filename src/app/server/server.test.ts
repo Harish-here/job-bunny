@@ -49,8 +49,8 @@ function sendRawRequest(port: number, raw: string): Promise<string> {
 
 const PROFILES: BoardProfile[] = [{ name: 'p1', connector: 'sqlite', hasDb: true }];
 const TEST_VERSION = '0.0.0-test';
-
-const NOT_DEGRADED = { degraded: false, degradedReason: null } as const;
+const NO_VERSIONS = { schemaVersion: null, buildVersion: null } as const;
+const NOT_DEGRADED = { degraded: false, degradedReason: null, ...NO_VERSIONS } as const;
 const NEXT = '2026-08-08T03:30:00.000Z';
 
 const FAKE_DAEMON_STATUS: DaemonStatus = {
@@ -94,28 +94,18 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   const patchCalls: Array<{ id: string; patch: TrackingPatch }> = [];
   return {
     patchCalls,
-    listJobs(): { rows: []; total: number } {
-      return { rows: [], total: 0 };
-    },
-    getJob() {
-      return null;
-    },
+    listJobs: () => ({ rows: [], total: 0 }),
+    getJob: () => null,
     updateTracking(id, patch) {
       patchCalls.push({ id, patch });
       return { jobId: id, updatedAt: '2026-08-02T00:00:00.000Z', status: 'Applied' };
     },
-    listRuns() {
-      return { rows: [], total: 0 };
-    },
-    getRun() {
-      return null;
-    },
-    listRunEvents() {
-      return { rows: [], total: 0 };
-    },
-    listRunHealth() {
-      return new Map();
-    },
+    listRuns: () => ({ rows: [], total: 0 }),
+    getRun: () => null,
+    listRunEvents: () => ({ rows: [], total: 0 }),
+    listRunHealth: () => new Map(),
+    listDeferredSlots: () => ({ rows: [], total: 0 }),
+    estimateRunDuration: () => null,
     close() {},
     ...overrides,
   };
@@ -243,6 +233,7 @@ test('GET /api/profiles/:name/runs reaches the fake store (runs routes are mount
             finishedAt: '2026-08-05T09:05:00.000Z',
             heartbeatAt: '2026-08-05T09:04:00.000Z',
             progress: null,
+            catchupSlots: null,
           },
         ],
         total: 1,
@@ -527,11 +518,10 @@ test('close() calls source.close()', async () => {
     logger: silentLogger,
     version: TEST_VERSION,
   });
-  const { port } = await server.listen(0);
+  await server.listen(0);
   assert.equal(closed.value, false);
   await server.close();
   assert.equal(closed.value, true);
-  void port;
 });
 
 test('one http log line is emitted per request, including error responses', async () => {

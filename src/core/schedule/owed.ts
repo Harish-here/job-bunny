@@ -11,8 +11,9 @@ import { formatLocalDate, hhMmToMinutes } from './types.ts';
 
 /** Local wall-clock moment for `time` ("HH:MM") on `date` ("YYYY-MM-DD").
  * No UTC conversion anywhere in this file — see types.ts's module doc
- * comment for why that distinction matters here specifically. */
-function parseLocal(date: string, time: string): Date {
+ * comment for why that distinction matters here specifically. Exported so
+ * `deferrals.ts` shares this exact parsing rather than re-deriving it. */
+export function parseLocal(date: string, time: string): Date {
   const dateParts = date.split('-');
   const timeParts = time.split(':');
   const year = Number(dateParts[0]);
@@ -21,6 +22,31 @@ function parseLocal(date: string, time: string): Date {
   const hour = Number(timeParts[0]);
   const minute = Number(timeParts[1]);
   return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+/** `slotAt + schedule.graceMinutes` — the single place this arithmetic
+ * lives; `deferrals.ts` imports it rather than reinventing it. */
+export function graceEndAtFor(slotAt: Date, schedule: ProfileSchedule): Date {
+  return new Date(slotAt.getTime() + schedule.graceMinutes * 60_000);
+}
+
+/** The one "was this (profile, date, slot) served" predicate — shared
+ * verbatim by `isRunOwed` and `deriveExpiredUnserved` (deferrals.ts) so the
+ * two can never silently diverge on what counts as "served" (see R25). A
+ * record counts as serving the slot iff it's for the same profile+date and
+ * its `startedAt` falls inside [slotAt, graceEndAt]. */
+export function isServed(
+  history: readonly RunRecord[],
+  profile: string,
+  date: string,
+  slotAt: Date,
+  graceEndAt: Date,
+): boolean {
+  return history.some((record) => {
+    if (record.profile !== profile || record.date !== date) return false;
+    const startedAt = parseLocal(date, record.startedAt);
+    return startedAt >= slotAt && startedAt <= graceEndAt;
+  });
 }
 
 /**
@@ -47,15 +73,10 @@ export function isRunOwed(
 
     for (const slot of schedule.times) {
       const slotAt = parseLocal(date, slot);
-      const graceEndAt = new Date(slotAt.getTime() + schedule.graceMinutes * 60_000);
+      const graceEndAt = graceEndAtFor(slotAt, schedule);
       if (now < slotAt || now > graceEndAt) continue;
 
-      const served = history.some((record) => {
-        if (record.profile !== schedule.profile || record.date !== date) return false;
-        const startedAt = parseLocal(date, record.startedAt);
-        return startedAt >= slotAt && startedAt <= graceEndAt;
-      });
-      if (served) continue;
+      if (isServed(history, schedule.profile, date, slotAt, graceEndAt)) continue;
 
       owed.push({ profile: schedule.profile, date, slot });
     }

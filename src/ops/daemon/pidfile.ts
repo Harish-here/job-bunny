@@ -14,6 +14,14 @@
  */
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  parseDeferredNotifyAttempts,
+  parseDegraded,
+  parseInFlight,
+  parseLastGateDecline,
+  parseNullableTimestamp,
+  parseSlotGateDeclines,
+} from './pidfile_parse.ts';
 
 export interface DaemonAttempt {
   profile: string;
@@ -68,6 +76,83 @@ export interface DaemonPidfile {
   // send and the log line while less than `SCHEMA_DRIFT_NOTIFY_RETRY_MS` has elapsed since it), and
   // cleared back to null the moment a send succeeds, so a later, genuinely new failure attempts
   // immediately rather than waiting out a stale interval.
+  lastGateDecline?: {
+    reasonCode: 'host-asleep' | 'network-unreachable';
+    reason: string;
+    at: string;
+  };
+  // Single rolling value, NOT an array — the gate is host-level, computed
+  // once per tick and applied uniformly to every owed entry that tick
+  // (step 1.11), so there is exactly one current reason at any moment,
+  // never a per-slot history. A second gate decline (same tick or a later
+  // one) simply overwrites this field wholesale via the normal
+  // updateDaemonPidfile mutate-and-write pattern — deliberately less
+  // structure than `degraded[]`. Optional (`?:`), not `| null`, mirroring
+  // `inFlight?: DaemonInFlight`'s convention rather than the four
+  // `schemaDrift*` fields' `T | null` convention. Kept for whatever cheap
+  // "what was the last thing that happened" display value it's worth —
+  // `deferred_sweep/sweep.ts`'s own per-SLOT reason attribution (bug 1) never
+  // reads it; see `slotGateDeclines` below for why a single rolling field
+  // cannot answer "why was THIS slot declined."
+  slotGateDeclines: SlotGateDecline[];
+  // Bug 1 (pipeline-stability-hardening QA, 2026-08-14): `lastGateDecline`
+  // above is a single rolling value, overwritten by every gate-declined
+  // owed entry — by the time a SPECIFIC slot's grace window fully closes
+  // (`deferred_sweep/sweep.ts`'s own sweep, possibly many ticks and several OTHER
+  // declined slots later), it usually holds a LATER slot's own reason, so
+  // the recorded `deferred_slots` row silently misattributes. This is the
+  // per-slot record that field cannot be: one entry per (profile, date,
+  // slot) that was EVER seen gate-declined while still owed (written by
+  // `applyGateDecline`, upserted so a later tick's decline for the SAME
+  // slot replaces rather than duplicates its own entry), read by
+  // `deferred_sweep/sweep.ts` once that slot's grace has fully closed. Filtered
+  // to `date === today` on every write (same self-pruning idiom as
+  // `attempts`), so yesterday's entries never linger.
+  deferredNotifyAttempts: DeferredNotifyAttempt[];
+  // Bug 2/6 (pipeline-stability-hardening QA, 2026-08-14): the last time an
+  // attempt (successful or not) was made to send a deferred-day summary for
+  // (profile, date) — covers BOTH the same-day T4 path and the retrospective
+  // (past-day) summary path, since both compose and send the exact same
+  // kind of message for the exact same (profile, date) pair.
+  // `deferred_sweep/sweep.ts` skips the attempt (no send, no log) entirely while
+  // less than `DEFERRED_NOTIFY_RETRY_INTERVAL_MS` has elapsed since the
+  // last one — the same 1-hour-retry idiom as
+  // `schemaDriftNotifyFailedAt`/`SCHEMA_DRIFT_NOTIFY_RETRY_INTERVAL_MS`
+  // (`alert/schema_drift.ts`), reused here rather than duplicated inline.
+  // Deliberately NOT cleared on a successful `notify()` call: `markNotified`
+  // is fail-soft (silently drops on a DB write error), so a SUCCEEDING send
+  // immediately followed by a FAILING write must still stay throttled — see
+  // this task's own report for the "escalation" this guards against.
+  // Bug 9 (pipeline-stability-hardening QA round 2, 2026-08-14): pruned by
+  // the entry's own `at` AGE on every `stampNotifyAttempt` write (dropped
+  // once older than `DEFERRED_NOTIFY_ATTEMPT_MAX_AGE_MS`, 24h) — NOT by
+  // `date === today` like `slotGateDeclines` below. The retrospective
+  // sweep re-visits PAST dates every tick for as long as they stay
+  // unnotified (`listUnnotifiedDatesBefore` has no date floor), so a
+  // date-based prune would evict a still-active PAST-date throttle and
+  // reopen bug 2 for exactly the dates this array protects; age-based
+  // pruning only ever drops an entry once nothing has attempted that
+  // (profile, date) pair in over a day.
+}
+
+export interface SlotGateDecline {
+  profile: string;
+  date: string; // 'YYYY-MM-DD' local — the OWED SLOT's own date, not
+  // necessarily "today" by the time this entry is read (a slot's grace can
+  // close well after its own date if the daemon is mid-batch past local
+  // midnight — same posture as `deferred_slots.runDate`).
+  slot: string; // 'HH:MM' local
+  reasonCode: 'host-asleep' | 'network-unreachable'; // narrower than
+  // `DeferredSlotRow.reasonCode`'s three-value union — same reasoning as
+  // `lastGateDecline`'s own `reasonCode` field (see its doc comment).
+  reason: string;
+  at: string; // ISO 8601 — when this decline was last observed for this slot.
+}
+
+export interface DeferredNotifyAttempt {
+  profile: string;
+  date: string; // 'YYYY-MM-DD' — the deferred day being summarized.
+  at: string; // ISO 8601 — the last attempt time, success or failure.
 }
 
 export interface DaemonPidfileDeps {
@@ -120,68 +205,10 @@ export function acquireDaemonPidfile(
     schemaDriftNotifiedAt: null,
     schemaDriftNoNotifierWarnedAt: null,
     schemaDriftNotifyFailedAt: null,
+    slotGateDeclines: [],
+    deferredNotifyAttempts: [],
   };
   return deps.writeFileSyncExclusive(path, JSON.stringify(initial));
-}
-
-/** Shape-checks a parsed `inFlight` value: either absent, or the full
- * `DaemonInFlight` object (`pid`/`profile`/`startedAt`) — never the old
- * bare-number form. A partially-shaped object is treated the same as
- * absent (malformed ⇒ safe to drop, not safe to trust). */
-function parseInFlight(value: unknown): DaemonInFlight | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Partial<DaemonInFlight>;
-  if (
-    typeof candidate.pid === 'number' &&
-    typeof candidate.profile === 'string' &&
-    typeof candidate.startedAt === 'string'
-  ) {
-    return {
-      pid: candidate.pid,
-      profile: candidate.profile,
-      startedAt: candidate.startedAt,
-    };
-  }
-  return undefined;
-}
-
-/** Shape-checks a single `degraded` entry: mirrors `parseInFlight` — every
- * field must match its expected type or the entry is dropped, not trusted. */
-function parseDegradedEntry(value: unknown): DaemonDegradedEntry | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Partial<DaemonDegradedEntry>;
-  if (
-    typeof candidate.profile === 'string' &&
-    typeof candidate.schemaVersion === 'number' &&
-    typeof candidate.buildVersion === 'number' &&
-    typeof candidate.detectedAt === 'string'
-  ) {
-    return {
-      profile: candidate.profile,
-      schemaVersion: candidate.schemaVersion,
-      buildVersion: candidate.buildVersion,
-      detectedAt: candidate.detectedAt,
-    };
-  }
-  return undefined;
-}
-
-/** A single malformed entry never rejects the whole array — same posture
- * as `parseInFlight`'s "malformed ⇒ drop, not trust." A non-array value
- * (or an absent one) is treated as an empty list, not an error. */
-function parseDegraded(value: unknown): DaemonDegradedEntry[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => parseDegradedEntry(entry))
-    .filter((entry): entry is DaemonDegradedEntry => entry !== undefined);
-}
-
-/** Shared parser for the nullable-ISO-timestamp latch/throttle fields
- * (`schemaDriftNotifiedAt`, `schemaDriftNoNotifierWarnedAt`,
- * `schemaDriftNotifyFailedAt`) — identical shape, identical
- * "malformed/absent ⇒ null" fallback. */
-function parseNullableTimestamp(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
 }
 
 function parsePidfile(raw: string): DaemonPidfile | undefined {
@@ -206,6 +233,11 @@ function parsePidfile(raw: string): DaemonPidfile | undefined {
         ),
         schemaDriftNotifyFailedAt: parseNullableTimestamp(
           parsed.schemaDriftNotifyFailedAt,
+        ),
+        lastGateDecline: parseLastGateDecline(parsed.lastGateDecline),
+        slotGateDeclines: parseSlotGateDeclines(parsed.slotGateDeclines),
+        deferredNotifyAttempts: parseDeferredNotifyAttempts(
+          parsed.deferredNotifyAttempts,
         ),
       };
     }

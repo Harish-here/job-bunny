@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RunProgress, RunSummary } from '../../lib/api/types';
 import { LiveRunHeader, type LiveRunHeaderProps } from './LiveRunHeader';
 // Vite's `?raw` import loads this module's own source as a plain string —
@@ -21,6 +21,7 @@ function makeRun(over: Partial<RunSummary> = {}): RunSummary {
     finishedAt: null,
     heartbeatAt: '2026-08-08T10:00:00.000Z',
     progress: null,
+    catchupSlots: null,
     ...over,
   };
 }
@@ -154,5 +155,133 @@ describe('LiveRunHeader — three liveness states (AC8, AC16)', () => {
     expect(stalledText).not.toEqual(disconnectedText);
     expect(disconnected.container.querySelector('.lucide-heart-off')).toBeNull();
     expect(stalled.container.querySelector('.lucide-wifi-off')).toBeNull();
+  });
+});
+
+describe('LiveRunHeader — catch-up extension, including the ETA computation (blueprint 1.6)', () => {
+  const STARTED_AT = '2026-08-08T10:00:00.000Z';
+  const STARTED_MS = Date.parse(STARTED_AT);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function catchupRun(
+    elapsedMinutes: number,
+    over: Partial<RunSummary> = {},
+  ): RunSummary {
+    const now = STARTED_MS + elapsedMinutes * 60_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    return makeRun({
+      kind: 'catchup',
+      startedAt: STARTED_AT,
+      heartbeatAt: new Date(now).toISOString(),
+      catchupSlots: ['14:00', '16:30', '19:00'],
+      progress: makeProgress({ stage: 'farm', stageIndex: 2, stageTotal: 10 }),
+      ...over,
+    });
+  }
+
+  it('(a) renders the exact ETA arithmetic result for a known fixture', async () => {
+    renderHeader(catchupRun(8), { estimatedDurationMs: 1_140_000 });
+
+    await waitFor(() => {
+      expect(screen.getByText('~11 min left')).toBeTruthy();
+    });
+  });
+
+  it('(b) catchup-banner-stop-unavailable shares the same computed value as the eta', async () => {
+    renderHeader(catchupRun(8), { estimatedDurationMs: 1_140_000 });
+
+    await waitFor(() => {
+      expect(screen.getByText('Runs to completion — about 11 min left.')).toBeTruthy();
+    });
+  });
+
+  it('(c) an elapsed time exceeding the estimate clamps to "~0 min left", never negative', async () => {
+    renderHeader(catchupRun(25), { estimatedDurationMs: 1_140_000 });
+
+    await waitFor(() => {
+      expect(screen.getByText('~0 min left')).toBeTruthy();
+      expect(screen.getByText('Runs to completion — about 0 min left.')).toBeTruthy();
+    });
+    expect(screen.queryByText(/-\d+ min left/)).toBeNull();
+  });
+
+  it('(d) estimatedDurationMs: null renders the elapsed-only fallback, no minutes clause', async () => {
+    renderHeader(catchupRun(8), { estimatedDurationMs: null });
+
+    await waitFor(() => {
+      const eta = screen.getByTestId('live-run-heartbeat').textContent ?? '';
+      expect(eta).toContain('elapsed');
+      expect(eta).not.toContain('min left');
+      expect(screen.getByText('Runs to completion.')).toBeTruthy();
+    });
+  });
+
+  it('(e) catchup-banner-standin joins all slot times exactly as the mockup shows', async () => {
+    renderHeader(catchupRun(8), { estimatedDurationMs: 1_140_000 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Standing in for 3 missed slots (14:00, 16:30, 19:00)'),
+      ).toBeTruthy();
+    });
+  });
+
+  it('(f) catchup-banner-stop is never present for any catch-up run state', async () => {
+    const alive = renderHeader(catchupRun(8), { estimatedDurationMs: 1_140_000 });
+    await waitFor(() => {
+      expect(alive.getByText('~11 min left')).toBeTruthy();
+    });
+    expect(alive.queryByTestId('catchup-banner-stop')).toBeNull();
+    expect(alive.container.querySelector('[data-qa="catchup-banner-stop"]')).toBeNull();
+    alive.unmount();
+
+    const stalled = renderHeader(
+      catchupRun(8, { heartbeatAt: new Date(STARTED_MS - 11 * 60_000).toISOString() }),
+    );
+    await waitFor(() => {
+      expect(stalled.getByTestId('live-run-heartbeat')).toHaveTextContent(
+        /No heartbeat for/,
+      );
+    });
+    expect(stalled.container.querySelector('[data-qa="catchup-banner-stop"]')).toBeNull();
+    stalled.unmount();
+
+    const disconnected = renderHeader(catchupRun(8), {
+      pollError: true,
+      estimatedDurationMs: null,
+    });
+    await waitFor(() => {
+      expect(disconnected.getByTestId('live-run-heartbeat')).toHaveTextContent(
+        /Disconnected/,
+      );
+    });
+    expect(
+      disconnected.container.querySelector('[data-qa="catchup-banner-stop"]'),
+    ).toBeNull();
+  });
+
+  it('(g) a non-catchup running row renders none of the catch-up-only data-qa ids (regression)', async () => {
+    const { container } = renderHeader(
+      makeRun({ kind: 'run', progress: makeProgress() }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-run-stage')).toHaveTextContent(
+        'Running — filter 7/10',
+      );
+    });
+    expect(container.querySelector('[data-qa="catchup-banner-standin"]')).toBeNull();
+    expect(container.querySelector('[data-qa="catchup-banner-why"]')).toBeNull();
+    expect(container.querySelector('[data-qa="catchup-banner-eta"]')).toBeNull();
+    expect(
+      container.querySelector('[data-qa="catchup-banner-stop-unavailable"]'),
+    ).toBeNull();
+    expect(container.querySelector('[data-qa="catchup-banner-stop"]')).toBeNull();
+    // The root itself still carries the additive data-qa (same element as
+    // every running row) — only the CONTENT branches on run.kind.
+    expect(container.querySelector('[data-qa="catchup-banner"]')).not.toBeNull();
   });
 });

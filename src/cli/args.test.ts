@@ -174,6 +174,31 @@ test('config: registered in COMMAND_NAMES and mentioned in USAGE', () => {
   assert.ok(USAGE.includes('config get'));
 });
 
+test('run: --catchup-slots comma-split into catchupSlots array', () => {
+  const result = buildOptions('run', [], {
+    profile: 'rajni',
+    'catchup-slots': '09:00,11:30,19:00',
+  });
+  assert.deepEqual(result, {
+    profile: 'rajni',
+    resume: false,
+    headless: false,
+    dryRun: false,
+    catchupSlots: ['09:00', '11:30', '19:00'],
+  });
+});
+
+test('run: no --catchup-slots omits catchupSlots entirely', () => {
+  const result = buildOptions('run', [], { profile: 'rajni' });
+  assert.deepEqual(result, {
+    profile: 'rajni',
+    resume: false,
+    headless: false,
+    dryRun: false,
+  });
+  assert.ok(!('catchupSlots' in (result as object)));
+});
+
 test('migrate-home: registered in COMMAND_NAMES and mentioned in USAGE', () => {
   assert.ok(COMMAND_NAMES.has('migrate-home'));
   assert.ok(USAGE.includes('migrate-home'));

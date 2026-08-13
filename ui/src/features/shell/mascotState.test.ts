@@ -18,6 +18,7 @@ function makeRun(
     finishedAt: FRESH_FINISHED,
     heartbeatAt: null,
     progress: null,
+    catchupSlots: null,
     ...over,
   };
 }

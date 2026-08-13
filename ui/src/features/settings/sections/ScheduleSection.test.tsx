@@ -153,6 +153,8 @@ describe('ScheduleSection', () => {
           nextRunAt: '2026-08-09T09:00:00.000Z',
           degraded: false,
           degradedReason: null,
+          schemaVersion: null,
+          buildVersion: null,
         },
       ],
     });
@@ -194,6 +196,8 @@ describe('ScheduleSection', () => {
           nextRunAt: '2026-08-13T11:30:00.000Z',
           degraded: false,
           degradedReason: null,
+          schemaVersion: null,
+          buildVersion: null,
         },
       ],
     });
@@ -246,6 +250,8 @@ describe('ScheduleSection', () => {
           nextRunAt: null,
           degraded: true,
           degradedReason,
+          schemaVersion: 8,
+          buildVersion: 7,
         },
       ],
     });
@@ -264,6 +270,35 @@ describe('ScheduleSection', () => {
     expect(
       screen.queryByTestId('schedule-daemon-status-healthy'),
     ).not.toBeInTheDocument();
+  });
+
+  it('a degraded entry with null schemaVersion/buildVersion (a stale pidfile from before these fields existed) falls back to the full degradedReason sentence, not a crash or "v undefined"', async () => {
+    stubDoc();
+    const degradedReason =
+      "the database schema (v8) is newer than the running daemon's build (v7). This happens after an update that changes the schema.";
+    stubDaemon({
+      state: 'running',
+      pid: 1,
+      startedAt: '2026-08-13T09:00:00.000Z',
+      lastTickAt: new Date().toISOString(),
+      inFlight: null,
+      profiles: [
+        {
+          profile: 'rajni',
+          enabled: true,
+          nextRunAt: null,
+          degraded: true,
+          degradedReason,
+          schemaVersion: null,
+          buildVersion: null,
+        },
+      ],
+    });
+    renderSection();
+    const status = await screen.findByTestId('schedule-daemon-status-degraded');
+    const label = status.querySelector('span.font-medium');
+    expect(label).not.toBeNull();
+    expect(label?.textContent).toBe(`Degraded — ${degradedReason}`);
   });
 
   it('while the daemon query is in flight, renders the loading skeleton and nothing else (mockup:702-707 loading state)', async () => {

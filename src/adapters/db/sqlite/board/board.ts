@@ -1,8 +1,12 @@
 /**
  * SqliteBoardStore — the board app's read-jobs/write-tracking surface over
- * jobbunny.db (local-DB spec §3, ownership zones). Reads `jobs` only,
- * writes `tracking` only, never the reverse — the pipeline-side
- * `SqliteStore` (../store/) owns `jobs` writes.
+ * jobbunny.db (local-DB spec §3, ownership zones). Reads `jobs` (and,
+ * read-only via `listRuns`/`getRun`/`listRunEvents`/`listRunHealth`/
+ * `listDeferredSlots`, `runs`/`run_events`/`deferred_slots`) only, writes
+ * `tracking` only, never the reverse — the pipeline-side `SqliteStore`
+ * (../store/) owns `jobs` writes, the daemon's `SqliteDeferredSlotStore`
+ * (`ports/deferred_slots.ts`, a separate port/adapter pair) owns
+ * `deferred_slots` writes.
  *
  * `whereFor(query)` is the single place a `BoardQuery` becomes SQL: it is
  * shared by `listJobs`'s row query AND its `total` count query so the two
@@ -14,17 +18,21 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { JD } from '../../../../core/jd/index.ts';
 import { reviewFlags } from '../../../../core/jd/index.ts';
+import { formatLocalDate } from '../../../../core/schedule/index.ts';
 import type {
   BoardJobDetail,
   BoardJobRow,
   BoardQuery,
   BoardStore,
+  RunDurationEstimate,
   RunEventHealth,
   TrackingPatch,
   TrackingRow,
 } from '../../../../ports/board.ts';
+import type { DeferredSlotRow } from '../../../../ports/deferred_slots.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../../ports/run_store.ts';
 import {
+  estimateRunDurationQuery,
   fetchRunHealth,
   getRunQuery,
   listRunEventsQuery,
@@ -100,6 +108,26 @@ interface RawRow {
   t_next_action: string | null;
   t_next_action_date: string | null;
   t_updated_at: string | null;
+}
+
+interface RawDeferredSlotRow {
+  run_date: string;
+  slot: string;
+  reason_code: DeferredSlotRow['reasonCode'];
+  reason: string;
+  decided_at: string;
+  notified_at: string | null;
+}
+
+function toDeferredSlotRow(row: RawDeferredSlotRow): DeferredSlotRow {
+  return {
+    runDate: row.run_date,
+    slot: row.slot,
+    reasonCode: row.reason_code,
+    reason: row.reason,
+    decidedAt: row.decided_at,
+    notifiedAt: row.notified_at,
+  };
 }
 
 interface RawTrackingRow {
@@ -316,6 +344,29 @@ export class SqliteBoardStore implements BoardStore {
 
   listRunHealth(runIds: number[]): Map<number, RunEventHealth> {
     return fetchRunHealth(this.db, runIds);
+  }
+
+  estimateRunDuration(): RunDurationEstimate | null {
+    return estimateRunDurationQuery(this.db);
+  }
+
+  /** D3b (blueprint step 1.17) — reads `deferred_slots` directly, the
+   * board's OWN query over the same table `SqliteDeferredSlotStore`
+   * (`ports/deferred_slots.ts`, a separate port/adapter pair) writes. See
+   * this file's own header comment; no delegation to that port. */
+  listDeferredSlots(query: { date?: string }): {
+    rows: DeferredSlotRow[];
+    total: number;
+  } {
+    const date = query.date ?? formatLocalDate(new Date());
+    const rawRows = this.db
+      .prepare(
+        `SELECT run_date, slot, reason_code, reason, decided_at, notified_at
+         FROM deferred_slots WHERE run_date = ? ORDER BY slot`,
+      )
+      .all(date) as unknown as RawDeferredSlotRow[];
+    const rows = rawRows.map((r) => toDeferredSlotRow(r));
+    return { rows, total: rows.length };
   }
 
   close(): void {

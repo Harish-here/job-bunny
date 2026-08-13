@@ -7,9 +7,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import type { NotifyEvent } from '../../ports/notifier.ts';
 import {
+  wireDaemonHasCatchupRun,
   wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
   wireDaemonNotifier,
+  wireDaemonReachabilityProbe,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
   wireDaemonSchemaGuard,
@@ -49,13 +51,13 @@ async function seedProfileDir(name: string): Promise<string> {
 
 function insertRunRow(
   dbPath: string,
-  row: { date: string; timeDir: string; startedAt: string },
+  row: { date: string; timeDir: string; startedAt: string; kind?: string },
 ): void {
   const db = new DatabaseSync(dbPath);
   db.prepare(
     `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
-     VALUES (?, ?, 'run', 'running', ?)`,
-  ).run(row.date, row.timeDir, row.startedAt);
+     VALUES (?, ?, ?, 'running', ?)`,
+  ).run(row.date, row.timeDir, row.kind ?? 'run', row.startedAt);
   db.close();
 }
 
@@ -176,6 +178,7 @@ test('wireDaemonRunHistory: a store that fails once does not permanently blind a
       const rows = calls === 1 ? [] : ['09-00'];
       return {
         listRunTimeDirs: () => rows,
+        hasRunOfKind: () => false,
         close: () => {
           closes += 1;
         },
@@ -227,16 +230,16 @@ test('wireDaemonSchemaGuard: flags a profile whose schema version exceeds LATEST
   }
   {
     const db = new DatabaseSync(currentDbPath);
-    // LATEST_SCHEMA_VERSION hardcoded as 7 here: this test file may not
+    // LATEST_SCHEMA_VERSION hardcoded as 8 here: this test file may not
     // import src/adapters/** (only daemon.ts itself is carved out — see
     // this file's own header comment).
-    db.exec('PRAGMA user_version = 7');
+    db.exec('PRAGMA user_version = 8');
     db.close();
   }
   const checkSchemaDrift = wireDaemonSchemaGuard({ root });
   const result = checkSchemaDrift(['newer', 'current', 'nodb']);
   assert.deepEqual([...result.keys()], ['newer']);
-  assert.deepEqual(result.get('newer'), { schemaVersion: 9, buildVersion: 7 });
+  assert.deepEqual(result.get('newer'), { schemaVersion: 9, buildVersion: 8 });
   assert.equal(existsSync(join(root, 'profiles', 'nodb', 'data', 'jobbunny.db')), false);
 });
 
@@ -507,4 +510,77 @@ test('wireDaemonHasNotifierConfigured: true for a profile with a configured noti
   assert.equal(await hasNotifierConfigured('hasnotif-no'), false);
   assert.equal(await hasNotifierConfigured('hasnotif-broken'), false);
   assert.equal(await hasNotifierConfigured('hasnotif-ghost'), false);
+});
+
+test('wireDaemonReachabilityProbe: pre-bound to zero args, true on a resolving lookup, false on a rejecting one — never throws', async () => {
+  const okProbe = wireDaemonReachabilityProbe({
+    reachabilityProbeDeps: {
+      lookup: async () => ({ address: '1.2.3.4' }),
+      timeoutMs: 1000,
+    },
+  });
+  assert.equal(await okProbe(), true);
+
+  const failProbe = wireDaemonReachabilityProbe({
+    reachabilityProbeDeps: {
+      lookup: async () => {
+        throw new Error('ENOTFOUND');
+      },
+      timeoutMs: 1000,
+    },
+  });
+  assert.equal(await failProbe(), false);
+});
+
+test('wireDaemonHasCatchupRun: a profile with no jobbunny.db yet returns false and creates no file', async () => {
+  const dbPath = await seedProfileDir('catchup-nodb');
+  const hasCatchupRun = wireDaemonHasCatchupRun({ root });
+  assert.equal(hasCatchupRun('catchup-nodb', '2026-08-05'), false);
+  assert.equal(existsSync(dbPath), false, 'a lookup must never create the db file');
+});
+
+test('wireDaemonHasCatchupRun: true only for the exact (date, kind:catchup) pair — a plain run or a different date does not count', async () => {
+  const dbPath = await seedProfileDir('catchup-yes');
+  await writeFile(dbPath, '');
+  const hasCatchupRun = wireDaemonHasCatchupRun({ root });
+  assert.equal(hasCatchupRun('catchup-yes', '2026-08-05'), false); // migrates the empty file.
+
+  insertRunRow(dbPath, {
+    date: '2026-08-05',
+    timeDir: 'catchup',
+    startedAt: '2026-08-05T20:00:00.000Z',
+    kind: 'catchup',
+  });
+  insertRunRow(dbPath, {
+    date: '2026-08-05',
+    timeDir: '09-00',
+    startedAt: '2026-08-05T09:00:00.000Z',
+    kind: 'run',
+  });
+
+  assert.equal(hasCatchupRun('catchup-yes', '2026-08-05'), true);
+  assert.equal(hasCatchupRun('catchup-yes', '2026-08-04'), false);
+});
+
+test('wireDaemonHasCatchupRun: a store that fails once does not permanently blind a subsequent call (fresh store per call, never memoized)', async () => {
+  const dbPath = await seedProfileDir('catchup-flaky');
+  await writeFile(dbPath, '');
+
+  let calls = 0;
+  const hasCatchupRun = wireDaemonHasCatchupRun({
+    root,
+    makeRunStore: () => {
+      calls += 1;
+      const result = calls !== 1;
+      return {
+        listRunTimeDirs: () => [],
+        hasRunOfKind: () => result,
+        close: () => {},
+      };
+    },
+  });
+
+  assert.equal(hasCatchupRun('catchup-flaky', '2026-08-05'), false);
+  assert.equal(hasCatchupRun('catchup-flaky', '2026-08-05'), true);
+  assert.equal(calls, 2, 'expected a fresh store construction per call, never memoized');
 });

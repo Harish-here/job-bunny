@@ -38,6 +38,7 @@ function makeRun(
     finishedAt: null,
     heartbeatAt: null,
     progress: null,
+    catchupSlots: null,
     ...over,
   };
 }

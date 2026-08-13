@@ -46,13 +46,17 @@ export interface RunRow {
   id: number;
   date: string;
   timeDir: string | null;
-  kind: 'run' | 'stage' | 'reconcile';
+  kind: 'run' | 'stage' | 'reconcile' | 'catchup';
   resumedFrom: number | null;
   status: 'running' | 'passed' | 'failed' | 'crashed';
   startedAt: string;
   finishedAt: string | null;
   heartbeatAt: string | null;
   progress: RunProgress | null;
+  /** `null` for every non-catch-up run; the missed local `HH:MM` slots a
+   * `kind: 'catchup'` run stood in for otherwise (`ports/run_store.ts`'s
+   * `RunRow`). */
+  catchupSlots: string[] | null;
 }
 
 /** One `GET /runs` list row — `RunSummary` + the health-gate inputs
@@ -90,11 +94,19 @@ export interface RunFailure {
 }
 
 /** `GET /runs/:id` response — `RunDetail` (`ports/run_store.ts`): a
- * `RunRow` plus the three opaque blobs. */
+ * `RunRow` plus the three opaque blobs, plus the catch-up banner's ETA
+ * input (`GetRunResponse`, `app/features/runs/routes.ts`, blueprint step
+ * 1.18). Optional (not every existing fixture cares, and the real backend
+ * only ever populates it for a `status: 'running'` row) — Playwright's
+ * `route.fulfill({ json })` drops an `undefined` key entirely, so an
+ * omitted field here reaches the client exactly like a genuinely absent
+ * one, landing on `LiveRunHeader`'s own `estimatedDurationMs = null`
+ * default. */
 export interface RunDetailFixture extends RunRow {
   result: { stages: FunnelStage[] } | null;
   failure: RunFailure | null;
   syncDryrun: unknown;
+  estimatedDurationMs?: number | null;
 }
 
 function makeDefaultRow(overrides: Partial<RunRow> & { id: number }): RunRow {
@@ -109,6 +121,7 @@ function makeDefaultRow(overrides: Partial<RunRow> & { id: number }): RunRow {
     finishedAt: now,
     heartbeatAt: now,
     progress: null,
+    catchupSlots: null,
     ...overrides,
   };
 }
@@ -131,6 +144,34 @@ export async function stubIntents(
   await page.route('**/api/profiles/rajni/run-intents*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     await route.fulfill({ json: { rows } });
+  });
+}
+
+/** `GET /deferred-slots` row — `DeferredSlotRow` (`ports/deferred_slots.ts`),
+ * mirrored locally rather than imported, same convention as `RunRow` above. */
+export interface DeferredSlotRow {
+  runDate: string;
+  slot: string;
+  reasonCode: 'host-asleep' | 'network-unreachable' | 'daemon-unavailable';
+  reason: string;
+  decidedAt: string;
+  notifiedAt: string | null;
+}
+
+/** Stubs `GET /deferred-slots` (D3b, task 24) — the `ListDeferredSlotsResponse`
+ * shape from task 19 (`{ rows, total, date }`). Echoes back whichever
+ * `date` the frontend actually requested (`RunsPage.tsx` always passes
+ * `today`) rather than hardcoding one, since this fixture doesn't know
+ * what "today" resolves to at test-run time. */
+export async function stubDeferredSlots(
+  page: Page,
+  rows: DeferredSlotRow[],
+): Promise<void> {
+  await page.route('**/api/profiles/rajni/deferred-slots*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const url = new URL(route.request().url());
+    const date = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
+    await route.fulfill({ json: { rows, total: rows.length, date } });
   });
 }
 
@@ -256,6 +297,8 @@ export interface DaemonProfileScheduleFixture {
   nextRunAt: string | null;
   degraded: boolean;
   degradedReason: string | null;
+  schemaVersion: number | null;
+  buildVersion: number | null;
 }
 
 /** GET /api/daemon -> 200, a full DaemonStatus payload with the given

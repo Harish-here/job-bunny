@@ -13,9 +13,13 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const LATEST_SCHEMA_VERSION = 7;
+export const LATEST_SCHEMA_VERSION = 8;
 
-const MIGRATIONS: readonly string[] = [
+// Exported (in addition to LATEST_SCHEMA_VERSION and openJobsDb) so the
+// colocated test can build a db at an arbitrary prior version by replaying a
+// prefix of this array, instead of hand-duplicating the full CREATE TABLE
+// history for every version under test.
+export const MIGRATIONS: readonly string[] = [
   // v0 -> v1
   `
   CREATE TABLE jobs (
@@ -131,6 +135,23 @@ const MIGRATIONS: readonly string[] = [
     item_current     INTEGER,
     item_total       INTEGER
   );
+  `,
+  // v7 -> v8: deferred-slot visibility (D3b) + catch-up labeling (D1b) —
+  // see docs/product/pipeline-stability-hardening/blueprint-be.md §4
+  `
+  CREATE TABLE deferred_slots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date    TEXT NOT NULL,
+    slot        TEXT NOT NULL,
+    reason_code TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    decided_at  TEXT NOT NULL,
+    notified_at TEXT
+  );
+  CREATE UNIQUE INDEX idx_deferred_slots_one_per_slot ON deferred_slots(run_date, slot);
+  CREATE INDEX idx_deferred_slots_date ON deferred_slots(run_date);
+
+  ALTER TABLE runs ADD COLUMN catchup_slots_json TEXT;
   `,
 ];
 

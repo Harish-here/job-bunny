@@ -1,6 +1,7 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
 import type { ConfigDocKey } from './config_store.ts';
+import type { DeferredSlotRow } from './deferred_slots.ts';
 import type { DoctorReport } from './doctor.ts';
 import type { RunIntentStore } from './run_intents.ts';
 import type { RunDetail, RunEventRow, RunSummary } from './run_store.ts';
@@ -71,6 +72,20 @@ export interface RunEventHealth {
   breakerOpen: boolean;
 }
 
+/** The catch-up banner's ETA input (blueprint step 1.18) —
+ * `estimateRunDuration()` computes this from run history; the route layer
+ * (`app/features/runs/routes.ts`) folds it into `RunDetailResponse` only
+ * for a `status === 'running'` run, and the CLIENT (task 26) computes
+ * `remaining = max(0, medianMs - elapsedMs)`, never this port. */
+export interface RunDurationEstimate {
+  medianMs: number;
+  sampleSize: number; // how many eligible runs contributed, always >= MIN_DURATION_SAMPLE_SIZE
+}
+
+/** Below this many eligible samples, `estimateRunDuration()` returns `null`
+ * — absence, not a guess, when history is too thin. */
+export const MIN_DURATION_SAMPLE_SIZE = 3;
+
 export type DaemonState = 'running' | 'stopped' | 'stale';
 
 export interface DaemonProfileSchedule {
@@ -80,6 +95,8 @@ export interface DaemonProfileSchedule {
   nextRunAt: string | null;
   degraded: boolean;
   degradedReason: string | null; // human-readable, mirrors T6's cause line, null when not degraded
+  schemaVersion: number | null; // the profile's own DB schema version when degraded, else null
+  buildVersion: number | null; // this daemon build's LATEST_SCHEMA_VERSION when degraded, else null
 }
 
 export interface DaemonStatus {
@@ -160,6 +177,23 @@ export interface BoardStore {
    * soft-errors fetch. Ids with no warn/error events are simply absent
    * from the map. */
   listRunHealth(runIds: number[]): Map<number, RunEventHealth>;
+  /** Deferred-slot visibility (D3b, blueprint step 1.17) — reads the SAME
+   * `deferred_slots` table the daemon's `SqliteDeferredSlotStore`
+   * (`ports/deferred_slots.ts`, a SEPARATE port/adapter pair) writes, but
+   * through this store's OWN read query, exactly like `listRuns`/`getRun`
+   * are a separate reader over `runs` from `SqliteRunStore`'s writer.
+   * `query.date` defaults to today's LOCAL date when absent. `total` is
+   * simply `rows.length` — a day's deferred count is never paginated. */
+  listDeferredSlots(query: { date?: string }): { rows: DeferredSlotRow[]; total: number };
+  /** Median duration of recent eligible successful runs (blueprint step
+   * 1.18) — scoped to "this profile" implicitly, same convention every
+   * other `BoardStore` method already uses. Eligibility: `status ===
+   * 'passed'`, `kind IN ('run', 'catchup')`, `resumedFrom === null`, and
+   * the LinkedIn same-day-resume discriminator (count of "skipping
+   * already-done url" events <= count of "page harvested" events) —
+   * excludes same-day re-fires with nothing left to scrape. `null` below
+   * `MIN_DURATION_SAMPLE_SIZE` eligible samples. */
+  estimateRunDuration(): RunDurationEstimate | null;
   close(): void;
 }
 

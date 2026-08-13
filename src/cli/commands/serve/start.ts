@@ -166,6 +166,16 @@ export function buildDaemonDeps(
     readIntents: deps.readIntents,
     claimIntent: deps.claimIntent,
     attachIntentRun: deps.attachIntentRun,
+    probeReachable: deps.probeReachable,
+    recordDeferral: deps.recordDeferral,
+    listForDate: deps.listForDate,
+    listUnnotifiedDatesBefore: deps.listUnnotifiedDatesBefore,
+    markNotified: deps.markNotified,
+    hasCatchupRun: deps.hasCatchupRun,
+    // step 1.12: the SAME executor as `spawnRun` above (`createSpawnRun`
+    // already branches on `'standingInFor' in owed` internally) — no
+    // duplicate executor, no separate `createSpawnRun` instance.
+    spawnCatchup: spawnRun,
     log,
     now: () => new Date(),
   };

@@ -140,6 +140,8 @@ test('shell: a degraded daemon shows the global banner with cause, remedy, and a
       nextRunAt: null,
       degraded: true,
       degradedReason,
+      schemaVersion: 8,
+      buildVersion: 7,
     },
   ]);
   // Chromium denies `clipboard-write` by default in a fresh Playwright

@@ -128,6 +128,9 @@ function fakeRunStore(opts?: { prunedResult?: number }): {
       prunedCalls.push({ today, ttlDays });
       return opts?.prunedResult ?? 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
   return { store, prunedCalls };

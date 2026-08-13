@@ -19,6 +19,7 @@ function makeRun(over: Partial<RunSummary> = {}): RunSummary {
     finishedAt: null,
     heartbeatAt: null,
     progress: null,
+    catchupSlots: null,
     ...over,
   };
 }

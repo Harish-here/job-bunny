@@ -62,6 +62,7 @@ const BASE = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:05:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const RUNNING_PROGRESS: RunProgress = {
@@ -251,6 +252,7 @@ const BARE_SUMMARY_BASE = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:05:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 describe('RunsList — bare RunSummary rows (the real /runs list contract)', () => {
@@ -383,5 +385,192 @@ describe('RunsList — degraded row soft-error-count subline', () => {
     const rowEl = screen.getByTestId('run-row');
     expect(rowEl).toHaveAttribute('data-outcome-kind', 'degraded');
     expect(screen.queryByTestId('run-row-subline')).not.toBeInTheDocument();
+  });
+});
+
+// Task 25 (blueprint.md step 1.5): a catch-up run's badge + subline
+// override, layered on top of a normally-classified `produced` row —
+// `catchupSlots` is orthogonal to `OutcomeKind` (design-scale.md), so these
+// fixtures deliberately reuse the plain `produced` shape and vary only
+// `catchupSlots`.
+describe('RunsList — catch-up row extension (blueprint.md 1.5)', () => {
+  it('a produced row with catchupSlots renders the "Catch-up" badge and the "Stood in for N slots" subline verbatim', () => {
+    const row: RunDetail = {
+      id: 50,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      failure: null,
+      syncDryrun: null,
+      catchupSlots: ['14:00', '16:30', '19:00'],
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).toHaveAttribute('data-qa', 'run-row-catchup');
+    expect(screen.getByText('Catch-up')).toBeInTheDocument();
+    expect(screen.getByText('Stood in for 3 slots')).toBeInTheDocument();
+  });
+
+  it('the same row shape with catchupSlots: null renders neither the badge nor the overridden subline', () => {
+    const row: RunDetail = {
+      id: 51,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      failure: null,
+      syncDryrun: null,
+      catchupSlots: null,
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    const rowEl = screen.getByTestId('run-row');
+    expect(rowEl).not.toHaveAttribute('data-qa', 'run-row-catchup');
+    expect(screen.queryByText('Catch-up')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Stood in for/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-row-subline')).not.toBeInTheDocument();
+  });
+
+  it('a singular catch-up count renders "Stood in for 1 slot" with no trailing "s"', () => {
+    const row: RunDetail = {
+      id: 52,
+      ...BASE,
+      status: 'passed',
+      result: { stages: stages(10, 7) },
+      failure: null,
+      syncDryrun: null,
+      catchupSlots: ['14:00'],
+    };
+    render(<RunsList rows={[row]} selectedId={null} onSelect={() => {}} />);
+    expect(screen.getByText('Stood in for 1 slot')).toBeInTheDocument();
+    expect(screen.queryByText('Stood in for 1 slots')).not.toBeInTheDocument();
+  });
+});
+
+// BUG 10 (pipeline-stability-hardening QA round 3, 2026-08-14) — ux-notes.md
+// §9 verbatim: "it must not enter the runs listbox." `insertContent` used to
+// render inside `role="listbox"`, between two `role="option"` rows: a div
+// holding a paragraph/region/heading/button is not a permitted listbox
+// child (ARIA 1.2 requires only `option`, or `group` of `option`s), and AT
+// that prunes disallowed children drops the whole group from the
+// accessibility tree. `INSERT_FIXTURE` below reproduces the QA report's own
+// driven evidence shape (`text`, `paragraph`, `region`, `heading[level=3]`,
+// `button`) so the standing guard exercises the exact tree that was found
+// broken, not a simplified stand-in.
+const INSERT_FIXTURE = (
+  <div data-testid="fixture-insert">
+    <p>Job Bunny declined to start these runs because the host was asleep.</p>
+    <section aria-label="Details">09:00 · host asleep</section>
+    <h3>Details</h3>
+    <button type="button">Details</button>
+  </div>
+);
+
+describe('RunsList — accessibility: the inserted group must not enter role="listbox" (BUG 10)', () => {
+  it('STANDING GUARD: every role="listbox" contains ONLY role="option" children, even with content inserted mid-list', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const nonOptionChildren = container.querySelectorAll(
+      '[role="listbox"] > *:not([role="option"])',
+    );
+    expect(nonOptionChildren).toHaveLength(0);
+  });
+
+  it('STANDING GUARD: also holds with no insertion at all (the plain single-listbox case)', () => {
+    const { container } = render(
+      <RunsList rows={ROWS} selectedId={null} onSelect={() => {}} />,
+    );
+    const nonOptionChildren = container.querySelectorAll(
+      '[role="listbox"] > *:not([role="option"])',
+    );
+    expect(nonOptionChildren).toHaveLength(0);
+  });
+
+  it('STANDING GUARD: also holds when insertAfterId matches no row (degrades to a single listbox, nothing inserted)', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={999}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    expect(screen.queryByTestId('fixture-insert')).not.toBeInTheDocument();
+    const nonOptionChildren = container.querySelectorAll(
+      '[role="listbox"] > *:not([role="option"])',
+    );
+    expect(nonOptionChildren).toHaveLength(0);
+    expect(container.querySelectorAll('[role="listbox"]')).toHaveLength(1);
+  });
+
+  it('the inserted content is not a DESCENDANT of any listbox either (not just not a direct child)', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const insert = container.querySelector('[data-testid="fixture-insert"]');
+    expect(insert).not.toBeNull();
+    expect(insert?.closest('[role="listbox"]')).toBeNull();
+  });
+
+  it('splits into two listboxes with DISTINCT, non-empty accessible names — never two identically-named "Runs" lists', () => {
+    render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const listboxes = screen.getAllByRole('listbox');
+    expect(listboxes).toHaveLength(2);
+    const names = listboxes.map((el) => el.getAttribute('aria-label'));
+    expect(names[0]).toBeTruthy();
+    expect(names[1]).toBeTruthy();
+    expect(names[0]).not.toBe(names[1]);
+  });
+
+  it('document order: rows-before -> insertContent -> rows-after, with more than one row on each side', () => {
+    const { container } = render(
+      <RunsList
+        rows={ROWS}
+        selectedId={null}
+        onSelect={() => {}}
+        insertAfterId={3}
+        insertContent={INSERT_FIXTURE}
+      />,
+    );
+    const runIds = screen
+      .getAllByTestId('run-row')
+      .map((el) => el.getAttribute('data-run-id'));
+    // Row order itself is untouched by the split (ids 1..7, unchanged).
+    expect(runIds).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+
+    const lastBeforeRow = container.querySelector('[data-run-id="3"]') as HTMLElement;
+    const insert = container.querySelector(
+      '[data-testid="fixture-insert"]',
+    ) as HTMLElement;
+    const firstAfterRow = container.querySelector('[data-run-id="4"]') as HTMLElement;
+
+    // DOCUMENT_POSITION_FOLLOWING on the comparison target means the
+    // target comes AFTER the node compareDocumentPosition was called on.
+    expect(
+      lastBeforeRow.compareDocumentPosition(insert) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      insert.compareDocumentPosition(firstAfterRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

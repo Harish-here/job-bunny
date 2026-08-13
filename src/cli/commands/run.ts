@@ -49,6 +49,7 @@ import {
   resolveLoggingSettings,
   type WireResult,
 } from '../wire/index.ts';
+import { sendFailureDigest } from './run_failure_notice.ts';
 
 // > structure provider timeout (300_000) so the stall watchdog never
 // false-kills a live batch.
@@ -90,6 +91,10 @@ export interface RunCommandOptions {
   /** Operator override for the run-level cap (ms). Absent ⇒ derived from
    * the wired stages' own timeout/retry budgets (`computeRunCapMs`). */
   runCapMs?: number;
+  /** Daemon-internal (`ops/daemon`'s `createSpawnRun`): present ⇒ this
+   * invocation is a catch-up run covering these owed HH:MM slots, recorded
+   * via `startRun`'s `kind: 'catchup'` + `catchupSlots`. */
+  catchupSlots?: string[];
 }
 
 /** Lock file name at the repo root — see `ops/scheduling/run_lock.ts` for
@@ -262,9 +267,10 @@ export async function runCommand(
     const runId = ctx.runStore.startRun({
       date,
       timeDir: time,
-      kind: 'run',
+      kind: opts.catchupSlots ? 'catchup' : 'run',
       startedAt: now.toISOString(),
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
+      ...(opts.catchupSlots !== undefined ? { catchupSlots: opts.catchupSlots } : {}),
     });
     // Never propagate the degraded run store's sentinel (`startRun` returns
     // -1 when the store failed to open — ports/run_store.ts) into
@@ -302,14 +308,25 @@ export async function runCommand(
     ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
 
     if (result.outcome === 'passed') {
+      // R20 — success bypasses the dedup path ENTIRELY: unconditional send,
+      // no `readDoc`/`writeDoc`/`decideNotification` at all, byte-identical
+      // to the pre-dedup behavior (regression bar).
       await runRoutines(routines, 'post-sync', ctx);
+      await ctx.notify({
+        kind: 'digest',
+        profile: opts.profile,
+        text: formatDigest(result, { dryRun: opts.dryRun ?? false }),
+      });
+    } else {
+      await sendFailureDigest(
+        ctx,
+        runId,
+        result,
+        opts.profile,
+        opts.dryRun ?? false,
+        resolved.now().toISOString(),
+      );
     }
-
-    await ctx.notify({
-      kind: 'digest',
-      profile: opts.profile,
-      text: formatDigest(result, { dryRun: opts.dryRun ?? false }),
-    });
 
     console.log(funnelSummary(result, opts.dryRun ?? false));
 

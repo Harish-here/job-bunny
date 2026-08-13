@@ -74,7 +74,7 @@ Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline
 | `adapters-only-ports-core` | `adapters/` importing `pipeline`, `routines`, `ops`, or `cli` |
 | `app-only-ports-core` | `app/` importing anything but `ports`/`core` (or its own `shared/`) |
 | `only-cli-imports-app` | anything except `cli` importing `src/app/**` |
-| `only-wire-imports-adapters` | anything except `cli/wire/compose.ts` (plus `builders.ts`, `board.ts`, `daemon.ts`, `migrate.ts`, and `registry.ts`'s type-only exception) importing `src/adapters/**` |
+| `only-wire-imports-adapters` | anything outside `cli/wire`'s composition files importing `src/adapters/**` — the rule's own comment in `.dependency-cruiser.cjs` is the authoritative list of exceptions and records why each exists |
 | `nothing-imports-cli` | anything importing `cli` |
 
 Note: `boundaries` parses via `@swc/core` with `tsConfig` omitted — setting `tsConfig` silently cruises 0 modules (dependency-cruiser's typescript resolver caps below TS7).

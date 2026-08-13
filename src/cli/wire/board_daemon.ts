@@ -62,6 +62,8 @@ async function readDaemonProfileSchedules(
           nextRunAt: nextFireAt(new Date(), [s])?.at.toISOString() ?? null,
           degraded: degradedEntry !== undefined,
           degradedReason: degradedEntry ? degradedReasonText(degradedEntry) : null,
+          schemaVersion: degradedEntry?.schemaVersion ?? null,
+          buildVersion: degradedEntry?.buildVersion ?? null,
         };
       })
       .sort((a, b) => a.profile.localeCompare(b.profile));
