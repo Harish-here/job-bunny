@@ -33,7 +33,7 @@ State the proposed location and which rule justifies it before writing code. If 
    Why: keeps adapter families independently replaceable and testable in isolation.
 4. `adapters-only-ports-core` — `src/adapters` may not import `pipeline|routines|ops|cli|app`.
    Why: adapters implement ports; they must not reach up into orchestration code.
-5. `only-wire-imports-adapters` — nothing except `src/cli/wire/compose.ts` (plus siblings `builders.ts` and `board.ts`, and a TYPE-ONLY exception for `registry.ts` — see that file's doc comment) may import `src/adapters/**`.
+5. `only-wire-imports-adapters` — only `cli/wire`'s composition files may import `src/adapters/**`. The rule's own comment in `.dependency-cruiser.cjs` is the authoritative list of which files those are and why each is excepted (one is TYPE-ONLY) — read it there rather than trusting a copy.
    Why: `wire/compose.ts` is the single composition point — the only place a concrete adapter is chosen. The rest of `src/cli/wire/` (`config.ts`, `registry.ts`, `settings.ts`) plus `index.ts` is that module's own internal structure and public surface.
 6. `nothing-imports-cli` — nothing imports `cli`.
    Why: `cli` is the outermost layer; anything importing it would create a cycle back into the entry point.

@@ -205,6 +205,46 @@ test('spawns <nodeBin> <cliEntry> run --profile <p> --headless, with stdio wired
   assert.deepEqual(seen?.opts.stdio, ['ignore', 42, 42]);
 });
 
+test('step 1.12: a catch-up target (standingInFor present) gets --catchup-slots, comma-joined, before --headless', async () => {
+  const child = fakeChild(9001);
+  let seen: readonly string[] | undefined;
+  const spawn: SuperviseDeps['spawn'] = (command, args, opts) => {
+    seen = args;
+    return child.spawnArg(command, args, opts);
+  };
+  const { deps } = baseDeps({ spawn });
+  const target = { ...OWED, standingInFor: ['09:00', '11:30'] };
+  const promise = createSpawnRun(deps)(target);
+  child.emit('exit', 0);
+  await promise;
+
+  assert.deepEqual(seen, [
+    deps.cliEntry,
+    'run',
+    '--profile',
+    OWED.profile,
+    '--catchup-slots',
+    '09:00,11:30',
+    '--headless',
+  ]);
+});
+
+test('step 1.12: a plain OwedRun (no standingInFor) never gets --catchup-slots — regression for the non-catchup path', async () => {
+  const child = fakeChild(9001);
+  let seen: readonly string[] | undefined;
+  const spawn: SuperviseDeps['spawn'] = (command, args, opts) => {
+    seen = args;
+    return child.spawnArg(command, args, opts);
+  };
+  const { deps } = baseDeps({ spawn });
+  const promise = createSpawnRun(deps)(OWED);
+  child.emit('exit', 0);
+  await promise;
+
+  assert.ok(!seen?.includes('--catchup-slots'));
+  assert.deepEqual(seen, [deps.cliEntry, 'run', '--profile', OWED.profile, '--headless']);
+});
+
 test('a spawn error event resolves to a nonzero code without throwing (A5/A7)', async () => {
   const child = fakeChild(undefined); // spawn() never produced a pid (ENOENT-shaped).
   const { deps, events } = baseDeps({ spawn: child.spawnArg });

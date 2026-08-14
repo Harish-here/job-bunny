@@ -139,6 +139,9 @@ function fakeRunStore(opts: { findRunIdResult?: number | null } = {}): {
     pruneRunsOlderThan() {
       return 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
   return { store, started, finished, findRunIdCalls };
@@ -155,7 +158,17 @@ function fakeCtx(
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     beat() {},
     storage: {} as PipelineCtx['storage'],
-    stateStore: {} as PipelineCtx['stateStore'],
+    // `notify/failure_dedup.json` — real behavior for the `'failed'`-outcome
+    // notify path (task 1.16): no prior state, writes succeed. The
+    // dedicated dedup scenarios (multi-run persistence, a throwing
+    // `writeDoc`) live in `run.dedup.test.ts`.
+    stateStore: {
+      async readDoc() {
+        return undefined;
+      },
+      async writeDoc() {},
+      close() {},
+    },
     config: { settings: {} } as PipelineCtx['config'],
     ports: {} as PipelineCtx['ports'],
     runStore,
@@ -374,6 +387,10 @@ test('runCommand: a passed run opens a "run"-kind runs row and closes it with th
   assert.equal(finished[0]?.outcome, 'passed');
   assert.deepEqual(finished[0]?.result, result);
 });
+
+// The `opts.catchupSlots` → `startRun({ kind, catchupSlots })` tests live in
+// `run.catchup.test.ts`, split out to stay under the 800-line test-file cap
+// — mirrors `run.resume.test.ts`'s split precedent.
 
 test('runCommand: a failed run closes its runs row with outcome "failed"', async () => {
   const notified: NotifyEvent[] = [];

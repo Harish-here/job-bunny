@@ -70,6 +70,9 @@ function fakeRunStore(): RunStore {
     pruneRunsOlderThan() {
       return 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
 }

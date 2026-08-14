@@ -35,6 +35,8 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore {
     getRun: () => null,
     listRunEvents: () => ({ rows: [], total: 0 }),
     listRunHealth: () => new Map(),
+    listDeferredSlots: () => ({ rows: [], total: 0 }),
+    estimateRunDuration: () => null,
     close: () => {},
     ...overrides,
   };
@@ -74,6 +76,7 @@ const PASSED_SUMMARY: RunSummary = {
   finishedAt: '2026-08-05T09:00:42.000Z',
   heartbeatAt: '2026-08-05T09:00:40.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const FAILED_SUMMARY: RunSummary = {
@@ -87,6 +90,7 @@ const FAILED_SUMMARY: RunSummary = {
   finishedAt: '2026-08-05T10:01:30.000Z',
   heartbeatAt: '2026-08-05T10:01:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const RUNNING_SUMMARY: RunSummary = {
@@ -100,6 +104,7 @@ const RUNNING_SUMMARY: RunSummary = {
   finishedAt: null,
   heartbeatAt: '2026-08-05T11:00:05.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const FAILED_RESULT = {

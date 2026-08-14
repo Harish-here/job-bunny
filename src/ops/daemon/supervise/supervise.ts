@@ -14,11 +14,13 @@
  *
  * This module knows nothing about pipeline stages, the CLI, or the
  * daemon's own tick loop — it only knows how to spawn and supervise ONE
- * child given an `OwedRun` and resolve to its exit code, exactly the
- * `SpawnRun` shape `daemon.ts` expects.
+ * child given a `SpawnTarget` (a plain `OwedRun`, or one carrying
+ * `standingInFor` for a catch-up run — step 1.12) and resolve to its exit
+ * code. Both `DaemonDeps.spawnRun` and `DaemonDeps.spawnCatchup` wire to
+ * this SAME executor (`buildDaemonDeps` in `cli/commands/serve/start.ts`);
+ * there is no separate catch-up spawner.
  */
-import type { OwedRun } from '../../../core/schedule/index.ts';
-import type { SpawnRun } from '../daemon.ts';
+import type { SpawnRun, SpawnTarget } from '../daemon.ts';
 import type { LogDeps } from '../logs/index.ts';
 import { openAppendFd, rotateIfLarge, runsLogPath } from '../logs/index.ts';
 import type { DaemonPidfileDeps } from '../pidfile.ts';
@@ -63,7 +65,7 @@ export interface SuperviseDeps {
 /** Builds the real SpawnRun: one child, `run --profile <p> --headless`,
  * captured to `runs.log`, backstopped, pidfile-tracked. */
 export function createSpawnRun(deps: SuperviseDeps): SpawnRun {
-  return (owed: OwedRun) =>
+  return (owed: SpawnTarget) =>
     new Promise<number>((resolve) => {
       // D21/§6.9: rotate BEFORE spawning — the safe quiet point, since
       // D6's sequential-execution guarantee means no other child can be
@@ -83,13 +85,21 @@ export function createSpawnRun(deps: SuperviseDeps): SpawnRun {
       // still REJECTS — daemon.ts's tick already contains that (ee4e035),
       // and turning it into a resolve(1) would falsely report a child
       // that never existed as having run and exited.
+      // step 1.12: a catch-up target carries `standingInFor` — the slots
+      // this run stands in for after a closed-lid gap. Spliced in BEFORE
+      // `--headless`, as two separate argv elements (mirroring the
+      // `'--profile', owed.profile` pair immediately above it, not a
+      // single `--flag=value` string), and omitted entirely for a plain
+      // scheduled `OwedRun` (the structural check, not a `kind` tag).
+      const args = [deps.cliEntry, 'run', '--profile', owed.profile];
+      if ('standingInFor' in owed) {
+        args.push('--catchup-slots', owed.standingInFor.join(','));
+      }
+      args.push('--headless');
+
       let child: ReturnType<SuperviseDeps['spawn']>;
       try {
-        child = deps.spawn(
-          deps.nodeBin,
-          [deps.cliEntry, 'run', '--profile', owed.profile, '--headless'],
-          { stdio: ['ignore', fd, fd] },
-        );
+        child = deps.spawn(deps.nodeBin, args, { stdio: ['ignore', fd, fd] });
       } catch (err) {
         deps.logs.closeSync(fd);
         throw err;

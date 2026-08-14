@@ -14,6 +14,7 @@
  */
 import path from 'node:path';
 import { nextFireAt } from '../../core/schedule/index.ts';
+import { degradedReasonText } from '../../ops/daemon/alert/index.ts';
 import {
   defaultDaemonPidfileDeps,
   HEARTBEAT_STALE_MS,
@@ -46,14 +47,25 @@ async function readDaemonProfileSchedules(
       readProfileJson: wireDaemonScheduleConfig({ root }),
     };
     const schedules = await scanProfileSchedules(path.join(root, 'profiles'), scanDeps);
+    const pidfile = readDaemonPidfile(root, defaultDaemonPidfileDeps());
+    const degradedByProfile = new Map(
+      (pidfile?.degraded ?? []).map((d) => [d.profile, d]),
+    );
     return schedules
-      .map((s) => ({
-        profile: s.profile,
-        enabled: s.enabled,
-        // Single-element array: THIS profile's own next slot, not the
-        // fleet-wide next fire nextFireAt would otherwise answer.
-        nextRunAt: nextFireAt(new Date(), [s])?.at.toISOString() ?? null,
-      }))
+      .map((s) => {
+        const degradedEntry = degradedByProfile.get(s.profile);
+        return {
+          profile: s.profile,
+          enabled: s.enabled,
+          // Single-element array: THIS profile's own next slot, not the
+          // fleet-wide next fire nextFireAt would otherwise answer.
+          nextRunAt: nextFireAt(new Date(), [s])?.at.toISOString() ?? null,
+          degraded: degradedEntry !== undefined,
+          degradedReason: degradedEntry ? degradedReasonText(degradedEntry) : null,
+          schemaVersion: degradedEntry?.schemaVersion ?? null,
+          buildVersion: degradedEntry?.buildVersion ?? null,
+        };
+      })
       .sort((a, b) => a.profile.localeCompare(b.profile));
   } catch {
     return [];

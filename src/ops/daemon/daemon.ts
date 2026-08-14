@@ -29,71 +29,37 @@
  */
 
 import type { OwedRun, ProfileSchedule, RunRecord } from '../../core/schedule/index.ts';
-import { formatLocalDate, hhMmToMinutes, isRunOwed } from '../../core/schedule/index.ts';
-import type { PendingIntent } from '../../ports/run_intents.ts';
-import type { DaemonPidfileDeps } from './pidfile.ts';
+import {
+  deriveExpiredUnserved,
+  formatLocalDate,
+  hhMmToMinutes,
+  isRunOwed,
+  parseLocal,
+} from '../../core/schedule/index.ts';
+import { trackSchemaDriftAndNotify } from './alert/index.ts';
+import type { DaemonDeps } from './deps.ts';
+import type { CatchupGateCache, ReachabilityGateDecision } from './gate/index.ts';
+import {
+  applyGateDecline,
+  computeCatchupOnlyGate,
+  computeReachabilityGate,
+  runDeferredSweepAndCatchup,
+  runRetrospectiveDeferredSweep,
+} from './gate/index.ts';
 import { readDaemonPidfile, updateDaemonPidfile } from './pidfile.ts';
-import type { ScanDeps } from './scan/index.ts';
 import { scanProfileSchedules } from './scan/index.ts';
 
+export type { DaemonDeps, SpawnRun } from './deps.ts';
+
+/** step 1.12 — the real spawn executor's widened parameter type: a plain
+ * `OwedRun` for a normal scheduled slot, or an `OwedRun` carrying
+ * `standingInFor` for a catch-up run standing in for one or more slots a
+ * closed lid deferred. Discriminated STRUCTURALLY (`'standingInFor' in
+ * owed`), not by a `kind` tag — `createSpawnRun` (`ops/daemon/supervise/
+ * supervise.ts`) branches on presence at runtime. */
+export type SpawnTarget = OwedRun | (OwedRun & { standingInFor: readonly string[] });
+
 export const TICK_MS = 30_000;
-
-/** Spawns `jobbunny run --profile <owed.profile> --headless` (the real
- * implementation, wired outside this module) and resolves to the child's
- * exit code once it exits. */
-export type SpawnRun = (owed: OwedRun) => Promise<number>;
-
-export interface DaemonDeps {
-  root: string;
-  profilesDir: string;
-  scan: ScanDeps;
-  pidfile: DaemonPidfileDeps;
-  spawnRun: SpawnRun;
-  /** Each named profile's own durable run history for `date` — real
-   * evidence from that profile's `jobbunny.db` `runs` table
-   * (`RunStoreReader.listRunTimeDirs`, via `cli/wire/daemon.ts`'s
-   * `wireDaemonRunHistory`), NOT the pidfile ledger (`ledgerHistory`
-   * below is folded in separately) and NOT a filesystem scan (there is no
-   * on-disk run folder to scan post-Phase-2). Must never throw — a
-   * profile whose db can't be opened yields no records for it. */
-  readRunHistory: (profiles: readonly string[], date: string) => RunRecord[];
-  /** Board-queued run intents that are `pending` and NOT expired, oldest
-   * first, across every profile directory under `<root>/profiles` —
-   * including profiles with no schedule at all, because "Run now" has to
-   * work for a profile the user never scheduled. Must never throw: a
-   * profile whose db cannot be opened simply yields no intents. */
-  readIntents: (now: Date) => PendingIntent[];
-  /** Flips one intent from `pending` to `claimed`. `false` when the row is
-   * no longer pending — cancelled between the scan and the claim, or
-   * already claimed — in which case the daemon skips it without spawning. */
-  claimIntent: (profile: string, intentId: number) => boolean;
-  /** Back-writes the run the claim produced: the newest run row for
-   * `profile` whose `startedAt` is at or after `since`. A no-op when the
-   * child never wrote one. Must never throw. */
-  attachIntentRun: (profile: string, intentId: number, since: string) => void;
-  log(
-    event: string,
-    data?: Record<string, unknown>,
-    level?: 'info' | 'warn' | 'error',
-  ): void;
-  now(): Date;
-}
-
-/** Local wall-clock moment for `slot` ("HH:MM") ON `date` ("YYYY-MM-DD")
- * — built from the OWED ENTRY's OWN date, never from `now`'s own
- * calendar date (mirrors owed.ts's own `parseLocal`). A batch that runs
- * past local midnight must still evaluate each entry against the date it
- * was actually scheduled for. */
-function parseSlotMoment(date: string, slot: string): Date {
-  const dateParts = date.split('-');
-  const timeParts = slot.split(':');
-  const year = Number(dateParts[0]);
-  const month = Number(dateParts[1]);
-  const day = Number(dateParts[2]);
-  const hour = Number(timeParts[0]);
-  const minute = Number(timeParts[1]);
-  return new Date(year, month - 1, day, hour, minute, 0, 0);
-}
 
 export function createDaemon(deps: DaemonDeps): {
   tick(): Promise<void>;
@@ -101,6 +67,9 @@ export function createDaemon(deps: DaemonDeps): {
   stop(): void;
 } {
   let ticking = false;
+  // Bug 7 — catch-up-only tick gate cache; see `computeCatchupOnlyGate`'s
+  // own doc comment (`gate/reachability_gate.ts`) for why it lives here.
+  let catchupGateCache: CatchupGateCache | undefined;
   // D10, relocated: `serve stop` kills the daemon BEFORE the in-flight
   // child precisely so the daemon's own `await deps.spawnRun(...)` can
   // never resolve and spawn the NEXT owed entry. That ordering only holds
@@ -113,7 +82,7 @@ export function createDaemon(deps: DaemonDeps): {
   let stopping = false;
   let timer: NodeJS.Timeout | undefined;
 
-  async function runOwedBatch(): Promise<void> {
+  async function runOwedBatch(previousLastTickAt: string | undefined): Promise<void> {
     const now = deps.now();
     const date = formatLocalDate(now);
 
@@ -172,7 +141,17 @@ export function createDaemon(deps: DaemonDeps): {
       deps.profilesDir,
       deps.scan,
     );
-    const profileNames = schedules.map((s) => s.profile);
+    // Phase 0 (D2 self-heal): a profile whose db schema is newer than
+    // this build's LATEST_SCHEMA_VERSION is excluded from spawning
+    // entirely THIS tick — never blindly respawned into a throw it
+    // cannot recover from (R15). checkSchemaDrift itself never throws.
+    const schemaDrift = deps.checkSchemaDrift(schedules.map((s) => s.profile));
+    const activeSchedules = schedules.filter((s) => !schemaDrift.has(s.profile));
+    const profileNames = activeSchedules.map((s) => s.profile);
+
+    // Phase 0 (D2 self-heal): track newly-degraded profiles in the
+    // pidfile and dispatch the single, daemon-level T6 alert (AC14).
+    await trackSchemaDriftAndNotify(deps, schemaDrift, schedules, now);
 
     // The daemon's DURABLE evidence — each named profile's own `runs` table,
     // real rows that survive a daemon restart (unlike the pidfile ledger
@@ -188,7 +167,7 @@ export function createDaemon(deps: DaemonDeps): {
       .map((a) => ({ profile: a.profile, date: a.date, startedAt: a.slot }));
 
     const history = [...dbHistory, ...ledgerHistory];
-    const owedRuns = isRunOwed(now, schedules, history);
+    const owedRuns = isRunOwed(now, activeSchedules, history);
 
     // A13: sort explicitly by (slot, profileName) — nothing upstream
     // supplies this ordering once cli/commands/schedule.ts is gone.
@@ -196,6 +175,41 @@ export function createDaemon(deps: DaemonDeps): {
       const slotCmp = hhMmToMinutes(a.slot) - hhMmToMinutes(b.slot);
       return slotCmp !== 0 ? slotCmp : a.profile.localeCompare(b.profile);
     });
+
+    // Also computed here, BEFORE the reachability gate: `deriveExpiredUnserved`
+    // (grace fully closed, unserved) and `isRunOwed` (grace still open) are
+    // provably disjoint, so a tick that fires ONLY a catch-up (no owed
+    // entries at all) used to skip the probe entirely — R2's "before
+    // spawning, the daemon runs a bounded external reachability probe"
+    // never covered the catch-up path it exists for. Passed straight
+    // through to `runDeferredSweepAndCatchup` below so it is derived once.
+    const expired = deriveExpiredUnserved(now, activeSchedules, history);
+
+    // step 1.11 (D1/D1b/D3b) — computed ONCE per batch (`gate/
+    // reachability_gate.ts`): a suspend gap or unreachable network
+    // declines every owed entry THIS tick. Reused by the catch-up below.
+    // Bug 7: a catch-up-ONLY tick uses `computeCatchupOnlyGate` instead —
+    // see its own doc comment.
+    let gate: ReachabilityGateDecision;
+    let catchupGateFresh = true; // suppresses the catch-up's own log line on a cache hit.
+    if (sorted.length === 0 && expired.length > 0) {
+      const result = await computeCatchupOnlyGate(
+        catchupGateCache,
+        now,
+        previousLastTickAt,
+        deps.probeReachable,
+      );
+      gate = result.gate;
+      catchupGateCache = result.cache;
+      catchupGateFresh = result.fresh;
+    } else {
+      gate = await computeReachabilityGate(
+        previousLastTickAt,
+        now,
+        sorted.length > 0 || expired.length > 0,
+        deps.probeReachable,
+      );
+    }
 
     for (const owed of sorted) {
       // Checked BEFORE this entry's revalidate/ledger/spawn sequence, so a
@@ -210,15 +224,36 @@ export function createDaemon(deps: DaemonDeps): {
         break;
       }
 
+      // R3/AC3 — the FIRST guard an owed entry can hit, strictly before
+      // the grace-revalidate/ledger-append blocks below: a gated entry
+      // leaves NO ledger entry (Trap 1's opposite-of-R8a rule). Never
+      // calls `recordDeferral` here (Trap 4) — only the post-loop
+      // deferred sweep does, once a slot's grace has fully closed.
+      if (gate.declined) {
+        applyGateDecline(
+          deps.root,
+          deps.pidfile,
+          deps.log,
+          owed.profile,
+          owed.date,
+          owed.slot,
+          gate,
+          now,
+        );
+        continue; // no ledger append happens below this line for a gated entry.
+      }
+
       const schedule = schedules.find((s) => s.profile === owed.profile);
       const graceMinutes = schedule?.graceMinutes ?? 0;
 
       // Revalidate (A3): re-check the grace window immediately before
       // acting on this entry — a slow sequential predecessor earlier in
       // this same batch may have consumed this entry's own grace window
-      // while it waited its turn.
+      // while it waited its turn. `parseLocal` uses the OWED ENTRY's OWN
+      // date, never `now`'s own calendar date (a batch that runs past
+      // local midnight must still evaluate against the scheduled date).
       const revalidateAt = deps.now();
-      const slotMoment = parseSlotMoment(owed.date, owed.slot);
+      const slotMoment = parseLocal(owed.date, owed.slot);
       const graceEndMoment = new Date(slotMoment.getTime() + graceMinutes * 60_000);
       if (revalidateAt > graceEndMoment) {
         deps.log('slot-expired-skipped', { profile: owed.profile, slot: owed.slot });
@@ -262,9 +297,40 @@ export function createDaemon(deps: DaemonDeps): {
       const exitCode = await deps.spawnRun(owed);
       deps.log('child-exit', { profile: owed.profile, slot: owed.slot, exitCode });
     }
+
+    // step 1.11, once at the end of the batch (`gate/deferred_sweep/sweep.ts`):
+    // records slots whose grace fully closed unserved, then decides
+    // whether TODAY's catch-up should fire (R8/R8a/R8b/Trap 5). Reuses the
+    // SAME `expired` candidates computed above for the reachability gate —
+    // no re-derivation. `deps` passes straight through, no cast (structural
+    // subset, same precedent as `trackSchemaDriftAndNotify` above).
+    await runDeferredSweepAndCatchup(deps, now, date, expired, gate, catchupGateFresh);
+
+    // step 1.11a (coordinator-added, 2026-08-13), split into
+    // `gate/deferred_sweep/sweep.ts`'s `runRetrospectiveDeferredSweep` purely to
+    // keep this file under the file-size cap (non-behavioral split, same
+    // precedent as `runDeferredSweepAndCatchup` above) — the day-rollover
+    // backstop: a lid that stays closed for a WHOLE calendar day means
+    // step 1.11's own T4 guard never fires for that day (it only ever
+    // evaluates `today`), and no live catch-up ever runs either. Iterates
+    // the FULL `schedules` list (not `activeSchedules`), since a profile
+    // currently excluded by today's schema-drift check can still owe a
+    // summary for an earlier date.
+    await runRetrospectiveDeferredSweep(deps, now, date, schedules);
   }
 
   async function tick(): Promise<void> {
+    // step 1.11 (D1): capture the pre-tick heartbeat before it's
+    // overwritten below — the gate measures elapsed time since THIS value.
+    // Undefined (first tick, unreadable pidfile) fail-opens to "not
+    // suspected" (§8 Failure Semantics).
+    let previousLastTickAt: string | undefined;
+    try {
+      previousLastTickAt = readDaemonPidfile(deps.root, deps.pidfile)?.lastTickAt;
+    } catch {
+      previousLastTickAt = undefined;
+    }
+
     // A15.1: heartbeat write is the FIRST statement, BEFORE the
     // reentrancy guard, so it runs on every 30s firing — including
     // firings the guard below short-circuits while a child is in flight.
@@ -289,7 +355,7 @@ export function createDaemon(deps: DaemonDeps): {
     if (ticking) return;
     ticking = true;
     try {
-      await runOwedBatch();
+      await runOwedBatch(previousLastTickAt);
     } catch (err) {
       // Same containment rationale as the heartbeat swallow above: in
       // production this runs inside a bare setInterval callback, where an

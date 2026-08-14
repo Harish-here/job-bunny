@@ -81,7 +81,7 @@ export function TrackerPage({ profile }: { profile: string }) {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       <DueStrip rows={due} onFocusCard={focusCard} />
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="flex flex-1 gap-3 overflow-x-auto p-4">

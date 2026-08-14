@@ -61,12 +61,16 @@ module.exports = {
         "`jobbunny migrate`'s own composition point (wireMigrate), split out " +
         'of builders.ts purely to keep it under the file-size cap once that ' +
         "file's other config→db Phase 4 additions pushed it over — not a " +
-        'behavioral change. ' +
+        'behavioral change; daemon_deferred.ts is wireDaemonDeferredSlots ' +
+        "split out of daemon.ts for the identical reason (that file's " +
+        'never-run-profile existsSync guard pushed it over the cap) — also ' +
+        'not a behavioral change. ' +
         'The `app` addition to `from` is redundant-with-`app-only-ports-core` ' +
         'defense-in-depth (belt-and-braces).',
       from: {
         path: '^src/(pipeline|routines|ops|cli|app)',
-        pathNot: '^src/cli/wire/(compose|builders|registry|board|daemon|migrate)\\.ts$',
+        pathNot:
+          '^src/cli/wire/(compose|builders|registry|board|daemon|daemon_deferred|migrate)\\.ts$',
       },
       to: { path: '^src/adapters' },
     },

@@ -117,9 +117,18 @@ function baseServeDeps(overrides: Partial<ServeDeps> = {}): {
     logs: fakeLogDeps(),
     scan: fakeScanDeps(),
     readRunHistory: () => [],
+    checkSchemaDrift: () => new Map(),
+    notify: async () => true,
+    hasNotifierConfigured: async () => false,
     readIntents: () => [],
     claimIntent: () => true,
     attachIntentRun: () => {},
+    probeReachable: async () => true,
+    recordDeferral: () => {},
+    listForDate: () => [],
+    listUnnotifiedDatesBefore: () => [],
+    markNotified: () => {},
+    hasCatchupRun: () => false,
     listLaunchAgentFiles: () => [],
     spawn,
     nodeBin: 'node',
@@ -377,4 +386,58 @@ test('start (child): the constructed DaemonDeps carries readIntents/claimIntent/
   assert.equal(daemonDeps.readIntents, readIntents);
   assert.equal(daemonDeps.claimIntent, claimIntent);
   assert.equal(daemonDeps.attachIntentRun, attachIntentRun);
+});
+
+test('start (child): the constructed DaemonDeps carries checkSchemaDrift/hasNotifierConfigured through from ServeDeps unchanged', () => {
+  const checkSchemaDrift = () => new Map();
+  const hasNotifierConfigured = async () => false;
+  const { deps } = baseServeDeps({ checkSchemaDrift, hasNotifierConfigured });
+
+  const daemonDeps = buildDaemonDeps(
+    deps,
+    async () => 0,
+    () => {},
+  );
+
+  assert.equal(daemonDeps.checkSchemaDrift, checkSchemaDrift);
+  assert.equal(daemonDeps.hasNotifierConfigured, hasNotifierConfigured);
+});
+
+test('start (child): notify is REBUILT (not passed through from ServeDeps) and never throws', async () => {
+  // `ServeDeps.notify`'s default is wired with a no-op `log` (see its own
+  // doc comment) — `buildDaemonDeps` REBUILDS it against THIS call's real
+  // `log` instead of forwarding `deps.notify` unchanged, so a failed T6
+  // send is observable in daemon.log rather than vanishing into a no-op.
+  // Proven here by identity (rebuilt, not passed through) and by calling
+  // it against a profile with no real `profile.json` on disk, which
+  // resolves `false` without throwing; the build/send-failure log path
+  // itself (the `log` override actually firing) is covered directly
+  // against `wireDaemonNotifier` in `cli/wire/daemon.test.ts`.
+  const notify = async () => true;
+  const { deps } = baseServeDeps({ notify });
+
+  const daemonDeps = buildDaemonDeps(
+    deps,
+    async () => 0,
+    () => {},
+  );
+
+  assert.notEqual(daemonDeps.notify, notify);
+  const result = await daemonDeps.notify('nonexistent-profile', {
+    kind: 'alert',
+    profile: 'nonexistent-profile',
+    text: 'x',
+  });
+  assert.equal(result, false); // no real profile.json under ROOT — no-op.
+});
+
+test('start (child): step 1.12 — spawnCatchup wires to the SAME function reference as spawnRun, not a duplicate executor', () => {
+  const { deps } = baseServeDeps();
+  const injectedSpawnRun = async () => 0;
+
+  const daemonDeps = buildDaemonDeps(deps, injectedSpawnRun, () => {});
+
+  assert.equal(daemonDeps.spawnRun, injectedSpawnRun);
+  assert.equal(daemonDeps.spawnCatchup, injectedSpawnRun);
+  assert.equal(daemonDeps.spawnCatchup, daemonDeps.spawnRun);
 });

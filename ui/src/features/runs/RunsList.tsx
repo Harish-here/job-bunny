@@ -7,10 +7,12 @@ import {
   TriangleAlert,
   Unplug,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import {
   formatInstant,
   formatInstantTitle,
 } from '../../../../src/core/datetime/index.ts';
+import { Badge } from '../../components/ui/badge';
 import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { cn } from '../../lib/utils';
 import { formatDuration } from './runFormat';
@@ -156,14 +158,141 @@ function RunningDot() {
   );
 }
 
+/** A single `role="option"` row (BUG 10 fix: extracted so it can be handed
+ * to either half of a split listbox without duplicating the JSX). */
+function RunRow({
+  row,
+  selected,
+  now,
+  onSelect,
+}: {
+  row: Row;
+  selected: boolean;
+  now: Date;
+  onSelect: (id: number) => void;
+}) {
+  const kind = classifyOutcome(row, row.softErrors);
+  const treatment = TREATMENT[kind];
+  const Icon = treatment.icon;
+  const label = outcomeLabel(kind, row);
+  const number = outcomeNumber(kind, row);
+  const subline =
+    row.catchupSlots != null
+      ? `Stood in for ${row.catchupSlots.length} slot${row.catchupSlots.length === 1 ? '' : 's'}`
+      : kind === 'empty'
+        ? emptySubline(row)
+        : kind === 'degraded'
+          ? degradedSubline(row)
+          : null;
+
+  return (
+    <div
+      role="option"
+      tabIndex={0}
+      aria-selected={selected}
+      data-testid="run-row"
+      data-run-id={row.id}
+      data-outcome-kind={kind}
+      {...(row.catchupSlots != null ? { 'data-qa': 'run-row-catchup' } : {})}
+      onClick={() => onSelect(row.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(row.id);
+        }
+      }}
+      className={cn(
+        'flex cursor-pointer flex-col gap-1 rounded-lg bg-card px-3 py-2 hop',
+        treatment.cardClassName,
+        selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {Icon ? (
+            <Icon
+              aria-hidden="true"
+              strokeWidth={kind === 'empty' ? 1.5 : undefined}
+              className={cn('size-4 shrink-0', treatment.iconClassName)}
+            />
+          ) : (
+            <RunningDot />
+          )}
+          <span
+            className="text-sm font-medium"
+            title={formatInstantTitle(row.startedAt, now)}
+          >
+            {formatInstant(row.startedAt, now)}
+          </span>
+        </div>
+        <span data-testid="run-row-number" className="text-2xl font-heading">
+          {number}
+        </span>
+      </div>
+      <div
+        data-testid="run-row-label"
+        className="flex items-baseline gap-2 flex-wrap text-sm font-medium"
+      >
+        {label}
+        {row.catchupSlots != null && (
+          <Badge variant="outline" className="border-transparent bg-accent text-primary">
+            Catch-up
+          </Badge>
+        )}
+      </div>
+      {subline !== null && (
+        <div data-testid="run-row-subline" className="text-xs text-muted-foreground">
+          {subline}
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="capitalize">{row.kind}</span>
+        <span>·</span>
+        <span>{formatDuration(row.startedAt, row.finishedAt)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function RunsList({
   rows,
   selectedId,
   onSelect,
+  insertAfterId = null,
+  insertContent = null,
 }: {
   rows: Row[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  /**
+   * BUG 3 (pipeline-stability-hardening QA round 2, 2026-08-14) — threading
+   * choice: rather than splitting `rows` at `RunsPage` and rendering two
+   * separate `<RunsList/>` instances (doubling the "no runs recorded"
+   * empty-state special case, for a feature that only ever inserts ONE
+   * thing after ONE row), `RunsList` itself accepts an insertion-point
+   * slot: `insertContent` renders directly after the row whose
+   * `id === insertAfterId`. `RunsPage` passes the catch-up row's own id
+   * (never assumes "the first row" positionally) — matches the mockup's
+   * S1 order (day reassurance -> catch-up row -> deferred group -> older
+   * runs) exactly, and degrades safely to "no match, nothing inserted" if
+   * the id is ever absent from `rows`.
+   *
+   * BUG 10 (round 3) — `insertContent` used to render *inside* the single
+   * `role="listbox"`, between two `role="option"` rows: a `div` holding a
+   * paragraph/region/heading/button is not a permitted listbox child (ARIA
+   * 1.2 requires `option`, or `group` of `option`s), and AT that prunes
+   * disallowed children drops the whole deferred group from the
+   * accessibility tree — ux-notes §9's literal "it must not enter the runs
+   * listbox". Fixed by splitting into two SIBLING listboxes around
+   * `insertContent` (rows up to and including the matched row, then
+   * `insertContent`, then the remaining rows) rather than nesting it — the
+   * same visual/document order, zero disallowed children. Each half gets
+   * its own `aria-label` so a screen reader never announces two
+   * identically-named "Runs" lists. When there's no match (or nothing to
+   * insert), this collapses back to the original single listbox.
+   */
+  insertAfterId?: number | null;
+  insertContent?: ReactNode;
 }) {
   if (rows.length === 0) {
     return (
@@ -174,86 +303,57 @@ export function RunsList({
   }
 
   const now = new Date();
+  const splitIndex =
+    insertAfterId !== null && insertContent !== null
+      ? rows.findIndex((row) => row.id === insertAfterId)
+      : -1;
+
+  if (splitIndex === -1) {
+    return (
+      <div role="listbox" aria-label="Runs">
+        {rows.map((row) => (
+          <RunRow
+            key={row.id}
+            row={row}
+            selected={row.id === selectedId}
+            now={now}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const beforeRows = rows.slice(0, splitIndex + 1);
+  const afterRows = rows.slice(splitIndex + 1);
 
   return (
-    <div role="listbox" aria-label="Runs">
-      {rows.map((row) => {
-        const kind = classifyOutcome(row, row.softErrors);
-        const treatment = TREATMENT[kind];
-        const Icon = treatment.icon;
-        const selected = row.id === selectedId;
-        const label = outcomeLabel(kind, row);
-        const number = outcomeNumber(kind, row);
-        const subline =
-          kind === 'empty'
-            ? emptySubline(row)
-            : kind === 'degraded'
-              ? degradedSubline(row)
-              : null;
-
-        return (
-          <div
+    <>
+      <div role="listbox" aria-label="Runs">
+        {beforeRows.map((row) => (
+          <RunRow
             key={row.id}
-            role="option"
-            tabIndex={0}
-            aria-selected={selected}
-            data-testid="run-row"
-            data-run-id={row.id}
-            data-outcome-kind={kind}
-            onClick={() => onSelect(row.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onSelect(row.id);
-              }
-            }}
-            className={cn(
-              'flex cursor-pointer flex-col gap-1 rounded-lg bg-card px-3 py-2 hop',
-              treatment.cardClassName,
-              selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                {Icon ? (
-                  <Icon
-                    aria-hidden="true"
-                    strokeWidth={kind === 'empty' ? 1.5 : undefined}
-                    className={cn('size-4 shrink-0', treatment.iconClassName)}
-                  />
-                ) : (
-                  <RunningDot />
-                )}
-                <span
-                  className="text-sm font-medium"
-                  title={formatInstantTitle(row.startedAt, now)}
-                >
-                  {formatInstant(row.startedAt, now)}
-                </span>
-              </div>
-              <span data-testid="run-row-number" className="text-2xl font-heading">
-                {number}
-              </span>
-            </div>
-            <div data-testid="run-row-label" className="text-sm font-medium">
-              {label}
-            </div>
-            {subline !== null && (
-              <div
-                data-testid="run-row-subline"
-                className="text-xs text-muted-foreground"
-              >
-                {subline}
-              </div>
-            )}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="capitalize">{row.kind}</span>
-              <span>·</span>
-              <span>{formatDuration(row.startedAt, row.finishedAt)}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+            row={row}
+            selected={row.id === selectedId}
+            now={now}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+      {insertContent}
+      {afterRows.length > 0 && (
+        <div role="listbox" aria-label="Earlier runs">
+          {afterRows.map((row) => (
+            <RunRow
+              key={row.id}
+              row={row}
+              selected={row.id === selectedId}
+              now={now}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 }

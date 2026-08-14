@@ -5,10 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
+import type { NotifyEvent } from '../../ports/notifier.ts';
 import {
+  wireDaemonHasCatchupRun,
+  wireDaemonHasNotifierConfigured,
   wireDaemonIntents,
+  wireDaemonNotifier,
+  wireDaemonReachabilityProbe,
   wireDaemonRunHistory,
   wireDaemonScheduleConfig,
+  wireDaemonSchemaGuard,
 } from './daemon.ts';
 
 // This test file may not import `src/adapters/**` directly (no test-file
@@ -45,13 +51,13 @@ async function seedProfileDir(name: string): Promise<string> {
 
 function insertRunRow(
   dbPath: string,
-  row: { date: string; timeDir: string; startedAt: string },
+  row: { date: string; timeDir: string; startedAt: string; kind?: string },
 ): void {
   const db = new DatabaseSync(dbPath);
   db.prepare(
     `INSERT INTO runs (run_date, time_dir, kind, status, started_at)
-     VALUES (?, ?, 'run', 'running', ?)`,
-  ).run(row.date, row.timeDir, row.startedAt);
+     VALUES (?, ?, ?, 'running', ?)`,
+  ).run(row.date, row.timeDir, row.kind ?? 'run', row.startedAt);
   db.close();
 }
 
@@ -172,6 +178,7 @@ test('wireDaemonRunHistory: a store that fails once does not permanently blind a
       const rows = calls === 1 ? [] : ['09-00'];
       return {
         listRunTimeDirs: () => rows,
+        hasRunOfKind: () => false,
         close: () => {
           closes += 1;
         },
@@ -209,6 +216,31 @@ test('wireDaemonScheduleConfig: a profile with a valid profile.json and no db st
   await writeFile(join(root, 'profiles', 'scancfg-ok', 'profile.json'), raw);
   const readProfileJson = wireDaemonScheduleConfig({ root });
   assert.equal(await readProfileJson(join(root, 'profiles'), 'scancfg-ok'), raw);
+});
+
+// --- wireDaemonSchemaGuard ---
+
+test('wireDaemonSchemaGuard: flags a profile whose schema version exceeds LATEST_SCHEMA_VERSION, leaves a current-version profile out, and skips a profile with no db file at all', async () => {
+  const newerDbPath = await seedProfileDir('newer');
+  const currentDbPath = await seedProfileDir('current');
+  {
+    const db = new DatabaseSync(newerDbPath);
+    db.exec('PRAGMA user_version = 9');
+    db.close();
+  }
+  {
+    const db = new DatabaseSync(currentDbPath);
+    // LATEST_SCHEMA_VERSION hardcoded as 8 here: this test file may not
+    // import src/adapters/** (only daemon.ts itself is carved out — see
+    // this file's own header comment).
+    db.exec('PRAGMA user_version = 8');
+    db.close();
+  }
+  const checkSchemaDrift = wireDaemonSchemaGuard({ root });
+  const result = checkSchemaDrift(['newer', 'current', 'nodb']);
+  assert.deepEqual([...result.keys()], ['newer']);
+  assert.deepEqual(result.get('newer'), { schemaVersion: 9, buildVersion: 8 });
+  assert.equal(existsSync(join(root, 'profiles', 'nodb', 'data', 'jobbunny.db')), false);
 });
 
 // --- wireDaemonIntents ---
@@ -362,4 +394,193 @@ test('wireDaemonIntents.attachIntentRun: leaves claimed_run_id null when the onl
 
     assert.equal(readClaimedRunId(dbPath, intentId), null);
   });
+});
+
+// --- wireDaemonNotifier / wireDaemonHasNotifierConfigured ---
+
+test('wireDaemonNotifier: a profile with no profile.json at all degrades to a no-op, never throws, resolves false', async () => {
+  const notify = wireDaemonNotifier({ root });
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-ghost', {
+      kind: 'alert',
+      profile: 'notify-ghost',
+      text: 'hi',
+    });
+  });
+  assert.equal(result, false);
+});
+
+test('wireDaemonNotifier: a malformed profile.json degrades to a no-op, never throws, resolves false', async () => {
+  await mkdir(join(root, 'profiles', 'notify-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-broken', 'profile.json'),
+    'not valid json {{{',
+  );
+  const notify = wireDaemonNotifier({ root });
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-broken', {
+      kind: 'alert',
+      profile: 'notify-broken',
+      text: 'hi',
+    });
+  });
+  assert.equal(result, false);
+});
+
+test('wireDaemonNotifier: a valid config sends the event via the configured notifier and resolves true', async () => {
+  await mkdir(join(root, 'profiles', 'notify-ok'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-ok', 'profile.json'),
+    JSON.stringify({
+      connector: 'sqlite',
+      notifiers: ['fake'],
+      settings: { fake: { chatId: 1 } },
+    }),
+  );
+  const sent: NotifyEvent[] = [];
+  const notify = wireDaemonNotifier({
+    root,
+    buildNotifier: (name) => ({
+      name,
+      send: async (event) => {
+        sent.push(event);
+      },
+    }),
+  });
+  const event: NotifyEvent = {
+    kind: 'alert',
+    profile: 'notify-ok',
+    text: 'daemon degraded',
+  };
+  const result = await notify('notify-ok', event);
+  assert.deepEqual(sent, [event]);
+  assert.equal(result, true);
+});
+
+test('wireDaemonNotifier: a notifier send rejection is logged via the injected log callback, never thrown, resolves false', async () => {
+  await mkdir(join(root, 'profiles', 'notify-fails'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'notify-fails', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: ['fake'], settings: {} }),
+  );
+  const logs: string[] = [];
+  const notify = wireDaemonNotifier({
+    root,
+    buildNotifier: (name) => ({
+      name,
+      send: async () => {
+        throw new Error('boom');
+      },
+    }),
+    log: (event) => logs.push(event),
+  });
+  let result: boolean | undefined;
+  await assert.doesNotReject(async () => {
+    result = await notify('notify-fails', {
+      kind: 'alert',
+      profile: 'notify-fails',
+      text: 'x',
+    });
+  });
+  assert.equal(result, false);
+  assert.equal(logs.length, 1);
+  assert.match(logs.at(0) ?? '', /boom/);
+});
+
+test('wireDaemonHasNotifierConfigured: true for a profile with a configured notifier; false for none configured, and false for a malformed profile.json', async () => {
+  await mkdir(join(root, 'profiles', 'hasnotif-yes'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-yes', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: ['telegram'] }),
+  );
+  await mkdir(join(root, 'profiles', 'hasnotif-no'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-no', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', notifiers: [] }),
+  );
+  await mkdir(join(root, 'profiles', 'hasnotif-broken'), { recursive: true });
+  await writeFile(
+    join(root, 'profiles', 'hasnotif-broken', 'profile.json'),
+    'not valid json',
+  );
+  const hasNotifierConfigured = wireDaemonHasNotifierConfigured({ root });
+  assert.equal(await hasNotifierConfigured('hasnotif-yes'), true);
+  assert.equal(await hasNotifierConfigured('hasnotif-no'), false);
+  assert.equal(await hasNotifierConfigured('hasnotif-broken'), false);
+  assert.equal(await hasNotifierConfigured('hasnotif-ghost'), false);
+});
+
+test('wireDaemonReachabilityProbe: pre-bound to zero args, true on a resolving lookup, false on a rejecting one — never throws', async () => {
+  const okProbe = wireDaemonReachabilityProbe({
+    reachabilityProbeDeps: {
+      lookup: async () => ({ address: '1.2.3.4' }),
+      timeoutMs: 1000,
+    },
+  });
+  assert.equal(await okProbe(), true);
+
+  const failProbe = wireDaemonReachabilityProbe({
+    reachabilityProbeDeps: {
+      lookup: async () => {
+        throw new Error('ENOTFOUND');
+      },
+      timeoutMs: 1000,
+    },
+  });
+  assert.equal(await failProbe(), false);
+});
+
+test('wireDaemonHasCatchupRun: a profile with no jobbunny.db yet returns false and creates no file', async () => {
+  const dbPath = await seedProfileDir('catchup-nodb');
+  const hasCatchupRun = wireDaemonHasCatchupRun({ root });
+  assert.equal(hasCatchupRun('catchup-nodb', '2026-08-05'), false);
+  assert.equal(existsSync(dbPath), false, 'a lookup must never create the db file');
+});
+
+test('wireDaemonHasCatchupRun: true only for the exact (date, kind:catchup) pair — a plain run or a different date does not count', async () => {
+  const dbPath = await seedProfileDir('catchup-yes');
+  await writeFile(dbPath, '');
+  const hasCatchupRun = wireDaemonHasCatchupRun({ root });
+  assert.equal(hasCatchupRun('catchup-yes', '2026-08-05'), false); // migrates the empty file.
+
+  insertRunRow(dbPath, {
+    date: '2026-08-05',
+    timeDir: 'catchup',
+    startedAt: '2026-08-05T20:00:00.000Z',
+    kind: 'catchup',
+  });
+  insertRunRow(dbPath, {
+    date: '2026-08-05',
+    timeDir: '09-00',
+    startedAt: '2026-08-05T09:00:00.000Z',
+    kind: 'run',
+  });
+
+  assert.equal(hasCatchupRun('catchup-yes', '2026-08-05'), true);
+  assert.equal(hasCatchupRun('catchup-yes', '2026-08-04'), false);
+});
+
+test('wireDaemonHasCatchupRun: a store that fails once does not permanently blind a subsequent call (fresh store per call, never memoized)', async () => {
+  const dbPath = await seedProfileDir('catchup-flaky');
+  await writeFile(dbPath, '');
+
+  let calls = 0;
+  const hasCatchupRun = wireDaemonHasCatchupRun({
+    root,
+    makeRunStore: () => {
+      calls += 1;
+      const result = calls !== 1;
+      return {
+        listRunTimeDirs: () => [],
+        hasRunOfKind: () => result,
+        close: () => {},
+      };
+    },
+  });
+
+  assert.equal(hasCatchupRun('catchup-flaky', '2026-08-05'), false);
+  assert.equal(hasCatchupRun('catchup-flaky', '2026-08-05'), true);
+  assert.equal(calls, 2, 'expected a fresh store construction per call, never memoized');
 });

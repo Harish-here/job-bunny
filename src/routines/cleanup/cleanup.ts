@@ -10,7 +10,11 @@ import type { Routine } from '../types.ts';
  * Status) older than `untouchedOlderThanDays`. It then prunes local
  * `runs/<date>/` checkpoint folders older than `runsOlderThanDays` via
  * `ctx.storage` — a purely local-disk concern, unrelated to Notion
- * staleness.
+ * staleness. The `checkpoints` table rows are pruned on their own, much
+ * shorter `checkpointsOlderThanDays` TTL: every checkpoint read path
+ * (`run.ts`, `stage.ts`, `reconcile.ts`) only ever looks at the *same-day*
+ * latest checkpoint, so retaining rows for the 30-day `runsOlderThanDays`
+ * window was pure dead weight (~95% of the DB in practice).
  *
  * Settings come from the pipeline config's `settings.cleanup` slice
  * (`PipelineConfigSchema.settings` is an untyped `Record<string, unknown>`
@@ -22,7 +26,9 @@ import type { Routine } from '../types.ts';
  * error: `passedOlderThanDays: 7`, `untouchedOlderThanDays: 30` (v0
  * `cleanup.js`'s own `DAYS_OLD`/`LEAD_DAYS_OLD` env-var defaults);
  * `runsOlderThanDays` has no v0 precedent (v0 never wrote checkpoints) and
- * defaults to 30.
+ * defaults to 30. `checkpointsOlderThanDays` likewise has no v0 precedent
+ * and defaults to 2 — checkpoints are read same-day only (see above), so a
+ * short TTL is safe and keeps the table small.
  *
  * Dry-run is deliberately NOT modeled here: it belongs entirely to the
  * connector's own settings (`NotionConnectorSettings.dryRun`, defaulting to
@@ -39,8 +45,12 @@ export const CleanupSettingsSchema = z.object({
   untouchedOlderThanDays: z.number().int().min(0).default(30),
   /** No v0 precedent (v0 never wrote checkpoints); TTL for local
    * `runs/<date>/` folders under `ctx.storage` (legacy, pre-Phase-2) and
-   * for `checkpoints`/`runs` table rows (persist-to-db). */
+   * for the `runs` table rows (persist-to-db). */
   runsOlderThanDays: z.number().int().min(0).default(30),
+  /** No v0 precedent. Own, much shorter TTL for `checkpoints` table rows:
+   * every checkpoint read path only ever looks at the same-day latest
+   * checkpoint, so a long TTL just accumulates dead weight. */
+  checkpointsOlderThanDays: z.number().int().min(0).default(2),
 });
 
 export type CleanupSettings = z.infer<typeof CleanupSettingsSchema>;
@@ -155,10 +165,13 @@ export const cleanupRoutine: Routine = {
       runsOlderThanDays: settings.runsOlderThanDays,
     });
 
-    // Same TTL, same `today` as the runs-row prune above — checkpoint rows
-    // (persist-to-db Phase 2) get pruned the same way. The legacy
-    // `runs/<date>/` folder prune above stays for pre-Phase-2 leftovers
-    // still on disk after an upgrade — harmless once none remain.
+    // Own, much shorter TTL than the runs-row prune above — checkpoint rows
+    // (persist-to-db Phase 2) are only ever read same-day (`run.ts`,
+    // `stage.ts`, `reconcile.ts` all resolve via `latestCheckpointTimeDir
+    // (runDate)`), so `runsOlderThanDays`'s 30-day window kept ~95% of the
+    // DB as dead weight. Same `today` as the runs-row prune above. The
+    // legacy `runs/<date>/` folder prune above stays for pre-Phase-2
+    // leftovers still on disk after an upgrade — harmless once none remain.
     //
     // `CheckpointStore.pruneOlderThan` is LOUD by its own port contract
     // (recovery-path methods must never silently lose a checkpoint) — but
@@ -172,11 +185,11 @@ export const cleanupRoutine: Routine = {
     try {
       const prunedCheckpoints = ctx.checkpointStore.pruneOlderThan(
         today,
-        settings.runsOlderThanDays,
+        settings.checkpointsOlderThanDays,
       );
       ctx.logger.info('cleanup: pruned checkpoint rows', {
         prunedCheckpoints,
-        runsOlderThanDays: settings.runsOlderThanDays,
+        checkpointsOlderThanDays: settings.checkpointsOlderThanDays,
       });
     } catch (err) {
       ctx.logger.warn('cleanup: checkpoint prune failed', {

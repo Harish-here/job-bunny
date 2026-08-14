@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { RunResult } from '../run/index.ts';
+import type { RunResult } from '../../run/index.ts';
 import { formatDigest } from './digest.ts';
 
 function passedResult(overrides: Partial<RunResult> = {}): RunResult {
@@ -98,4 +98,37 @@ test('formatDigest: dryRun option adds a loud DRY RUN line, absent by default', 
 
   const dry = formatDigest(passedResult(), { dryRun: true });
   assert.match(dry, /DRY RUN/);
+});
+
+// T5 (mockup ux-notes.md §4, mockup.html `tg-catchup-digest`): the
+// catch-up label sits immediately after the separator, before the
+// dry-run/failed-stage lines, as two lines.
+test('formatDigest: catchupSlots inserts the exact T5 two-line block right after the separator', () => {
+  const text = formatDigest(
+    passedResult({ profile: 'harish', date: '2026-08-12', time: '20:40' }),
+    { catchupSlots: ['09:00', '11:30', '14:00', '16:30', '19:00'] },
+  );
+  const expected = [
+    '✅ Job Bunny — harish (2026-08-12 20:40)',
+    '────────────────',
+    'CATCH-UP RUN — stood in for 5 missed slots.',
+    '(09:00, 11:30, 14:00, 16:30, 19:00)',
+  ].join('\n');
+  assert.equal(text.startsWith(expected), true);
+});
+
+test('formatDigest: catchupSlots singular slot uses "slot" not "slots"', () => {
+  const text = formatDigest(passedResult(), { catchupSlots: ['09:00'] });
+  assert.match(text, /CATCH-UP RUN — stood in for 1 missed slot\.\n\(09:00\)/);
+});
+
+test('formatDigest: omitted catchupSlots is byte-identical to the pre-T5 output (regression)', () => {
+  const withoutOpt = formatDigest(passedResult());
+  const withEmptyOpts = formatDigest(passedResult(), {});
+  const withUndefinedCatchup = formatDigest(passedResult(), { catchupSlots: undefined });
+  const withEmptyArray = formatDigest(passedResult(), { catchupSlots: [] });
+  assert.equal(withoutOpt, withEmptyOpts);
+  assert.equal(withoutOpt, withUndefinedCatchup);
+  assert.equal(withoutOpt, withEmptyArray);
+  assert.doesNotMatch(withoutOpt, /CATCH-UP RUN/);
 });

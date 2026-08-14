@@ -6,7 +6,13 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource, BoardStore, DaemonStatus } from '../../../ports/board.ts';
+import type {
+  BoardSource,
+  BoardStore,
+  DaemonStatus,
+  RunDurationEstimate,
+} from '../../../ports/board.ts';
+import type { DeferredSlotRow } from '../../../ports/deferred_slots.ts';
 import type { RunDetail, RunEventRow, RunSummary } from '../../../ports/run_store.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
@@ -57,6 +63,7 @@ const SAMPLE_SUMMARY: RunSummary = {
   finishedAt: '2026-08-05T09:05:00.000Z',
   heartbeatAt: '2026-08-05T09:04:00.000Z',
   progress: null,
+  catchupSlots: null,
 };
 
 const SAMPLE_DETAIL: RunDetail = {
@@ -98,6 +105,7 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
   listRunsCalls: Array<{ limit?: number; offset?: number }>;
   listRunEventsCalls: Array<{ id: number; query: { limit?: number; offset?: number } }>;
   listRunHealthCalls: number[][];
+  estimateRunDurationCalls: number[];
 } {
   const listRunsCalls: Array<{ limit?: number; offset?: number }> = [];
   const listRunEventsCalls: Array<{
@@ -105,10 +113,12 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     query: { limit?: number; offset?: number };
   }> = [];
   const listRunHealthCalls: number[][] = [];
+  const estimateRunDurationCalls: number[] = [];
   return {
     listRunsCalls,
     listRunEventsCalls,
     listRunHealthCalls,
+    estimateRunDurationCalls,
     listJobs: () => ({ rows: [], total: 0 }),
     getJob: () => null,
     updateTracking: () => null,
@@ -126,6 +136,11 @@ function fakeStore(overrides: Partial<BoardStore> = {}): BoardStore & {
     listRunHealth(runIds) {
       listRunHealthCalls.push(runIds);
       return new Map();
+    },
+    listDeferredSlots: () => ({ rows: [], total: 0 }),
+    estimateRunDuration(): RunDurationEstimate | null {
+      estimateRunDurationCalls.push(1);
+      return { medianMs: 30 * 60_000, sampleSize: 10 };
     },
     close() {},
     ...overrides,
@@ -238,11 +253,45 @@ test('list: null store (no local db) is a 404 no_local_db', async () => {
 
 // --- GET /api/profiles/:name/runs/:id ---
 
-test('get: 200 for a known id', async () => {
-  const route = findRoute(fakeSource(fakeStore()), '/api/profiles/:name/runs/:id');
+test('get: 200 for a known id; estimatedDurationMs is null for a status: passed run even when the store has enough history to answer, and estimateRunDuration is never even called', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
   const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, SAMPLE_DETAIL);
+  assert.deepEqual(res.body, { ...SAMPLE_DETAIL, estimatedDurationMs: null });
+  assert.deepEqual(store.estimateRunDurationCalls, []);
+});
+
+test('get: estimatedDurationMs is populated (blueprint step 1.18) for a status: running run', async () => {
+  const runningDetail = {
+    ...SAMPLE_DETAIL,
+    status: 'running' as const,
+    finishedAt: null,
+  };
+  const store = fakeStore({
+    getRun: (id) => (id === SAMPLE_SUMMARY.id ? runningDetail : null),
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
+  const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ...runningDetail, estimatedDurationMs: 30 * 60_000 });
+  assert.deepEqual(store.estimateRunDurationCalls, [1]);
+});
+
+test('get: estimatedDurationMs is null for a status: running run when the store has too little history to estimate', async () => {
+  const runningDetail = {
+    ...SAMPLE_DETAIL,
+    status: 'running' as const,
+    finishedAt: null,
+  };
+  const store = fakeStore({
+    getRun: (id) => (id === SAMPLE_SUMMARY.id ? runningDetail : null),
+    estimateRunDuration: () => null,
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/runs/:id');
+  const res = await route.handler(req({ params: { name: 'rajni', id: '7' } }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ...runningDetail, estimatedDurationMs: null });
 });
 
 test('get: 404 for an unknown id', async () => {
@@ -390,5 +439,101 @@ test('soft-errors: non-numeric id is a 400 validation error', async () => {
     () => route.handler(req({ params: { name: 'rajni', id: 'abc' } })),
     400,
     'validation',
+  );
+});
+
+// --- GET /api/profiles/:name/deferred-slots ---
+
+function fakeDeferredSlot(overrides: Partial<DeferredSlotRow> = {}): DeferredSlotRow {
+  return {
+    runDate: '2026-08-13',
+    slot: '09:00',
+    reasonCode: 'host-asleep',
+    reason: 'host was asleep',
+    decidedAt: '2026-08-13T09:00:05.000Z',
+    notifiedAt: null,
+    ...overrides,
+  };
+}
+
+const TODAY_SLOTS: DeferredSlotRow[] = [
+  fakeDeferredSlot({ slot: '05:00' }),
+  fakeDeferredSlot({ slot: '09:00' }),
+  fakeDeferredSlot({ slot: '13:00' }),
+  fakeDeferredSlot({ slot: '17:00' }),
+  fakeDeferredSlot({ slot: '21:00' }),
+];
+
+const OTHER_DATE_SLOTS: DeferredSlotRow[] = [
+  fakeDeferredSlot({ runDate: '2026-07-01', slot: '10:00' }),
+];
+
+test('deferred-slots: a profile with 5 deferred rows for today returns exactly those 5', async () => {
+  const listDeferredSlotsCalls: Array<{ date?: string }> = [];
+  const store = fakeStore({
+    listDeferredSlots(query) {
+      listDeferredSlotsCalls.push(query);
+      return { rows: TODAY_SLOTS, total: TODAY_SLOTS.length };
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/deferred-slots');
+  const res = await route.handler(req({ params: { name: 'rajni' } }));
+  assert.equal(res.status, 200);
+  const body = res.body as { rows: DeferredSlotRow[]; total: number; date: string };
+  assert.equal(body.rows.length, 5);
+  assert.deepEqual(body.rows, TODAY_SLOTS);
+  assert.equal(body.total, 5);
+  // date defaults to today (local) — a fixed regex shape check, not a
+  // literal date, so this test never rots at midnight.
+  assert.match(body.date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(listDeferredSlotsCalls[0]?.date, body.date);
+});
+
+test("deferred-slots: ?date=YYYY-MM-DD scopes to a different date's rows", async () => {
+  const listDeferredSlotsCalls: Array<{ date?: string }> = [];
+  const store = fakeStore({
+    listDeferredSlots(query) {
+      listDeferredSlotsCalls.push(query);
+      return { rows: OTHER_DATE_SLOTS, total: OTHER_DATE_SLOTS.length };
+    },
+  });
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/deferred-slots');
+  const res = await route.handler(
+    req({
+      params: { name: 'rajni' },
+      query: new URLSearchParams({ date: '2026-07-01' }),
+    }),
+  );
+  assert.equal(res.status, 200);
+  const body = res.body as { rows: DeferredSlotRow[]; total: number; date: string };
+  assert.deepEqual(body.rows, OTHER_DATE_SLOTS);
+  assert.equal(body.total, 1);
+  assert.equal(body.date, '2026-07-01');
+  assert.deepEqual(listDeferredSlotsCalls, [{ date: '2026-07-01' }]);
+});
+
+test('deferred-slots: malformed ?date= is a 400 validation error', async () => {
+  const store = fakeStore();
+  const route = findRoute(fakeSource(store), '/api/profiles/:name/deferred-slots');
+  await assertHttpError(
+    () =>
+      route.handler(
+        req({
+          params: { name: 'rajni' },
+          query: new URLSearchParams({ date: 'not-a-date' }),
+        }),
+      ),
+    400,
+    'validation',
+  );
+});
+
+test('deferred-slots: null store (no local db) is a 404 no_local_db, same shape as every other runs route', async () => {
+  const route = findRoute(fakeSource(null), '/api/profiles/:name/deferred-slots');
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'notion-only' } })),
+    404,
+    'no_local_db',
+    'profile has no local database (pure-Notion profiles are read via Notion)',
   );
 });

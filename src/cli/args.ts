@@ -27,6 +27,10 @@ export interface CommandOptions {
   headless?: boolean;
   dryRun?: boolean;
   runCapMs?: number;
+  /** Daemon-internal (`ops/daemon`'s `createSpawnRun`): comma-separated
+   * owed HH:MM slots a catch-up invocation covers in one process. Never
+   * hand-typed by an operator in normal use. */
+  catchupSlots?: string[];
   stage?: string;
   routine?: string;
   action?: string;
@@ -93,7 +97,8 @@ export const COMMAND_NAMES = new Set<string>([
 export const USAGE = [
   'usage: jobbunny <command> [options]',
   '',
-  '  run       --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>]',
+  '  run       --profile <name> [--resume] [--headless] [--dry-run] [--run-cap-ms <ms>] [--catchup-slots <hh:mm,...>]',
+  '            (--catchup-slots is daemon-internal — see ops/daemon; manual use is for debugging only)',
   '  doctor    --profile <name>',
   '  reconcile --profile <name>',
   '  stage <stage-name> --profile <name>',
@@ -127,6 +132,7 @@ export const PARSE_ARGS_OPTIONS = {
   force: { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'run-cap-ms': { type: 'string' },
+  'catchup-slots': { type: 'string' },
   'no-merge': { type: 'boolean', default: false },
   yes: { type: 'boolean', default: false },
   'daemon-child': { type: 'boolean', default: false },
@@ -149,6 +155,7 @@ export function buildOptions(
     force?: boolean;
     'dry-run'?: boolean;
     'run-cap-ms'?: string;
+    'catchup-slots'?: string;
     'no-merge'?: boolean;
     yes?: boolean;
     'daemon-child'?: boolean;
@@ -173,6 +180,9 @@ export function buildOptions(
           };
         }
       }
+      const catchupSlots = values['catchup-slots']
+        ? values['catchup-slots'].split(',')
+        : undefined;
       return (
         needsProfile() ?? {
           profile,
@@ -180,6 +190,7 @@ export function buildOptions(
           headless: values.headless ?? false,
           dryRun: values['dry-run'] ?? false,
           ...(runCapMs === undefined ? {} : { runCapMs }),
+          ...(catchupSlots === undefined ? {} : { catchupSlots }),
         }
       );
     }

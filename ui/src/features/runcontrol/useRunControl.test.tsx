@@ -60,13 +60,20 @@ function runRow(over: Partial<RunSummary> = {}): ListRunsResponse['rows'][number
     finishedAt: null,
     heartbeatAt: null,
     progress: null,
+    catchupSlots: null,
     softErrors: { total: 0, groups: [], breakerOpen: false },
     ...over,
   };
 }
 
 function runDetail(over: Partial<RunSummary> = {}): GetRunResponse {
-  return { ...runRow(over), result: null, failure: null, syncDryrun: null };
+  return {
+    ...runRow(over),
+    result: null,
+    failure: null,
+    syncDryrun: null,
+    estimatedDurationMs: null,
+  };
 }
 
 function makeWrapper() {

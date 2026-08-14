@@ -19,30 +19,38 @@
  * `canonicalDbPath` directly at its one use site; the old
  * `resolveProfileDbPath` (a `readFileSync`+`JSON.parse`+settings-walk) is
  * dead and removed (`daemon.test.ts` never named it directly).
+ *
+ * `DaemonWireOverrides` itself lives in the sibling `./daemon_types.ts`
+ * (step 1.10) — a non-behavioral split purely to keep this file under the
+ * 400-line cap; it imports no adapters, so it needs no `only-wire-imports-
+ * adapters` carve-out entry of its own and is re-exported below for every
+ * existing import site. `wireDaemonDeferredSlots` similarly lives in the
+ * sibling `./daemon_deferred.ts` (same reason, same non-behavioral split),
+ * re-exported below.
  */
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { SqliteRunIntentStore } from '../../adapters/db/sqlite/intents/index.ts';
 import { SqliteRunStore } from '../../adapters/db/sqlite/runs/index.ts';
+import {
+  LATEST_SCHEMA_VERSION,
+  readSchemaVersionReadonly,
+} from '../../adapters/db/sqlite/store/index.ts';
+import { PipelineConfigSchema } from '../../core/config/index.ts';
 import type { RunRecord } from '../../core/schedule/index.ts';
 import { parseTimeDirSlot } from '../../core/schedule/index.ts';
-import type { RunStore } from '../../ports/index.ts';
+import {
+  defaultReachabilityProbeDeps,
+  probeReachable,
+} from '../../ops/daemon/reachability/index.ts';
+import type { Notifier, NotifyEvent } from '../../ports/notifier.ts';
 import type { PendingIntent } from '../../ports/run_intents.ts';
 import { resolveHome } from '../home/index.ts';
-import { canonicalDbPath, wireConfigStore } from './builders.ts';
+import { buildNotifier, canonicalDbPath, wireConfigStore } from './builders.ts';
+import type { DaemonWireOverrides } from './daemon_types.ts';
 
-export interface DaemonWireOverrides {
-  /** the data home; default `resolveHome()` — same resolution as
-   * `compose.ts`/`wireBoard` in `builders.ts`/`board.ts`. */
-  root?: string;
-  /** test-only seam: overrides how a run-history reader is constructed for
-   * a resolved db path that is already known to exist. Default builds a
-   * real `SqliteRunStore`. Tests use this to inject a store that behaves
-   * as though a prior open/query failed, WITHOUT touching the real
-   * filesystem, to prove a failure on one call never carries into the
-   * next (see `readRunHistory`'s own doc comment). */
-  makeRunStore?: (dbPath: string) => Pick<RunStore, 'listRunTimeDirs' | 'close'>;
-}
+export { wireDaemonDeferredSlots } from './daemon_deferred.ts';
+export type { DaemonWireOverrides } from './daemon_types.ts';
 
 /** Builds the daemon's `DaemonDeps.readRunHistory` function: for each named
  * profile, checks whether that profile's own `jobbunny.db` file EXISTS
@@ -88,6 +96,33 @@ export function wireDaemonRunHistory(
       }
     }
     return records;
+  };
+}
+
+/** Per-profile, per-tick schema-drift detector (Phase 0, D2 self-heal).
+ * Never throws — a profile with no db file yet, or one that fails to
+ * open for any reason, simply contributes nothing to the returned map
+ * (readSchemaVersionReadonly's own fail-soft posture, step 0.1). */
+export function wireDaemonSchemaGuard(
+  overrides: DaemonWireOverrides = {},
+): (
+  profiles: readonly string[],
+) => Map<string, { schemaVersion: number; buildVersion: number }> {
+  const root = overrides.root ?? resolveHome();
+  return (profiles) => {
+    const result = new Map<string, { schemaVersion: number; buildVersion: number }>();
+    for (const profile of profiles) {
+      const dbPath = canonicalDbPath(root, profile);
+      if (!existsSync(dbPath)) continue; // never-run profile — do not create it.
+      const version = readSchemaVersionReadonly(dbPath);
+      if (version !== undefined && version > LATEST_SCHEMA_VERSION) {
+        result.set(profile, {
+          schemaVersion: version,
+          buildVersion: LATEST_SCHEMA_VERSION,
+        });
+      }
+    }
+    return result;
   };
 }
 
@@ -228,4 +263,135 @@ export function wireDaemonIntents(overrides: DaemonWireOverrides = {}): {
       }
     },
   };
+}
+
+/** Builds the daemon-reachable notifier (step 0.5): per call, reads the
+ * NAMED profile's `profile.json` fresh (readonly-lift `ConfigStore`,
+ * mirroring `wireDaemonScheduleConfig`'s discipline — no memoization, one
+ * profile's failure must never blind another's future call), parses it
+ * with the same `PipelineConfigSchema` every other config reader uses, and
+ * — only on success — builds each configured notifier and sends `event` to
+ * all of them via `Promise.allSettled`, exactly mirroring `compose.ts`'s
+ * `ctx.notify` (see its doc comment there). A missing or malformed
+ * `profile.json`, or a notifier that fails to construct or send, is never
+ * fatal to the caller: this function NEVER throws or rejects — it is the
+ * daemon's own "guaranteed alert" path (step 0.6) and must survive every
+ * per-profile failure mode `wireDaemonScheduleConfig` already tolerates.
+ *
+ * Returns whether delivery actually happened (`true` iff at least one
+ * configured notifier's `send` resolved) rather than just "ran without
+ * throwing" — a missing `TELEGRAM_BOT_TOKEN`, a 401, or a timed-out fetch
+ * all resolve this to `false` so the caller (`trackSchemaDriftAndNotify`)
+ * can retry on a later tick instead of permanently stamping delivery that
+ * never happened. */
+export function wireDaemonNotifier(
+  overrides: DaemonWireOverrides = {},
+): (profile: string, event: NotifyEvent) => Promise<boolean> {
+  const root = overrides.root ?? resolveHome();
+  const build = overrides.buildNotifier ?? buildNotifier;
+  const log = overrides.log ?? (() => {});
+  return async (profile, event) => {
+    const store = wireConfigStore(profile, { root, liftMode: 'readonly' });
+    let notifierNames: string[];
+    let settings: Record<string, unknown>;
+    try {
+      const text = await store.readText('profile.json');
+      const parsed = PipelineConfigSchema.safeParse(JSON.parse(text ?? ''));
+      if (!parsed.success) return false; // malformed profile.json — no-op, never throws.
+      notifierNames = parsed.data.notifiers;
+      settings = parsed.data.settings;
+    } catch {
+      return false; // missing profile.json / JSON.parse failure — no-op, never throws.
+    } finally {
+      store.close();
+    }
+
+    let notifiers: Notifier[];
+    try {
+      notifiers = notifierNames.map((name) => build(name, settings[name]));
+    } catch (err) {
+      log(
+        `notify: failed to build a notifier for profile ${profile}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return false;
+    }
+
+    const results = await Promise.allSettled(notifiers.map((n) => n.send(event)));
+    let sentAny = false;
+    for (const [i, result] of results.entries()) {
+      if (result.status === 'rejected') {
+        const name = notifiers[i]?.name ?? `notifier[${i}]`;
+        const reason =
+          result.reason instanceof Error ? result.reason.message : String(result.reason);
+        log(`notify: ${name} failed: ${reason}`);
+      } else {
+        sentAny = true;
+      }
+    }
+    return sentAny;
+  };
+}
+
+/** Builds `DaemonDeps.hasCatchupRun` (step 1.11a): mirrors
+ * `wireDaemonRunHistory`'s EXACT discipline — `existsSync`-checked FIRST (a
+ * never-run profile must not have its db created as a side effect of a
+ * retrospective sweep query), then a FRESH `SqliteRunStore` per call,
+ * closed in `finally`, never memoized. `SqliteRunStore.hasRunOfKind` is
+ * already fail-soft at the adapter layer (degrades to `false` on any
+ * storage error, task 5/6), so no extra try/catch is needed here. */
+export function wireDaemonHasCatchupRun(
+  overrides: DaemonWireOverrides = {},
+): (profile: string, date: string) => boolean {
+  const root = overrides.root ?? resolveHome();
+  const makeRunStore =
+    overrides.makeRunStore ?? ((dbPath: string) => new SqliteRunStore(dbPath));
+
+  return (profile, date) => {
+    const dbPath = canonicalDbPath(root, profile);
+    if (!existsSync(dbPath)) return false; // never run — do not create it.
+    const store = makeRunStore(dbPath);
+    try {
+      return store.hasRunOfKind(date, 'catchup');
+    } finally {
+      store.close();
+    }
+  };
+}
+
+/** Sibling query (step 0.5a): does a profile have at least one notifier
+ * configured, without constructing or sending anything? Exists so the
+ * daemon's step-0.6 dispatch can pick a sender profile deterministically —
+ * picking one that turns out to have zero notifiers configured would mean
+ * the one guaranteed alert in this design goes silently nowhere. Same
+ * read/parse path and same never-throws posture as `wireDaemonNotifier`. */
+export function wireDaemonHasNotifierConfigured(
+  overrides: DaemonWireOverrides = {},
+): (profile: string) => Promise<boolean> {
+  const root = overrides.root ?? resolveHome();
+  return async (profile) => {
+    const store = wireConfigStore(profile, { root, liftMode: 'readonly' });
+    try {
+      const text = await store.readText('profile.json');
+      const parsed = PipelineConfigSchema.safeParse(JSON.parse(text ?? ''));
+      return parsed.success && parsed.data.notifiers.length > 0;
+    } catch {
+      return false;
+    } finally {
+      store.close();
+    }
+  };
+}
+
+/** Builds `DaemonDeps.probeReachable` (step 1.8/1.11): pre-bound to zero
+ * args here, at the wiring layer — mirrors `wireDaemonNotifier`/
+ * `wireDaemonHasNotifierConfigured`'s own already-curried shape, so
+ * `ops/daemon/daemon.ts` never sees the raw `ReachabilityProbeDeps`-taking
+ * function. `probeReachable` itself never throws or rejects. */
+export function wireDaemonReachabilityProbe(
+  overrides: DaemonWireOverrides = {},
+): () => Promise<boolean> {
+  const deps = overrides.reachabilityProbeDeps ?? defaultReachabilityProbeDeps();
+  return () => probeReachable(deps);
 }

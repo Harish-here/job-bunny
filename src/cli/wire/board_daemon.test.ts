@@ -7,7 +7,7 @@
  * "no `src/adapters/**` import" posture (this file imports none either).
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -112,4 +112,48 @@ test('a live pid with a lastTickAt older than 5 minutes is stale', async () => {
     inFlight: null,
     profiles: [],
   });
+});
+
+test('a scheduled profile flagged as degraded in the pidfile surfaces degraded=true with a non-null reason; every other scheduled profile stays degraded=false/null', async () => {
+  mkdirSync(path.join(root, 'profiles', 'harish'), { recursive: true });
+  writeFileSync(
+    path.join(root, 'profiles', 'harish', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', schedule: { times: ['09:00'] } }),
+  );
+  mkdirSync(path.join(root, 'profiles', 'rajni'), { recursive: true });
+  writeFileSync(
+    path.join(root, 'profiles', 'rajni', 'profile.json'),
+    JSON.stringify({ connector: 'sqlite', schedule: { times: ['09:00'] } }),
+  );
+  writeFileSync(
+    pidfilePath(),
+    JSON.stringify({
+      pid: 4242,
+      startedAt: '2026-08-07T09:00:00.000Z',
+      lastTickAt: new Date().toISOString(),
+      attempts: [],
+      degraded: [
+        {
+          profile: 'harish',
+          schemaVersion: 8,
+          buildVersion: 7,
+          detectedAt: '2026-08-13T10:00:00.000Z',
+        },
+      ],
+      schemaDriftNotifiedAt: null,
+    }),
+  );
+
+  const status = await readBoardDaemonStatus({ root, pidIsAlive: () => true });
+  const harish = status.profiles.find((p) => p.profile === 'harish');
+  const rajni = status.profiles.find((p) => p.profile === 'rajni');
+  assert.equal(harish?.degraded, true);
+  assert.match(harish?.degradedReason ?? '', /v8/);
+  assert.match(harish?.degradedReason ?? '', /v7/);
+  assert.equal(harish?.schemaVersion, 8);
+  assert.equal(harish?.buildVersion, 7);
+  assert.equal(rajni?.degraded, false);
+  assert.equal(rajni?.degradedReason, null);
+  assert.equal(rajni?.schemaVersion, null);
+  assert.equal(rajni?.buildVersion, null);
 });

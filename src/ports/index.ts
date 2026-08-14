@@ -4,6 +4,7 @@ export * from './checkpoint_store.ts';
 export * from './config_store.ts';
 export * from './connector.ts';
 export * from './context.ts';
+export * from './deferred_slots.ts';
 export * from './doctor.ts';
 export * from './lane.ts';
 export * from './llm.ts';

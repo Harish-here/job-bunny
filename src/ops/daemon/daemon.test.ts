@@ -1,125 +1,23 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { test } from 'node:test';
-import type { ProfileSchedule } from '../../core/schedule/index.ts';
-import type { DaemonDeps, SpawnRun } from './daemon.ts';
+import type { SpawnRun } from './daemon.ts';
 import { createDaemon } from './daemon.ts';
 import type { DaemonPidfileDeps } from './pidfile.ts';
 import {
-  acquireDaemonPidfile,
   readDaemonPidfile,
   releaseDaemonPidfile,
   updateDaemonPidfile,
 } from './pidfile.ts';
 import type { ScanDeps } from './scan/index.ts';
-
-const ROOT = '/fake/root';
-const PROFILES_DIR = '/fake/profiles';
-
-function profilePath(name: string): string {
-  return join(PROFILES_DIR, name, 'profile.json');
-}
-
-function profileJson(schedule: Partial<ProfileSchedule> & { times: string[] }): string {
-  return JSON.stringify({
-    connector: 'notion',
-    schedule: {
-      times: schedule.times,
-      enabled: schedule.enabled ?? true,
-      weekdays: schedule.weekdays ?? [1, 2, 3, 4, 5],
-      graceMinutes: schedule.graceMinutes ?? 90,
-    },
-  });
-}
-
-function fakeScanDeps(
-  files: Record<string, string>,
-  dirs: Record<string, string[]>,
-): ScanDeps {
-  return {
-    readdirSync: (p) => {
-      const entries = dirs[p];
-      if (!entries) {
-        const err = new Error('ENOENT') as NodeJS.ErrnoException;
-        err.code = 'ENOENT';
-        throw err;
-      }
-      return entries;
-    },
-    readProfileJson: async (profilesDir, name) =>
-      files[join(profilesDir, name, 'profile.json')],
-  };
-}
-
-function fakePidfileDeps(): DaemonPidfileDeps {
-  const files = new Map<string, string>();
-  const notFound = (): never => {
-    const err = new Error('ENOENT') as NodeJS.ErrnoException;
-    err.code = 'ENOENT';
-    throw err;
-  };
-  return {
-    existsSync: (p) => files.has(p),
-    readFileSync: (p) => files.get(p) ?? notFound(),
-    writeFileSync: (p, data) => {
-      files.set(p, data);
-    },
-    writeFileSyncExclusive: (p, data) => {
-      if (files.has(p)) return false;
-      files.set(p, data);
-      return true;
-    },
-    renameSync: (from, to) => {
-      const content = files.get(from) ?? notFound();
-      files.delete(from);
-      files.set(to, content);
-    },
-    unlinkSync: (p) => {
-      files.delete(p);
-    },
-    pidIsAlive: () => true,
-    now: () => new Date(),
-  };
-}
-
-function readLastTickAt(deps: DaemonDeps): string | undefined {
-  return readDaemonPidfile(deps.root, deps.pidfile)?.lastTickAt;
-}
-
-function baseDeps(overrides: Partial<DaemonDeps> = {}): {
-  deps: DaemonDeps;
-  events: Array<{
-    event: string;
-    data?: Record<string, unknown>;
-    level?: 'info' | 'warn' | 'error';
-  }>;
-} {
-  const events: Array<{
-    event: string;
-    data?: Record<string, unknown>;
-    level?: 'info' | 'warn' | 'error';
-  }> = [];
-  const pidfile = fakePidfileDeps();
-  acquireDaemonPidfile(ROOT, 5000, pidfile);
-
-  const deps: DaemonDeps = {
-    root: ROOT,
-    profilesDir: PROFILES_DIR,
-    scan: fakeScanDeps({}, {}),
-    pidfile,
-    spawnRun: (async () => 0) as SpawnRun,
-    readRunHistory: () => [],
-    readIntents: () => [],
-    claimIntent: () => true,
-    attachIntentRun: () => {},
-    log: (event, data, level) => {
-      events.push({ event, data, level });
-    },
-    now: () => new Date(2026, 6, 27, 14, 4), // 2026-07-27 is a Monday.
-    ...overrides,
-  };
-  return { deps, events };
-}
+import {
+  baseDeps,
+  fakeScanDeps,
+  PROFILES_DIR,
+  profileJson,
+  profilePath,
+  ROOT,
+  readLastTickAt,
+} from './testkit/index.ts';
 
 test('a due slot spawns exactly once', async () => {
   const spawnCalls: string[] = [];
@@ -153,8 +51,12 @@ test('a second tick during an in-flight run short-circuits on the guard but stil
   const daemon = createDaemon(deps);
 
   const firstTick = daemon.tick();
-  await Promise.resolve();
-  await Promise.resolve(); // let the heartbeat write and ledger append settle.
+  // Enough microtask flushes for the batch (schedule scan, gate probe,
+  // ledger append) to reach the spawn — no hardcoded hop count, matching
+  // the "stop() during an in-flight child" test's own polling style.
+  for (let i = 0; i < 20 && !events.some((e) => e.event === 'spawn'); i++) {
+    await Promise.resolve();
+  }
 
   const beforeSecondTick = readLastTickAt(deps);
   nowMs += 1000;
@@ -342,6 +244,30 @@ test('two owed entries run sequentially in (slot, profileName) order', async () 
   assert.deepEqual(order, ['start:alpha', 'end:alpha', 'start:zeta', 'end:zeta']);
 });
 
+test('a profile flagged by checkSchemaDrift is excluded from spawning this tick; a healthy profile spawns normally', async () => {
+  const spawnCalls: string[] = [];
+  const spawnRun: SpawnRun = async (owed) => {
+    spawnCalls.push(owed.profile);
+    return 0;
+  };
+  const scan = fakeScanDeps(
+    {
+      [profilePath('harish')]: profileJson({ times: ['14:00'] }),
+      [profilePath('rajni')]: profileJson({ times: ['14:00'] }),
+    },
+    { [PROFILES_DIR]: ['harish', 'rajni'] },
+  );
+  const checkSchemaDrift = (profiles: readonly string[]) =>
+    new Map(
+      profiles
+        .filter((p) => p === 'harish')
+        .map((p) => [p, { schemaVersion: 9, buildVersion: 7 }] as const),
+    );
+  const { deps } = baseDeps({ scan, spawnRun, checkSchemaDrift });
+  await createDaemon(deps).tick();
+  assert.deepEqual(spawnCalls, ['rajni']);
+});
+
 test('the reentrancy guard short-circuits a tick BEFORE it rescans, while the heartbeat still runs', async () => {
   let nowMs = new Date(2026, 6, 27, 14, 4).getTime();
   const now = () => new Date(nowMs);
@@ -383,6 +309,13 @@ test('the reentrancy guard short-circuits a tick BEFORE it rescans, while the he
   assert.equal(profileScans, 1); // guard short-circuited BEFORE the rescan.
   assert.notEqual(readLastTickAt(deps), beforeSecondTick); // heartbeat still advanced.
 
+  // Enough microtask flushes for the first tick's own batch (schedule
+  // scan, gate probe, ledger append) to reach `spawnRun` and assign
+  // `resolveSpawn` — no hardcoded hop count, matching the "stop() during
+  // an in-flight child" test's own polling style elsewhere in this file.
+  for (let i = 0; i < 20 && !resolveSpawn; i++) {
+    await Promise.resolve();
+  }
   resolveSpawn?.(0);
   await firstTick;
 });

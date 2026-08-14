@@ -128,6 +128,9 @@ function fakeRunStore(opts?: { prunedResult?: number }): {
       prunedCalls.push({ today, ttlDays });
       return opts?.prunedResult ?? 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
   return { store, prunedCalls };
@@ -195,12 +198,30 @@ function fakeCtx(opts?: {
   };
 }
 
-test('CleanupSettingsSchema: empty object parses to defaults (7 / 30 / 30)', () => {
+test('CleanupSettingsSchema: empty object parses to defaults (7 / 30 / 30 / 2)', () => {
   const settings = CleanupSettingsSchema.parse({});
   assert.deepEqual(settings, {
     passedOlderThanDays: 7,
     untouchedOlderThanDays: 30,
     runsOlderThanDays: 30,
+    checkpointsOlderThanDays: 2,
+  });
+});
+
+test('CleanupSettingsSchema: a live-profile shape with no checkpointsOlderThanDays key still validates and defaults it to 2', () => {
+  // Mirrors the live harish profile's settings.cleanup: { passedOlderThanDays: 30,
+  // untouchedOlderThanDays: 30, runsOlderThanDays: 30 } — no checkpointsOlderThanDays
+  // key at all. Must not throw, and must default the new field to 2.
+  const settings = CleanupSettingsSchema.parse({
+    passedOlderThanDays: 30,
+    untouchedOlderThanDays: 30,
+    runsOlderThanDays: 30,
+  });
+  assert.deepEqual(settings, {
+    passedOlderThanDays: 30,
+    untouchedOlderThanDays: 30,
+    runsOlderThanDays: 30,
+    checkpointsOlderThanDays: 2,
   });
 });
 
@@ -371,7 +392,7 @@ test('run(): prunes runs/run_events rows via ctx.runStore, with the same TTL and
   assert.equal(infoCall?.data?.runsOlderThanDays, 45);
 });
 
-test('run(): prunes checkpoint rows via ctx.checkpointStore, with the same TTL and today used for the runs-row prune', async () => {
+test('run(): prunes checkpoint rows via ctx.checkpointStore, using the default checkpointsOlderThanDays (2) when the setting is absent, with the same today used for the runs-row prune', async () => {
   const logger = fakeLogger();
   const connector = fakeConnector();
   const { store: runStore, prunedCalls: runPrunedCalls } = fakeRunStore({
@@ -390,14 +411,59 @@ test('run(): prunes checkpoint rows via ctx.checkpointStore, with the same TTL a
   await cleanupRoutine.run(ctx);
 
   assert.equal(checkpointPrunedCalls.length, 1);
-  assert.equal(checkpointPrunedCalls[0]?.ttlDays, 45);
+  assert.equal(checkpointPrunedCalls[0]?.ttlDays, 2);
   assert.equal(checkpointPrunedCalls[0]?.today, runPrunedCalls[0]?.today);
-  assert.equal(checkpointPrunedCalls[0]?.ttlDays, runPrunedCalls[0]?.ttlDays);
 
   const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned checkpoint rows');
   assert.ok(infoCall, 'must log the number of pruned checkpoint rows');
   assert.equal(infoCall?.data?.prunedCheckpoints, 2);
-  assert.equal(infoCall?.data?.runsOlderThanDays, 45);
+  assert.equal(infoCall?.data?.checkpointsOlderThanDays, 2);
+});
+
+test('run(): an explicit checkpointsOlderThanDays is passed through to ctx.checkpointStore.pruneOlderThan, independently of runsOlderThanDays', async () => {
+  const logger = fakeLogger();
+  const connector = fakeConnector();
+  const { store: runStore, prunedCalls: runPrunedCalls } = fakeRunStore({
+    prunedResult: 4,
+  });
+  const { store: checkpointStore, prunedCalls: checkpointPrunedCalls } =
+    fakeCheckpointStore({ prunedResult: 2 });
+  const ctx = fakeCtx({
+    connector,
+    logger,
+    runStore,
+    checkpointStore,
+    settings: { cleanup: { runsOlderThanDays: 45, checkpointsOlderThanDays: 3 } },
+  });
+
+  await cleanupRoutine.run(ctx);
+
+  assert.equal(checkpointPrunedCalls.length, 1);
+  assert.equal(checkpointPrunedCalls[0]?.ttlDays, 3);
+  assert.equal(runPrunedCalls[0]?.ttlDays, 45);
+
+  const infoCall = logger.calls.find((c) => c.msg === 'cleanup: pruned checkpoint rows');
+  assert.ok(infoCall, 'must log the number of pruned checkpoint rows');
+  assert.equal(infoCall?.data?.checkpointsOlderThanDays, 3);
+});
+
+test('run(): the runs/run_events prune still receives runsOlderThanDays regardless of checkpointsOlderThanDays', async () => {
+  const connector = fakeConnector();
+  const { store: runStore, prunedCalls: runPrunedCalls } = fakeRunStore({
+    prunedResult: 1,
+  });
+  const { store: checkpointStore } = fakeCheckpointStore({ prunedResult: 0 });
+  const ctx = fakeCtx({
+    connector,
+    runStore,
+    checkpointStore,
+    settings: { cleanup: { runsOlderThanDays: 45, checkpointsOlderThanDays: 3 } },
+  });
+
+  await cleanupRoutine.run(ctx);
+
+  assert.equal(runPrunedCalls.length, 1);
+  assert.equal(runPrunedCalls[0]?.ttlDays, 45);
 });
 
 test('run(): a throwing checkpointStore.pruneOlderThan is warned about but does not throw, letting the routine complete (LOUD-by-contract wrapped fail-soft by this caller)', async () => {

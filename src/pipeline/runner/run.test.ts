@@ -117,6 +117,9 @@ function fakeRunStore(opts?: { throwOnRecordProgress?: boolean }): {
     pruneRunsOlderThan() {
       return 0;
     },
+    hasRunOfKind() {
+      return false;
+    },
     close() {},
   };
   return { store, heartbeats, failures, progressCalls };

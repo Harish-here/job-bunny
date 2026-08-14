@@ -116,7 +116,7 @@ export function HubPage({ profile }: { profile: string }) {
       : null;
 
   return (
-    <div data-testid="hub" className="flex h-screen flex-col gap-6 overflow-y-auto p-6">
+    <div data-testid="hub" className="flex h-full flex-col gap-6 overflow-y-auto p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold font-heading">Setup & Health</h1>
         <Button
