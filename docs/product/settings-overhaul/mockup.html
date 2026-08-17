@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings &amp; Control Surface Overhaul — Mid-fi Mockup</title>
+<!--
+  Standalone design artifact rendered from docs/product/settings-overhaul/ux-notes.md.
+  Not application code — no build step, no framework, no external requests.
+  The real app uses Geist (UI) / Nunito (headings); this mockup substitutes the
+  system font stack below (dossier §3, documented exception) so it renders
+  identically offline. Light theme only.
+-->
+<style>
+:root{
+  /* ---- §3 colour tokens, literal light values, exact names ---- */
+  --background:#faf8fd; --foreground:#3d2c55; --card:#ffffff; --muted:#f1ecf8;
+  --muted-foreground:#6e5b87; --accent:#efe8fa; --border:#e4dbf0; --primary:#7b5ea7;
+  --primary-foreground:#ffffff; --success:#4caf6e; --attention:#ff8a3d; --amber:#c98a2e;
+  --destructive:#d64545; --sidebar:#f3eefb; --sidebar-accent:#e7def7;
+  /* composited literals the dossier itself specifies inline (bg-X/NN, ring-foreground/10) —
+     same table colours at the stated opacities, not new values */
+  --ring-1:rgba(61,44,85,.10); --focus-ring:rgba(123,94,167,.5);
+  --attention-10:rgba(255,138,61,.10); --destructive-8:rgba(214,69,69,.08);
+  --success-10:rgba(76,175,110,.10); --shadow-xs:0 1px 2px rgba(61,44,85,.06);
+  --shadow-lg:0 10px 24px rgba(61,44,85,.18);
+  --font-sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-heading:ui-rounded,system-ui,sans-serif;
+  --font-mono:ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:var(--font-sans);background:var(--background);color:var(--foreground);font-size:14px;line-height:1.5}
+h1,h2,h3,p{margin:0}
+a{color:var(--primary)}
+code{font-family:var(--font-mono);background:var(--muted);padding:1px 4px;border-radius:4px;font-size:.85em}
+:focus-visible{outline:3px solid var(--focus-ring);outline-offset:2px}
+button{font:inherit;color:inherit;cursor:pointer}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.icon{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;display:inline-block;vertical-align:middle;flex-shrink:0}
+
+/* ---- header strip ---- */
+.header-strip{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;flex-wrap:wrap;gap:24px;align-items:center;font-size:12px}
+.header-strip .field{display:flex;gap:6px;align-items:baseline}
+.header-strip .k{color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.05em;font-size:10px}
+.header-strip .v{font-family:var(--font-mono);font-weight:500}
+.header-strip .open-decision{width:100%;font-size:12px;background:var(--attention-10);border-left:2px solid var(--attention);border-radius:16px;padding:8px 12px;color:var(--foreground)}
+.header-strip .open-decision b{color:var(--foreground)}
+
+/* ---- frames ---- */
+.frame{margin:24px 24px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--background)}
+.frame-title{background:var(--sidebar);padding:8px 12px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.frame-title h2{font-size:14px;font-weight:600;font-family:var(--font-heading)}
+.frame-title p{font-size:12px;color:var(--muted-foreground)}
+.frame-body{padding:24px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;background:var(--card);border:1px solid var(--border);padding:0 8px;height:20px;border-radius:9999px;color:var(--muted-foreground)}
+.section-note{font-size:12px;color:var(--muted-foreground);margin:12px 0}
+
+/* ---- badges / status ---- */
+.badge{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px;font-size:12px;border-radius:9999px;background:var(--muted);color:var(--muted-foreground)}
+.badge.on-primary{background:var(--accent);color:var(--primary)}
+.status-word{font-size:12px;font-weight:500}
+.status-word.success{color:var(--success)}
+.status-word.attention{color:var(--attention)}
+.status-word.amber{color:var(--amber)}
+.status-word.destructive{color:var(--destructive)}
+.dot{width:8px;height:8px;border-radius:9999px;display:inline-block;flex-shrink:0}
+.dot.success{background:var(--success)}
+.dot.attention{background:var(--attention)}
+.dot.amber{background:var(--amber)}
+.dot.destructive{background:var(--destructive)}
+.dot.muted{background:var(--muted-foreground)}
+
+/* ---- buttons / inputs ---- */
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;font-size:14px;border-radius:16px;border:none;font-family:inherit;white-space:nowrap}
+.btn-primary{background:var(--primary);color:var(--primary-foreground)}
+.btn-outline{background:var(--background);border:1px solid var(--border);color:var(--foreground)}
+.btn-outline:hover{background:var(--muted)}
+.btn-sm{height:28px;padding:0 10px;font-size:12.8px;border-radius:12.8px}
+.btn-icon{width:32px;height:32px;padding:0;border-radius:16px;justify-content:center}
+.btn:disabled{opacity:.5}
+label.field-label,span.field-label{font-size:12px;font-weight:500;color:var(--foreground);display:block;margin-bottom:6px}
+input[type=text],input[type=number],input[type=password],select,textarea{height:32px;padding:0 10px;font-size:14px;border-radius:16px;border:1px solid var(--border);font-family:inherit;background:var(--card);color:var(--foreground);width:100%}
+textarea{height:auto;padding:12px;border-radius:16px;font-family:var(--font-mono);background:var(--muted);resize:vertical}
+.field{display:flex;flex-direction:column;gap:1px}
+.field-help{font-size:12px;color:var(--muted-foreground);margin-top:6px}
+.field-effect{font-size:12px;color:var(--muted-foreground);margin-top:4px}
+.field-error-text{font-size:12px;color:var(--destructive);margin-top:6px}
+input[aria-invalid="true"],textarea[aria-invalid="true"]{border-color:var(--destructive)}
+
+/* switch */
+.switch{width:36px;height:20px;border-radius:9999px;background:var(--muted);position:relative;border:1px solid var(--border);flex-shrink:0}
+.switch .thumb{width:16px;height:16px;border-radius:9999px;background:var(--card);position:absolute;top:1px;left:1px;box-shadow:var(--shadow-xs)}
+.switch.checked{background:var(--primary);border-color:var(--primary)}
+.switch.checked .thumb{left:19px;background:var(--primary-foreground)}
+.switch-row{display:flex;align-items:center;gap:8px;font-size:14px}
+
+/* chips */
+.chip-input{border:1px solid var(--border);border-radius:16px;padding:8px;display:flex;flex-wrap:wrap;gap:8px;background:var(--card)}
+.rem-chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px 0 8px;font-size:12px;border-radius:9999px;background:var(--muted);color:var(--foreground)}
+.rem-chip button{border:0;background:none;padding:0;display:flex;color:var(--muted-foreground)}
+
+/* cards */
+.card{background:var(--card);border-radius:16px;padding:16px;box-shadow:var(--shadow-xs);border:1px solid var(--ring-1);display:flex;flex-direction:column;gap:16px}
+.card-sm{padding:12px;gap:12px}
+.card.accent-attention{border-left:2px solid var(--attention);background:linear-gradient(0deg,var(--attention-10),var(--attention-10)),var(--card)}
+.card-title{font-size:16px;font-weight:600}
+.card-subtitle{font-size:12px;color:var(--muted-foreground)}
+.card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.hero-number{font-size:24px;font-weight:600;font-family:var(--font-heading)}
+.page-title{font-size:18px;font-weight:600;font-family:var(--font-heading)}
+
+/* table idiom (funnel-style, reused for caps/limits) */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;border-bottom:1px solid var(--border);padding:4px 8px 4px 0;font-weight:500;color:var(--muted-foreground)}
+.tbl td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border);vertical-align:middle;font-size:14px}
+.tbl tr:last-child td{border-bottom:0}
+
+/* Settings shell (S1) */
+.app-shell{display:grid;grid-template-columns:224px 1fr;background:var(--card);border-radius:16px;box-shadow:0 0 0 1px var(--border);overflow:hidden;min-height:520px}
+.app-sidebar{background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px}
+.app-nav{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:4px}
+.app-nav li a{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:16px;color:var(--foreground);text-decoration:none;font-size:14px}
+.app-nav li a.active{background:var(--sidebar-accent);font-weight:500}
+.sidebar-spacer{flex:1}
+.profile-switcher{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-foreground);display:flex;align-items:center;gap:6px}
+.settings-shell-inner{display:grid;grid-template-columns:224px 1fr}
+.settings-nav{background:var(--sidebar);border-right:1px solid var(--border);padding:12px}
+.settings-nav-group{margin-bottom:12px}
+.settings-nav-group-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground);padding:0 8px;margin-bottom:4px}
+.settings-nav-group ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.settings-nav-group li a{display:flex;align-items:center;height:32px;padding:0 8px;border-radius:16px;color:var(--foreground);text-decoration:none;font-size:14px}
+.settings-nav-group li a.active{background:var(--sidebar-accent);font-weight:500}
+.settings-main{padding:24px;overflow:hidden}
+.page-header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+
+/* disclosure */
+.disclosure-trigger{width:100%;text-align:left;background:none;border:0;padding:0;font-size:14px;color:var(--muted-foreground);display:flex;justify-content:space-between;align-items:center;gap:6px}
+.disclosure-content{padding-top:12px;display:none}
+.disclosure[data-open="true"] .disclosure-content{display:block}
+.disclosure[data-open="true"] .chev{transform:rotate(180deg)}
+.chev{transition:transform .15s}
+@media(prefers-reduced-motion:reduce){.chev{transition:none}}
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+/* skeleton / empty / error */
+.skel{background:var(--muted);border-radius:12.8px}
+@media not (prefers-reduced-motion:reduce){.skel{background:linear-gradient(90deg,var(--muted) 25%,rgba(255,255,255,.6) 37%,var(--muted) 63%);background-size:400% 100%;animation:shimmer 1.4s ease infinite}}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+.skel-row{height:32px;border-radius:16px;margin-bottom:8px}
+.empty-card{border:1px solid var(--border);border-radius:16px;padding:20px;text-align:center;color:var(--muted-foreground);display:flex;flex-direction:column;align-items:center;gap:8px;font-size:12px}
+.error-retry{border:1px solid var(--border);background:var(--destructive-8);border-radius:16px;padding:16px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-size:12px}
+
+/* toggle-driven variants */
+.variant{display:none}
+[data-fetching-preset="normal"] .v-preset-normal{display:block}
+[data-fetching-preset="fast"] .v-preset-fast{display:block}
+
+/* pacing presets */
+.preset-group{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.preset-card{border:1px solid var(--border);border-radius:16px;padding:16px;background:var(--card);display:flex;flex-direction:column;gap:6px;cursor:pointer;text-align:left}
+.preset-card[aria-checked="true"]{box-shadow:0 0 0 2px var(--primary)}
+.preset-card.attention{border-left:2px solid var(--attention)}
+.preset-name{font-size:14px;font-weight:600}
+.preset-meta{font-size:12px;color:var(--muted-foreground)}
+.preset-warning{font-size:12px;color:var(--foreground);background:var(--attention-10);border-left:2px solid var(--attention);border-radius:16px;padding:8px;margin-top:6px}
+.ack-row{display:flex;align-items:flex-start;gap:6px;margin-top:8px;font-size:12px}
+
+/* callouts */
+.callout{display:inline-flex;width:19px;height:19px;border-radius:9999px;background:var(--primary);color:var(--primary-foreground);font-size:10px;font-weight:600;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0}
+.callout:hover{filter:brightness(1.1)}
+
+/* save model */
+.save-bar{background:var(--card);border:1px solid var(--ring-1);border-radius:16px;padding:12px;box-shadow:var(--shadow-lg);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.validation-summary{border-left:2px solid var(--destructive);background:var(--destructive-8);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.validation-summary ul{margin:0;padding-left:18px;font-size:14px}
+.validation-summary li a{color:var(--destructive);text-decoration:underline}
+.success-line{background:var(--success-10);border-left:2px solid var(--success);border-radius:16px;padding:12px;font-size:14px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.dialog-mock{border:1px solid var(--border);border-radius:22.4px;background:var(--card);box-shadow:var(--shadow-lg);padding:20px;max-width:340px}
+
+/* connective / conflict */
+.connective-line{font-size:14px;padding:8px 0}
+.conflict-notice{background:var(--attention-10);border-left:2px solid var(--attention);padding:12px;border-radius:16px;font-size:14px;display:flex;flex-direction:column;gap:8px}
+.conflict-actions{display:flex;gap:8px}
+
+/* two-pane raw config */
+.two-pane{display:grid;grid-template-columns:200px 1fr;gap:24px}
+.doc-list{display:flex;flex-direction:column;gap:4px}
+.doc-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px;border-radius:16px;font-size:14px}
+.doc-row.active{background:var(--accent)}
+.scope-banner{background:var(--muted);border-radius:16px;padding:12px;font-size:12px;color:var(--muted-foreground);margin-bottom:16px}
+
+/* annotations (used on mockup-2.html too, kept here for shared idiom reference) */
+.annotations{padding:20px;background:var(--card);margin:24px 24px;border-radius:16px;box-shadow:0 0 0 1px var(--border)}
+.annotation-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.annotation-row:last-child{border-bottom:0}
+.annotation-text{font-size:13px}
+.annotation-text b{display:block;margin-bottom:2px}
+.back-link{font-size:12px;margin-left:6px}
+
+footer.foot{padding:20px;text-align:center;font-size:12px;color:var(--muted-foreground)}
+</style>
+</head>
+<body>
+
+<!-- ============== inline icon sprite (lucide-style, 16px, stroke-width 1.5, currentColor) ============== -->
+<svg style="display:none" aria-hidden="true">
+<defs>
+<symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+<symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+<symbol id="icon-alert-triangle" viewBox="0 0 24 24"><path d="M10.3 3.9L2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.2"/><circle cx="12" cy="16.3" r=".6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.7" r=".6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+<symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="icon-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="icon-kanban" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="7" x2="9" y2="17"/><line x1="15" y1="7" x2="15" y2="13"/></symbol>
+<symbol id="icon-play-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></symbol>
+<symbol id="icon-bar-chart" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></symbol>
+<symbol id="icon-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+<symbol id="icon-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+<symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+<symbol id="icon-play" viewBox="0 0 24 24"><path d="M6.5 4.5l13 7.5-13 7.5z"/></symbol>
+<symbol id="icon-square" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+<symbol id="icon-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+</defs>
+</svg>
+
+<!-- ============== header strip ============== -->
+<header class="header-strip">
+  <div class="field"><span class="k">Feature</span><span class="v">Settings &amp; Control Surface Overhaul</span></div>
+  <div class="field"><span class="k">Slug</span><span class="v">settings-overhaul</span></div>
+  <div class="field"><span class="k">Date</span><span class="v">2026-08-17</span></div>
+  <div class="field"><span class="k">Spec</span><span class="v">/Users/harishamutha/Job-bunny/docs/product/settings-overhaul/spec.md</span></div>
+  <div class="open-decision"><b>Open decision for this gate (dossier §1):</b> the Hub-vs-Settings boundary — recommended Option C+D, rendered below as <b>Operate</b> (machine-scoped) vs <b>Settings</b> (profile-scoped). Everything below the IA (§2) is boundary-independent.</div>
+  <div class="field" style="width:100%"><a href="mockup-2.html" style="font-size:12px">S10 five-state matrix + full callout annotation panel → mockup-2.html</a></div>
+</header>
+
+<!-- ======================================================================= -->
+<!-- S1 — Settings shell + "What decides your board" landing -->
+<!-- ======================================================================= -->
+<section class="frame" id="s1">
+  <div class="frame-title">
+    <div><h2>S1 — Settings shell + "What decides your board" (landing)</h2><p>Zero clicks after arriving — CP #1, #2 (dossier §5)</p></div>
+    <span class="chip">the answer to the 1/5 nav test</span>
+  </div>
+  <div class="frame-body">
+    <div class="app-shell" data-qa="settings-shell">
+      <aside class="app-sidebar">
+        <ul class="app-nav">
+          <li><a href="#"><svg class="icon"><use href="#icon-inbox"></use></svg>Triage</a></li>
+          <li><a href="#"><svg class="icon"><use href="#icon-kanban"></use></svg>Tracker</a></li>
+          <li><a href="#"><svg class="icon"><use href="#icon-play-circle"></use></svg>Runs</a></li>
+          <li><a href="#"><svg class="icon"><use href="#icon-bar-chart"></use></svg>Analytics</a></li>
+          <li><a href="#"><svg class="icon"><use href="#icon-activity"></use></svg>Operate</a></li>
+          <li><a href="#" class="active" aria-current="page"><svg class="icon"><use href="#icon-sliders"></use></svg>Settings</a></li>
+        </ul>
+        <div class="sidebar-spacer"></div>
+        <div class="profile-switcher"><svg class="icon" style="width:14px;height:14px"><use href="#icon-chevron-right"></use></svg><span>Profile:</span> <b>harish</b></div>
+      </aside>
+      <div class="settings-shell-inner">
+        <nav class="settings-nav" aria-label="Settings sections" data-qa="settings-nav">
+          <div class="settings-nav-group" data-qa="settings-nav-group-aim">
+            <div class="settings-nav-group-label">Aim</div>
+            <ul>
+              <li><a href="#" class="active" aria-current="page">What decides your board</a></li>
+              <li><a href="#s4">Roles &amp; companies</a></li>
+              <li><a href="#s2">Where you'll work</a></li>
+              <li><a href="#">Skills</a></li>
+              <li><a href="#">About you</a></li>
+            </ul>
+          </div>
+          <div class="settings-nav-group" data-qa="settings-nav-group-runs">
+            <div class="settings-nav-group-label">Runs</div>
+            <ul>
+              <li><a href="#">Where jobs come from</a></li>
+              <li><a href="#">Schedule</a></li>
+              <li><a href="#s3">Fetching</a></li>
+            </ul>
+          </div>
+          <div class="settings-nav-group" data-qa="settings-nav-group-output">
+            <div class="settings-nav-group-label">Output</div>
+            <ul>
+              <li><a href="#">Delivery</a></li>
+              <li><a href="#">Housekeeping</a></li>
+            </ul>
+          </div>
+          <div class="settings-nav-group" data-qa="settings-nav-group-advanced">
+            <div class="settings-nav-group-label">Advanced</div>
+            <ul>
+              <li><a href="#s5">Raw config</a></li>
+              <li><a href="#s9">Danger zone</a></li>
+            </ul>
+          </div>
+        </nav>
+        <main class="settings-main">
+          <div class="page-header-row">
+            <h1 class="page-title">Settings</h1>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge" data-qa="scope-chip-profile">Profile: harish</span>
+              <input type="text" placeholder="Search settings…" aria-label="Search settings" data-qa="settings-search" style="width:180px">
+            </div>
+          </div>
+
+          <!-- block 2: thin-run line (Von Restorff — the one distinct element) -->
+          <div class="card" data-qa="landing-thin-run">
+            <div>
+              Your last run put <span class="hero-number">4</span> jobs on the board. 214 were scraped; <code>filter</code> dropped 189 — biggest rule: <code>locations</code>.
+            </div>
+            <div style="display:flex;gap:16px">
+              <a href="#s2" id="c3-src">Review that rule →</a>
+              <a href="#">See the run →</a>
+            </div>
+          </div>
+
+          <!-- block 3: limits in force -->
+          <h3 style="font-size:14px;margin:16px 0 8px">Limits in force</h3>
+          <table class="tbl" data-qa="landing-caps-table">
+            <thead><tr><th>Cap</th><th>Value</th><th>Binding?</th><th></th></tr></thead>
+            <tbody>
+              <tr data-qa="landing-cap-row-max-new-per-lane"><td>maxNewPerLane</td><td class="v">40</td><td><span class="badge on-primary">hit this cap on 2 of 3 lanes</span></td><td><a href="#s3">Change →</a></td></tr>
+              <tr data-qa="landing-cap-row-max-probes-per-run"><td>maxProbesPerRun</td><td class="v">25</td><td><span class="badge">not hit</span></td><td><a href="#s3">Change →</a></td></tr>
+              <tr data-qa="landing-cap-row-max-cards-per-url"><td>maxCardsPerUrl</td><td class="v">40</td><td><span class="badge">not hit</span></td><td><a href="#s3">Change →</a></td></tr>
+              <tr data-qa="landing-cap-row-max-age-days"><td>maxAgeDays</td><td class="v">30</td><td><span class="badge">not hit</span></td><td><a href="#s3">Change →</a></td></tr>
+            </tbody>
+          </table>
+
+          <!-- block 4: rules in force -->
+          <h3 style="font-size:14px;margin:16px 0 8px">Rules in force</h3>
+          <table class="tbl" data-qa="landing-rules-summary">
+            <tbody>
+              <tr><td>Roles &amp; companies</td><td>9 active rules, 4 of them hard</td><td><a href="#s4">Open →</a></td></tr>
+              <tr id="c4-src" style="background:var(--attention-10)"><td>Where you'll work</td><td>6 active rules, 3 of them hard <a href="#c4" class="callout" aria-label="callout 4" style="margin-left:6px">4</a></td><td><a href="#s2">Open →</a></td></tr>
+              <tr><td>Skills</td><td>5 active rules, 2 of them hard</td><td><a href="#">Open →</a></td></tr>
+            </tbody>
+          </table>
+
+          <!-- block 5: scope footer -->
+          <p class="section-note" data-qa="landing-scope-footer" id="c1-src-s1">Daemon, LinkedIn session and secrets are machine-wide — see <a href="#s6">Operate →</a>. <a href="#c1" class="callout" aria-label="callout 1">1</a> <a href="#c15" class="callout" aria-label="callout 15">15</a></p>
+        </main>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S2 — "Where you'll work" (R2, the hero screen) -->
+<!-- ======================================================================= -->
+<section class="frame" id="s2">
+  <div class="frame-title">
+    <div><h2>S2 — Settings — Where you'll work</h2><p>R2 acceptance case · the repeated idiom, first appearance <a href="#c2" class="callout" aria-label="callout 2" id="c2-src">2</a></p></div>
+    <span class="chip">Aim group</span>
+  </div>
+  <div class="frame-body">
+    <div class="card" data-qa="geo-rules-card">
+      <div><div class="card-title">Rules — a job that fails these is dropped</div><div class="card-subtitle">Applied during <code>filter</code>. A dropped job never reaches your board. (<code>filter.json</code>)</div></div>
+      <div class="field-grid">
+        <div class="field"><span class="field-label">Cities / countries</span>
+          <div class="chip-input" role="listbox" aria-label="Cities and countries rule">
+            <span class="rem-chip">India<button aria-label="Remove India"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+            <span class="rem-chip">Remote<button aria-label="Remove Remote"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+          </div>
+        </div>
+        <div class="field"><span class="field-label">Timezones</span>
+          <div class="chip-input" role="listbox" aria-label="Allowed timezones rule" data-qa="geo-timezones-rule">
+            <span class="rem-chip">Asia/Kolkata<button aria-label="Remove Asia/Kolkata"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+          </div>
+        </div>
+        <div class="field"><span class="field-label">Work types</span>
+          <div style="display:flex;gap:12px;font-size:14px">
+            <label><input type="checkbox" checked> Remote</label>
+            <label><input type="checkbox"> Hybrid</label>
+            <label><input type="checkbox"> On-site</label>
+          </div>
+        </div>
+        <div class="field"><span class="field-label">Severity</span>
+          <select><option>Hard — drops the job</option><option>Soft — flags only</option></select>
+        </div>
+      </div>
+    </div>
+
+    <p class="connective-line" data-qa="geo-connective-line">The same timezone can appear in both. As a rule it decides <b>whether</b> a job reaches you. As a preference it decides <b>where in the list</b> it lands.</p>
+
+    <div class="conflict-notice" data-qa="geo-conflict-notice" id="c4">
+      <div><svg class="icon" style="color:var(--attention)"><use href="#icon-alert-triangle"></use></svg> <code>Asia/Kolkata</code> is ranked as acceptable, but your rule drops remote roles outside the allowed timezones — so no job from it can reach the board. Add it to the rule, or remove it from the preference.</div>
+      <div class="conflict-actions"><button class="btn btn-outline btn-sm">Add to rule</button><button class="btn btn-outline btn-sm">Remove from preference</button></div>
+      <a href="#s1" class="back-link">↩ back to S1</a>
+    </div>
+
+    <div class="card" data-qa="geo-prefs-card">
+      <div><div class="card-title">Preferences — these change the order, never drop anything</div><div class="card-subtitle">Applied during <code>rank</code>. Nothing here can remove a job. (<code>profile.json → settings.rank</code>)</div></div>
+      <div class="field-grid">
+        <div class="field"><span class="field-label">Home cities</span>
+          <div class="chip-input" role="listbox" aria-label="Home cities preference">
+            <span class="rem-chip">Bengaluru<button aria-label="Remove Bengaluru"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+          </div>
+        </div>
+        <div class="field"><span class="field-label">Acceptable timezones</span>
+          <div class="chip-input" role="listbox" aria-label="Acceptable timezones preference" data-qa="geo-timezones-acceptable">
+            <span class="rem-chip">Asia/Kolkata<button aria-label="Remove Asia/Kolkata"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+            <span class="rem-chip">America/New_York<button aria-label="Remove America/New_York"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+          </div>
+        </div>
+        <div class="field"><span class="field-label">Borderline timezones</span>
+          <div class="chip-input" role="listbox" aria-label="Borderline timezones preference" data-qa="geo-timezones-borderline">
+            <span class="rem-chip">Europe/London<button aria-label="Remove Europe/London"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span>
+          </div>
+        </div>
+        <div class="field"><span class="field-label">Work-type preference</span>
+          <select><option>Remote first</option><option>No preference</option></select>
+        </div>
+      </div>
+      <p class="section-note">Point weights for these live in <a href="#s5">Raw config →</a></p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S3 — "Fetching" (caps + pacing) -->
+<!-- ======================================================================= -->
+<section class="frame" id="s3" data-fetching-preset="normal">
+  <div class="frame-title">
+    <div><h2>S3 — Settings — Fetching</h2><p>R6 caps · R12 pacing · R13 validation demo case</p></div>
+    <span class="chip">Runs group</span>
+  </div>
+  <div class="frame-body">
+    <div class="card" data-qa="fetch-caps-card">
+      <div><div class="card-title">How much each run pulls</div><div class="card-subtitle">Enforced at save. Bounds shown beside each field.</div></div>
+      <div class="field-grid">
+        <div class="field" data-qa="fetch-cap-max-new-per-lane"><label class="field-label" for="f-maxnew">maxNewPerLane</label><input id="f-maxnew" type="number" value="40"><p class="field-help">1–500</p><p class="field-effect">At most 40 new jobs from each lane per run. Your last run hit this on linkedin and greenhouse.</p></div>
+        <div class="field" data-qa="fetch-cap-max-probes-per-run"><label class="field-label" for="f-maxprobes">maxProbesPerRun</label><input id="f-maxprobes" type="number" value="25"><p class="field-help">1–200</p><p class="field-effect">At most 25 ATS probes per run.</p></div>
+        <div class="field" data-qa="fetch-cap-max-cards-per-url"><label class="field-label" for="f-maxcards">maxCardsPerUrl</label><input id="f-maxcards" type="number" value="40"><p class="field-help">1–200</p><p class="field-effect">At most 40 cards read per saved-search URL.</p></div>
+        <div class="field" data-qa="fetch-cap-max-age-days"><label class="field-label" for="f-maxage">maxAgeDays</label><input id="f-maxage" type="number" value="30"><p class="field-help">1–90</p><p class="field-effect">Postings older than 30 days are skipped.</p></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div><div class="card-title">How fast it pulls</div><div class="card-subtitle">Three presets, consequences visible at once — not a select.</div></div>
+      <div class="preset-group" role="radiogroup" aria-label="Pacing preset" data-qa="pacing-presets">
+        <button class="preset-card" role="radio" aria-checked="false" data-preset="safe" onclick="setPreset('safe')" aria-describedby="preset-safe-desc" data-qa="pacing-preset-safe">
+          <span class="preset-name">Safe</span>
+          <span class="preset-meta" id="preset-safe-desc">8–18s between pages · 35–70s between searches · ~40% slower runs</span>
+        </button>
+        <button class="preset-card" role="radio" aria-checked="true" data-preset="normal" onclick="setPreset('normal')" aria-describedby="preset-normal-desc" data-qa="pacing-preset-normal">
+          <span class="preset-name">Normal <span class="badge">current</span></span>
+          <span class="preset-meta" id="preset-normal-desc">5–12s between pages · 20–45s between searches · the shipped default</span>
+        </button>
+        <button class="preset-card attention" role="radio" aria-checked="false" data-preset="fast" onclick="setPreset('fast')" aria-describedby="preset-fast-desc" data-qa="pacing-preset-fast">
+          <span class="preset-name">Fast</span>
+          <span class="preset-meta" id="preset-fast-desc">2–5s between pages · 8–15s between searches</span>
+          <div class="preset-warning" data-qa="pacing-fast-warning" id="c5-src"><svg class="icon" style="color:var(--attention)"><use href="#icon-alert-triangle"></use></svg> Faster than LinkedIn tolerates. A soft-block stops all LinkedIn scraping for 4 hours; repeat blocks risk the account. <a href="#c5" class="callout" aria-label="callout 5">5</a></div>
+          <label class="ack-row" data-qa="pacing-fast-ack"><input type="checkbox" id="fast-ack" onclick="event.stopPropagation()"> I understand this risks a soft-block</label>
+        </button>
+      </div>
+      <p class="section-note">Honest flag: pacing-consequence placement is transferred reasoning — no in-domain source exists for scraper-pacing UI (spec §16 weakness 4).</p>
+
+      <div class="disclosure" data-open="true">
+        <button class="disclosure-trigger" aria-expanded="true" onclick="toggleDisclosure(this)" data-qa="pacing-advanced-disclosure">Advanced — raw millisecond values <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+        <div class="disclosure-content">
+          <div class="field-grid">
+            <div class="field" data-qa="pacing-raw-jitter-min"><label class="field-label" for="f-jmin">jitterMinMs</label><input id="f-jmin" type="number" value="5000"></div>
+            <div class="field" data-qa="pacing-raw-jitter-max"><label class="field-label" for="f-jmax">jitterMaxMs</label><input id="f-jmax" type="number" value="12000"></div>
+            <div class="field" data-qa="pacing-raw-inter-url-min"><label class="field-label" for="f-iumin">interUrlDelayMinMs</label><input id="f-iumin" type="number" value="20000"></div>
+            <div class="field" data-qa="pacing-raw-inter-url-max"><label class="field-label" for="f-iumax">interUrlDelayMaxMs</label><input id="f-iumax" type="number" value="45000"></div>
+          </div>
+          <p class="section-note">Editing any of these switches the preset group to an unstyled fourth state: Custom. R13's demo case (jitterMinMs 15000 &gt; jitterMaxMs 12000) is rendered live in S8 below.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S4 — "Roles & companies" + R15 preview -->
+<!-- ======================================================================= -->
+<section class="frame" id="s4">
+  <div class="frame-title">
+    <div><h2>S4 — Settings — Roles &amp; companies</h2><p>R7, R8, R15 · same idiom as S2 <a href="#c2" class="callout" aria-label="callout 2">2</a></p></div>
+    <span class="chip">Aim group</span>
+  </div>
+  <div class="frame-body">
+    <div class="card" data-qa="roles-rules-card">
+      <div><div class="card-title">Rules — a job that fails these is dropped</div><div class="card-subtitle">Applied during <code>filter</code>. (<code>filter.json.title</code>)</div></div>
+      <div class="field-grid">
+        <div class="field"><span class="field-label">Title must match</span><div class="chip-input" role="listbox" aria-label="Title match rule"><span class="rem-chip">engineer<button aria-label="Remove engineer"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span></div></div>
+        <div class="field"><span class="field-label">Title must reject</span><div class="chip-input" role="listbox" aria-label="Title reject rule"><span class="rem-chip">intern<button aria-label="Remove intern"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span></div></div>
+        <div class="field"><span class="field-label">Severity</span><select><option>Hard — drops the job</option></select></div>
+      </div>
+    </div>
+    <div class="card" data-qa="roles-prefs-card">
+      <div><div class="card-title">Preferences — these change the order, never drop anything</div><div class="card-subtitle">Applied during <code>rank</code>. (<code>profile.json → settings.rank</code>)</div></div>
+      <div class="field-grid">
+        <div class="field"><span class="field-label">Domain keywords</span><div class="chip-input" role="listbox" aria-label="Domain keyword preference"><span class="rem-chip">fintech<button aria-label="Remove fintech"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span></div></div>
+        <div class="field"><span class="field-label">Seniority targets</span><div class="chip-input" role="listbox" aria-label="Seniority target preference"><span class="rem-chip">Senior<button aria-label="Remove Senior"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span></div></div>
+      </div>
+    </div>
+    <div class="card" data-qa="companies-avoid-card">
+      <div><div class="card-title">Companies to avoid</div><div class="card-subtitle"><code>filter.json.companies</code></div></div>
+      <div class="chip-input" role="listbox" aria-label="Companies to avoid"><span class="rem-chip">Acme Staffing<button aria-label="Remove Acme Staffing"><svg class="icon" style="width:12px;height:12px"><use href="#icon-x"></use></svg></button></span></div>
+    </div>
+    <div class="card card-sm" data-qa="rule-preview-strip" id="c6-src" style="background:var(--muted);box-shadow:none">
+      Against your last run (214 jobs): this rule set would drop <b>201</b> — 12 more than the current one. <a href="#">see which 12 →</a> <a href="#c6" class="callout" aria-label="callout 6">6</a>
+    </div>
+    <p class="section-note">Three states this strip must reach without a layout hole: (a) spike passed, data present — shown above; (b) no recent run — <i>"No recent run to preview against."</i>; (c) spike failed/cut — strip never mounts. All three appear in the S10 matrix (mockup-2.html).</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S5 — "Raw config" -->
+<!-- ======================================================================= -->
+<section class="frame" id="s5">
+  <div class="frame-title">
+    <div><h2>S5 — Settings — Raw config</h2><p>R4 · reachable, honest about its own scope <a href="#c7" class="callout" aria-label="callout 7" id="c7-src">7</a></p></div>
+    <span class="chip">Advanced group — muted, last but one</span>
+  </div>
+  <div class="frame-body">
+    <div class="scope-banner" data-qa="raw-scope-banner">Only these have no form: ranking point weights and denominators, registry health thresholds, adapter settings. Everything else on this page has one.</div>
+    <div class="two-pane">
+      <div class="doc-list" data-qa="raw-doc-list">
+        <div class="doc-row active" data-qa="raw-doc-profile-json">profile.json <span class="badge" data-qa="raw-key-badge-schedule">has a form →</span></div>
+        <div class="doc-row" data-qa="raw-doc-filter-json">filter.json <span class="badge" data-qa="raw-key-badge-locations">has a form →</span></div>
+        <div class="doc-row" data-qa="raw-doc-resume-json">resume.json <span class="badge" data-qa="raw-key-badge-companies">has a form →</span></div>
+        <div class="doc-row" data-qa="raw-doc-search-urls-md">search_urls.md <span class="badge" data-qa="raw-key-badge-lanes">has a form →</span></div>
+        <div style="padding:6px 8px"><span class="badge" data-qa="raw-key-badge-rank-weights">raw only</span> <span class="section-note" style="display:inline">settings.rank weights</span></div>
+      </div>
+      <div>
+        <label class="field-label" for="raw-editor-ta">profile.json</label>
+        <textarea id="raw-editor-ta" data-qa="raw-editor" rows="14">{
+  "connector": "sqlite",
+  "schedule": { "times": ["23:00"], "weekdays": [1,2,3,4,5], "graceMinutes": 30, "enabled": true },
+  "settings": {
+    "rank": { "homeCities": ["Bengaluru"], "acceptableTimezones": ["Asia/Kolkata"] },
+    "linkedin": { "jitterMinMs": 5000, "jitterMaxMs": 12000 }
+  }
+}</textarea>
+        <p class="field-help">Editing raw and reopening a form shows the new value with no reload. Save-time validation applies identically here; a JSON parse error renders in the same S8 error summary, not as a toast.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S6 — Operate, healthy -->
+<!-- ======================================================================= -->
+<section class="frame" id="s6">
+  <div class="frame-title">
+    <div><h2>S6 — Operate — healthy</h2><p>CP #5–#8, #12 · calm treatment, no accents except next-run time</p></div>
+    <span class="chip" id="c1"><a href="#c1-src-s1" class="back-link">↩ C1</a></span>
+  </div>
+  <div class="frame-body" data-qa="operate-shell">
+    <div class="page-header-row">
+      <h1 class="page-title">Operate</h1>
+      <span class="badge on-primary" data-qa="scope-chip-machine">This machine · all profiles</span>
+    </div>
+    <div class="field-grid" style="grid-template-columns:1fr 1fr">
+      <div class="card card-sm" data-qa="card-daemon">
+        <div class="card-header">
+          <div class="card-title">Daemon</div>
+          <span class="status-word success" data-qa="daemon-state"><span class="dot success"></span> Running</span>
+        </div>
+        <div class="section-note">last tick <code>12s ago</code> · pid <code>59025</code> · uptime <code>3d 4h</code></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" data-qa="daemon-start-stop" onclick="toggleDaemonVariant()">Stop</button>
+          <button class="btn btn-outline btn-sm" data-qa="daemon-pause-all">Pause all</button>
+          <label class="switch-row"><span class="switch checked" data-qa="daemon-autostart"><span class="thumb"></span></span> Autostart</label>
+        </div>
+        <p class="field-help">Toggle mechanism variant (Interaction spec) — swaps this card between the real control (R20a) and the copy-command fallback (R20b, static reference also on S6b below).</p>
+      </div>
+      <div class="card card-sm" data-qa="card-scheduled-runs">
+        <div class="card-title">Scheduled runs</div>
+        <table class="tbl">
+          <tbody>
+            <tr style="background:var(--accent)" data-qa="schedule-row-harish"><td>harish</td><td>next run 23:00</td><td><button class="btn btn-outline btn-sm" data-qa="schedule-skip-next">Skip next</button></td><td><span class="switch checked"><span class="thumb"></span></span></td></tr>
+            <tr data-qa="schedule-row-rajni"><td>rajni</td><td>next run 21:30</td><td><button class="btn btn-outline btn-sm">Skip next</button></td><td><span class="switch checked"><span class="thumb"></span></span></td></tr>
+          </tbody>
+        </table>
+        <p class="section-note">Active profile row highlighted. <a href="#s3">Edit times in Settings →</a></p>
+      </div>
+      <div class="card card-sm" data-qa="card-linkedin">
+        <div class="card-title">LinkedIn <span class="badge">All profiles</span></div>
+        <div class="tbl" style="display:flex;flex-direction:column;gap:8px">
+          <div data-qa="linkedin-session" style="display:flex;justify-content:space-between;align-items:center">
+            <span class="status-word success"><span class="dot success"></span> Session — Signed in</span>
+            <span class="section-note">checked 4m ago</span>
+            <button class="btn btn-outline btn-sm" aria-label="Check session now" data-qa="linkedin-session-check">Check now</button>
+          </div>
+          <div data-qa="linkedin-breaker" style="display:flex;justify-content:space-between;align-items:center">
+            <span class="status-word success"><span class="dot success"></span> Breaker — Closed</span>
+            <span class="section-note">stops LinkedIn scraping for all profiles when open</span>
+          </div>
+        </div>
+        <p class="section-note">No reset control (R29, Won't).</p>
+      </div>
+      <div class="card card-sm" data-qa="card-setup-health">
+        <div class="card-title">Setup &amp; health</div>
+        <div class="disclosure" data-open="false">
+          <button class="disclosure-trigger" aria-expanded="false" onclick="toggleDisclosure(this)">Setup complete · 14/14 checks passing <svg class="icon chev"><use href="#icon-chevron-down"></use></svg></button>
+          <div class="disclosure-content">
+            <div data-qa="health-group-ok">
+              <table class="tbl">
+                <tbody>
+                  <tr data-qa="health-row-autostart"><td><span class="status-word success"><span class="dot success"></span> Autostart enabled</span></td><td data-qa="health-destination-autostart"><a href="#s6">this card</a></td></tr>
+                  <tr><td><span class="status-word success"><span class="dot success"></span> Chrome executable found</span></td><td><a href="#s6">this card</a></td></tr>
+                  <tr><td><span class="status-word success"><span class="dot success"></span> filter.json valid</span></td><td><a href="#s2">Settings</a></td></tr>
+                </tbody>
+              </table>
+              <p class="section-note">+8 more, all passing</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card card-sm" data-qa="card-secrets" style="grid-column:1/-1">
+        <div class="card-title">Secrets <span class="badge">All profiles</span></div>
+        <table class="tbl">
+          <tbody>
+            <tr data-qa="secret-row-notion-token"><td>NOTION_TOKEN</td><td><span class="status-word success"><span class="dot success"></span> configured</span></td><td><button class="btn btn-outline btn-sm">Set</button></td></tr>
+            <tr data-qa="secret-row-telegram-bot-token"><td>TELEGRAM_BOT_TOKEN</td><td><span class="status-word success"><span class="dot success"></span> configured</span></td><td><button class="btn btn-outline btn-sm">Set</button></td></tr>
+          </tbody>
+        </table>
+        <p class="section-note">Write-only. Value never rendered.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S6b — Daemon card, R20 fallback variant (button replaced, not disabled) -->
+<!-- ======================================================================= -->
+<section class="frame" id="s6b" style="max-width:420px">
+  <div class="frame-title">
+    <div><h2>S6b — Daemon card, R20 fallback variant</h2><p>C9 — replaced, never disabled <a href="#c9" class="callout" aria-label="callout 9" id="c9-src">9</a></p></div>
+  </div>
+  <div class="frame-body">
+    <div class="card card-sm">
+      <div class="card-header"><div class="card-title">Daemon</div><span class="status-word attention"><span class="dot attention"></span> Stopped</span></div>
+      <div class="section-note">last tick <code>—</code></div>
+      <div data-qa="daemon-start-fallback">
+        <p style="font-size:14px;margin:0 0 8px">The daemon must be started from a terminal.</p>
+        <button class="btn btn-outline btn-sm" onclick="copyCmd()"><svg class="icon" style="width:14px;height:14px"><use href="#icon-copy"></use></svg> Copy: jobbunny serve start</button>
+      </div>
+    </div>
+    <p class="section-note">Variant (b) — BE gate ruled the mechanism out. This is today's behaviour elevated from hint text to a labelled control.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S7 — Operate, degraded -->
+<!-- ======================================================================= -->
+<section class="frame" id="s7">
+  <div class="frame-title">
+    <div><h2>S7 — Operate — degraded</h2><p>daemon stopped · session signed out · breaker open until 21:40 · 2 checks failing — only the worst takes the accent <a href="#c10" class="callout" aria-label="callout 10" id="c10-src">10</a></p></div>
+    <span class="chip">G3, G9; P-b</span>
+  </div>
+  <div class="frame-body">
+    <div class="page-header-row">
+      <h1 class="page-title">Operate</h1>
+      <span class="badge on-primary">This machine · all profiles</span>
+    </div>
+    <div class="field-grid" style="grid-template-columns:1fr 1fr">
+      <div class="card card-sm accent-attention">
+        <div class="card-header"><div class="card-title">Daemon</div><span class="status-word attention"><span class="dot attention"></span> Stopped</span></div>
+        <div class="section-note">last tick <code>14m ago</code></div>
+        <p style="font-size:14px;margin:0 0 8px">The daemon must be started from a terminal.</p>
+        <button class="btn btn-outline btn-sm"><svg class="icon" style="width:14px;height:14px"><use href="#icon-copy"></use></svg> Copy: jobbunny serve start</button>
+      </div>
+      <div class="card card-sm">
+        <div class="card-title">Scheduled runs</div>
+        <table class="tbl"><tbody>
+          <tr style="background:var(--accent)"><td>harish</td><td>next run 23:00</td><td><button class="btn btn-outline btn-sm">Skip next</button></td></tr>
+        </tbody></table>
+        <p class="section-note">Runs will not fire while the daemon is stopped — see Daemon card.</p>
+      </div>
+      <div class="card card-sm">
+        <div class="card-title">LinkedIn <span class="badge">All profiles</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span class="status-word amber"><span class="dot amber"></span> Session — Signed out</span><button class="btn btn-outline btn-sm">Check now</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span class="status-word amber"><span class="dot amber"></span> Breaker — Open until 21:40</span></div>
+        </div>
+        <p class="section-note">Plain rows with a status word — the daemon is the worst problem, so only it carries the border/tint (C10).</p>
+      </div>
+      <div class="card card-sm">
+        <div class="card-title">Setup &amp; health</div>
+        <table class="tbl"><tbody>
+          <tr><td colspan="2" style="color:var(--muted-foreground);font-size:11px;text-transform:uppercase">Needs action (2)</td></tr>
+          <tr><td><span class="status-word amber"><span class="dot amber"></span> Notion database connection — token missing</span></td><td><a href="#s6">Delivery</a></td></tr>
+          <tr><td><span class="status-word amber"><span class="dot amber"></span> Telegram chat id — not set</span></td><td><a href="#s6">Delivery</a></td></tr>
+          <tr><td colspan="2" style="color:var(--muted-foreground);font-size:11px;text-transform:uppercase">Not configured (1)</td></tr>
+          <tr><td><span class="status-word amber"><span class="dot amber"></span> Resume not parsed from PDF</span></td><td><button class="btn btn-outline btn-sm">Copy: jobbunny setup</button></td></tr>
+        </tbody></table>
+        <p class="section-note">11 OK checks collapsed below.</p>
+      </div>
+      <div class="card card-sm" style="grid-column:1/-1">
+        <div class="card-title">Secrets <span class="badge">All profiles</span></div>
+        <table class="tbl"><tbody>
+          <tr><td>NOTION_TOKEN</td><td><span class="status-word amber"><span class="dot amber"></span> not configured</span></td><td><button class="btn btn-outline btn-sm">Set</button></td></tr>
+          <tr><td>TELEGRAM_BOT_TOKEN</td><td><span class="status-word success"><span class="dot success"></span> configured</span></td><td><button class="btn btn-outline btn-sm">Set</button></td></tr>
+        </tbody></table>
+      </div>
+    </div>
+    <p class="section-note">Order of severity: daemon down &gt; session signed out &gt; breaker open &gt; check failing. Note: S7's cards intentionally omit <code>data-qa</code> — each canonical id already renders exactly once on S6 (rule 7); duplicating them here would break document-wide uniqueness.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S8 — Save model -->
+<!-- ======================================================================= -->
+<section class="frame" id="s8">
+  <div class="frame-title">
+    <div><h2>S8 — Save model</h2><p>R5, R13, R14 — one model, identical in all eleven editable sections</p></div>
+    <span class="chip"><a href="#c13" class="callout" aria-label="callout 13" id="c13-src">13</a> <a href="#c14" class="callout" aria-label="callout 14" id="c14-src">14</a></span>
+  </div>
+  <div class="frame-body">
+    <div class="field-grid" style="grid-template-columns:1fr 1fr 1fr;align-items:start">
+      <div>
+        <h3 style="font-size:13px;margin-bottom:8px">(a) sticky save bar — dirty</h3>
+        <div class="save-bar" data-qa="save-bar">
+          <span>3 unsaved changes</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" data-qa="discard-button">Discard</button>
+            <button class="btn btn-primary btn-sm" data-qa="save-button">Save changes</button>
+          </div>
+        </div>
+        <div class="dialog-mock" style="margin-top:16px" data-qa="dirty-nav-dialog">
+          <p style="font-size:14px;font-weight:600;margin-bottom:8px">Unsaved changes</p>
+          <p style="font-size:13px;color:var(--muted-foreground);margin-bottom:12px">You have unsaved changes on this section. What would you like to do?</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm">Save and continue</button>
+            <button class="btn btn-outline btn-sm">Discard changes</button>
+            <button class="btn btn-outline btn-sm">Stay here</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="font-size:13px;margin-bottom:8px">(b) validation error — jitter min &gt; max</h3>
+        <div class="validation-summary" role="alert" data-qa="validation-summary">
+          <b>2 problems to fix</b>
+          <ul>
+            <li data-qa="validation-item-jitter-min"><a href="#f-jmin">Minimum jitter (15000 ms) is above maximum jitter (12000 ms). The run would fail to start.</a></li>
+            <li data-qa="validation-item-jitter-max"><a href="#f-jmax">Maximum jitter (12000 ms) is below minimum jitter (15000 ms). The run would fail to start.</a></li>
+          </ul>
+        </div>
+        <div class="field" style="margin-top:12px"><label class="field-label" for="f-jmin-2">jitterMinMs</label><input id="f-jmin-2" type="number" value="15000" aria-invalid="true"><p class="field-error-text">Above maximum jitter (12000 ms).</p></div>
+        <p class="section-note">The save button is never disabled.</p>
+      </div>
+      <div>
+        <h3 style="font-size:13px;margin-bottom:8px">(c) persistent success line</h3>
+        <div id="success-toggle-region">
+          <div class="success-line" data-qa="save-success-line">
+            <span id="success-line-text">Saved. Takes effect from your next run — nothing is running right now.</span>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="toggleSuccessVariant()">Toggle: run in flight</button>
+        <p class="section-note">A sonner toast fires too, but the toast is not the carrier — this line persists until navigation.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S9 — Danger zone -->
+<!-- ======================================================================= -->
+<section class="frame" id="s9">
+  <div class="frame-title">
+    <div><h2>S9 — Settings — Danger zone</h2><p>R25 · type-to-confirm</p></div>
+    <span class="chip">Advanced group</span>
+  </div>
+  <div class="frame-body" data-qa="danger-zone">
+    <div class="card card-sm" style="border-left:2px solid var(--destructive);max-width:420px">
+      <div class="card-title" style="color:var(--destructive)">Remove this profile</div>
+      <p class="section-note">This deletes <code>profiles/harish/</code> — including the local database and run history. It never touches Notion. This cannot be undone.</p>
+      <label class="field-label" for="danger-confirm">Type <code>harish</code> to confirm</label>
+      <input id="danger-confirm" type="text" data-qa="danger-confirm-input" placeholder="harish">
+      <button class="btn btn-sm" style="background:var(--destructive);color:#fff" disabled data-qa="danger-remove-button">Remove profile</button>
+      <p class="section-note">Dry-run by default; refuses the <code>rajni</code> fixture regardless of confirmation text.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">Standalone mid-fi mockup — docs/product/settings-overhaul/mockup.html — rendered from ux-notes.md, not imported by any application code. Five-state matrix + full callout annotation panel: <a href="mockup-2.html">mockup-2.html</a>.</footer>
+
+<script>
+function toggleDisclosure(btn){
+  var wrap = btn.closest('.disclosure');
+  var open = wrap.getAttribute('data-open') === 'true';
+  wrap.setAttribute('data-open', open ? 'false' : 'true');
+  btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+}
+function setPreset(name){
+  var group = document.querySelectorAll('[data-qa="pacing-presets"] .preset-card');
+  group.forEach(function(c){ c.setAttribute('aria-checked', c.getAttribute('data-preset') === name ? 'true' : 'false'); });
+  document.getElementById('s3').setAttribute('data-fetching-preset', name);
+}
+var daemonFallback = false;
+function toggleDaemonVariant(){
+  var card = document.querySelector('[data-qa="card-daemon"]');
+  var controls = card.querySelector('div[style*="flex-wrap"]');
+  daemonFallback = !daemonFallback;
+  if (daemonFallback) {
+    controls.innerHTML = '<p style="font-size:14px;margin:0">The daemon must be started from a terminal.</p><button class="btn btn-outline btn-sm"><svg class="icon" style="width:14px;height:14px"><use href="#icon-copy"></use></svg> Copy: jobbunny serve start</button>';
+  } else {
+    controls.innerHTML = '<button class="btn btn-outline btn-sm" data-qa="daemon-start-stop" onclick="toggleDaemonVariant()">Stop</button><button class="btn btn-outline btn-sm" data-qa="daemon-pause-all">Pause all</button><label class="switch-row"><span class="switch checked"><span class="thumb"></span></span> Autostart</label>';
+  }
+}
+function toggleSuccessVariant(){
+  var el = document.getElementById('success-line-text');
+  el.textContent = el.textContent.indexOf('nothing is running') > -1
+    ? 'Saved. A run is in progress; this applies to the next run, not that one.'
+    : 'Saved. Takes effect from your next run — nothing is running right now.';
+}
+function copyCmd(){ /* mock: would call navigator.clipboard.writeText('jobbunny serve start') */ }
+</script>
+</body>
+</html>
