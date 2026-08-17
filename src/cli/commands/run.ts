@@ -173,7 +173,7 @@ export async function runCommand(
   const date = now.toISOString().slice(0, 10);
   const wireOverrides: NonNullable<Parameters<typeof resolved.wire>[1]> = {};
   if (opts.dryRun) wireOverrides.syncDryRun = true;
-  if (opts.headless !== undefined) wireOverrides.headless = opts.headless;
+  if (opts.headless) wireOverrides.headless = true;
   const hasWireOverrides = Object.keys(wireOverrides).length > 0;
   const { ctx, stages, routines, checks } = await resolved.wire(
     opts.profile,

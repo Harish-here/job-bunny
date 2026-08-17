@@ -136,7 +136,7 @@ test('runCommand: --headless threads headless: true into wire()', async () => {
   assert.deepEqual(receivedOverrides, { headless: true });
 });
 
-test('runCommand: an explicit --headless=false still threads headless: false into wire()', async () => {
+test('runCommand: an explicit --headless=false threads no overrides into wire()', async () => {
   const notified: NotifyEvent[] = [];
   const ctx = fakeCtx(notified);
   let receivedOverrides: unknown;
@@ -155,7 +155,7 @@ test('runCommand: an explicit --headless=false still threads headless: false int
     },
   );
 
-  assert.deepEqual(receivedOverrides, { headless: false });
+  assert.equal(receivedOverrides, undefined);
 });
 
 test('runCommand: --headless and --dry-run together thread both overrides into wire()', async () => {

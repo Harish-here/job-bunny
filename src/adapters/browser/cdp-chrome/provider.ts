@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { sleep } from '../../../core/async/index.ts';
 import type { BrowserHandle, BrowserProvider } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
+import { raceWithTimeout } from './async/index.ts';
 import { CdpChromeBrowserHandle } from './handles/index.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import {
@@ -16,7 +17,6 @@ import {
   defaultChromePidfileDeps,
   readChromePidfile,
 } from './ownership/index.ts';
-import { raceWithTimeout } from './race_with_timeout.ts';
 
 /**
  * CdpChromeProvider — BrowserProvider implementation over a real, locally
