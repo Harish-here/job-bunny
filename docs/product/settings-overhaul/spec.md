@@ -325,10 +325,13 @@ confirmed hitting in the last month (Q1); the rest are recon-derived and honestl
 - **Zero capability is gained.** Every knob in §5.3 is already editable today, by a user fluent in
   the schema he wrote. This epic buys convenience, not ability. Measured in job leads, its direct
   yield is zero.
-- **The discoverability argument is at its weakest with n=1.** Settings IA research is about helping
-  users find things they do not know the location of. Our user knows every location. Card sorting —
-  the method NN/g names as the way to establish a mental model — is not available: there is one
-  participant and he authored the taxonomy. **IA quality here is unfalsifiable before build.**
+- ~~**The discoverability argument is at its weakest with n=1.**~~ **WITHDRAWN 2026-08-17 — tested and
+  refuted.** The argument ran: settings IA research is about helping users find things whose location
+  they do not know, our user knows every location, and card sorting is unavailable at n=1 with the
+  taxonomy's own author as the participant — so IA quality is unfalsifiable before build. It was
+  falsifiable, it was tested, and it failed at **1/5** (§9). The author of the schema could not
+  reliably say where his own settings live. This bullet is struck rather than deleted so the record
+  shows the case against was made in good faith and then beaten by evidence.
 - **Driver 4 is unevidenced by the user's own answers.** He has not set up a new profile, and Q3
   confirmed this is not being handed to anyone else. Building onboarding for a population of one
   who is already onboarded is close to definitionally waste.
@@ -442,6 +445,14 @@ back to me (Q11).
 | 10 | Rule-change preview? | **(b)** — cheap static preview re-evaluating the last run's jobs against edited rules; fall back to no preview if infeasible. Feasibility explicitly flagged for the BE stage. |
 | 11 | Phase order? | **(d)** — delegated to me. Derived and defended in §12. |
 
+### Post-spec rulings (orchestrator-relayed, 2026-08-17)
+
+| # | Ruling | Effect |
+|---|---|---|
+| 12 | The §7.3 reading of the brief's Must-level scope override — *each driver carries at least one Must and none is deferred to a later spec*, which is not the same as making every requirement a Must — is **ACCEPTED as stated**. | Within-driver MoSCoW triage (R12 pacing at Should, R28 new-profile creation at Won't) is confirmed as ordinary prioritisation, **not** scope erosion. No downstream stage may re-open it on that basis. |
+| 13 | **New-profile creation at Won't (R28) is ACCEPTED.** | Driver 4 ships as setup completeness/repair only (R22–R24). R28 stays out of this spec; it is deferred by decision, not by oversight. |
+| 14 | The §9 riskiest-assumption navigation test was **run unprimed and scored 1/5** — see §9. | Driver 2's value stands at full weight on evidence. Phase 1 becomes unconditional and its scope-reduction branch is closed (§12). Scorecard weakness 1 is resolved (§16). |
+
 ---
 
 ## 9. Tech Story
@@ -477,15 +488,43 @@ Written backwards from the completion moment.
 Small, testable, and every clause maps to a numbered acceptance criterion in §13.
 
 **Riskiest assumption, named:** that an intent-shaped IA measurably reduces friction *for a user who
-already knows the file-shaped one perfectly.* This is the assumption the whole epic rests on and it
-is the hardest to validate — the standard method (card sort) is unavailable at n=1, and the user's
-existing expertise is precisely what makes the current IA tolerable. **Cheapest validation:** before
-building, have the user name where he would go to change five specific things (the per-lane cap; the
-timezone he'll accept for remote; the company he never wants to see; whether Notion mirroring is on;
-whether the daemon is running). If he answers all five instantly and correctly, the friction is not
-navigational and this epic should collapse to drivers 1 and 3 — surfacing knobs and surfacing ops
-state — with driver 2 reduced to grouping. That test costs five minutes and could remove the
-largest phase in this spec.
+already knows the file-shaped one perfectly.* This was the assumption the whole epic rested on, and
+the hardest to validate — the standard method (card sort) is unavailable at n=1, and the user's
+existing expertise is precisely what made the current IA tolerable.
+
+### The assumption was tested. It is REFUTED. (2026-08-17, before the user had read §5)
+
+The five-minute navigation test proposed here was run unprimed: name where you would go to change
+each of five live settings. **Score: 1 correct out of 5.**
+
+| Asked | Answer | Truth |
+|---|---|---|
+| Timezone used for **ranking** | `profile.json` settings | ✅ correct (`settings.rank.location.*Timezones`) |
+| Timezone that **hard-drops** a job | not sure | `filter.json` → `timezones` |
+| Company I never want to see | **`profile.json` settings** | ❌ **wrong** — `filter.json` → `companies` |
+| Per-lane job cap | not sure | `settings.linkedin` / `maxNewPerLane` |
+| Cleanup retention window | not sure | `settings.cleanup` |
+
+**Three consequences, and they are the most load-bearing findings in this document:**
+
+1. **Driver 2's value stands at full weight, on evidence rather than on reasoning.** The case
+   against it — "n=1, and he wrote the schema, so navigation cannot be the problem" — is now
+   falsified by the schema's own author. Authoring a taxonomy is not the same as retaining it.
+2. **G6 is confirmed empirically, not just structurally.** The two timezone questions are the two
+   halves of the same intent, and the user got **one right and one blank**. He does not hold the
+   split in his head — which is precisely what R2 exists to fix, and it is now the single
+   best-evidenced requirement in the spec.
+3. **The wrong answer is worse than the blanks.** He did not merely fail to recall where the
+   company avoid-list lives — he confidently named the wrong document, and that setting is one he
+   named among his own evidenced Q1 frictions. A confident wrong answer means an edit attempted in
+   the wrong place, which is a *worse* failure mode than hesitation and is invisible until a run
+   behaves unexpectedly.
+
+**Phase 1 is therefore unconditional.** The scope-reduction branch this test existed to trigger —
+collapse driver 2 to grouping, ship only drivers 1 and 3 — is **closed and must not be revisited by
+a later stage.**
+
+**The riskiest assumption is now R15's feasibility** (see §16 weakness 3), which inherits the title.
 
 **Second-riskiest:** that R12's preview is feasible. It is the difference between "the same knobs,
 better arranged" and a tool that answers a question. See §16 weakness 3.
@@ -624,9 +663,11 @@ on no container at all — they could be dropped into the *existing* Schedule ta
 letting the two silent-outage gaps wait behind an IA project.** They will move house later at trivial
 cost; that is a good trade.
 
-**Cheap spikes to run inside this phase, before committing to the phases behind it:**
-- The five-question navigation test from §9's riskiest assumption. Five minutes; could collapse
-  driver 2 to grouping only.
+**Phase 1 is unconditional.** It was originally gated on the §9 navigation test, with a branch that
+would have collapsed driver 2 to grouping. **That test has run and refuted the assumption (1/5).**
+The branch is closed; the gate is discharged; the phase ships as scoped.
+
+**Cheap spike still to run inside this phase:**
 - The **R15 preview feasibility spike**: can `src/core/filter` and `src/core/rank` be invoked
   directly against a stored job set from the board process, given the `ui/` dependency-free-import
   seam? Answering this early is what keeps R15 cuttable rather than half-built.
@@ -799,11 +840,15 @@ confirms.
 
 ### Named weaknesses — this scorecard is not a clean sweep
 
-1. **The central assumption is close to unfalsifiable before build.** The epic rests on an
-   intent-shaped IA reducing friction for a user who already knows the file-shaped one perfectly.
-   NN/g's method for establishing a mental model is card sorting; at n=1, with the participant being
-   the schema's author, it is unavailable. §9 proposes a five-minute substitute test whose failure
-   would collapse driver 2 to grouping — **that test should run before Phase 1, not after.**
+1. ~~**The central assumption is close to unfalsifiable before build.**~~ **RESOLVED 2026-08-17 — the
+   assumption was tested and refuted.** The listed weakness was that the epic rested on an
+   intent-shaped IA helping a user who already knows the file-shaped one perfectly, and that card
+   sorting is unavailable at n=1 with the schema's author as the only participant. The five-minute
+   substitute test in §9 was run unprimed and scored **1/5**, including one *confidently wrong*
+   answer on a setting the user had named among his own frictions. **This strengthens the spec:**
+   driver 2's value now rests on evidence rather than reasoning, R2 becomes the best-evidenced
+   requirement in the document, and the scope-reduction branch is closed. Retained here rather than
+   deleted, because a scorecard that quietly drops its weaknesses once they resolve is not a record.
 2. **Driver 4 is in scope by dispatch, not by demand.** The user's Q1 answer did not select
    new-profile setup and his Q3 answer ruled out other users. It is reshaped into the most defensible
    form available (a completeness view over doctor checks) and placed last, but it should be the
