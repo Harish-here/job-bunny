@@ -58,7 +58,7 @@ export function SettingsPage({
 }) {
   const doc = SECTION_DOC[section];
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
       <h1 className="text-lg font-semibold font-heading">Settings</h1>
       <Tabs
         data-testid="settings-tabs"
