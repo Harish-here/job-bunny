@@ -54,7 +54,12 @@ function fakePage(overrides: Partial<CdpPage> = {}): CdpPage {
 function fakeLauncher(pid = 4242): {
   calls: Array<{ options: unknown; deps: unknown }>;
   launchChrome: (
-    options: { port: number; userDataDir?: string; candidates?: readonly string[] },
+    options: {
+      port: number;
+      userDataDir?: string;
+      candidates?: readonly string[];
+      headless?: boolean;
+    },
     deps?: LauncherDeps,
   ) => ChromeProcessHandle;
 } {
@@ -117,7 +122,40 @@ test('launch() spawns Chrome via the injected launcher and connects to http://12
     port: 9333,
     userDataDir: DEFAULT_USER_DATA_DIR,
     candidates: undefined,
+    headless: false,
   } as never);
+});
+
+test('launch() passes headless: true through to the launcher when the provider is constructed with headless: true', async () => {
+  const launcher = fakeLauncher(4242);
+  const provider = new CdpChromeProvider({
+    port: 9333,
+    headless: true,
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => null,
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  await provider.launch(fakeCtx());
+
+  assert.equal(launcher.calls.length, 1);
+  const options = launcher.calls[0]?.options as { headless?: boolean } | undefined;
+  assert.equal(options?.headless, true);
+});
+
+test('launch() defaults headless to false when not configured', async () => {
+  const launcher = fakeLauncher(4242);
+  const provider = new CdpChromeProvider({
+    port: 9333,
+    launchChrome: launcher.launchChrome,
+    cdpReachable: async () => null,
+    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
+  });
+
+  await provider.launch(fakeCtx());
+
+  const options = launcher.calls[0]?.options as { headless?: boolean } | undefined;
+  assert.equal(options?.headless, false);
 });
 
 test('newPage() wraps the connected browser page in a PageHandle that passes calls through', async () => {

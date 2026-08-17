@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { sleep } from '../../../core/async/index.ts';
 import type { BrowserHandle, BrowserProvider } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
+import { raceWithTimeout } from './async/index.ts';
 import { CdpChromeBrowserHandle } from './handles/index.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import {
@@ -128,7 +129,12 @@ export function decideChromeAction({
 export interface CdpChromeProviderDeps {
   connect?: ConnectFn;
   launchChrome?: (
-    options: { port: number; userDataDir?: string; candidates?: readonly string[] },
+    options: {
+      port: number;
+      userDataDir?: string;
+      candidates?: readonly string[];
+      headless?: boolean;
+    },
     deps?: LauncherDeps,
   ) => ChromeProcessHandle;
   killChrome?: (pid: number | undefined, deps?: KillDeps) => boolean | Promise<boolean>;
@@ -166,6 +172,11 @@ export interface CdpChromeProviderDeps {
   recycleIfOld?: boolean;
   /** Bound on the reachability probe fetch, in ms. Default 2000. */
   reachabilityTimeoutMs?: number;
+  /** Launches a freshly spawned Chrome with `--headless=new` when true —
+   * threaded straight into launchChrome/buildLaunchArgv. Only ever applies
+   * on the spawn path (spawnAndConnect); a reused/attached Chrome keeps
+   * whatever mode it was already launched in. Default false. */
+  headless?: boolean;
 }
 
 export class CdpChromeProvider implements BrowserProvider {
@@ -186,6 +197,7 @@ export class CdpChromeProvider implements BrowserProvider {
   private readonly maxAgeMs: number;
   private readonly recycleIfOld: boolean;
   private readonly reachabilityTimeoutMs: number;
+  private readonly headless: boolean;
 
   constructor(deps: CdpChromeProviderDeps = {}) {
     this.connect = deps.connect ?? defaultConnect;
@@ -203,6 +215,7 @@ export class CdpChromeProvider implements BrowserProvider {
     this.maxAgeMs = deps.maxAgeMs ?? CHROME_MAX_AGE_MS;
     this.recycleIfOld = deps.recycleIfOld ?? true;
     this.reachabilityTimeoutMs = deps.reachabilityTimeoutMs ?? 2000;
+    this.headless = deps.headless ?? false;
   }
 
   async launch(ctx: RunContext): Promise<BrowserHandle> {
@@ -281,7 +294,12 @@ export class CdpChromeProvider implements BrowserProvider {
    * launch(). */
   private async spawnAndConnect(cdpUrl: string, ctx: RunContext): Promise<BrowserHandle> {
     const proc = this.launchChromeFn(
-      { port: this.port, userDataDir: this.userDataDir, candidates: this.candidates },
+      {
+        port: this.port,
+        userDataDir: this.userDataDir,
+        candidates: this.candidates,
+        headless: this.headless,
+      },
       // pidfileDeps is threaded in explicitly so the ONE seam governs both
       // sides of the pid file: without it, launchChrome's write path fell
       // back to defaultChromePidfileDeps() (real fs) even when this provider
@@ -369,29 +387,4 @@ export class CdpChromeProvider implements BrowserProvider {
       });
     }
   }
-}
-
-/**
- * Races an in-flight promise against a timer of `ms` — used to enforce
- * connectMaxWaitMs on a single connect() attempt (playwright's
- * connectOverCDP has its own internal ~30s timeout that must never be
- * allowed to outlive our configured cap). The timer is always cleared,
- * whichever side settles first, so a losing timer can never keep the
- * process alive or leak. `task` itself is left to settle on its own time —
- * Promise.race attaches a handler to it, so a late rejection never surfaces
- * as an unhandled rejection.
- */
-function raceWithTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => {
-        reject(new Error(`connect attempt exceeded ${Math.max(ms, 0)}ms`));
-      },
-      Math.max(ms, 0),
-    );
-  });
-  return Promise.race([task, timeout]).finally(() => {
-    clearTimeout(timer);
-  });
 }

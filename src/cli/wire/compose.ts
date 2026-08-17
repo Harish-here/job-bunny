@@ -104,6 +104,11 @@ export interface WireOverrides {
    * the would-write set via `ctx.runStore.recordSyncDryrun` instead of
    * calling `connector.syncJobs`. `undefined` (default) is unchanged. */
   syncDryRun?: boolean;
+  /** Threaded into the `CdpChromeProvider`'s `headless` dep — `--headless=new`
+   * on a fresh spawn when true. `undefined` (default) resolves to false;
+   * per-profile `settings['cdp-chrome']` can still override this, same
+   * precedence port/userDataDir already have. */
+  headless?: boolean;
 }
 
 export interface WireResult {
@@ -278,6 +283,7 @@ async function wireWithConfigStore(
   const browser = new CdpChromeProvider({
     port: deps.cdpPort,
     userDataDir: deps.chromeUserDataDir,
+    headless: overrides.headless ?? false,
     ...((config.settings['cdp-chrome'] as CdpChromeProviderDeps | undefined) ?? {}),
   });
 

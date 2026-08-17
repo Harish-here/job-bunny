@@ -116,19 +116,21 @@ export function resolveChromePath(
 export interface LaunchArgvOptions {
   port: number;
   userDataDir: string;
+  /** Launches with `--headless=new` (the modern headless mode, never bare
+   * `--headless`) when true. Default false — manual runs stay headed; only
+   * the daemon's scheduled runs opt in (see ops/daemon/supervise). */
+  headless?: boolean;
 }
 
-/** Builds the CDP launch argv — ported from scripts/lib/browser.js's spawn()
- * call (--remote-debugging-port + --user-data-dir), extended (2026-07-25
- * incident) with flags that suppress session/tab restore and the
- * crash-restore bubble on launch. A prior unclean exit left Chrome
- * restoring its ENTIRE previous session on next launch — ~97 CDP targets,
- * duplicate tabs, an invalidated extension retrying a failed fetch every
- * ~1s, and tracker iframes — which is what blew the connectWithRetry
- * timeout in provider.ts. None of these touch cookies, storage, or the
- * user-data-dir itself — the persistent LinkedIn login in <data home>/chrome
- * MUST survive a launch, only the leftover TABS/SESSION must not come
- * back:
+/** Static flags always present, in order — extended (2026-07-25 incident)
+ * with flags that suppress session/tab restore and the crash-restore
+ * bubble on launch. A prior unclean exit left Chrome restoring its ENTIRE
+ * previous session on next launch — ~97 CDP targets, duplicate tabs, an
+ * invalidated extension retrying a failed fetch every ~1s, and tracker
+ * iframes — which is what blew the connectWithRetry timeout in provider.ts.
+ * None of these touch cookies, storage, or the user-data-dir itself — the
+ * persistent LinkedIn login in <data home>/chrome MUST survive a launch,
+ * only the leftover TABS/SESSION must not come back:
  *  - --restore-last-session=false: don't reopen the previous session's tabs.
  *  - --no-first-run: skip first-run UI/promo interstitials that would
  *    otherwise open their own tab.
@@ -137,14 +139,41 @@ export interface LaunchArgvOptions {
  *    clutters the page and, if ever clicked/auto-accepted, would itself
  *    restore the old session.
  */
-export function buildLaunchArgv({ port, userDataDir }: LaunchArgvOptions): string[] {
+const STATIC_LAUNCH_FLAGS: readonly string[] = [
+  '--restore-last-session=false',
+  '--no-first-run',
+  '--disable-session-crashed-bubble',
+  '--hide-crash-restore-bubble',
+];
+
+// Feature names here merge into ONE `--disable-features` flag (Chrome
+// last-wins on repeated flags, so multiple `--disable-features` occurrences
+// would silently drop all but the last); a deprecated name is silently
+// ignored by Chrome — prune on sight, never urgent.
+const DISABLED_FEATURES: readonly string[] = [
+  // 2026-08-17: on-device AI model — 4GB download into the profile, useless
+  // for scraping
+  'OptimizationGuideOnDeviceModel',
+];
+
+/** Builds the CDP launch argv — ported from scripts/lib/browser.js's spawn()
+ * call (--remote-debugging-port + --user-data-dir). Composes dynamic flags
+ * (port/user-data-dir/headless) + STATIC_LAUNCH_FLAGS + exactly one
+ * --disable-features=<comma-joined DISABLED_FEATURES> entry, omitted
+ * entirely when DISABLED_FEATURES is empty. */
+export function buildLaunchArgv({
+  port,
+  userDataDir,
+  headless,
+}: LaunchArgvOptions): string[] {
   return [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
-    '--restore-last-session=false',
-    '--no-first-run',
-    '--disable-session-crashed-bubble',
-    '--hide-crash-restore-bubble',
+    ...(headless ? ['--headless=new'] : []),
+    ...STATIC_LAUNCH_FLAGS,
+    ...(DISABLED_FEATURES.length > 0
+      ? [`--disable-features=${DISABLED_FEATURES.join(',')}`]
+      : []),
   ];
 }
 
@@ -152,6 +181,9 @@ export interface LaunchChromeOptions {
   port: number;
   userDataDir?: string;
   candidates?: readonly string[];
+  /** Threaded straight into buildLaunchArgv's `headless` — see its doc
+   * comment. Default false. */
+  headless?: boolean;
 }
 
 export interface ChromeProcessHandle {
@@ -171,7 +203,7 @@ export function launchChrome(
   options: LaunchChromeOptions,
   deps: LauncherDeps = {},
 ): ChromeProcessHandle {
-  const { port, userDataDir = DEFAULT_USER_DATA_DIR, candidates } = options;
+  const { port, userDataDir = DEFAULT_USER_DATA_DIR, candidates, headless } = options;
   const existsSync = deps.existsSync ?? nodeExistsSync;
   const spawn = deps.spawn ?? (nodeSpawn as unknown as SpawnFn);
   const env = deps.env ?? process.env;
@@ -186,7 +218,7 @@ export function launchChrome(
   }
   const resolvedCandidates = resolveCandidates(process.platform, env, candidates);
   const chromePath = resolveChromePath(resolvedCandidates, { existsSync });
-  const argv = buildLaunchArgv({ port, userDataDir });
+  const argv = buildLaunchArgv({ port, userDataDir, headless });
   const child = spawn(chromePath, argv, { detached: true, stdio: 'ignore' });
   child.unref();
   if (child.pid != null) {

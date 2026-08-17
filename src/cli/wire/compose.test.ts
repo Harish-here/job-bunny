@@ -90,6 +90,24 @@ test('wire: returns a live ctx with config/ports/storage/notify populated', asyn
   assert.equal(typeof result.ctx.notify, 'function');
 });
 
+// `CdpChromeProvider` exposes no observable seam for its internal `headless`
+// dep beyond `.name` (like the rest of this file's adapter-identity
+// assertions) — these just pin that `overrides.headless` is accepted
+// end-to-end without throwing, in both directions.
+test('wire: accepts overrides.headless: true without throwing, still wires a cdp-chrome browser port', async () => {
+  const result = await wire('rajni', {
+    root: '/repo',
+    configStore: liveConfigStore(),
+    headless: true,
+  });
+  assert.equal(result.ctx.ports.browser?.name, 'cdp-chrome');
+});
+
+test('wire: overrides.headless left undefined does not throw either (defaults to headed)', async () => {
+  const result = await wire('rajni', { root: '/repo', configStore: liveConfigStore() });
+  assert.equal(result.ctx.ports.browser?.name, 'cdp-chrome');
+});
+
 // P9 closure register item 5: a notifier failure (e.g. Telegram's send()
 // throwing on a missing token) must never propagate out of ctx.notify — a
 // run.ts caller awaits notify() AFTER the pipeline has already produced a

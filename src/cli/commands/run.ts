@@ -80,6 +80,10 @@ export { computeRunCapMs };
 export interface RunCommandOptions {
   profile: string;
   resume?: boolean;
+  /** Threaded into `wire()` as `WireOverrides.headless`, which reaches the
+   * `CdpChromeProvider` and, on a fresh spawn, emits `--headless=new`.
+   * `undefined` leaves the default (headed) to `wire()`; the daemon always
+   * passes `true` on scheduled runs (`ops/daemon/supervise`). */
   headless?: boolean;
   /** P8 Task 7 (DB-backed as of runs-observability Phase 1 Task 6): computes
    * the sync stage's would-write set without writing to Notion — threaded
@@ -167,9 +171,13 @@ export async function runCommand(
 
   const now = resolved.now();
   const date = now.toISOString().slice(0, 10);
+  const wireOverrides: NonNullable<Parameters<typeof resolved.wire>[1]> = {};
+  if (opts.dryRun) wireOverrides.syncDryRun = true;
+  if (opts.headless) wireOverrides.headless = true;
+  const hasWireOverrides = Object.keys(wireOverrides).length > 0;
   const { ctx, stages, routines, checks } = await resolved.wire(
     opts.profile,
-    opts.dryRun ? { syncDryRun: true } : undefined,
+    hasWireOverrides ? wireOverrides : undefined,
   );
 
   // Cross-process, cross-profile exclusive lock (see `ops/scheduling/
