@@ -95,7 +95,32 @@ test('buildLaunchArgv sets --remote-debugging-port, --user-data-dir, and the ses
     '--no-first-run',
     '--disable-session-crashed-bubble',
     '--hide-crash-restore-bubble',
+    '--disable-features=OptimizationGuideOnDeviceModel',
   ]);
+});
+
+test('buildLaunchArgv emits exactly one --disable-features flag, containing OptimizationGuideOnDeviceModel', () => {
+  const argv = buildLaunchArgv({ port: 9222, userDataDir: '/repo/.chrome-debug' });
+  const disableFeaturesFlags = argv.filter((flag) =>
+    flag.startsWith('--disable-features='),
+  );
+  assert.equal(disableFeaturesFlags.length, 1);
+  assert.match(disableFeaturesFlags[0] ?? '', /OptimizationGuideOnDeviceModel/);
+});
+
+test('buildLaunchArgv omits --headless=new by default', () => {
+  const argv = buildLaunchArgv({ port: 9222, userDataDir: '/repo/.chrome-debug' });
+  assert.ok(!argv.some((flag) => flag.startsWith('--headless')));
+});
+
+test('buildLaunchArgv emits --headless=new (not bare --headless) when headless is true', () => {
+  const argv = buildLaunchArgv({
+    port: 9222,
+    userDataDir: '/repo/.chrome-debug',
+    headless: true,
+  });
+  assert.ok(argv.includes('--headless=new'));
+  assert.ok(!argv.includes('--headless'));
 });
 
 test('buildLaunchArgv never adds a flag that would destroy auth state (cookies/storage/profile/incognito)', () => {
@@ -148,8 +173,31 @@ test('launchChrome resolves the chrome path, builds argv, spawns detached+unref,
     '--no-first-run',
     '--disable-session-crashed-bubble',
     '--hide-crash-restore-bubble',
+    '--disable-features=OptimizationGuideOnDeviceModel',
   ]);
   assert.deepEqual(spawnCalls[0]?.options, { detached: true, stdio: 'ignore' });
+});
+
+test('launchChrome passes headless through to buildLaunchArgv, emitting --headless=new', () => {
+  const spawnCalls: Array<{ args: string[] }> = [];
+  launchChrome(
+    {
+      port: 9333,
+      userDataDir: '/repo/.chrome-debug',
+      candidates: ['/only/chrome'],
+      headless: true,
+    },
+    {
+      existsSync: (path) => path === '/only/chrome',
+      spawn: (_command, args) => {
+        spawnCalls.push({ args });
+        return { pid: 4242, unref: () => {} };
+      },
+      env: {},
+      pidfileDeps: fakePidfileDepsForLauncher().deps,
+    },
+  );
+  assert.ok(spawnCalls[0]?.args.includes('--headless=new'));
 });
 
 test('launchChrome unrefs the spawned child so it never keeps the event loop alive', () => {
