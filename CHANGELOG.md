@@ -3,6 +3,43 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [3.1.0] — 2026-08-17
+
+### Added
+- **Pipeline stability package** (PRs #102/#103): the daemon now detects
+  suspend gaps and probes network reachability (bounded `node:dns` probe)
+  before firing; slots it can't run are recorded as deferred (`deferred_slots`,
+  schema v8) and swept into catch-up runs (`--catchup-slots` argv, widened
+  `RunKind`), with a retrospective past-day deferred summary on day rollover.
+  Failure notifications dedup on signature (STILL OPEN count/since) instead of
+  storming Telegram.
+- **Catch-up + daemon health in the board**: deferred-slots read surface and
+  DeferredGroup UI, catch-up badge with computed ETA and covered-slots line in
+  run detail, undismissible daemon-degraded banner, and the Schedule settings
+  section's degraded daemon status.
+- **Launcher flag registry + headless scheduled runs** (PR #104):
+  `DISABLED_FEATURES` merged into exactly one `--disable-features=` entry
+  (first entry blocks Chrome's 4GB on-device AI model re-download; profile
+  pruned 6.4G→808M); the previously-inert `--headless` flag wired end-to-end
+  to `--headless=new`. Scheduled runs are now genuinely headless — no more
+  focus-stealing Chrome window; manual runs stay headed. Live-verified
+  (run 37: passed, best-of-recent JD yield, zero errors/breaker events).
+- **Checkpoint TTL**: `routine cleanup` prunes the `checkpoints` table on its
+  own 2-day TTL (`settings.cleanup.checkpointsOlderThanDays`) — checkpoints
+  are only ever read same-day, so the long default was pure dead weight.
+
+### Changed
+- Per-profile SQLite schema v6 → v8 (`deferred_slots` table, `catchupSlots`
+  on runs, `hasRunOfKind`). Migration is automatic on first open.
+
+### Fixed
+- Daemon catch-up dedup, notify-storm guards, and "throttle the log, never
+  the catch-up itself"; slot-deferral reasons reported instead of silent
+  forever-retries; failed-send branch latched; five Phase 0 QA findings closed.
+- Board: deferred group kept out of (and ordered above) the runs listbox;
+  run.ts headless override no longer sends a spurious overrides object on
+  plain runs (review finding on #104).
+
 ## [3.0.0] — 2026-08-09
 
 ### Added
