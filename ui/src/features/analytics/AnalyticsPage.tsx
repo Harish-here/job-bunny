@@ -3,7 +3,7 @@
  * feature exists yet. */
 export function AnalyticsPage() {
   return (
-    <div className="flex flex-col gap-2 p-6">
+    <div className="flex h-full flex-col gap-2 overflow-y-auto p-6">
       <h1 className="text-lg font-semibold font-heading">Analytics</h1>
       <p className="text-muted-foreground">
         Coming soon — run stats, funnel drops, and match-quality trends will land here.

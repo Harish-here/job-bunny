@@ -221,6 +221,34 @@ test("settings: invalid JSON in the escape hatch is rejected inline with the ser
   await expect(textarea).toHaveValue('{not valid json');
 });
 
+test('settings: search-urls section content is reachable by a real scroll gesture when it overflows the viewport', async ({
+  page,
+}) => {
+  // The shell (`Shell.tsx`) pins `h-screen overflow-hidden` and delegates
+  // scrolling to each page; Playwright's own scrollIntoView-based
+  // auto-scroll is programmatic and works even under `overflow: hidden`,
+  // so this test drives a REAL wheel gesture instead — the only way to
+  // catch a page that forgot its own `overflow-y-auto` container.
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.goto('/#/settings/search-urls');
+  await expect(section(page)).toHaveAttribute('data-section', 'search-urls');
+
+  const addRow = section(page).getByRole('button', { name: 'Add another search URL' });
+  const saveButton = section(page).getByRole('button', { name: 'Save', exact: true });
+
+  // Pile on enough rows to push the Save button below the fold at this
+  // viewport height — the rajni fixture's own row count alone isn't
+  // enough to overflow.
+  for (let i = 0; i < 15; i++) {
+    await addRow.click();
+  }
+  await expect(saveButton).not.toBeInViewport();
+
+  await page.mouse.move(640, 200);
+  await page.mouse.wheel(0, 1000);
+  await expect(saveButton).toBeInViewport();
+});
+
 test("settings: schedule section shows the daemon's degraded state with cause and remedy", async ({
   page,
 }) => {
