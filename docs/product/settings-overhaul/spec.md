@@ -233,7 +233,7 @@ Everything below is live, runtime-read configuration with **no form anywhere in 
 | Area | Where | Notable knobs (defaults) |
 |---|---|---|
 | **Ranking — the entire model** | `profile.json` → `settings.rank`, parsed at `src/cli/wire/compose.ts:362` | primary/secondary skill points (1.0 / 0.5), skills max 40, domain keywords, title max 15 / neutral 8, seniority targets (max 15), home cities, acceptable & borderline timezones, work-type multipliers, soft-verdict penalty 5 — `src/core/rank/rank.ts:69-171` |
-| **Yield caps** | `src/cli/wire/settings.ts` | `maxNewPerLane` 40 (:59), `maxProbesPerRun` 25 (:53), `maxCardsPerUrl` 40 (:66), `maxAgeDays` 30 (:25) |
+| **Yield caps** | `src/cli/wire/settings.ts` | `maxNewPerLane` 40 (:59), `maxProbesPerRun` 25 (:53), `maxCardsPerUrl` 40 (:66) — `maxAgeDays` 30 (:25) is **not** a yield cap; it gates LinkedIn page-inventory freshness (a doctor-check input) [Amended 2026-08-18 at the BE-blueprint gate, F10 ratified by user — see rulings/be-gate-r1.md] |
 | **Registry health** | same | `reprobeNotFoundAfterDays` 30 (:46), `maxProbeFailures` 3 (:47), `staleAfterFetchFailures` 3 (:48) |
 | **LinkedIn pacing** | same | jitter 5000–12000ms (:88-89), inter-URL delay 20000–45000ms (:95-96) |
 | **Filter blocks** | `filter.json` | `companies` — live, read at `src/core/filter/rules/company.ts:9,11`; `timezones` — live, read at `src/core/filter/rules/timezone.ts:13,16,20` |
@@ -580,7 +580,7 @@ user-confirmed friction from Q1 · **JTBD** = persona job · **Industry** = §3 
 | R4 | One consolidated **Advanced / raw config** area replaces the per-section JSON hatches. Form and raw edit **one source of truth** and cannot disagree. | Q7, G1, Industry (VS Code `ui\|json`) | **Must** |
 | R5 | Unsaved edits are not silently discarded when switching section or profile. | Recon §5.2, G11 | **Should** |
 | **Driver 1 — surfacing configuration** ||||
-| R6 | The **yield-bounding caps** are surfaced with their effect stated in plain terms: `maxNewPerLane`, `maxProbesPerRun`, `maxCardsPerUrl`, `maxAgeDays`. | **P-c**, G2, Recon §5.3 | **Must** |
+| R6 | The **yield-bounding caps** are surfaced with their effect stated in plain terms: `maxNewPerLane`, `maxProbesPerRun`, `maxCardsPerUrl`. `maxAgeDays` is surfaced separately, stated as LinkedIn page-inventory freshness (a doctor-check input), not a yield cap. [Amended 2026-08-18 at the BE-blueprint gate, F10 ratified by user — see rulings/be-gate-r1.md] | **P-c**, G2, Recon §5.3 | **Must** |
 | R7 | `filter.json`'s `companies` (avoid list) and `timezones` are surfaced as forms. | Ask (driver 1), Recon (both live) | **Must** |
 | R8 | The **retunable ranking lists** are surfaced: domain keywords, seniority targets, home cities, acceptable/borderline timezones, work-type preference. Point weights and denominators remain raw-JSON only. | Q2, G5 | **Must** |
 | R9 | Notion **`mirror` on/off** and **`dryRun`** are surfaced as toggles. | Ask (driver 1), Q9, Recon §5.3 | **Must** |
@@ -738,7 +738,10 @@ Objectively checkable. Each maps to a requirement.
 5. Navigating away from a form with unsaved edits either preserves them or warns; it never discards
    them silently. *(R5)*
 6. `maxNewPerLane`, `maxProbesPerRun`, `maxCardsPerUrl`, and `maxAgeDays` are each editable from a
-   form and each display a one-line statement of what they cap. *(R6)*
+   form; `maxNewPerLane`, `maxProbesPerRun`, and `maxCardsPerUrl` each display a one-line statement of
+   what they cap, and `maxAgeDays` displays a one-line statement of what it gates (LinkedIn
+   page-inventory freshness — a doctor-check input, not a yield cap). [Amended 2026-08-18 at the
+   BE-blueprint gate, F10 ratified by user — see rulings/be-gate-r1.md] *(R6)*
 7. `filter.json`'s `companies` avoid-list and `timezones` are editable from a form, and a value saved
    through that form is present in the doc read back by `GET /api/profiles/:name/config/filter.json`.
    *(R7)*
