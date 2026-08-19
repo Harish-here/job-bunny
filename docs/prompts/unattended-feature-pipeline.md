@@ -36,9 +36,29 @@ per its own instructions rather than improvising generic subagents), the
 `sdd-task-loop` workflow (Phase 3's execution engine), the `gh` CLI, Node 24,
 and a logged-in Chrome for live verification.
 
-Create the branch `claude/<feature-slug>` from the latest `main` and do all
-work there. Commit per completed task with clear messages; never push to
-`main`.
+## WORKSPACE — GIT WORKTREE
+
+Do all work in an isolated git worktree so my original checkout stays clean and
+usable while you run:
+
+1. From the original repo: `git fetch origin main`, then
+   `git worktree add ../job-bunny-<feature-slug> -b claude/<feature-slug> origin/main`.
+   Every subsequent command (installs, gates, commits, verification with
+   repo-as-home) runs inside that worktree, never in the original checkout.
+2. **Seed the worktree with the original repo's local-only values.** Gitignored
+   state does not follow a worktree, so copy it over from the original checkout
+   before starting: the root `.env` (secrets — `NOTION_TOKEN`,
+   `TELEGRAM_BOT_TOKEN`), `.claude/settings.local.json` if present, and any
+   other gitignored config the gates or repo-as-home verification need — check
+   `git status --ignored --short` in the original repo for candidates (skip
+   caches, `node_modules`, and per-run data intermediates). Copy files; never
+   symlink secrets into tracked paths, and never commit any of them.
+3. `npm install` in the worktree (Node 24 per `.nvmrc`; no build step).
+4. The worktree exists until the PR merges: include its path in the CI-green
+   Telegram message, and only remove it (`git worktree remove`) after merge or
+   when I say so.
+
+Commit per completed task with clear messages; never push to `main`.
 
 ## PHASE 1 — PRODUCT (PM)
 
@@ -107,9 +127,14 @@ touched. All green before Phase 4.
 ## PHASE 5 — LIVE VERIFICATION (Definition of Done gate)
 
 1. **Fixture first:** use the `verify` skill to exercise the affected stages and
-   commands against `profiles/rajni/` (`JOBBUNNY_HOME=$PWD node src/cli/main.ts
-   ... --profile rajni`). Fix anything red.
-2. **Harish profile:** this prompt is my explicit, standing authorization to
+   commands against `profiles/rajni/`, with the worktree as the home
+   (`JOBBUNNY_HOME=<worktree> node src/cli/main.ts ... --profile rajni` from the
+   worktree — the copied `.env` makes secrets-dependent paths work). Fix
+   anything red.
+2. **Harish profile:** harish lives in the real data home (`~/.jobbunny`),
+   which is machine-global and unaffected by the worktree — run the worktree's
+   code against it (`node src/cli/main.ts` from the worktree, default home).
+   This prompt is my explicit, standing authorization to
    verify against `profiles/harish/`, overriding the default "never run
    test/experimental stages against harish" caution — but be least-destructive:
    start with `jobbunny doctor --profile harish` and read-only surfaces (board,
@@ -137,8 +162,9 @@ green, and never push empty commits to kick CI.
 
 ## NOTIFY ME — TELEGRAM
 
-All notifications go to **Telegram**: use `TELEGRAM_BOT_TOKEN` from the data
-home's `.env` and the chat id from my profile's Telegram settings (the same
+All notifications go to **Telegram**: use `TELEGRAM_BOT_TOKEN` from the `.env`
+copied into the worktree (same values as the data home's `.env`) and the chat
+id from my profile's Telegram settings (the same
 wiring the digest path uses — see README), sending via the Bot API
 `sendMessage` with `fetch`. Notifications are one-way FYIs: never wait for a
 reply, never block on me.
