@@ -28,7 +28,7 @@ import {
 } from '../../../components/ui/accordion';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Badge } from '../../../components/ui/badge';
-import { Field, FieldControl, FieldLabel } from '../../../components/ui/form';
+import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
 import { RadioGroupItem } from '../../../components/ui/radio-group';
 import { cn } from '../../../lib/utils';
@@ -146,6 +146,14 @@ const RAW_FIELDS: Array<{ key: RawFieldKey; label: string; dataQa: string }> = [
  * `AccordionTrigger` sets `aria-expanded` itself. Editing any field is the
  * caller's job (`onFieldChange`) — this component owns no state of its
  * own, matching every other raw-value input on this page.
+ *
+ * `errors` is keyed by the same `RawFieldKey`s and rendered the same way
+ * `FetchingSection`'s own `CAP_FIELDS` render theirs (`Field invalid` +
+ * `FieldError`) — this component owns no validation logic itself, it only
+ * displays whatever the caller's `useSectionSaveState().errors` already
+ * computed (R13, task 28 gap fix), so the R13 cross-field pacing invariant
+ * (`jitterMinMs <= jitterMaxMs`) surfaces here the same way it surfaces in
+ * the SaveBar's validation summary.
  */
 export function PacingAdvancedDisclosure({
   jitterMinMs,
@@ -153,12 +161,14 @@ export function PacingAdvancedDisclosure({
   interUrlDelayMinMs,
   interUrlDelayMaxMs,
   onFieldChange,
+  errors,
 }: {
   jitterMinMs: number;
   jitterMaxMs: number;
   interUrlDelayMinMs: number;
   interUrlDelayMaxMs: number;
   onFieldChange: (field: RawFieldKey, raw: string) => void;
+  errors?: Partial<Record<RawFieldKey, string>>;
 }) {
   const values: Record<RawFieldKey, number> = {
     jitterMinMs,
@@ -175,18 +185,22 @@ export function PacingAdvancedDisclosure({
         </AccordionTrigger>
         <AccordionContent>
           <div className="grid grid-cols-2 gap-4">
-            {RAW_FIELDS.map((field) => (
-              <Field key={field.key} data-qa={field.dataQa}>
-                <FieldLabel>{field.label}</FieldLabel>
-                <FieldControl>
-                  <Input
-                    type="number"
-                    value={String(values[field.key])}
-                    onChange={(e) => onFieldChange(field.key, e.target.value)}
-                  />
-                </FieldControl>
-              </Field>
-            ))}
+            {RAW_FIELDS.map((field) => {
+              const error = errors?.[field.key];
+              return (
+                <Field key={field.key} data-qa={field.dataQa} invalid={Boolean(error)}>
+                  <FieldLabel>{field.label}</FieldLabel>
+                  <FieldControl>
+                    <Input
+                      type="number"
+                      value={String(values[field.key])}
+                      onChange={(e) => onFieldChange(field.key, e.target.value)}
+                    />
+                  </FieldControl>
+                  <FieldError>{error}</FieldError>
+                </Field>
+              );
+            })}
           </div>
         </AccordionContent>
       </AccordionItem>

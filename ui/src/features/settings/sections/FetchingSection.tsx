@@ -33,135 +33,21 @@ import {
   presetFromRanges,
   rangesFromPreset,
 } from './fetching.model';
+import {
+  CAP_FIELDS,
+  type CapFieldDef,
+  EMPTY_STATE,
+  type FetchingState,
+  parseFetchingState,
+  validatePacingPairs,
+  validateState,
+} from './fetching.state';
 import { PacingAdvancedDisclosure, PacingPresetCard } from './PacingPresetCard';
-
-interface FetchingState {
-  maxNewPerLane: number;
-  maxProbesPerRun: number;
-  maxCardsPerUrl: number;
-  maxAgeDays: number;
-  jitterMinMs: number;
-  jitterMaxMs: number;
-  interUrlDelayMinMs: number;
-  interUrlDelayMaxMs: number;
-}
-
-// Same shipped defaults `LandingCapsTable.tsx`/`core/config/linkedin_pacing/
-// index.ts` use — a profile with no `settings` block at all still shows the
-// real in-force numbers, never a blank/zero.
-const DEFAULTS: FetchingState = {
-  maxNewPerLane: 40,
-  maxProbesPerRun: 25,
-  maxCardsPerUrl: 40,
-  maxAgeDays: 30,
-  jitterMinMs: 5_000,
-  jitterMaxMs: 12_000,
-  interUrlDelayMinMs: 20_000,
-  interUrlDelayMaxMs: 45_000,
-};
-
-const EMPTY_STATE: FetchingState = DEFAULTS;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : {};
-}
-
-function positiveNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : fallback;
-}
-
-// Mirrors `LandingCapsTable.tsx`'s own resolver posture: anything other
-// than a positive finite number falls back to the shipped default rather
-// than a wrong/blank field.
-function parseFetchingState(profileDoc: Record<string, unknown>): FetchingState {
-  const settings = asRecord(profileDoc.settings);
-  const source = asRecord(settings.source);
-  const linkedin = asRecord(settings.linkedin);
-  return {
-    maxNewPerLane: positiveNumber(source.maxNewPerLane, DEFAULTS.maxNewPerLane),
-    maxProbesPerRun: positiveNumber(source.maxProbesPerRun, DEFAULTS.maxProbesPerRun),
-    maxCardsPerUrl: positiveNumber(linkedin.maxCardsPerUrl, DEFAULTS.maxCardsPerUrl),
-    maxAgeDays: positiveNumber(linkedin.maxAgeDays, DEFAULTS.maxAgeDays),
-    jitterMinMs: positiveNumber(linkedin.jitterMinMs, DEFAULTS.jitterMinMs),
-    jitterMaxMs: positiveNumber(linkedin.jitterMaxMs, DEFAULTS.jitterMaxMs),
-    interUrlDelayMinMs: positiveNumber(
-      linkedin.interUrlDelayMinMs,
-      DEFAULTS.interUrlDelayMinMs,
-    ),
-    interUrlDelayMaxMs: positiveNumber(
-      linkedin.interUrlDelayMaxMs,
-      DEFAULTS.interUrlDelayMaxMs,
-    ),
-  };
-}
-
-interface CapFieldDef {
-  key: 'maxNewPerLane' | 'maxProbesPerRun' | 'maxCardsPerUrl' | 'maxAgeDays';
-  dataQa: string;
-  bounds: string;
-  min: number;
-  max: number;
-  effect: (value: number) => string;
-  /** Only `maxNewPerLane`/`maxCardsPerUrl` have a real hit signal on the
-   * soft-errors response (`SoftErrorSummary.capsHit`) — `maxProbesPerRun`
-   * and `maxAgeDays` never render the binding-marker clause. */
-  hitKey: 'maxNewPerLane' | 'maxCardsPerUrl' | null;
-}
-
-const CAP_FIELDS: CapFieldDef[] = [
-  {
-    key: 'maxNewPerLane',
-    dataQa: 'fetch-cap-max-new-per-lane',
-    bounds: '1–500',
-    min: 1,
-    max: 500,
-    effect: (v) => `At most ${v} new jobs from each lane per run.`,
-    hitKey: 'maxNewPerLane',
-  },
-  {
-    key: 'maxProbesPerRun',
-    dataQa: 'fetch-cap-max-probes-per-run',
-    bounds: '1–200',
-    min: 1,
-    max: 200,
-    effect: (v) => `At most ${v} ATS probes per run.`,
-    hitKey: null,
-  },
-  {
-    key: 'maxCardsPerUrl',
-    dataQa: 'fetch-cap-max-cards-per-url',
-    bounds: '1–200',
-    min: 1,
-    max: 200,
-    effect: (v) => `At most ${v} cards read per saved-search URL.`,
-    hitKey: 'maxCardsPerUrl',
-  },
-  {
-    key: 'maxAgeDays',
-    dataQa: 'fetch-cap-max-age-days',
-    bounds: '1–90',
-    min: 1,
-    max: 90,
-    // Gates LinkedIn page-inventory freshness — NEVER "limits job count" (F10).
-    effect: (v) => `Postings older than ${v} days are skipped.`,
-    hitKey: null,
-  },
-];
-
-function validateState(state: FetchingState): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const field of CAP_FIELDS) {
-    const value = state[field.key];
-    if (!Number.isFinite(value) || value < field.min || value > field.max) {
-      errors[`fetching.${field.key}`] =
-        `${field.key} must be between ${field.min} and ${field.max}.`;
-    }
-  }
-  return errors;
 }
 
 export function FetchingSection({ profile }: { profile: string }) {
@@ -174,6 +60,11 @@ export function FetchingSection({ profile }: { profile: string }) {
   const [state, setState] = useState<FetchingState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<FetchingState>(EMPTY_STATE);
   const [fastAck, setFastAck] = useState(false);
+  // Populated only by an attempted `handleSave` (never live/as-you-type —
+  // see `validatePacingPairs`'s own doc comment) and cleared the instant
+  // the draft changes again, so a stale post-submit error never survives
+  // past the edit that was meant to fix it.
+  const [pacingErrors, setPacingErrors] = useState<Record<string, string>>({});
 
   const initialized = useRef<string | null>(null);
   useEffect(() => {
@@ -207,6 +98,7 @@ export function FetchingSection({ profile }: { profile: string }) {
   // comment for why this can't live as that card's local state instead.
   function applyRanges(next: FetchingState) {
     setState(next);
+    setPacingErrors({});
     const nextPreset = presetFromRanges(
       next.jitterMinMs,
       next.jitterMaxMs,
@@ -229,6 +121,12 @@ export function FetchingSection({ profile }: { profile: string }) {
   }
 
   function handleSave(value: FetchingState): Promise<boolean> {
+    const crossFieldErrors = validatePacingPairs(value);
+    if (Object.keys(crossFieldErrors).length > 0) {
+      setPacingErrors(crossFieldErrors);
+      return Promise.resolve(false);
+    }
+    setPacingErrors({});
     return docForm.save((cfg) => {
       const settings = asRecord(cfg.settings);
       const source = asRecord(settings.source);
@@ -347,6 +245,12 @@ export function FetchingSection({ profile }: { profile: string }) {
               interUrlDelayMinMs={state.interUrlDelayMinMs}
               interUrlDelayMaxMs={state.interUrlDelayMaxMs}
               onFieldChange={updateRawField}
+              errors={{
+                jitterMinMs: pacingErrors['fetching.jitterMinMs'],
+                jitterMaxMs: pacingErrors['fetching.jitterMaxMs'],
+                interUrlDelayMinMs: pacingErrors['fetching.interUrlDelayMinMs'],
+                interUrlDelayMaxMs: pacingErrors['fetching.interUrlDelayMaxMs'],
+              }}
             />
           </CardContent>
         </Card>
@@ -359,10 +263,13 @@ export function FetchingSection({ profile }: { profile: string }) {
 
         <SaveBar
           isDirty={saveState.isDirty}
-          errors={saveState.errors}
+          errors={{ ...saveState.errors, ...pacingErrors }}
           successMessage={saveState.successMessage}
           onSave={saveState.save}
-          onDiscard={() => setState(saveState.discard())}
+          onDiscard={() => {
+            setPacingErrors({});
+            setState(saveState.discard());
+          }}
         />
       </div>
     </DocFormGate>
