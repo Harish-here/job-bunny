@@ -1,4 +1,5 @@
 import { FilterConfigSchema } from '../filter/config.ts';
+import { LinkedinPacingSettingsSchema } from './linkedin_pacing/index.ts';
 import { PipelineConfigSchema } from './schema.ts';
 
 /** BYTE-EXACT retirement message for `settings.sqlite.path` (config→db
@@ -59,6 +60,7 @@ export function validateConfigDoc(
       let parsed: { settings: Record<string, unknown> };
       try {
         parsed = PipelineConfigSchema.parse(JSON.parse(rawText));
+        LinkedinPacingSettingsSchema.parse(parsed.settings.linkedin ?? {});
       } catch (err) {
         throw new Error(`profile.json is invalid: ${errorMessage(err)}`);
       }

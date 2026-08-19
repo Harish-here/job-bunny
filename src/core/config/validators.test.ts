@@ -57,6 +57,38 @@ describe('validateConfigDoc', () => {
     );
   });
 
+  it('rejects a profile.json with an inverted LinkedIn pacing jitter range', () => {
+    assert.throws(
+      () =>
+        validateConfigDoc(
+          'profile.json',
+          JSON.stringify({
+            connector: 'sqlite',
+            settings: { linkedin: { jitterMinMs: 15000, jitterMaxMs: 12000 } },
+          }),
+        ),
+      /jitterMinMs.*jitterMaxMs/s,
+    );
+  });
+
+  it('accepts a profile.json with no settings.linkedin at all (defaults quietly)', () => {
+    assert.doesNotThrow(() =>
+      validateConfigDoc('profile.json', JSON.stringify({ connector: 'sqlite' })),
+    );
+  });
+
+  it('accepts a profile.json with a valid LinkedIn pacing range', () => {
+    assert.doesNotThrow(() =>
+      validateConfigDoc(
+        'profile.json',
+        JSON.stringify({
+          connector: 'sqlite',
+          settings: { linkedin: { jitterMinMs: 5000, jitterMaxMs: 12000 } },
+        }),
+      ),
+    );
+  });
+
   it('accepts an empty filter.json (every field optional)', () => {
     assert.doesNotThrow(() => validateConfigDoc('filter.json', '{}'));
   });
