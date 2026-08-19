@@ -16,12 +16,22 @@
  * import that file's own orchestration code (checkpoint/run-store lookup)
  * — that part is intentionally left to code review, per the brief's own
  * "step 32's implementation has no test until step 35's route test" note.
+ *
+ * Fix round (adversarial review, two findings) — see `routes.ts`'s own
+ * header for the full rationale:
+ *  1. The fake's draft-validation throw below is now the real
+ *     `InvalidDraftFilterConfigError` (`ports/board_preview.ts`), exactly
+ *     what `cli/wire/board_preview.ts` throws — and a dedicated test proves
+ *     a DIFFERENT throw (simulating stored-config corruption) is NOT turned
+ *     into a 422.
+ *  2. A dedicated test proves an unknown `:name` 404s `no_such_profile`.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { decide, evaluate, FilterConfigSchema } from '../../../core/filter/index.ts';
 import type { StructuredJD } from '../../../core/jd/index.ts';
 import type { BoardSource, FilterPreviewResult } from '../../../ports/board.ts';
+import { InvalidDraftFilterConfigError } from '../../../ports/board_preview.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { HttpError } from '../../shared/index.ts';
 import { makePreviewRoutes } from './routes.ts';
@@ -89,7 +99,7 @@ function fakeSource(mode: Mode): BoardSource {
       const parsed = FilterConfigSchema.safeParse(draftFilterConfig);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        throw new Error(
+        throw new InvalidDraftFilterConfigError(
           issue ? `${issue.path.join('.') || 'body'}: ${issue.message}` : 'bad',
         );
       }
@@ -229,4 +239,45 @@ test('a payload that is entirely unstructured degrades to checkpoint_expired', a
   const res = await post(source, { companies: { avoid: ['BadCo'] } });
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { available: false, reason: 'checkpoint_expired' });
+});
+
+test('finding 1: a stored-config/store failure (not InvalidDraftFilterConfigError) is NOT wrapped as a 422 validation error', async () => {
+  const baseSource = fakeSource({ kind: 'no_recent_run' });
+  const brokenSource: BoardSource = {
+    ...baseSource,
+    // Simulates `board_preview.ts` step (5): the profile's STORED
+    // filter.json is corrupted (bad JSON, or JSON that no longer satisfies
+    // `FilterConfigSchema`) or its store is broken — a plain `Error`,
+    // deliberately never `InvalidDraftFilterConfigError`.
+    async previewFilterRule() {
+      throw new Error('stored filter.json is corrupted: Unexpected token in JSON');
+    },
+  };
+  await assert.rejects(
+    async () => post(brokenSource, {}),
+    (err: unknown) => {
+      // The misattribution finding: this must never surface as "your
+      // draft filter is invalid". Reverting the fix (routes.ts blanket-
+      // catching every throw as HttpError(422,'validation',...)) turns
+      // this assertion false.
+      assert.ok(!(err instanceof HttpError), `expected a raw throw, got ${err}`);
+      assert.match((err as Error).message, /stored filter\.json is corrupted/);
+      return true;
+    },
+  );
+});
+
+test('finding 2: unknown :name 404s no_such_profile, matching config/routes.ts convention', async () => {
+  const source = fakeSource({ kind: 'no_recent_run' });
+  const [route] = makePreviewRoutes(source);
+  if (!route) throw new Error('no route registered');
+  await assert.rejects(
+    async () => route.handler(req({ params: { name: 'ghost' }, body: {} })),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpError);
+      assert.equal(err.status, 404);
+      assert.equal(err.code, 'no_such_profile');
+      return true;
+    },
+  );
 });

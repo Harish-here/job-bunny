@@ -1,5 +1,11 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
+import type {
+  AutostartOutcome,
+  DaemonStatus,
+  StartDaemonOutcome,
+  StopDaemonOutcome,
+} from './board_daemon.ts';
 import type { ConfigDocKey } from './config_store.ts';
 import type { DeferredSlotRow } from './deferred_slots.ts';
 import type { DoctorReport } from './doctor.ts';
@@ -86,78 +92,19 @@ export interface RunDurationEstimate {
  * — absence, not a guess, when history is too thin. */
 export const MIN_DURATION_SAMPLE_SIZE = 3;
 
-export type DaemonState = 'running' | 'stopped' | 'stale';
-
-export interface DaemonProfileSchedule {
-  profile: string;
-  enabled: boolean;
-  /** ISO 8601 UTC, or `null` when the profile has no enabled schedule. */
-  nextRunAt: string | null;
-  degraded: boolean;
-  degradedReason: string | null; // human-readable, mirrors T6's cause line, null when not degraded
-  schemaVersion: number | null; // the profile's own DB schema version when degraded, else null
-  buildVersion: number | null; // this daemon build's LATEST_SCHEMA_VERSION when degraded, else null
-}
-
-export interface DaemonStatus {
-  state: DaemonState;
-  pid: number | null;
-  startedAt: string | null;
-  lastTickAt: string | null;
-  inFlight: { profile: string; pid: number; startedAt: string } | null;
-  profiles: DaemonProfileSchedule[];
-}
-
-/** `BoardSource.stopDaemon`'s result (R20 = Option 1, board-initiated
- * detached spawn). Deliberately NOT a bare "did the signal go through" —
- * `'stopped'` is reached only after the FULL kill-and-confirm lifecycle
- * (`cli/wire/board_daemon_control.ts`, reusing `cli/commands/serve/
- * lifecycle.ts`'s `runServeStop` sequence) succeeds for both the daemon and
- * any in-flight run child it owned. `'daemon_unresponsive'`/
- * `'child_unresponsive'` are DISTINCT, visible failures — a daemon or child
- * that survives SIGKILL must NEVER be reported as `'already_stopped'`; that
- * would be a false success (the exact defect BE-gate finding F1 caught in
- * this step's original spec). `'child_unresponsive'` carries `childPid`
- * because a stuck run child is a different operator action (manual `kill
- * -9`, or a reboot) than a stuck daemon. */
-export type StopDaemonOutcome =
-  | { outcome: 'stopped' }
-  | { outcome: 'already_stopped' }
-  | { outcome: 'daemon_unresponsive' }
-  | { outcome: 'child_unresponsive'; childPid: number };
-
-/** `BoardSource.startDaemon`'s result (R20 = Option 1, board-initiated
- * detached spawn — task 12, this brief's Start counterpart to
- * `StopDaemonOutcome` above). `'started'` and `'already_running'` are BOTH
- * a success from the caller's point of view (the daemon ends up running
- * either way — the same "target state reached" posture `'already_stopped'`
- * takes on the stop side), while `'spawn_failed'` is a DISTINCT, visible
- * failure — never collapsed into a false success. Defined HERE, not in
- * `cli/wire/`, for the identical reachability reason `StopDaemonOutcome`
- * is: a `cli/wire/` type is not reachable through the `ports` →
- * `app/features/<name>/index.ts` → `ui/src/lib/api/types.ts` chain. */
-export type StartDaemonOutcome = {
-  outcome: 'started' | 'already_running' | 'spawn_failed';
-};
-
-/** `BoardSource.setAutostart`'s result (R20 = Option 1, task 13 — the
- * Autostart counterpart to `StopDaemonOutcome`/`StartDaemonOutcome` above).
- * Named EXACTLY `AutostartOutcome` — product-ui's own blueprint already
- * assumes this name for this control. `'ok'` covers every darwin outcome
- * short of a real, blocking refusal, including tolerated launchctl hiccups
- * (`autostart.ts:228-231`) — the board never surfaces those as a request
- * failure. `'unsupported_platform'` is reached on any non-darwin
- * `process.platform`, with no filesystem or `launchctl` side effect
- * attempted. Defined HERE, not `cli/wire/`, same reachability reason as
- * `StopDaemonOutcome`/`StartDaemonOutcome`.
- *
- * No slot exists here for the darwin legacy-plist-conflict refusal
- * (`runEnable`, exit 1, enable only — NO plist written, `launchctl` never
- * called): fix round F13 surfaces THAT case as a thrown
- * `HttpError(409, 'autostart_conflict', ...)` instead of silently
- * returning `{outcome:'ok'}` — see `board_autostart_control.ts`'s
- * `setBoardAutostart`. */
-export type AutostartOutcome = { outcome: 'ok' | 'unsupported_platform' };
+// Daemon-control result types (`DaemonState`/`DaemonProfileSchedule`/
+// `DaemonStatus`/`StopDaemonOutcome`/`StartDaemonOutcome`/
+// `AutostartOutcome`) live in `./board_daemon.ts` (split out purely for the
+// file-size cap) and are re-exported here so every existing
+// `from '../../ports/board.ts'` import keeps working unchanged.
+export type {
+  AutostartOutcome,
+  DaemonProfileSchedule,
+  DaemonState,
+  DaemonStatus,
+  StartDaemonOutcome,
+  StopDaemonOutcome,
+} from './board_daemon.ts';
 
 /** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
  * `newlyDropped` (jobs that drop under the draft but not the current config)
@@ -385,12 +332,17 @@ export interface BoardSource {
    * existing evaluation, once against the profile's CURRENT `filter.json`
    * and once against `draftFilterConfig`, over the most recent run's
    * pre-filter candidate pool (read from a checkpoint) — it never reruns
-   * the pipeline and never mutates any stored config. Throws on an invalid
-   * `draftFilterConfig` (caller turns that into a 422, same posture as
-   * `writeConfigDoc`'s validator-throw contract); `available: false` with
-   * `reason: 'no_recent_run'` when the profile has no run to read from at
-   * all, or `'checkpoint_expired'` when recent runs exist but none has a
-   * usable pre-filter checkpoint left (pruned, or its payload carries no
+   * the pipeline and never mutates any stored config. Throws
+   * `InvalidDraftFilterConfigError` (`ports/board_preview.ts`) on an
+   * invalid `draftFilterConfig` — the caller turns THAT, and only that,
+   * into a 422 (same posture as `writeConfigDoc`'s validator-throw
+   * contract). Any OTHER throw (a corrupted stored `filter.json`, a broken
+   * store, ...) is deliberately a plain `Error`, not that class — it is a
+   * server-side data problem, not the caller's input, and callers must not
+   * misattribute it as one (fix round). `available: false` with `reason:
+   * 'no_recent_run'` when the profile has no run to read from at all, or
+   * `'checkpoint_expired'` when recent runs exist but none has a usable
+   * pre-filter checkpoint left (pruned, or its payload carries no
    * structured job). Read-only. */
   previewFilterRule(
     name: string,

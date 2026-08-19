@@ -17,6 +17,14 @@
  * branch-selection / defensive-guard logic — the actual shipped code path,
  * not a parallel reimplementation (see `app/features/preview/routes.test.ts`
  * for why that file's fake couldn't do this: `app` may not import `cli`).
+ *
+ * Fix round (adversarial review, finding 1) — two tests below seed a
+ * deliberately corrupted `filter.json` DIRECTLY into `config_docs` (raw
+ * SQL, bypassing `writeConfigDoc`'s own validation, exactly like
+ * `insertCheckpoint` bypasses the pipeline to seed a checkpoint) and assert
+ * `previewFilterRule` throws something OTHER than
+ * `InvalidDraftFilterConfigError` — proving the stored-config-corruption
+ * failure is never misattributed as the caller's draft being invalid.
  */
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,6 +33,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, describe, test } from 'node:test';
 import type { FilterPreviewResult } from '../../ports/board.ts';
+import { isInvalidDraftFilterConfigError } from '../../ports/board_preview.ts';
 import { wireBoard } from './board.ts';
 
 let root: string;
@@ -93,6 +102,18 @@ function insertCheckpoint(
     `INSERT INTO checkpoints (run_date, time_dir, position, stage, payload_json, created_at)
      VALUES (?, ?, 0, ?, ?, ?)`,
   ).run(runDate, timeDir, stage, JSON.stringify(payload), runDate);
+  db.close();
+}
+
+/** Writes `config_docs.value_text` DIRECTLY (raw SQL, bypassing
+ * `writeConfigDoc`'s own `validateConfigDoc` gate) — the only way to get a
+ * genuinely corrupted stored doc onto disk, since every real write path
+ * validates first. Mirrors `insertCheckpoint`'s own raw-seed posture above. */
+function writeRawConfigDoc(name: string, key: string, valueText: string): void {
+  const db = new DatabaseSync(dbPathFor(name));
+  db.prepare(
+    'INSERT OR REPLACE INTO config_docs (key, value_text, updated_at) VALUES (?, ?, ?)',
+  ).run(key, valueText, '2026-08-01T00:00:00.000Z');
   db.close();
 }
 
@@ -245,7 +266,7 @@ describe('wireBoard — previewFilterRule (via board.ts delegate + real SqliteCh
     source.close();
   });
 
-  test("an invalid draft filter config throws (board.ts delegate propagates board_preview.ts's validator throw)", async () => {
+  test("an invalid draft filter config throws InvalidDraftFilterConfigError (board.ts delegate propagates board_preview.ts's validator throw)", async () => {
     writeProfile('invalid-draft');
     await migrateProfile('invalid-draft');
 
@@ -253,7 +274,68 @@ describe('wireBoard — previewFilterRule (via board.ts delegate + real SqliteCh
     await assert.rejects(
       () =>
         source.previewFilterRule('invalid-draft', { skills: { core: 'not-an-array' } }),
-      /skills/,
+      (err: unknown) => {
+        assert.ok(isInvalidDraftFilterConfigError(err));
+        assert.match((err as Error).message, /skills/);
+        return true;
+      },
+    );
+    source.close();
+  });
+
+  test('finding 1: a corrupted stored filter.json (invalid JSON) throws, but NEVER InvalidDraftFilterConfigError', async () => {
+    writeProfile('corrupt-json');
+    await migrateProfile('corrupt-json');
+    insertRun('corrupt-json', '2026-08-01', '09-00', '2026-08-01T09:00:00.000Z');
+    insertCheckpoint('corrupt-json', '2026-08-01', '09-00', 'assemble', {
+      jobs: [structuredJob('1', 'GoodCo')],
+      dropped: [],
+    });
+    writeRawConfigDoc('corrupt-json', 'filter.json', '{not valid json');
+
+    const source = wireBoard({ root });
+    await assert.rejects(
+      // A VALID draft — proves the throw comes from the stored doc, not
+      // from draft validation.
+      () => source.previewFilterRule('corrupt-json', {}),
+      (err: unknown) => {
+        assert.ok(
+          !isInvalidDraftFilterConfigError(err),
+          `expected a data-corruption error, got ${err}`,
+        );
+        return true;
+      },
+    );
+    source.close();
+  });
+
+  test('finding 1: a stored filter.json that fails FilterConfigSchema throws, but NEVER InvalidDraftFilterConfigError', async () => {
+    writeProfile('corrupt-schema');
+    await migrateProfile('corrupt-schema');
+    insertRun('corrupt-schema', '2026-08-01', '09-00', '2026-08-01T09:00:00.000Z');
+    insertCheckpoint('corrupt-schema', '2026-08-01', '09-00', 'assemble', {
+      jobs: [structuredJob('1', 'GoodCo')],
+      dropped: [],
+    });
+    // Valid JSON, but violates FilterConfigSchema (wrong type for
+    // `skills.core`) — e.g. a doc written by a since-tightened schema
+    // version.
+    writeRawConfigDoc(
+      'corrupt-schema',
+      'filter.json',
+      JSON.stringify({ skills: { core: 'not-an-array' } }),
+    );
+
+    const source = wireBoard({ root });
+    await assert.rejects(
+      () => source.previewFilterRule('corrupt-schema', {}),
+      (err: unknown) => {
+        assert.ok(
+          !isInvalidDraftFilterConfigError(err),
+          `expected a data-corruption error, got ${err}`,
+        );
+        return true;
+      },
     );
     source.close();
   });

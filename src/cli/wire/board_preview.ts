@@ -21,6 +21,7 @@
 import { decide, evaluate, FilterConfigSchema } from '../../core/filter/index.ts';
 import type { StructuredJD } from '../../core/jd/index.ts';
 import type { BoardSource, FilterPreviewResult } from '../../ports/board.ts';
+import { InvalidDraftFilterConfigError } from '../../ports/board_preview.ts';
 import type { CheckpointStore } from '../../ports/checkpoint_store.ts';
 
 /** Newest-first runs to try before giving up — never unbounded scanning. */
@@ -73,13 +74,20 @@ export async function previewFilterRule(
   draftFilterConfig: unknown,
 ): Promise<FilterPreviewResult> {
   // (1) Validate the draft FIRST — never touch a store on a malformed
-  // request. Throw: the route layer converts this into a 422 (same posture
-  // as `writeConfigDoc`'s validator-throw contract).
+  // request. Throws `InvalidDraftFilterConfigError` — the ONE throw the
+  // route layer converts into a 422 (same posture as `writeConfigDoc`'s
+  // validator-throw contract). Every other throw in this function
+  // (`openStore`, the stored-config read/parse below, ...) is DELIBERATELY
+  // a plain `Error`, never this class — it means the profile's own stored
+  // data or store is broken, not that the caller's draft is invalid, and
+  // must not be misattributed as one (fix round).
   const draftParsed = FilterConfigSchema.safeParse(draftFilterConfig);
   if (!draftParsed.success) {
     const issue = draftParsed.error.issues[0];
     const field = issue?.path.join('.') || 'body';
-    throw new Error(issue ? `${field}: ${issue.message}` : 'invalid filter config');
+    throw new InvalidDraftFilterConfigError(
+      issue ? `${field}: ${issue.message}` : 'invalid filter config',
+    );
   }
   const draftConfig = draftParsed.data;
 
@@ -124,7 +132,14 @@ export async function previewFilterRule(
 
   // (5) The profile's CURRENT filter.json — an absent doc reads as the
   // schema's own defaults, mirroring `compose.ts`'s own
-  // `filterCfgForStage = filterCfg ?? FilterConfigSchema.parse({})`.
+  // `filterCfgForStage = filterCfg ?? FilterConfigSchema.parse({})`. A
+  // corrupted stored doc (bad JSON, or JSON that no longer satisfies
+  // `FilterConfigSchema` — e.g. hand-edited or written by a stale schema
+  // version) throws HERE, past step (1)'s draft validation — this is a
+  // server-side data problem, not the caller's draft being invalid, so it
+  // is deliberately left a plain `Error`/`SyntaxError`/`ZodError`, never an
+  // `InvalidDraftFilterConfigError` (fix round: the route layer must not
+  // conflate the two).
   const currentRaw = await deps.source.readConfigDoc(name, 'filter.json');
   const currentConfig =
     currentRaw === undefined
