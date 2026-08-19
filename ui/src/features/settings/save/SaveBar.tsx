@@ -1,0 +1,114 @@
+import { Alert, AlertTitle } from '../../../components/ui/alert';
+import { Button } from '../../../components/ui/button';
+
+export interface SaveBarProps {
+  isDirty: boolean;
+  errors: Record<string, string>;
+  successMessage: string | null;
+  /** Wraps `useSectionSaveState`'s (task 4) own `save`. Always called on
+   * click, unconditionally — `save-button` is NEVER `disabled`; the hook's
+   * own `save()` is what refuses to call the caller's `onSave` when
+   * validation fails (task 4's job, already built). */
+  onSave: () => void | Promise<void>;
+  /** Wraps `useSectionSaveState`'s `discard`; the caller is responsible for
+   * applying `discard()`'s returned value back onto its own draft state
+   * (e.g. `onDiscard={() => setCurrentValue(discard())}`). */
+  onDiscard: () => void;
+}
+
+/**
+ * The S8 save model's sticky bar (blueprint.md:479-496). Renders exactly one
+ * of four states, in priority order: validation summary (errors present, any
+ * `isDirty`) > dirty bar (unsaved, currently valid) > success line (just
+ * saved) > idle (nothing).
+ */
+export function SaveBar({
+  isDirty,
+  errors,
+  successMessage,
+  onSave,
+  onDiscard,
+}: SaveBarProps) {
+  const errorEntries = Object.entries(errors);
+
+  if (errorEntries.length > 0) {
+    return (
+      <Alert
+        variant="destructive"
+        role="alert"
+        data-qa="validation-summary"
+        data-testid="validation-summary"
+      >
+        <AlertTitle>{errorEntries.length} problems to fix</AlertTitle>
+        <ul className="list-disc pl-4 text-sm">
+          {errorEntries.map(([field, message]) => (
+            <li
+              key={field}
+              data-qa={`validation-item-${field}`}
+              data-testid={`validation-item-${field}`}
+            >
+              <a
+                href={`#${field}`}
+                className="underline"
+                onClick={(event) => {
+                  event.preventDefault();
+                  document.getElementById(field)?.focus();
+                }}
+              >
+                {message}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </Alert>
+    );
+  }
+
+  if (isDirty) {
+    return (
+      <div
+        data-qa="save-bar"
+        data-testid="save-bar"
+        className="sticky bottom-0 flex items-center justify-between gap-3 rounded-xl bg-card p-3 shadow-lg ring-1 ring-foreground/10"
+      >
+        <span className="text-sm">Unsaved changes</span>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-qa="discard-button"
+            data-testid="discard-button"
+            onClick={onDiscard}
+          >
+            Discard
+          </Button>
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            data-qa="save-button"
+            data-testid="save-button"
+            onClick={onSave}
+          >
+            Save changes
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (successMessage !== null) {
+    return (
+      <div
+        data-qa="save-success-line"
+        data-testid="save-success-line"
+        className="flex items-center justify-between gap-3 rounded-xl border-l-2 border-l-success bg-success/10 p-3 text-sm"
+      >
+        <span>{successMessage}</span>
+      </div>
+    );
+  }
+
+  return null;
+}

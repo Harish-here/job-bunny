@@ -1,0 +1,92 @@
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { navigate } from '../../../lib/router';
+import { DirtyNavGuard } from './DirtyNavGuard';
+
+vi.mock('../../../lib/router', () => ({ navigate: vi.fn() }));
+
+const TARGET = { name: 'settings', section: 'filters' } as const;
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+function renderGuard(props: {
+  isDirty: boolean;
+  save?: () => void;
+  discard?: () => void;
+}) {
+  const save = props.save ?? vi.fn();
+  const discard = props.discard ?? vi.fn();
+  render(
+    <DirtyNavGuard
+      isDirty={props.isDirty}
+      navigate={navigate}
+      save={save}
+      discard={discard}
+    >
+      {(go) => (
+        <button type="button" data-testid="nav-link" onClick={() => go(TARGET)}>
+          Filters
+        </button>
+      )}
+    </DirtyNavGuard>,
+  );
+  return { save, discard };
+}
+
+describe('DirtyNavGuard — isDirty=false', () => {
+  it('a wrapped navigation call passes straight through with no dialog', async () => {
+    renderGuard({ isDirty: false });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith(TARGET);
+    expect(screen.queryByTestId('dirty-nav-dialog')).toBeNull();
+  });
+});
+
+describe('DirtyNavGuard — isDirty=true', () => {
+  it('intercepts the navigation and renders dirty-nav-dialog instead of calling navigate', async () => {
+    renderGuard({ isDirty: true });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    expect(screen.getByTestId('dirty-nav-dialog')).toBeInTheDocument();
+    expect(vi.mocked(navigate)).not.toHaveBeenCalled();
+  });
+
+  it('"Save and continue" calls save then navigate with the pending target', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    renderGuard({ isDirty: true, save });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith(TARGET);
+  });
+
+  it('"Discard changes" calls discard then navigate with the pending target', async () => {
+    const discard = vi.fn();
+    renderGuard({ isDirty: true, discard });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    await userEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith(TARGET);
+  });
+
+  it('"Stay here" closes the dialog and never calls navigate across the whole interaction', async () => {
+    renderGuard({ isDirty: true });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    await userEvent.click(screen.getByRole('button', { name: 'Stay here' }));
+    expect(screen.queryByTestId('dirty-nav-dialog')).toBeNull();
+    expect(vi.mocked(navigate)).not.toHaveBeenCalled();
+  });
+
+  it('a second identical nav attempt re-opens the dialog from scratch after Stay here', async () => {
+    renderGuard({ isDirty: true });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    await userEvent.click(screen.getByRole('button', { name: 'Stay here' }));
+    expect(screen.queryByTestId('dirty-nav-dialog')).toBeNull();
+
+    await userEvent.click(screen.getByTestId('nav-link'));
+    expect(screen.getByTestId('dirty-nav-dialog')).toBeInTheDocument();
+    expect(vi.mocked(navigate)).not.toHaveBeenCalled();
+  });
+});
