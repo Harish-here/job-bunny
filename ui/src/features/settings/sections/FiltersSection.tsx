@@ -74,7 +74,11 @@ function ChipRow({
   );
 }
 
-function TitleRuleEditor({
+// Exported for RolesCompaniesSection.tsx (task 13), which reuses this
+// unchanged rather than duplicating it — the roles-rules-card owns the
+// same title[domain|function|seniority] rules this component already
+// edits (same reuse discipline as LocationRow, below).
+export function TitleRuleEditor({
   ruleKey,
   rule,
   onChange,
