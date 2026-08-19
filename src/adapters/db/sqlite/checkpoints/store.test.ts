@@ -115,6 +115,51 @@ test('readLatest returns undefined for a group with no rows', () => {
   assert.equal(store.readLatest('2026-08-05', '10-00'), undefined);
 });
 
+test('readAt finds a named stage within a group that also has other stages', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteCheckpointStore(dbPath);
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 0, stage: 'filter' },
+    { n: 'filter' },
+  );
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 1, stage: 'dedup' },
+    { n: 'dedup' },
+  );
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 2, stage: 'assemble' },
+    { n: 'assemble' },
+  );
+  const found = store.readAt('2026-08-05', '10-00', 'assemble');
+  assert.ok(found);
+  assert.equal(found.ref.stage, 'assemble');
+  assert.deepEqual(found.payload, { n: 'assemble' });
+});
+
+test('readAt returns undefined for a stage never written in that group', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteCheckpointStore(dbPath);
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 0, stage: 'filter' },
+    { n: 'filter' },
+  );
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 1, stage: 'dedup' },
+    { n: 'dedup' },
+  );
+  store.write(
+    { runDate: '2026-08-05', timeDir: '10-00', position: 2, stage: 'assemble' },
+    { n: 'assemble' },
+  );
+  assert.equal(store.readAt('2026-08-05', '10-00', 'rank'), undefined);
+});
+
+test('readAt returns undefined for a completely unknown (runDate, timeDir) pair', () => {
+  const dbPath = freshDbPath();
+  const store = new SqliteCheckpointStore(dbPath);
+  assert.equal(store.readAt('2026-08-05', '10-00', 'assemble'), undefined);
+});
+
 test('latestTimeDir: a collision-suffix group sorts after its bare HH-MM', () => {
   const dbPath = freshDbPath();
   const store = new SqliteCheckpointStore(dbPath);

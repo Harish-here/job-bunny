@@ -141,6 +141,9 @@ function fakeCheckpointStore(
     readLatest() {
       return undefined;
     },
+    readAt() {
+      return undefined; // not exercised by reconcileCommand
+    },
     latestTimeDir() {
       return undefined; // not exercised by reconcileCommand
     },

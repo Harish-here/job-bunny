@@ -55,6 +55,9 @@ function fakeCheckpointStore(
     readLatest() {
       return opts.readLatestResult;
     },
+    readAt() {
+      return undefined; // not exercised by run.ts's --resume discovery
+    },
     latestTimeDir() {
       return undefined; // not exercised by run.ts's --resume discovery
     },

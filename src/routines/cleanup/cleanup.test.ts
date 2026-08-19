@@ -149,6 +149,9 @@ function fakeCheckpointStore(opts?: { prunedResult?: number }): {
     readLatest() {
       return undefined;
     },
+    readAt() {
+      return undefined;
+    },
     latestTimeDir() {
       return undefined;
     },
@@ -472,6 +475,9 @@ test('run(): a throwing checkpointStore.pruneOlderThan is warned about but does 
   const checkpointStore: CheckpointStore = {
     write() {},
     readLatest() {
+      return undefined;
+    },
+    readAt() {
       return undefined;
     },
     latestTimeDir() {
