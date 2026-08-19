@@ -32,7 +32,12 @@ export interface DeferralCandidate {
  * per today's schedules, that has no serving RunRecord in `history`. Mirrors
  * `isRunOwed`'s own served-check exactly, via the shared `isServed`
  * predicate and `graceEndAtFor` arithmetic in owed.ts — do not re-derive
- * either differently here.
+ * either differently here. Also mirrors `isRunOwed`'s `skipNext` guard: a
+ * slot the user deliberately skipped is never reported as an
+ * expired-unserved candidate (it would otherwise be indistinguishable from
+ * a genuine daemon-outage miss and could trigger a same-day catch-up run
+ * for a slot that was skipped on purpose) — do not re-derive that
+ * differently here either.
  */
 export function deriveExpiredUnserved(
   now: Date,
@@ -51,6 +56,19 @@ export function deriveExpiredUnserved(
       const slotAt = parseLocal(date, slot);
       const graceEndAt = graceEndAtFor(slotAt, schedule);
       if (now <= graceEndAt) continue; // grace not yet fully closed.
+
+      // Mirrors isRunOwed's own skipNext guard exactly (owed.ts) — a
+      // deliberately skipped slot ending its grace unserved is the
+      // EXPECTED outcome of the skip, not an expired-unserved candidate;
+      // without this it would be indistinguishable from a genuine
+      // daemon-outage miss and could spawn a same-day catch-up run,
+      // defeating "skipped exactly once and never runs."
+      if (
+        schedule.skipNext &&
+        schedule.skipNext.date === date &&
+        schedule.skipNext.slot === slot
+      )
+        continue;
 
       if (isServed(history, schedule.profile, date, slotAt, graceEndAt)) continue;
 

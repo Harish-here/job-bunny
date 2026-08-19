@@ -119,3 +119,42 @@ test('grace boundary is strictly-greater-than: now exactly at graceEndAt is stil
   );
   assert.deepEqual(candidates, []);
 });
+
+test('a skipNext-suppressed slot is excluded even once its grace has fully closed unserved (mirrors isRunOwed)', () => {
+  const now = new Date(2026, 6, 27, 15, 31); // 14:00 slot's grace ended at 15:30.
+  const candidates = deriveExpiredUnserved(
+    now,
+    [
+      schedule({
+        profile: 'harish',
+        times: ['14:00'],
+        skipNext: { date: '2026-07-27', slot: '14:00' },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(candidates, []);
+});
+
+test('skipNext for a DIFFERENT slot does not suppress this slot from being reported expired-unserved', () => {
+  const now = new Date(2026, 6, 27, 15, 31); // 14:00 slot's grace ended at 15:30.
+  const candidates = deriveExpiredUnserved(
+    now,
+    [
+      schedule({
+        profile: 'harish',
+        times: ['14:00'],
+        skipNext: { date: '2026-07-27', slot: '11:30' },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(candidates, [
+    {
+      profile: 'harish',
+      date: '2026-07-27',
+      slot: '14:00',
+      graceEndAt: new Date(2026, 6, 27, 15, 30),
+    },
+  ]);
+});
