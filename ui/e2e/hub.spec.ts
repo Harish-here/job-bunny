@@ -77,11 +77,11 @@ test('hub: #/setup renders six status cards', async ({ page }) => {
   }
 });
 
-test('hub: the sidebar nav item reads Setup & Health and routes to the hub', async ({
+test('hub: the sidebar nav item reads Operate and routes to the hub', async ({
   page,
 }) => {
   await page.goto('/#/triage');
-  await page.getByRole('button', { name: 'Setup & Health', exact: true }).click();
+  await page.getByRole('button', { name: 'Operate', exact: true }).click();
   await expect(page).toHaveURL(/#\/setup/);
   await expect(page.getByTestId('hub')).toBeVisible();
 });

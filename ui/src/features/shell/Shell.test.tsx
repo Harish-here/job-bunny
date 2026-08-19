@@ -128,7 +128,7 @@ describe('Shell', () => {
       'Tracker',
       'Runs',
       'Analytics',
-      'Setup & Health',
+      'Operate',
       'Settings',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
@@ -227,7 +227,7 @@ describe('Shell', () => {
       'Tracker',
       'Runs',
       'Analytics',
-      'Setup & Health',
+      'Operate',
       'Settings',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();

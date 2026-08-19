@@ -98,14 +98,7 @@ test('shell: nav items stay reachable by name at rail width', async ({ page }) =
   await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await expect(page.getByTestId('sidebar')).toHaveAttribute('data-collapsed', 'true');
 
-  for (const label of [
-    'Triage',
-    'Tracker',
-    'Runs',
-    'Analytics',
-    'Setup & Health',
-    'Settings',
-  ]) {
+  for (const label of ['Triage', 'Tracker', 'Runs', 'Analytics', 'Operate', 'Settings']) {
     await expect(page.getByRole('button', { name: label })).toBeVisible();
   }
 
