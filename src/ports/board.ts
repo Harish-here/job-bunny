@@ -140,6 +140,20 @@ export type StartDaemonOutcome = {
   outcome: 'started' | 'already_running' | 'spawn_failed';
 };
 
+/** `BoardSource.setAutostart`'s result (R20 = Option 1, task 13 — the
+ * Autostart counterpart to `StopDaemonOutcome`/`StartDaemonOutcome` above).
+ * Named EXACTLY `AutostartOutcome` — product-ui's own blueprint already
+ * assumes this name for this control. `'ok'` covers every darwin outcome
+ * the underlying `jobbunny autostart enable|disable` command can reach,
+ * including its own tolerated launchctl hiccups (`autostart.ts:228-231`) —
+ * the board never surfaces those as a request failure. `'unsupported_platform'`
+ * is reached on any non-darwin `process.platform`, WITHOUT the CLI command
+ * attempting any filesystem or `launchctl` side effect (its own darwin gate
+ * is the first statement of `runEnable`/`runDisable`). Defined HERE, not in
+ * `cli/wire/`, for the identical reachability reason `StopDaemonOutcome`/
+ * `StartDaemonOutcome` are. */
+export type AutostartOutcome = { outcome: 'ok' | 'unsupported_platform' };
+
 /** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
  * `newlyDropped` (jobs that drop under the draft but not the current config)
  * is capped at 12 entries, matching the mockup's disclosure ("see which 12
@@ -329,6 +343,13 @@ export interface BoardSource {
    * a pipeline run directly; every run stays daemon-spawned off a schedule
    * slot or claimed off a `run_intents` row. */
   startDaemon(): Promise<StartDaemonOutcome>;
+  /** R20 = Option 1, task 13 — enables or disables the darwin autostart
+   * LaunchAgent, reusing `cli/commands/autostart.ts`'s `runEnable`/
+   * `runDisable` verbatim (same darwin gate, same tolerant launchctl
+   * posture, same idempotent re-enable/re-disable). NEVER throws; every
+   * failure mode is a typed `AutostartOutcome`. On any non-darwin platform
+   * this NEVER attempts a filesystem write or a `launchctl` shell-out. */
+  setAutostart(enabled: boolean): Promise<AutostartOutcome>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this
    * OPENS-OR-CREATES the profile's db: an intent is durable state a

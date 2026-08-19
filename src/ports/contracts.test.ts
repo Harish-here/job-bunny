@@ -237,6 +237,7 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
     startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     readDaemonStatus: async () => ({
       state: 'stopped',
       pid: null,

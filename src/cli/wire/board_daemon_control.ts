@@ -22,12 +22,19 @@
  * `startDaemon()` (task 12) wraps `runServeStartParent`
  * (`cli/commands/serve/start.ts`) — see `startBoardDaemon`'s own doc
  * comment below for why that's a wrapping layer, not a pass-through.
+ *
+ * `setAutostart()` (task 13) is a THIN wrapper over `runEnable`/
+ * `runDisable` (`cli/commands/autostart.ts`, exported by this task's own
+ * non-behavioural refactor) — see `setBoardAutostart`'s own doc comment
+ * below for why every darwin outcome collapses to `'ok'`.
  */
-import { spawn as nodeSpawn } from 'node:child_process';
+import { execFile, spawn as nodeSpawn } from 'node:child_process';
 import { readdirSync as fsReaddirSync, readFileSync as fsReadFileSync } from 'node:fs';
+import { unlink as fsUnlink, writeFile as fsWriteFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import {
   defaultDaemonPidfileDeps,
   readDaemonPidfile,
@@ -38,10 +45,18 @@ import {
   defaultLogDeps,
   type LogDeps,
 } from '../../ops/daemon/logs/index.ts';
-import type { StartDaemonOutcome, StopDaemonOutcome } from '../../ports/board.ts';
+import type {
+  AutostartOutcome,
+  StartDaemonOutcome,
+  StopDaemonOutcome,
+} from '../../ports/board.ts';
+import type { AutostartDeps } from '../commands/autostart.ts';
+import { runDisable, runEnable } from '../commands/autostart.ts';
 import type { ServeDeps, SpawnFn, SpawnHandle } from '../commands/serve/index.ts';
 import { type KillDeps, killAndConfirmDead } from '../commands/serve/lifecycle.ts';
 import { runServeStartParent } from '../commands/serve/start.ts';
+
+const execFileAsync = promisify(execFile);
 
 function hasCode(err: unknown, code: string): boolean {
   return (
@@ -280,4 +295,103 @@ export async function startBoardDaemon(
   } catch {
     return { outcome: 'spawn_failed' };
   }
+}
+
+/** Real `launchctl` shell-out, `AutostartDeps.runLaunchctl`'s shape —
+ * mirrors `autostart.ts`'s own private `defaultAutostartDeps().runLaunchctl`
+ * (not exported, so reconstructed rather than imported), including its
+ * absorb-and-report posture for a non-zero exit. */
+async function realRunLaunchctl(
+  args: string[],
+): Promise<{ exitCode: number; stdout: string }> {
+  try {
+    const { stdout } = await execFileAsync('launchctl', args);
+    return { exitCode: 0, stdout };
+  } catch (err) {
+    const failure = err as { stdout?: string; code?: number };
+    return {
+      exitCode: typeof failure.code === 'number' ? failure.code : 1,
+      stdout: failure.stdout ?? '',
+    };
+  }
+}
+
+export interface BoardAutostartOverrides {
+  root: string;
+  /** Test-only seam: overrides `process.platform`. Per this brief's own
+   * safety constraint, EVERY test in this repo must override this — no
+   * test may exercise the real darwin path. Default: `process.platform`. */
+  platform?: NodeJS.Platform;
+  /** Default: the OS home directory (`homedir()`) — same default
+   * `BoardDaemonStartOverrides.home` documents above. */
+  home?: string;
+  uid?: number;
+  envPath?: string;
+  nodeBin?: string;
+  cliEntry?: string;
+  /** Test-only seam: overrides the darwin legacy-plist directory listing.
+   * Default: a real read of `<home>/Library/LaunchAgents`, `[]` on any
+   * error (same `realListLaunchAgentFiles` `startBoardDaemon` uses). */
+  listLaunchAgentFiles?: () => string[];
+  /** Test-only seam: replaces the real plist write. Default: a real
+   * `node:fs/promises writeFile`. */
+  writeFile?: (path: string, data: string) => Promise<void>;
+  /** Test-only seam: replaces the real plist removal. Default: a real
+   * `node:fs/promises unlink`. */
+  unlink?: (path: string) => Promise<void>;
+  /** Test-only seam: replaces the real `launchctl` shell-out. Per this
+   * brief's own safety constraint, EVERY test must override this. Default:
+   * `realRunLaunchctl` above. */
+  runLaunchctl?: (args: string[]) => Promise<{ exitCode: number; stdout: string }>;
+}
+
+/** `BoardSource.setAutostart`'s real implementation (task 13) — a thin
+ * wrapper that builds an `AutostartDeps` bag and delegates ENTIRELY to the
+ * CLI's own `runEnable`/`runDisable` (`cli/commands/autostart.ts`, exported
+ * by this task's own non-behavioural refactor): the SAME darwin gate,
+ * legacy-plist gate, plist render, and tolerant-launchctl posture the
+ * `jobbunny autostart enable|disable` command already has, reused
+ * verbatim — never re-derived here. This function ALWAYS calls
+ * `runEnable`/`runDisable`, regardless of `platform`: their own darwin
+ * check is the FIRST statement in either function body, so passing a
+ * non-darwin `deps.platform` through already guarantees `writeFile`/
+ * `unlink`/`runLaunchctl` are never invoked — there is no separate darwin
+ * check duplicated in this file.
+ *
+ * `AutostartOutcome` has only two members (`'ok'` / `'unsupported_platform'`)
+ * — deliberately coarser than the CLI's own exit code, which also
+ * distinguishes a legacy-plist conflict from a clean run. On darwin this
+ * wrapper always reports `'ok'` once `runEnable`/`runDisable` has run,
+ * discarding their exit code: both the tolerated-launchctl-hiccup path
+ * (already non-fatal inside `runEnable`, per this brief's explicit "must
+ * NOT surface [launchctl hiccups] as request failures" instruction) and
+ * the legacy-plist-conflict path (a real, if rare, CLI-side stop condition
+ * with no slot in this narrower port type) collapse to the same `'ok'` —
+ * the CLI's own `write`/`writeErr` output for either path is discarded
+ * here, never escalated into a board-visible failure. Never throws. */
+export async function setBoardAutostart(
+  enabled: boolean,
+  overrides: BoardAutostartOverrides,
+): Promise<AutostartOutcome> {
+  const platform = overrides.platform ?? process.platform;
+  const home = overrides.home ?? homedir();
+  const deps: AutostartDeps = {
+    platform,
+    home,
+    uid: overrides.uid ?? process.getuid?.(),
+    root: overrides.root,
+    envPath: overrides.envPath ?? process.env.PATH ?? '',
+    nodeBin: overrides.nodeBin ?? process.execPath,
+    cliEntry: overrides.cliEntry ?? fileURLToPath(new URL('../main.ts', import.meta.url)),
+    listLaunchAgentFiles:
+      overrides.listLaunchAgentFiles ?? realListLaunchAgentFiles(home),
+    writeFile: overrides.writeFile ?? ((p, data) => fsWriteFile(p, data, 'utf8')),
+    unlink: overrides.unlink ?? fsUnlink,
+    runLaunchctl: overrides.runLaunchctl ?? realRunLaunchctl,
+    write: () => {},
+    writeErr: () => {},
+  };
+
+  await (enabled ? runEnable(deps) : runDisable(deps));
+  return { outcome: platform === 'darwin' ? 'ok' : 'unsupported_platform' };
 }

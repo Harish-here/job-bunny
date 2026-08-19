@@ -162,6 +162,7 @@ function fakeSource(store: BoardStore | null): BoardSource {
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
     startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };

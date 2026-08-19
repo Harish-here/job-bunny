@@ -167,6 +167,7 @@ function fakeSource(
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
     startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     close() {
       if (closed) closed.value = true;
     },

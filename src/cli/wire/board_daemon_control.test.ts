@@ -1,13 +1,18 @@
 /**
  * board_daemon_control.test.ts (settings-overhaul, task 11 `stopBoardDaemon`;
- * task 12 adds `startBoardDaemon`) — TDD against a REAL temporary home for
- * the pidfile (written by hand, mirroring `board_daemon.test.ts`'s own
- * posture) but with `pidIsAlive`/`killPid`/`sleep`/`spawn` fully stubbed —
- * NEVER a real OS process. SAFETY: per this brief's own constraint, no test
- * here spawns, signals, or waits on anything but these in-memory stubs; the
+ * task 12 adds `startBoardDaemon`; task 13 adds `setBoardAutostart`) — TDD
+ * against a REAL temporary home for the pidfile (written by hand, mirroring
+ * `board_daemon.test.ts`'s own posture) but with
+ * `pidIsAlive`/`killPid`/`sleep`/`spawn` fully stubbed — NEVER a real OS
+ * process. SAFETY: per this brief's own constraint, no test here spawns,
+ * signals, or waits on anything but these in-memory stubs; the
  * `startBoardDaemon` tests below additionally stub `listLaunchAgentFiles`
  * and `home` (a throwaway subdirectory of the same tmpdir) so no test ever
- * touches the real `~/Library/LaunchAgents` or `~/.jobbunny/logs`.
+ * touches the real `~/Library/LaunchAgents` or `~/.jobbunny/logs`. The
+ * `setBoardAutostart` tests below stub BOTH `platform` and
+ * `listLaunchAgentFiles`/`writeFile`/`unlink`/`runLaunchctl` — per task 13's
+ * own explicit safety constraint, none of them ever writes, loads, or
+ * unloads a real LaunchAgent on this or any machine.
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -15,7 +20,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import type { SpawnFn, SpawnHandle } from '../commands/serve/index.ts';
-import { startBoardDaemon, stopBoardDaemon } from './board_daemon_control.ts';
+import {
+  setBoardAutostart,
+  startBoardDaemon,
+  stopBoardDaemon,
+} from './board_daemon_control.ts';
 
 let root: string;
 
@@ -264,4 +273,106 @@ test('startBoardDaemon: a synchronous spawn throw is caught: spawn_failed, never
     listLaunchAgentFiles: () => [],
   });
   assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+});
+
+// --- setBoardAutostart (task 13) ------------------------------------------
+
+function fakeAutostartOverrides(overrides: {
+  platform: NodeJS.Platform;
+  writeFileCalls?: Array<{ path: string; data: string }>;
+  unlinkCalls?: string[];
+  launchctlCalls?: string[][];
+  listLaunchAgentFilesCalled?: { value: boolean };
+}) {
+  const writeFileCalls = overrides.writeFileCalls ?? [];
+  const unlinkCalls = overrides.unlinkCalls ?? [];
+  const launchctlCalls = overrides.launchctlCalls ?? [];
+  const listCalled = overrides.listLaunchAgentFilesCalled ?? { value: false };
+  return {
+    root: freshRoot(),
+    platform: overrides.platform,
+    home: freshRoot(),
+    uid: 501,
+    envPath: '/usr/bin:/bin',
+    nodeBin: 'node',
+    cliEntry: '/repo/src/cli/main.ts',
+    listLaunchAgentFiles: () => {
+      listCalled.value = true;
+      return [];
+    },
+    writeFile: async (p: string, data: string) => {
+      writeFileCalls.push({ path: p, data });
+    },
+    unlink: async (p: string) => {
+      unlinkCalls.push(p);
+    },
+    runLaunchctl: async (args: string[]) => {
+      launchctlCalls.push(args);
+      return { exitCode: 0, stdout: '' };
+    },
+  };
+}
+
+test('setBoardAutostart: enable on a stubbed darwin platform writes the plist and bootstraps it: ok', async () => {
+  const writeFileCalls: Array<{ path: string; data: string }> = [];
+  const launchctlCalls: string[][] = [];
+  const outcome = await setBoardAutostart(
+    true,
+    fakeAutostartOverrides({ platform: 'darwin', writeFileCalls, launchctlCalls }),
+  );
+  assert.deepEqual(outcome, { outcome: 'ok' });
+  assert.equal(writeFileCalls.length, 1);
+  assert.ok(writeFileCalls[0]?.path.endsWith('com.jobbunny.autostart.plist'));
+  assert.deepEqual(launchctlCalls[0]?.[0], 'bootstrap');
+});
+
+test('setBoardAutostart: disable on a stubbed darwin platform bootouts and unlinks the plist: ok', async () => {
+  const unlinkCalls: string[] = [];
+  const launchctlCalls: string[][] = [];
+  const outcome = await setBoardAutostart(
+    false,
+    fakeAutostartOverrides({ platform: 'darwin', unlinkCalls, launchctlCalls }),
+  );
+  assert.deepEqual(outcome, { outcome: 'ok' });
+  assert.equal(launchctlCalls[0]?.[0], 'bootout');
+  assert.equal(unlinkCalls.length, 1);
+  assert.ok(unlinkCalls[0]?.endsWith('com.jobbunny.autostart.plist'));
+});
+
+test('setBoardAutostart: enable on a stubbed non-darwin platform: unsupported_platform, no side effect attempted', async () => {
+  const writeFileCalls: Array<{ path: string; data: string }> = [];
+  const launchctlCalls: string[][] = [];
+  const listCalled = { value: false };
+  const outcome = await setBoardAutostart(
+    true,
+    fakeAutostartOverrides({
+      platform: 'win32',
+      writeFileCalls,
+      launchctlCalls,
+      listLaunchAgentFilesCalled: listCalled,
+    }),
+  );
+  assert.deepEqual(outcome, { outcome: 'unsupported_platform' });
+  assert.equal(writeFileCalls.length, 0);
+  assert.equal(launchctlCalls.length, 0);
+  assert.equal(listCalled.value, false);
+});
+
+test('setBoardAutostart: disable on a stubbed non-darwin platform: unsupported_platform, no side effect attempted', async () => {
+  const unlinkCalls: string[] = [];
+  const launchctlCalls: string[][] = [];
+  const listCalled = { value: false };
+  const outcome = await setBoardAutostart(
+    false,
+    fakeAutostartOverrides({
+      platform: 'linux',
+      unlinkCalls,
+      launchctlCalls,
+      listLaunchAgentFilesCalled: listCalled,
+    }),
+  );
+  assert.deepEqual(outcome, { outcome: 'unsupported_platform' });
+  assert.equal(unlinkCalls.length, 0);
+  assert.equal(launchctlCalls.length, 0);
+  assert.equal(listCalled.value, false);
 });

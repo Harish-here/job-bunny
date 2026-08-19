@@ -75,6 +75,7 @@ import {
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
 import type {
+  AutostartOutcome,
   BoardProfile,
   BoardSource,
   BoardStore,
@@ -92,7 +93,11 @@ import type { RunIntentStore } from '../../ports/run_intents.ts';
 import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
-import { startBoardDaemon, stopBoardDaemon } from './board_daemon_control.ts';
+import {
+  setBoardAutostart,
+  startBoardDaemon,
+  stopBoardDaemon,
+} from './board_daemon_control.ts';
 import { runBoardDoctor } from './board_doctor.ts';
 import { previewFilterRule as previewFilterRuleImpl } from './board_preview.ts';
 import { listBoardSecrets, writeBoardSecret } from './board_secrets.ts';
@@ -279,6 +284,10 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
 
     startDaemon(): Promise<StartDaemonOutcome> {
       return startBoardDaemon({ root });
+    },
+
+    setAutostart(enabled: boolean): Promise<AutostartOutcome> {
+      return setBoardAutostart(enabled, { root });
     },
 
     async openIntents(name: string): Promise<RunIntentStore | null> {

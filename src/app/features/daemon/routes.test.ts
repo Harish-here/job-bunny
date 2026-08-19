@@ -1,22 +1,26 @@
 /**
  * routes.test.ts (UI phase 1, Task 7; settings-overhaul task 11 adds Stop,
- * task 12 adds Start) — TDD for `makeDaemonRoutes`. Fakes are plain object
- * literals (`fakeSource`), mirroring `features/doctor/routes.test.ts`'s
- * pattern — no `src/adapters/**` import anywhere in this file.
+ * task 12 adds Start, task 13 adds Autostart) — TDD for `makeDaemonRoutes`.
+ * Fakes are plain object literals (`fakeSource`), mirroring
+ * `features/doctor/routes.test.ts`'s pattern — no `src/adapters/**` import
+ * anywhere in this file.
  *
- * The `stopDaemon`/`startDaemon` tests here cover the ROUTE's
- * outcome-to-HTTP mapping only (all `StopDaemonOutcome`/`StartDaemonOutcome`
- * values, via a stubbed `BoardSource.stopDaemon`/`startDaemon`) — the
- * actual kill-and-confirm / spawn-and-confirm sequencing is exercised
- * against the real implementations in `cli/wire/board_daemon_control.test.ts`,
- * the only layer with a stubbed process seam to assert it against. Per this
- * brief's own safety constraint, no test in this file (or in
- * `board_daemon_control.test.ts`) ever spawns, signals, or waits on a real
+ * The `stopDaemon`/`startDaemon`/`setAutostart` tests here cover the
+ * ROUTE's outcome-to-HTTP mapping only (all `StopDaemonOutcome`/
+ * `StartDaemonOutcome`/`AutostartOutcome` values, via a stubbed
+ * `BoardSource.stopDaemon`/`startDaemon`/`setAutostart`) — the actual
+ * kill-and-confirm / spawn-and-confirm / enable-and-disable sequencing is
+ * exercised against the real implementations in
+ * `cli/wire/board_daemon_control.test.ts`, the only layer with a stubbed
+ * process/platform seam to assert it against. Per this brief's own safety
+ * constraint, no test in this file (or in `board_daemon_control.test.ts`)
+ * ever spawns, signals, waits on, or exercises the real darwin path of an
  * OS process.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type {
+  AutostartOutcome,
   BoardSource,
   DaemonStatus,
   StartDaemonOutcome,
@@ -41,6 +45,7 @@ function fakeSource(overrides: Partial<BoardSource> = {}): BoardSource {
     readDaemonStatus: async () => defaultStatus(),
     stopDaemon: async () => ({ outcome: 'stopped' }),
     startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
@@ -50,7 +55,7 @@ function fakeSource(overrides: Partial<BoardSource> = {}): BoardSource {
   };
 }
 
-function findRoute(source: BoardSource, method: 'GET' | 'POST', path: string) {
+function findRoute(source: BoardSource, method: 'GET' | 'POST' | 'PUT', path: string) {
   const route = makeDaemonRoutes(source).find(
     (r) => r.method === method && r.path === path,
   );
@@ -88,12 +93,13 @@ function defaultStatus(): DaemonStatus {
   };
 }
 
-test('makeDaemonRoutes: registers exactly one GET and two POST routes', () => {
+test('makeDaemonRoutes: registers exactly one GET, two POST, and one PUT route', () => {
   const routes = makeDaemonRoutes(fakeSource());
-  assert.equal(routes.length, 3);
+  assert.equal(routes.length, 4);
   assert.ok(routes.some((r) => r.method === 'GET' && r.path === '/api/daemon'));
   assert.ok(routes.some((r) => r.method === 'POST' && r.path === '/api/daemon/stop'));
   assert.ok(routes.some((r) => r.method === 'POST' && r.path === '/api/daemon/start'));
+  assert.ok(routes.some((r) => r.method === 'PUT' && r.path === '/api/daemon/autostart'));
 });
 
 test('daemon: returns the status verbatim', async () => {
@@ -220,4 +226,85 @@ test('daemon start: a genuine spawn failure never reports already_running', asyn
   const res = await route.handler(req());
   assert.deepEqual(res.body, { outcome: 'spawn_failed' });
   assert.notDeepEqual(res.body, { outcome: 'already_running' });
+});
+
+// --- daemon autostart (task 13) -------------------------------------------
+
+const AUTOSTART_OUTCOMES: AutostartOutcome[] = [
+  { outcome: 'ok' },
+  { outcome: 'unsupported_platform' },
+];
+
+for (const outcome of AUTOSTART_OUTCOMES) {
+  test(`daemon autostart PUT enabled:true: ${outcome.outcome} maps to 200 with the outcome as the body, no envelope`, async () => {
+    let received: boolean | undefined;
+    const route = findRoute(
+      fakeSource({
+        setAutostart: async (enabled) => {
+          received = enabled;
+          return outcome;
+        },
+      }),
+      'PUT',
+      '/api/daemon/autostart',
+    );
+    const res = await route.handler(req({ body: { enabled: true } }));
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, outcome);
+    assert.equal(received, true);
+  });
+}
+
+test('daemon autostart PUT enabled:false: forwards false through to BoardSource.setAutostart', async () => {
+  let received: boolean | undefined;
+  const route = findRoute(
+    fakeSource({
+      setAutostart: async (enabled) => {
+        received = enabled;
+        return { outcome: 'ok' };
+      },
+    }),
+    'PUT',
+    '/api/daemon/autostart',
+  );
+  const res = await route.handler(req({ body: { enabled: false } }));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { outcome: 'ok' });
+  assert.equal(received, false);
+});
+
+test('daemon autostart PUT: a non-boolean enabled field is rejected before reaching BoardSource', async () => {
+  let called = false;
+  const route = findRoute(
+    fakeSource({
+      setAutostart: async () => {
+        called = true;
+        return { outcome: 'ok' };
+      },
+    }),
+    'PUT',
+    '/api/daemon/autostart',
+  );
+  await assert.rejects(async () => {
+    await route.handler(req({ body: { enabled: 'yes' } }));
+  });
+  assert.equal(called, false);
+});
+
+test('daemon autostart PUT: a missing body is rejected before reaching BoardSource', async () => {
+  let called = false;
+  const route = findRoute(
+    fakeSource({
+      setAutostart: async () => {
+        called = true;
+        return { outcome: 'ok' };
+      },
+    }),
+    'PUT',
+    '/api/daemon/autostart',
+  );
+  await assert.rejects(async () => {
+    await route.handler(req({ body: undefined }));
+  });
+  assert.equal(called, false);
 });
