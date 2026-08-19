@@ -92,12 +92,9 @@ import type { DoctorReport } from '../../ports/doctor.ts';
 import type { RunIntentStore } from '../../ports/run_intents.ts';
 import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
+import { setBoardAutostart } from './board_autostart_control.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
-import {
-  setBoardAutostart,
-  startBoardDaemon,
-  stopBoardDaemon,
-} from './board_daemon_control.ts';
+import { startBoardDaemon, stopBoardDaemon } from './board_daemon_control.ts';
 import { runBoardDoctor } from './board_doctor.ts';
 import { previewFilterRule as previewFilterRuleImpl } from './board_preview.ts';
 import { listBoardSecrets, writeBoardSecret } from './board_secrets.ts';

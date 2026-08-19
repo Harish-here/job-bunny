@@ -144,14 +144,19 @@ export type StartDaemonOutcome = {
  * Autostart counterpart to `StopDaemonOutcome`/`StartDaemonOutcome` above).
  * Named EXACTLY `AutostartOutcome` — product-ui's own blueprint already
  * assumes this name for this control. `'ok'` covers every darwin outcome
- * the underlying `jobbunny autostart enable|disable` command can reach,
- * including its own tolerated launchctl hiccups (`autostart.ts:228-231`) —
- * the board never surfaces those as a request failure. `'unsupported_platform'`
- * is reached on any non-darwin `process.platform`, WITHOUT the CLI command
- * attempting any filesystem or `launchctl` side effect (its own darwin gate
- * is the first statement of `runEnable`/`runDisable`). Defined HERE, not in
- * `cli/wire/`, for the identical reachability reason `StopDaemonOutcome`/
- * `StartDaemonOutcome` are. */
+ * short of a real, blocking refusal, including tolerated launchctl hiccups
+ * (`autostart.ts:228-231`) — the board never surfaces those as a request
+ * failure. `'unsupported_platform'` is reached on any non-darwin
+ * `process.platform`, with no filesystem or `launchctl` side effect
+ * attempted. Defined HERE, not `cli/wire/`, same reachability reason as
+ * `StopDaemonOutcome`/`StartDaemonOutcome`.
+ *
+ * No slot exists here for the darwin legacy-plist-conflict refusal
+ * (`runEnable`, exit 1, enable only — NO plist written, `launchctl` never
+ * called): fix round F13 surfaces THAT case as a thrown
+ * `HttpError(409, 'autostart_conflict', ...)` instead of silently
+ * returning `{outcome:'ok'}` — see `board_autostart_control.ts`'s
+ * `setBoardAutostart`. */
 export type AutostartOutcome = { outcome: 'ok' | 'unsupported_platform' };
 
 /** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
@@ -346,9 +351,12 @@ export interface BoardSource {
   /** R20 = Option 1, task 13 — enables or disables the darwin autostart
    * LaunchAgent, reusing `cli/commands/autostart.ts`'s `runEnable`/
    * `runDisable` verbatim (same darwin gate, same tolerant launchctl
-   * posture, same idempotent re-enable/re-disable). NEVER throws; every
-   * failure mode is a typed `AutostartOutcome`. On any non-darwin platform
-   * this NEVER attempts a filesystem write or a `launchctl` shell-out. */
+   * posture, same idempotent re-enable/re-disable). Fix round F13: a
+   * darwin legacy-plist-conflict refusal on enable throws
+   * `HttpError(409, 'autostart_conflict', ...)` rather than returning a
+   * value — see `AutostartOutcome`'s own doc comment. On any non-darwin
+   * platform this never attempts a filesystem write or `launchctl`
+   * shell-out. */
   setAutostart(enabled: boolean): Promise<AutostartOutcome>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this

@@ -10,22 +10,27 @@
  * `features/doctor/routes.ts`'s shape: no `service.ts` (two-pair rule keeps
  * this slice at one impl file plus `index.ts`).
  *
- * `stopDaemon()`/`startDaemon()`/`setAutostart()` never throw, so no
- * handler needs a try/catch — every outcome is a value. `stopDaemon`'s two
- * unresponsive outcomes (`daemon_unresponsive`/`child_unresponsive`) map to
- * a 409 so the client can never mistake them for the 200
- * `stopped`/`already_stopped` success line. `startDaemon`'s
- * `'started'`/`'already_running'` both map to 200 — the daemon ends up
- * running either way, the same "target state reached" posture
- * `'already_stopped'` gets on the stop side — while `'spawn_failed'` maps
- * to 500 (a genuine operational failure, not a state conflict) so it can
- * never read as success. The exact status codes are a UI-side decision
- * (per the design doc); this mapping just guarantees no failure outcome on
- * any route is ever indistinguishable from success. `setAutostart`'s two
- * outcomes are BOTH a legitimate, non-error result (`'ok'` the toggle
- * applied, `'unsupported_platform'` there was nothing to apply on this OS)
- * — both map to 200, the body itself carries the distinction; the request
- * body is validated with zod before it ever reaches `BoardSource`. */
+ * `stopDaemon()`/`startDaemon()` never throw, so their handlers need no
+ * try/catch — every outcome is a value. `stopDaemon`'s two unresponsive
+ * outcomes (`daemon_unresponsive`/`child_unresponsive`) map to a 409 so the
+ * client can never mistake them for the 200 `stopped`/`already_stopped`
+ * success line. `startDaemon`'s `'started'`/`'already_running'` both map to
+ * 200 — the daemon ends up running either way, the same "target state
+ * reached" posture `'already_stopped'` gets on the stop side — while
+ * `'spawn_failed'` maps to 500 (a genuine operational failure, not a state
+ * conflict) so it can never read as success. The exact status codes are a
+ * UI-side decision (per the design doc); this mapping just guarantees no
+ * failure outcome on any route is ever indistinguishable from success.
+ * `setAutostart`'s two RETURNED outcomes are BOTH a legitimate, non-error
+ * result (`'ok'` the toggle applied, `'unsupported_platform'` there was
+ * nothing to apply on this OS) — both map to 200, the body itself carries
+ * the distinction; the request body is validated with zod before it ever
+ * reaches `BoardSource`. Fix round F13: `setAutostart` CAN also throw
+ * `HttpError(409, 'autostart_conflict', ...)` for a darwin legacy-plist
+ * conflict the `AutostartOutcome` type has no slot for — no local
+ * try/catch is needed for that either, since `server.ts`'s existing
+ * generic `HttpError` catch (the same one `router.ts`'s `param()` already
+ * relies on) handles it. */
 import { z } from 'zod';
 import type {
   AutostartOutcome,
