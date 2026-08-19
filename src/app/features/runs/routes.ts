@@ -139,6 +139,13 @@ function listHandler(source: BoardSource) {
             total: h?.total ?? 0,
             groups: [],
             breakerOpen: h?.breakerOpen ?? false,
+            // `listRunHealth` batches only `total`/`breakerOpen` (see
+            // `ports/board.ts`'s `RunHealth`) — the list view never
+            // computes the full grouped breakdown, so cap-hit flags
+            // degrade to false here exactly like `breakerOpen` does;
+            // only the detail pane's `/soft-errors` endpoint (backed by
+            // `groupSoftErrors`) reports real values.
+            capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
           },
         };
       }),

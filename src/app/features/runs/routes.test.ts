@@ -179,7 +179,15 @@ test('list: happy path with defaults', async () => {
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, {
     rows: [
-      { ...SAMPLE_SUMMARY, softErrors: { total: 0, groups: [], breakerOpen: false } },
+      {
+        ...SAMPLE_SUMMARY,
+        softErrors: {
+          total: 0,
+          groups: [],
+          breakerOpen: false,
+          capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+        },
+      },
     ],
     total: 1,
     limit: 50,
@@ -207,6 +215,7 @@ test('list: merges the batched listRunHealth map onto each row as softErrors (he
     total: 5,
     groups: [],
     breakerOpen: true,
+    capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
   });
   assert.deepEqual(store.listRunHealthCalls, [[SAMPLE_SUMMARY.id]]);
 });

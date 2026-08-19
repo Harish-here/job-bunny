@@ -9,7 +9,12 @@ function row(msg: string, data?: Record<string, unknown>): RunEventRow {
 
 test('groupSoftErrors: empty input', () => {
   const summary = groupSoftErrors([]);
-  assert.deepEqual(summary, { total: 0, groups: [], breakerOpen: false });
+  assert.deepEqual(summary, {
+    total: 0,
+    groups: [],
+    breakerOpen: false,
+    capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+  });
 });
 
 test('groupSoftErrors: single group', () => {
@@ -131,4 +136,44 @@ test('groupSoftErrors: breakerOpen also detects the trip and probe-re-open break
     ),
   ]);
   assert.equal(reopen.breakerOpen, true);
+});
+
+test('groupSoftErrors: capsHit.maxNewPerLane true when only the maxNewPerLane cap warn is present', () => {
+  const summary = groupSoftErrors([
+    row('source: maxNewPerLane cap hit — dropping remainder', {
+      scope: 'source',
+      lane: 'greenhouse',
+      maxNewPerLane: 50,
+    }),
+  ]);
+  assert.deepEqual(summary.capsHit, { maxNewPerLane: true, maxCardsPerUrl: false });
+});
+
+test('groupSoftErrors: capsHit.maxCardsPerUrl true when only the maxCardsPerUrl cap warn is present', () => {
+  const summary = groupSoftErrors([
+    row('linkedin lane: maxCardsPerUrl cap hit — dropping remainder for this url', {
+      scope: 'farm',
+      url: 'https://www.linkedin.com/jobs/search/?keywords=x',
+      maxCardsPerUrl: 25,
+    }),
+  ]);
+  assert.deepEqual(summary.capsHit, { maxNewPerLane: false, maxCardsPerUrl: true });
+});
+
+test('groupSoftErrors: capsHit both true when both cap warns are present', () => {
+  const summary = groupSoftErrors([
+    row('source: maxNewPerLane cap hit — dropping remainder', { scope: 'source' }),
+    row('linkedin lane: maxCardsPerUrl cap hit — dropping remainder for this url', {
+      scope: 'farm',
+    }),
+  ]);
+  assert.deepEqual(summary.capsHit, { maxNewPerLane: true, maxCardsPerUrl: true });
+});
+
+test('groupSoftErrors: capsHit both false when no cap warn is present', () => {
+  const summary = groupSoftErrors([
+    row('linkedin lane: page identity loss', { scope: 'farm' }),
+    row('harvest: harvested 0 cards', { scope: 'farm' }),
+  ]);
+  assert.deepEqual(summary.capsHit, { maxNewPerLane: false, maxCardsPerUrl: false });
 });
