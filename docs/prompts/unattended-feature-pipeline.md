@@ -29,17 +29,16 @@ Read CLAUDE.md and consult the explainer agent's KB before Phase 2 so your
 decisions respect the architecture and the stability principle (pipeline
 stability outranks any feature).
 
-**Tooling for the phases:** the PM, UI, and BE personas in Phases 1–2 are the
-agents provided by the `/product-engineering` skill (installed on this machine)
-— load that skill first and drive its personas per its own instructions rather
-than improvising generic subagents. Phase 3 executes through the
-`sdd-task-loop` workflow (installed on this machine). Only if a skill or
-workflow is genuinely unavailable in this session, note that in the ledger and
-fall back to the inline fallback described in the phase.
+**Tooling for the phases:** you are running on my local machine — everything
+you need is installed: the `/product-engineering` skill (its agents are the PM,
+UI, and BE personas for Phases 1–2; load the skill first and drive its personas
+per its own instructions rather than improvising generic subagents), the
+`sdd-task-loop` workflow (Phase 3's execution engine), the `gh` CLI, Node 24,
+and a logged-in Chrome for live verification.
 
-Work on the git branch this session designates; if none is designated, create
-`claude/<feature-slug>` from the latest `main`. Commit per completed task with
-clear messages; never push to `main`.
+Create the branch `claude/<feature-slug>` from the latest `main` and do all
+work there. Commit per completed task with clear messages; never push to
+`main`.
 
 ## PHASE 1 — PRODUCT (PM)
 
@@ -83,14 +82,12 @@ Convert the frozen blueprints into an ordered, spec-driven task list: each task
 Order tasks so the tree stays green after every one
 (ports/schemas → core → adapters → app/board → ui).
 
-Execute the task list through the **`sdd-task-loop` workflow** (installed on
-this machine), feeding it the frozen blueprints and the task specs; follow its
-own conventions for task format and completion criteria. Code changes must
-still respect this repo's rule that the **executor** agent owns placement and
-test-pairing — if the workflow lets you choose the coding agent, choose
-executor. Fallback if the workflow is unavailable: run the loop manually —
-TaskCreate for the list, executor per task. Either way, after each task run the
-relevant fast checks (`node --test <changed tests>`, typecheck/lint as
+Execute the task list through the **`sdd-task-loop` workflow**, feeding it the
+frozen blueprints and the task specs; follow its own conventions for task
+format and completion criteria. Code changes must still respect this repo's
+rule that the **executor** agent owns placement and test-pairing — if the
+workflow lets you choose the coding agent, choose executor. After each task run
+the relevant fast checks (`node --test <changed tests>`, typecheck/lint as
 appropriate), fix until green, commit. Loop until all tasks are done, then run
 the full gate:
 `npm run check`, plus `npm run ui:check`, `ui:build`, and `ui:e2e` if `ui/` was
@@ -118,9 +115,9 @@ touched. All green before Phase 4.
    start with `jobbunny doctor --profile harish` and read-only surfaces (board,
    runs); run the real pipeline path only as far as the feature requires, prefer
    `--dry-run` where it exists, and never delete, reset, or clobber harish data.
-   If a real run is needed and Chrome/login isn't available in this environment,
-   verify as deep as the environment allows, and record exactly what could not be
-   exercised live in the ledger and final message.
+   Chrome and the logged-in profile are available on this machine — a real run
+   is expected when the feature touches the run path; respect the one-Chrome
+   invariant (stop the daemon or let it idle before launching a manual run).
 3. Anything not green: classify it (Blocker Protocol), fix through the executor,
    re-run the failed verification. Loop until the harish verification is green.
    Green here is the Definition of Done for the implementation.
@@ -128,13 +125,15 @@ touched. All green before Phase 4.
 ## PHASE 6 — SHIP
 
 This prompt is my explicit request to raise the PR. Push the branch
-(`git push -u origin <branch>`, retry on network errors with backoff), open a PR
-against `main` with a body covering: feature summary, blueprint highlights, test
-+ verification evidence, and the decision ledger's crucial entries. Then
-`subscribe_pr_activity` and drive CI to green: diagnose and push fixes for every
-red check per the drive-to-green rules; never skip or quarantine a test to get
-green. Schedule `send_later` check-ins (~1h) until CI is green so a missed
-webhook can't strand the PR.
+(`git push -u origin <branch>`, retry on network errors with backoff) and open
+a PR against `main` with `gh pr create`, the body covering: feature summary,
+blueprint highlights, test + verification evidence, and the decision ledger's
+crucial entries. Then drive CI to green: watch the `test` check with
+`gh pr checks <n> --watch` (fall back to polling `gh pr checks` every few
+minutes if `--watch` misbehaves); on any red check, pull the failing job's log
+(`gh run view --log-failed`), root-cause it, fix through the executor, and
+push — repeat until green. Never skip, disable, or quarantine a test to get
+green, and never push empty commits to kick CI.
 
 ## NOTIFY ME — TELEGRAM
 
@@ -174,7 +173,7 @@ Classify every blocker the moment you hit it:
 3. **Not blocking progress** → defer. Note it in the ledger and in the final
    message; never fix-creep into it, never silently drop it.
 4. **Hard blocker** — blocks the Definition of Done and you cannot fix it
-   (missing credential, environment limitation, a fix that would violate the
+   (missing credential, external outage, a fix that would violate the
    stability principle) → stop, commit and push what's green so far, and message
    me with: the classification, what you tried, and 2–3 options with your
    recommendation.
