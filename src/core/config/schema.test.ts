@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { PipelineConfigSchema } from './schema.ts';
 
 test('minimal config gets defaults', () => {
@@ -44,6 +47,7 @@ test('schedule with only times gets enabled/weekdays/graceMinutes defaults', () 
     enabled: true,
     weekdays: [1, 2, 3, 4, 5],
     graceMinutes: 90,
+    skipNext: null,
   });
 });
 
@@ -62,6 +66,7 @@ test('schedule with explicit enabled/weekdays/graceMinutes preserves them', () =
     enabled: false,
     weekdays: [0, 6],
     graceMinutes: 45,
+    skipNext: null,
   });
 });
 
@@ -86,4 +91,45 @@ test('rejects a non-positive graceMinutes', () => {
 test('a config with no schedule key at all still parses fine', () => {
   const cfg = PipelineConfigSchema.parse({ connector: 'notion' });
   assert.equal(cfg.schedule, undefined);
+});
+
+test('a schedule with no skipNext key parses with skipNext: null', () => {
+  const cfg = PipelineConfigSchema.parse({
+    connector: 'notion',
+    schedule: { times: ['09:00'] },
+  });
+  assert.equal(cfg.schedule?.skipNext, null);
+});
+
+test('a schedule with a valid skipNext object round-trips unchanged', () => {
+  const cfg = PipelineConfigSchema.parse({
+    connector: 'notion',
+    schedule: {
+      times: ['09:00'],
+      skipNext: { date: '2026-08-20', slot: '09:00' },
+    },
+  });
+  assert.deepEqual(cfg.schedule?.skipNext, { date: '2026-08-20', slot: '09:00' });
+});
+
+test('the committed rajni profile.json fixture parses unchanged through the widened schema', () => {
+  const fixturePath = join(
+    fileURLToPath(new URL('.', import.meta.url)),
+    '..',
+    '..',
+    '..',
+    'profiles',
+    'rajni',
+    'profile.json',
+  );
+  const raw = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const cfg = PipelineConfigSchema.parse(raw);
+  assert.equal(cfg.connector, 'sqlite');
+  assert.deepEqual(cfg.schedule, {
+    times: [],
+    enabled: false,
+    weekdays: [1, 2, 3, 4, 5],
+    graceMinutes: 90,
+    skipNext: null,
+  });
 });
