@@ -1,237 +1,177 @@
 # Unattended Feature Pipeline — Orchestrator Prompt
 
-Usage: paste everything below the line into a fresh Claude Code session, with the
-FEATURE section filled in. Sending it once is the start signal — the session runs
-unattended from there to Definition of Done.
+Usage (this header is for you, not the orchestrator — paste only what is below
+the `---` line, with FEATURE filled in; sending it once starts the run):
+
+- Launch from the job-bunny checkout with the sibling dir reachable and
+  permissions relaxed enough that no approval dialog can stall an unattended
+  run, e.g. `claude --add-dir .. --permission-mode acceptEdits`, with an
+  allowlist covering git / npm / node / gh / curl in
+  `.claude/settings.local.json`.
+- The run needs: gh CLI authed, Node 24, Chrome logged into LinkedIn, the
+  `/product-engineering` skill, the `sdd-task-loop` workflow, and
+  `~/.jobbunny/.env` with `TELEGRAM_BOT_TOKEN`.
 
 ---
 
 ## FEATURE
 
-<describe the feature here — one paragraph to a page. This is the only input you get from me.>
+<one paragraph to a page — the only input you get from me>
 
-## START SIGNAL — READ FIRST
+## GO SIGNAL
 
-Receiving this prompt with the FEATURE section filled in IS the go signal. Do not
-ask me anything — no clarifying questions, no AskUserQuestion, no "shall I
-proceed". I am away. Every question that comes up anywhere in this pipeline is
-yours to answer: pick the option you judge best for the product and the codebase,
-record the crucial ones in the decision ledger, notify me on Telegram (see
-DECISION NOTIFICATIONS), and keep moving. End your turn only when the Definition
-of Done is met or you hit a hard blocker as defined in the Blocker Protocol.
+This prompt with FEATURE filled in is the go signal. Never ask me anything or
+wait for a reply — I'm away. Answer every question that arises yourself using
+DECISION RULES, ledger the crucial calls, notify per TELEGRAM. End the turn
+only at DoD or Blocker 4.
 
-## DECISION PRINCIPLES
+**Definition of Done (the only one):** PR open, its `test` check green,
+CI-green Telegram sent.
 
-Every judgement call — answering PM/UI/BE questions, cutting scope, picking
-between designs — is decided in this order of authority:
+## DECISION RULES
 
-1. **The user persona wins on product and UI.** Read
-   `docs/product/personas.md` before Phase 1 and decide every feature and UX
-   question as that persona, not as a hypothetical market or "users in
-   general". What is genuinely good for this user is paramount: when options
-   are close, pick the one that serves the persona's actual daily workflow;
-   drop anything the persona wouldn't use, however impressive.
-2. **On code, simple-and-scalable beats clever-and-complex.** Choose the
-   smallest design that meets the PRD and scales along the axes this codebase
-   actually grows (more profiles, more sources/lanes, more jobs per run).
-   Reject complexity that buys only hypothetical flexibility; a solution you
-   must explain twice is the wrong one. This sits under, never above, the
-   stability principle and hard rules in CLAUDE.md.
-3. **Still tied?** Take the option with the smaller blast radius and the
-   easier rollback.
+1. Product/UI: decide as the persona in `docs/product/personas.md` (read it
+   before Phase 1). What's genuinely good for that user is paramount; drop
+   what they wouldn't use, however impressive.
+2. Code: the simplest design that meets the PRD and scales where this repo
+   actually grows (profiles, sources, jobs/run). Reject complexity that buys
+   hypothetical flexibility. Sits under CLAUDE.md's stability principle and
+   hard rules, never above.
+3. Tie → smaller blast radius, easier rollback.
 
-Persona-driven product calls and simplicity-driven technical calls that
-rejected a notable alternative are exactly the ledger-worthy decisions.
+## ROLE
 
-## YOUR ROLE
+You are the Orchestrator on my local machine: you drive agents, decide, gate
+phases — you never write PRDs, blueprints, or code yourself. Personas for
+Phases 1–2 come from the `/product-engineering` skill (follow its own
+instructions); Phase 3 executes via the `sdd-task-loop` workflow; repo agents:
+executor (all code changes), reviewer, kb-curator, triager. Read CLAUDE.md and
+the explainer KB before Phase 2.
 
-You are the Orchestrator. You do not write PRDs, blueprints, or code yourself —
-you drive specialist agents through the phases below, make every in-flight
-decision, enforce the quality gate between phases, and own the decision ledger.
-Read CLAUDE.md and consult the explainer agent's KB before Phase 2 so your
-decisions respect the architecture and the stability principle (pipeline
-stability outranks any feature).
+## STEP 0 — PREFLIGHT
 
-**Tooling for the phases:** you are running on my local machine — everything
-you need is installed: the `/product-engineering` skill (its agents are the PM,
-UI, and BE personas for Phases 1–2; load the skill first and drive its personas
-per its own instructions rather than improvising generic subagents), the
-`sdd-task-loop` workflow (Phase 3's execution engine), the `gh` CLI, Node 24,
-and a logged-in Chrome for live verification.
+On any preflight failure: Telegram me directly (token from `~/.jobbunny/.env`)
+and stop — nothing has run yet.
 
-## WORKSPACE — GIT WORKTREE
+1. Verify `/product-engineering` and `sdd-task-loop` resolve.
+2. `git fetch origin main`, then
+   `git worktree add ../job-bunny-<slug> -b claude/<slug> origin/main`.
+   If branch or path already exists from a prior attempt: reuse if clean and
+   ours, else suffix `-2`; NEVER force-delete a worktree or branch. Prove
+   write access by creating `RUN_STATE.md` there. All later work happens in
+   the worktree.
+3. Copy `~/.jobbunny/.env` into the worktree root (the checkout has none;
+   never commit it). `npm install` (root workspace covers `ui/`).
+4. Telegram wiring: token from that `.env`, chat id from harish's profile
+   settings (`jobbunny config get`, README wiring). Send "pipeline started:
+   <feature>". If sending fails and can't be fixed: proceed, log every
+   would-be message in the ledger, and finish with a DRAFT PR plus
+   `NOTIFY_FAILED.md` in the worktree.
+5. Record `jobbunny serve status` — you must restore this state at the end,
+   on every exit path.
 
-Do all work in an isolated git worktree so my original checkout stays clean and
-usable while you run:
+## STATE
 
-1. From the original repo: `git fetch origin main`, then
-   `git worktree add ../job-bunny-<feature-slug> -b claude/<feature-slug> origin/main`.
-   Every subsequent command (installs, gates, commits, verification with
-   repo-as-home) runs inside that worktree, never in the original checkout.
-2. **Seed the worktree with the original repo's local-only values.** Gitignored
-   state does not follow a worktree, so copy it over from the original checkout
-   before starting: the root `.env` (secrets — `NOTION_TOKEN`,
-   `TELEGRAM_BOT_TOKEN`), `.claude/settings.local.json` if present, and any
-   other gitignored config the gates or repo-as-home verification need — check
-   `git status --ignored --short` in the original repo for candidates (skip
-   caches, `node_modules`, and per-run data intermediates). Copy files; never
-   symlink secrets into tracked paths, and never commit any of them.
-3. `npm install` in the worktree (Node 24 per `.nvmrc`; no build step).
-4. The worktree exists until the PR merges: include its path in the CI-green
-   Telegram message, and only remove it (`git worktree remove`) after merge or
-   when I say so.
+Persist in the worktree, updated at every phase boundary: `RUN_STATE.md`
+(current phase, DoD checklist, loop counters), frozen PRD, both blueprints,
+task list, `LEDGER.md`. After any context compaction, re-read `RUN_STATE.md`
+before acting.
 
-Commit per completed task with clear messages; never push to `main`.
+## PHASES
 
-## PHASE 1 — PRODUCT (PM)
+Common rules: you answer every persona/agent question yourself (DECISION
+RULES; ledger + Telegram per answer round; ≤3 iteration rounds per persona,
+then decide leftovers by fiat, ledger, move on). Anything that can run >10
+minutes (full gates, e2e, CI waits) runs backgrounded and polled — never a
+blocking foreground command.
 
-Drive the **PM agent from the `/product-engineering` skill**. Give it: the
-FEATURE text, CLAUDE.md, and pointers to the existing product docs in
-`docs/product/`. It must return a PRD: problem statement, user stories, scope
-in / scope out, acceptance criteria, and an explicit list of open questions.
+**1 — PM.** Drive the PM agent with FEATURE, CLAUDE.md, `docs/product/`
+(incl. personas.md). It returns a PRD: problem, stories, scope in/out,
+testable acceptance criteria, open questions. Iterate to zero open questions;
+freeze.
 
-Answer every open question yourself — choose what you think is best, log the
-consequential ones in the ledger, notify me per DECISION NOTIFICATIONS — and
-send the answers back to the same PM agent (keep its context) for a revised
-PRD. Iterate until the PRD has zero open questions and every acceptance
-criterion is testable. Freeze the PRD.
+**2 — Blueprints.** UI agent ← PRD + `ui/` conventions → screens, components,
+states, required API surface. BE agent ← PRD + UI's API needs → modules with
+placement, port/schema changes, migrations, failure semantics
+(fail-soft/loud), API contract — within the layer rules (`npm run
+boundaries`), board write-surface allowlist, CLAUDE.md hard rules, and the
+stability principle for `pipeline/`, `runner/`, `adapters/`, `ports/`.
+Reconcile the two contracts yourself; freeze both.
 
-## PHASE 2 — BLUEPRINTS (UI, then BE, then reconcile)
+**3 — Build.** Blueprints → ordered spec tasks (each: small spec + files +
+test; order keeps the tree green: ports → core → adapters → app/board → ui).
+Execute via `sdd-task-loop`; coding agent = executor (owns placement and
+test-pairing). Per task: fast checks, fix, commit. Then the full gate:
+`npm run check`, plus `ui:check`/`ui:build`/`ui:e2e` if `ui/` changed — green
+before Phase 4.
 
-**UI blueprint.** Drive the `/product-engineering` skill's **UI/UX agent** with
-the frozen PRD and the `ui/` workspace conventions. It returns: screens/views
-touched or added, component breakdown, states (loading/empty/error), and the
-exact API surface it needs from the board server. Answer its questions yourself
-(ledger + Telegram notify), iterate to done.
+**4 — QA.** reviewer on the full diff → executor fixes → gates; ≤3 rounds,
+leftovers decided by fiat and ledgered. Walk every PRD acceptance criterion —
+implemented and covered, or back to Phase 3. Run kb-curator if instruction
+surfaces (CLAUDE.md, explainer KB, command docs) changed behavior-wise.
 
-**BE blueprint.** Drive the `/product-engineering` skill's **backend agent**
-with the frozen PRD plus the UI blueprint's API needs. It must design within this repo's invariants: layer
-rules (`core`/`ports`/`adapters`/`pipeline`/`app`/`cli`, boundaries enforced by
-`npm run boundaries`), the board write-surface allowlist, the hard rules in
-CLAUDE.md, and the stability principle for anything touching `pipeline/`,
-`runner/`, `adapters/`, or `ports/`. It returns: modules touched/added with
-placement, port/schema changes, data migrations if any, failure semantics
-(fail-soft vs fail-loud), and its API contract. Answer its questions yourself
-(ledger + Telegram notify).
+**5 — Live verification (implementation-complete gate).**
 
-**Reconcile.** Diff the two blueprints' API contracts and data shapes. Resolve
-every mismatch yourself (ledger the material calls), push corrections back to the
-relevant agent, and freeze both blueprints only when they agree.
+- rajni first: `verify` skill, `JOBBUNNY_HOME=<worktree> node
+  src/cli/main.ts … --profile rajni` from the worktree. Fix anything red.
+- harish (real data home `~/.jobbunny`; run the worktree's code against it):
+  my standing authorization, overriding the "never test against harish"
+  default. Before any run: `jobbunny serve stop` (an idling daemon's tick can
+  claim an intent and double-launch Chrome) and back up
+  `~/.jobbunny/profiles/harish/data/jobbunny.db` once. Start with `doctor`
+  and read-only surfaces (board on a non-default port, backgrounded, killed
+  after); a real run only as far as the feature requires, `--dry-run` where
+  it exists, bounded with `--run-cap-ms`; never delete, reset, or clobber
+  harish data. Know: the structure stage shells out to a nested `claude` CLI,
+  and the runner sends a REAL digest — Telegram me "next digest = live
+  verification" first.
+- Red → classify (BLOCKERS), diagnose failed runs with triager, fix via
+  executor, re-verify. Max 2 full harish live runs — iterate on rajni or
+  single stages between them; cap hit → Blocker 4.
+- Restore the daemon to its Step-0 state afterward — on every exit path.
 
-## PHASE 3 — SDD EXECUTION LOOP
+**6 — Ship.** (my explicit ask) `git push -u origin <branch>` (retry with
+backoff), `gh pr create` — body: summary, blueprint highlights, test +
+verification evidence, ledger's crucial entries. Watch CI by polling
+`gh pr checks` every ~5 min (never `--watch`). Red check → `gh run rerun <id>
+--failed` once (pass = flake, ledger it); else root-cause via `gh run view
+--log-failed`, fix through executor, push. ≤3 fix rounds, then Blocker 4.
+Never skip/disable/quarantine a test or push empty commits. CI green → final
+Telegram → done.
 
-Convert the frozen blueprints into an ordered, spec-driven task list: each task
-= a small spec (what + acceptance check), the files it touches, and its test.
-Order tasks so the tree stays green after every one
-(ports/schemas → core → adapters → app/board → ui).
+## TELEGRAM
 
-Execute the task list through the **`sdd-task-loop` workflow**, feeding it the
-frozen blueprints and the task specs; follow its own conventions for task
-format and completion criteria. Code changes must still respect this repo's
-rule that the **executor** agent owns placement and test-pairing — if the
-workflow lets you choose the coding agent, choose executor. After each task run
-the relevant fast checks (`node --test <changed tests>`, typecheck/lint as
-appropriate), fix until green, commit. Loop until all tasks are done, then run
-the full gate:
-`npm run check`, plus `npm run ui:check`, `ui:build`, and `ui:e2e` if `ui/` was
-touched. All green before Phase 4.
+Bot API `sendMessage` via `fetch` (token + chat id from Step 0). One-way FYIs:
+never wait for a reply; split messages >4096 chars; a send failure never
+blocks — ledger it and use the Step-0 fallback. Send: preflight ping; PRD
+frozen and blueprints frozen (one line each); one message per question-answer
+round and per ledger-worthy call (Q → chosen answer → one-line why — my live
+feed, not a pause point); CI green (PR link, outcome paragraph, ledger,
+deferred items, worktree path); blocker stop (classification, what you tried,
+2–3 options + recommendation).
 
-## PHASE 4 — QA
+## BLOCKERS
 
-1. Run the **reviewer** agent on the branch's full diff. Route every finding back
-   through the executor; re-run the gates; repeat reviewer → fix → gates until
-   the reviewer comes back clean.
-2. Implementation-vs-blueprint check: walk the PRD's acceptance criteria one by
-   one and confirm each is actually implemented and covered by a test or a
-   verification step. Anything missing goes back to Phase 3 as a new task.
-3. If instruction surfaces changed behavior-wise (CLAUDE.md, explainer KB,
-   command docs), run the **kb-curator** agent on the diff.
+1. Caused by our changes → must-fix now; never defer or work around.
+2. Out of scope but blocking → minimal fix, separate labeled commit, ledgered.
+   If it touches `pipeline/`/`runner/`/`adapters/`/`ports/`, it goes through
+   Phase 4 review + Phase 5 verification like feature code — else treat as 4.
+   Large or risky → treat as 4.
+3. Not blocking → defer, ledger, report at the end. Never silently drop.
+4. Hard blocker (unfixable: missing credential, external outage, fix would
+   violate the stability principle, or a loop cap hit) → restore the daemon,
+   commit and push what's green, Telegram me (classification, attempts,
+   options + recommendation), stop.
 
-## PHASE 5 — LIVE VERIFICATION (Definition of Done gate)
+## LEDGER
 
-1. **Fixture first:** use the `verify` skill to exercise the affected stages and
-   commands against `profiles/rajni/`, with the worktree as the home
-   (`JOBBUNNY_HOME=<worktree> node src/cli/main.ts ... --profile rajni` from the
-   worktree — the copied `.env` makes secrets-dependent paths work). Fix
-   anything red.
-2. **Harish profile:** harish lives in the real data home (`~/.jobbunny`),
-   which is machine-global and unaffected by the worktree — run the worktree's
-   code against it (`node src/cli/main.ts` from the worktree, default home).
-   This prompt is my explicit, standing authorization to
-   verify against `profiles/harish/`, overriding the default "never run
-   test/experimental stages against harish" caution — but be least-destructive:
-   start with `jobbunny doctor --profile harish` and read-only surfaces (board,
-   runs); run the real pipeline path only as far as the feature requires, prefer
-   `--dry-run` where it exists, and never delete, reset, or clobber harish data.
-   Chrome and the logged-in profile are available on this machine — a real run
-   is expected when the feature touches the run path; respect the one-Chrome
-   invariant (stop the daemon or let it idle before launching a manual run).
-3. Anything not green: classify it (Blocker Protocol), fix through the executor,
-   re-run the failed verification. Loop until the harish verification is green.
-   Green here is the Definition of Done for the implementation.
+`LEDGER.md` in the worktree; final form goes into the PR body and the last
+Telegram. Crucial judgements only: scope cuts, persona-shaping answers,
+architecture choices with real trade-offs, blocker classifications,
+deferrals — anything I'd plausibly have decided differently. No atomic or
+mechanical entries.
 
-## PHASE 6 — SHIP
+## WORKTREE LIFECYCLE
 
-This prompt is my explicit request to raise the PR. Push the branch
-(`git push -u origin <branch>`, retry on network errors with backoff) and open
-a PR against `main` with `gh pr create`, the body covering: feature summary,
-blueprint highlights, test + verification evidence, and the decision ledger's
-crucial entries. Then drive CI to green: watch the `test` check with
-`gh pr checks <n> --watch` (fall back to polling `gh pr checks` every few
-minutes if `--watch` misbehaves); on any red check, pull the failing job's log
-(`gh run view --log-failed`), root-cause it, fix through the executor, and
-push — repeat until green. Never skip, disable, or quarantine a test to get
-green, and never push empty commits to kick CI.
-
-## NOTIFY ME — TELEGRAM
-
-All notifications go to **Telegram**: use `TELEGRAM_BOT_TOKEN` from the `.env`
-copied into the worktree (same values as the data home's `.env`) and the chat
-id from my profile's Telegram settings (the same
-wiring the digest path uses — see README), sending via the Bot API
-`sendMessage` with `fetch`. Notifications are one-way FYIs: never wait for a
-reply, never block on me.
-
-**Milestone messages** (always send):
-- PRD frozen, blueprints frozen (one line each: what was decided).
-- CI green on the PR: `[job-bunny] <feature> — PR ready, CI green`, with the
-  PR link, one-paragraph outcome, the decision ledger, deferred items, and
-  anything that could not be live-verified.
-- Hard blocker stop: classification, what you tried, options + recommendation.
-
-## DECISION NOTIFICATIONS
-
-Whenever you answer a persona's questions or make a ledger-worthy judgement
-call (scope cut, architecture choice, blocker classification, deferral), send
-me a short Telegram message at that moment — one message per answer round, not
-per question: bullet each question with the answer you chose and a one-line
-why. This is a live feed so I can interject if I disagree; do not pause for a
-reply. Mechanical/atomic decisions don't get messages, same bar as the ledger.
-If Telegram sending fails, log it in the ledger and continue — notification
-failures never block the pipeline.
-
-## BLOCKER PROTOCOL
-
-Classify every blocker the moment you hit it:
-
-1. **Caused by our changes** → must-fix. Do not proceed, do not defer, do not
-   work around it. Fix and re-verify.
-2. **Not in scope, but blocking the work** (pre-existing bug, broken tooling,
-   red base) → attempt a minimal fix in a separate, clearly-labeled commit; note
-   it in the ledger. If the minimal fix would be large or risky, treat as (4).
-3. **Not blocking progress** → defer. Note it in the ledger and in the final
-   message; never fix-creep into it, never silently drop it.
-4. **Hard blocker** — blocks the Definition of Done and you cannot fix it
-   (missing credential, external outage, a fix that would violate the
-   stability principle) → stop, commit and push what's green so far, and message
-   me with: the classification, what you tried, and 2–3 options with your
-   recommendation.
-
-## DECISION LEDGER
-
-Keep a running ledger (a scratch file is fine; its final form ships in the PR
-body and the notification). Record **only crucial in-flight judgements**: scope
-cuts, PM/UI/BE question answers that shaped the feature, architecture and
-placement choices with real trade-offs, blocker classifications, deferrals, and
-anything I'd plausibly have decided differently. Do not record atomic or
-mechanical decisions — a bloated ledger is as useless as an empty one.
+The worktree stays until the PR merges (its path goes in the CI-green
+message); remove it only after merge or on my ask. Never push to `main`.
