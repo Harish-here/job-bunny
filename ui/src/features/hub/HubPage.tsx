@@ -40,7 +40,7 @@ function cardAction(id: HubCardId, status: HubCardStatus): CardAction {
       return {
         kind: 'link',
         label: 'Edit in Settings',
-        route: { name: 'settings', section: 'profile' },
+        route: { name: 'settings', section: 'delivery' },
       };
     case 'schedule-daemon':
       return {
@@ -55,7 +55,7 @@ function cardAction(id: HubCardId, status: HubCardStatus): CardAction {
         ? {
             kind: 'link',
             label: 'Edit in Settings',
-            route: { name: 'settings', section: 'filters' },
+            route: { name: 'settings', section: 'roles-companies' },
           }
         : { kind: 'dialog', label: 'Set up', cardId: 'persona-filters' };
     case 'search-urls':
@@ -63,7 +63,7 @@ function cardAction(id: HubCardId, status: HubCardStatus): CardAction {
         ? {
             kind: 'link',
             label: 'Edit in Settings',
-            route: { name: 'settings', section: 'search-urls' },
+            route: { name: 'settings', section: 'where-jobs-come-from' },
           }
         : { kind: 'dialog', label: 'Set up', cardId: 'search-urls' };
     case 'integrations':
@@ -71,7 +71,7 @@ function cardAction(id: HubCardId, status: HubCardStatus): CardAction {
         ? {
             kind: 'link',
             label: 'Edit in Settings',
-            route: { name: 'settings', section: 'profile' },
+            route: { name: 'settings', section: 'delivery' },
           }
         : { kind: 'dialog', label: 'Set up', cardId: 'integrations' };
   }

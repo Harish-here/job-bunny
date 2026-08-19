@@ -22,17 +22,23 @@ describe('parseHash', () => {
     expect(parseHash('#/job')).toEqual({ name: 'triage' });
   });
   test.each([
-    ['#/settings/profile', 'profile'],
+    ['#/settings/landing', 'landing'],
+    ['#/settings/roles-companies', 'roles-companies'],
+    ['#/settings/where-you-work', 'where-you-work'],
+    ['#/settings/skills', 'skills'],
+    ['#/settings/about-you', 'about-you'],
+    ['#/settings/where-jobs-come-from', 'where-jobs-come-from'],
     ['#/settings/schedule', 'schedule'],
-    ['#/settings/filters', 'filters'],
-    ['#/settings/resume', 'resume'],
-    ['#/settings/search-urls', 'search-urls'],
+    ['#/settings/fetching', 'fetching'],
+    ['#/settings/delivery', 'delivery'],
+    ['#/settings/housekeeping', 'housekeeping'],
+    ['#/settings/raw-config', 'raw-config'],
     ['#/settings/danger', 'danger'],
   ])('%s → settings section %s', (hash, section) => {
     expect(parseHash(hash)).toEqual({ name: 'settings', section });
   });
-  test('#/settings with no section stays a plain settings route', () => {
-    expect(parseHash('#/settings')).toEqual({ name: 'settings' });
+  test('#/settings with no section defaults to the landing section', () => {
+    expect(parseHash('#/settings')).toEqual({ name: 'settings', section: 'landing' });
   });
   test('#/settings/bogus falls back to a plain settings route', () => {
     expect(parseHash('#/settings/bogus')).toEqual({ name: 'settings' });
@@ -46,4 +52,20 @@ test('routeHash emits a settings section only when the route carries one', () =>
     '#/settings/schedule',
   );
   expect(routeHash({ name: 'settings' })).toBe('#/settings');
+});
+test.each([
+  'landing',
+  'roles-companies',
+  'where-you-work',
+  'skills',
+  'about-you',
+  'where-jobs-come-from',
+  'schedule',
+  'fetching',
+  'delivery',
+  'housekeeping',
+  'raw-config',
+  'danger',
+] as const)('routeHash round-trips the %s settings section', (section) => {
+  expect(routeHash({ name: 'settings', section })).toBe(`#/settings/${section}`);
 });

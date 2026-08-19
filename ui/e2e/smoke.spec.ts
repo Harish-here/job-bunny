@@ -187,10 +187,15 @@ test('runs page empty state', async ({ page }) => {
   await expect(page.getByText('No run selected.')).toBeVisible();
 });
 
-test('settings page: edit filter.json, save, reload, still there', async ({ page }) => {
-  await page.goto('/#/settings/filters');
-  await page.getByTestId('settings-json-open').click();
-  const textarea = page.getByTestId('settings-json-textarea');
+test('settings page: edit filter.json in raw config, save, reload, still there', async ({
+  page,
+}) => {
+  await page.goto('/#/settings/raw-config');
+  await page
+    .locator('[data-qa="raw-doc-filter-json"]')
+    .getByRole('button', { name: 'filter.json', exact: true })
+    .click();
+  const textarea = page.locator('[data-qa="raw-editor"]');
   await expect(textarea).toBeVisible();
   await expect(textarea).not.toHaveValue('');
 
@@ -203,34 +208,38 @@ test('settings page: edit filter.json, save, reload, still there', async ({ page
     parsed.companies.avoid.push('E2ESmokeAvoidCo');
   }
   await textarea.fill(JSON.stringify(parsed, null, 2));
-  await page.getByTestId('settings-json-save').click();
+  await page.getByTestId('save-button').click();
 
-  // No toast: success is evidenced by the dialog closing with no error.
-  await expect(page.getByTestId('settings-json-textarea')).toHaveCount(0);
-  await expect(page.getByTestId('settings-error')).toHaveCount(0);
+  // No toast: success is evidenced by the validation summary staying absent.
+  await expect(page.getByTestId('validation-summary')).toHaveCount(0);
 
   await page.reload();
-  await page.goto('/#/settings/filters');
-  await page.getByTestId('settings-json-open').click();
-  await expect(page.getByTestId('settings-json-textarea')).toContainText(
-    'E2ESmokeAvoidCo',
-  );
+  await page.goto('/#/settings/raw-config');
+  await page
+    .locator('[data-qa="raw-doc-filter-json"]')
+    .getByRole('button', { name: 'filter.json', exact: true })
+    .click();
+  await expect(page.locator('[data-qa="raw-editor"]')).toContainText('E2ESmokeAvoidCo');
 });
 
-test("settings page: invalid JSON shows the server's error message", async ({ page }) => {
-  await page.goto('/#/settings/filters');
-  await page.getByTestId('settings-json-open').click();
-  const textarea = page.getByTestId('settings-json-textarea');
+test('settings page: invalid JSON in the raw config editor is rejected inline, never sent to the server', async ({
+  page,
+}) => {
+  await page.goto('/#/settings/raw-config');
+  await page
+    .locator('[data-qa="raw-doc-filter-json"]')
+    .getByRole('button', { name: 'filter.json', exact: true })
+    .click();
+  const textarea = page.locator('[data-qa="raw-editor"]');
   await expect(textarea).toBeVisible();
   await expect(textarea).not.toHaveValue('');
 
   await textarea.fill('{not valid json');
-  await page.getByTestId('settings-json-save').click();
+  await page.getByTestId('save-button').click();
 
-  // Server's real 422 message (validateConfigDoc, core/config/validators.ts).
-  await expect(page.getByTestId('settings-error')).toContainText(
-    /filter\.json is invalid:/,
-  );
+  // Client-side JSON.parse validation (RawConfigSection), surfaced via
+  // SaveBar's validation summary — the server never sees this invalid text.
+  await expect(page.getByTestId('validation-summary')).toContainText(/Invalid JSON/);
   await expect(textarea).toHaveValue('{not valid json');
 });
 

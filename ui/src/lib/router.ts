@@ -11,18 +11,30 @@ export const ROUTES = [
 ] as const;
 export type RouteName = (typeof ROUTES)[number];
 export type SettingsSection =
-  | 'profile'
+  | 'landing'
+  | 'roles-companies'
+  | 'where-you-work'
+  | 'skills'
+  | 'about-you'
+  | 'where-jobs-come-from'
   | 'schedule'
-  | 'filters'
-  | 'resume'
-  | 'search-urls'
+  | 'fetching'
+  | 'delivery'
+  | 'housekeeping'
+  | 'raw-config'
   | 'danger';
 const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  'profile',
+  'landing',
+  'roles-companies',
+  'where-you-work',
+  'skills',
+  'about-you',
+  'where-jobs-come-from',
   'schedule',
-  'filters',
-  'resume',
-  'search-urls',
+  'fetching',
+  'delivery',
+  'housekeeping',
+  'raw-config',
   'danger',
 ];
 export type Route =
@@ -41,6 +53,9 @@ export function parseHash(hash: string): Route {
       return { name: 'settings', section: section as SettingsSection };
     }
     return { name: 'settings' };
+  }
+  if (name === 'settings') {
+    return { name: 'settings', section: 'landing' };
   }
   return (ROUTES as readonly string[]).includes(name)
     ? { name: name as RouteName }

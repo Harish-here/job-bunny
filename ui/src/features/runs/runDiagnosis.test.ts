@@ -204,7 +204,7 @@ describe('classifyFailure', () => {
     expect(verdict.action).toEqual({
       kind: 'navigate',
       label: 'Review filter rules →',
-      route: { name: 'settings', section: 'filters' },
+      route: { name: 'settings', section: 'roles-companies' },
     });
     expect(verdict.secondaryAction).toBeUndefined();
   });

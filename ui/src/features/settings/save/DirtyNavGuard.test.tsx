@@ -6,7 +6,7 @@ import { DirtyNavGuard } from './DirtyNavGuard';
 
 vi.mock('../../../lib/router', () => ({ navigate: vi.fn() }));
 
-const TARGET = { name: 'settings', section: 'filters' } as const;
+const TARGET = { name: 'settings', section: 'roles-companies' } as const;
 
 afterEach(() => {
   vi.clearAllMocks();

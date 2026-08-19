@@ -46,7 +46,7 @@ function verdictFor(kind: Exclude<DiagnosisKind, 'fallback'>): DiagnosisVerdict 
       action: {
         kind: 'navigate',
         label: 'Review filter rules →',
-        route: { name: 'settings', section: 'filters' },
+        route: { name: 'settings', section: 'roles-companies' },
       },
     },
     'breaker-open': {
@@ -265,7 +265,7 @@ describe('DiagnosisPanel — action effects, one per action.kind', () => {
     expect(onRun).toHaveBeenCalledTimes(1);
   });
 
-  it("kind: 'navigate' — clicking 'zero-yield-healthy's action navigates to #/settings/filters", async () => {
+  it("kind: 'navigate' — clicking 'zero-yield-healthy's action navigates to #/settings/roles-companies", async () => {
     render(
       <DiagnosisPanel
         verdict={verdictFor('zero-yield-healthy')}
@@ -274,7 +274,7 @@ describe('DiagnosisPanel — action effects, one per action.kind', () => {
       />,
     );
     await userEvent.click(screen.getByTestId('diagnosis-action'));
-    expect(window.location.hash).toBe('#/settings/filters');
+    expect(window.location.hash).toBe('#/settings/roles-companies');
   });
 
   it("kind: 'copy' — clicking chrome-not-found's action writes the exact doctor command to the clipboard", async () => {

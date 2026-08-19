@@ -41,7 +41,7 @@ function Page({ route, profile }: { route: Route; profile: string }) {
       return (
         <SettingsPage
           profile={profile}
-          section={'section' in route ? route.section : 'profile'}
+          section={'section' in route ? route.section : 'landing'}
         />
       );
     case 'job':

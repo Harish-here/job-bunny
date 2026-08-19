@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { navigate } from '../../../lib/router';
 import * as wizardApi from '../../wizard/wizard.api';
 import type { DaemonStatus } from '../../wizard/wizard.types';
 import * as configApi from '../config.api';
@@ -13,6 +14,10 @@ vi.mock('../../wizard/wizard.api', () => ({
   getDaemonStatus: vi.fn(),
   getPersonas: vi.fn(),
 }));
+vi.mock('../../../lib/router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../lib/router')>();
+  return { ...actual, navigate: vi.fn() };
+});
 
 const BASE_PROFILE_JSON = {
   connector: 'sqlite',
@@ -45,9 +50,8 @@ function stubDoc(doc: Record<string, unknown> = BASE_PROFILE_JSON) {
 function stubDaemon(status: DaemonStatus = IDLE_DAEMON) {
   vi.mocked(wizardApi.getDaemonStatus).mockResolvedValue(status);
 }
-/** Never resolves — pins the mockup's `schedule-daemon-status-loading`
- * state (the query genuinely in flight), rather than a resolved state
- * that merely looks like loading for a tick. */
+/** Never resolves — a query genuinely in flight, not merely resolved fast
+ * enough to look pending. */
 function stubDaemonPending() {
   vi.mocked(wizardApi.getDaemonStatus).mockReturnValue(new Promise(() => {}));
 }
@@ -180,159 +184,100 @@ describe('ScheduleSection', () => {
     });
   });
 
-  it("healthy daemon status shows 'Running · last tick Ns ago', computed from the fixture's lastTickAt, not a hardcoded string", async () => {
-    stubDoc();
-    const lastTickAt = new Date(Date.now() - 12_000).toISOString(); // 12s ago.
-    stubDaemon({
-      state: 'running',
-      pid: 1,
-      startedAt: '2026-08-13T09:00:00.000Z',
-      lastTickAt,
-      inFlight: null,
-      profiles: [
-        {
-          profile: 'rajni',
-          enabled: true,
-          nextRunAt: '2026-08-13T11:30:00.000Z',
-          degraded: false,
-          degradedReason: null,
-          schemaVersion: null,
-          buildVersion: null,
-        },
-      ],
+  // The daemon bridge line (blueprint.md:798-812, step 18) — the compact
+  // isLoading/isError/word treatment that replaced the six-branch
+  // full-markup block. Full-markup state coverage moved to
+  // DaemonCard.test.tsx (a later Operate brief); these assert only the
+  // word text `daemonStatusWord()` (task 16) derives per state, ported
+  // byte-for-byte from the removed tests' own substrings (proving the
+  // extraction changed no observable text).
+  describe('the compact daemon bridge line', () => {
+    it('loading — "Loading…"', async () => {
+      stubDoc();
+      stubDaemonPending();
+      renderSection();
+      await screen.findByText('Loading…');
     });
-    renderSection();
-    const status = await screen.findByTestId('schedule-daemon-status-healthy');
-    expect(status).toHaveTextContent(/Running · last tick 1[0-4]s ago/);
-    // A tight range (10-14s), not an exact string match, since real
-    // elapsed time between seeding lastTickAt and the assertion running
-    // is a handful of milliseconds, never exactly 12000ms.
-  });
 
-  it("a stopped daemon renders 'Not running', never the healthy testid", async () => {
-    stubDoc();
-    stubDaemon({ ...IDLE_DAEMON, state: 'stopped', lastTickAt: null });
-    renderSection();
-    const status = await screen.findByTestId('schedule-daemon-status-stopped');
-    expect(status).toHaveTextContent('Not running');
-    expect(status).toHaveTextContent('jobbunny serve start');
-    expect(
-      screen.queryByTestId('schedule-daemon-status-healthy'),
-    ).not.toBeInTheDocument();
-  });
-
-  it("a stale daemon renders 'Wedged', never the healthy testid", async () => {
-    stubDoc();
-    const lastTickAt = new Date(Date.now() - 600_000).toISOString(); // 10m ago.
-    stubDaemon({ ...IDLE_DAEMON, state: 'stale', lastTickAt });
-    renderSection();
-    const status = await screen.findByTestId('schedule-daemon-status-stale');
-    expect(status).toHaveTextContent(/Wedged · last tick 60[0-4]s ago/);
-    expect(
-      screen.queryByTestId('schedule-daemon-status-healthy'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('degraded daemon status leads with "Degraded —" in the terse version-comparison form (mockup:717), not the full reason sentence, and the remedy command in font-mono', async () => {
-    stubDoc();
-    const degradedReason =
-      "the database schema (v8) is newer than the running daemon's build (v7). This happens after an update that changes the schema.";
-    stubDaemon({
-      state: 'running',
-      pid: 1,
-      startedAt: '2026-08-13T09:00:00.000Z',
-      lastTickAt: new Date().toISOString(),
-      inFlight: null,
-      profiles: [
-        {
-          profile: 'rajni',
-          enabled: true,
-          nextRunAt: null,
-          degraded: true,
-          degradedReason,
-          schemaVersion: 8,
-          buildVersion: 7,
-        },
-      ],
+    it('unreachable — "Can\'t reach the daemon API"', async () => {
+      stubDoc();
+      stubDaemonUnreachable();
+      renderSection();
+      await screen.findByText("Can't reach the daemon API");
     });
-    renderSection();
-    const status = await screen.findByTestId('schedule-daemon-status-degraded');
-    // Every sibling status state (Running/Wedged/Not running) leads with a
-    // status word — degraded must too, and in the terse form, not the
-    // ~120-char sentence that's already on screen in the global banner.
-    const label = status.querySelector('span.font-medium');
-    expect(label).not.toBeNull();
-    expect(label?.textContent).toBe('Degraded — schema v8 > daemon build v7');
-    expect(status).not.toHaveTextContent(degradedReason);
-    const command = status.querySelector('code.font-mono');
-    expect(command).not.toBeNull();
-    expect(command?.textContent).toBe('jobbunny serve stop && jobbunny serve start');
-    expect(
-      screen.queryByTestId('schedule-daemon-status-healthy'),
-    ).not.toBeInTheDocument();
-  });
 
-  it('a degraded entry with null schemaVersion/buildVersion (a stale pidfile from before these fields existed) falls back to the full degradedReason sentence, not a crash or "v undefined"', async () => {
-    stubDoc();
-    const degradedReason =
-      "the database schema (v8) is newer than the running daemon's build (v7). This happens after an update that changes the schema.";
-    stubDaemon({
-      state: 'running',
-      pid: 1,
-      startedAt: '2026-08-13T09:00:00.000Z',
-      lastTickAt: new Date().toISOString(),
-      inFlight: null,
-      profiles: [
-        {
-          profile: 'rajni',
-          enabled: true,
-          nextRunAt: null,
-          degraded: true,
-          degradedReason,
-          schemaVersion: null,
-          buildVersion: null,
-        },
-      ],
+    it('running (healthy) — "Running"', async () => {
+      stubDoc();
+      const lastTickAt = new Date(Date.now() - 12_000).toISOString();
+      stubDaemon({
+        ...IDLE_DAEMON,
+        lastTickAt,
+        profiles: [
+          {
+            profile: 'rajni',
+            enabled: true,
+            nextRunAt: null,
+            degraded: false,
+            degradedReason: null,
+            schemaVersion: null,
+            buildVersion: null,
+          },
+        ],
+      });
+      renderSection();
+      await screen.findByText(/Running/);
     });
-    renderSection();
-    const status = await screen.findByTestId('schedule-daemon-status-degraded');
-    const label = status.querySelector('span.font-medium');
-    expect(label).not.toBeNull();
-    expect(label?.textContent).toBe(`Degraded — ${degradedReason}`);
-  });
 
-  it('while the daemon query is in flight, renders the loading skeleton and nothing else (mockup:702-707 loading state)', async () => {
-    stubDoc();
-    stubDaemonPending();
-    renderSection();
-    await screen.findByTestId('schedule-daemon-status-loading');
-    // The loading skeleton excludes every other status render — this is
-    // the effect the mockup's four-state toggle actually requires, not
-    // merely that the loading id exists somewhere in the tree.
-    expect(screen.queryByTestId('schedule-daemon-status-healthy')).toBeNull();
-    expect(screen.queryByTestId('schedule-daemon-status-degraded')).toBeNull();
-    expect(screen.queryByTestId('schedule-daemon-status-error')).toBeNull();
-  });
+    it('stopped — "Not running"', async () => {
+      stubDoc();
+      stubDaemon({ ...IDLE_DAEMON, state: 'stopped', lastTickAt: null });
+      renderSection();
+      await screen.findByText('Not running');
+    });
 
-  it("an unreachable /api/daemon renders the error state ('Can't reach the daemon API' + working Retry), never the degraded state — Degraded ≠ unreachable (ux-notes.md callout 13)", async () => {
-    stubDoc();
-    stubDaemonUnreachable();
-    renderSection();
-    const status = await screen.findByTestId('schedule-daemon-status-error');
-    expect(status).toHaveTextContent("Can't reach the daemon API");
-    // The distinguishing assertion: an unreachable probe must render the
-    // "we can't tell" copy, never the "we know, and it's broken" degraded
-    // copy — collapsing the two is the exact regression this bug guards.
-    expect(screen.queryByTestId('schedule-daemon-status-degraded')).toBeNull();
-    expect(screen.queryByTestId('schedule-daemon-status-healthy')).toBeNull();
+    it('stale — "Wedged"', async () => {
+      stubDoc();
+      const lastTickAt = new Date(Date.now() - 600_000).toISOString();
+      stubDaemon({ ...IDLE_DAEMON, state: 'stale', lastTickAt });
+      renderSection();
+      await screen.findByText('Wedged');
+    });
 
-    // Retry is wired, not inert: it re-invokes the query fn.
-    const callsBefore = vi.mocked(wizardApi.getDaemonStatus).mock.calls.length;
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => {
-      expect(vi.mocked(wizardApi.getDaemonStatus).mock.calls.length).toBeGreaterThan(
-        callsBefore,
+    it('degraded — the terse "Degraded — schema vN > daemon build vM" form', async () => {
+      stubDoc();
+      const degradedReason =
+        "the database schema (v8) is newer than the running daemon's build (v7).";
+      stubDaemon({
+        state: 'running',
+        pid: 1,
+        startedAt: '2026-08-13T09:00:00.000Z',
+        lastTickAt: new Date().toISOString(),
+        inFlight: null,
+        profiles: [
+          {
+            profile: 'rajni',
+            enabled: true,
+            nextRunAt: null,
+            degraded: true,
+            degradedReason,
+            schemaVersion: 8,
+            buildVersion: 7,
+          },
+        ],
+      });
+      renderSection();
+      await screen.findByText('Degraded — schema v8 > daemon build v7');
+    });
+
+    it('clicking "Manage the daemon on Operate →" navigates to #/setup', async () => {
+      stubDoc();
+      stubDaemon();
+      const user = userEvent.setup();
+      renderSection();
+      await user.click(
+        await screen.findByRole('button', { name: 'Manage the daemon on Operate →' }),
       );
+      expect(vi.mocked(navigate)).toHaveBeenCalledWith({ name: 'setup' });
     });
   });
 });
