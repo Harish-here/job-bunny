@@ -12,6 +12,7 @@ function schedule(
     times: ['09:00', '11:30', '14:00', '16:30', '19:00'],
     weekdays: [1, 2, 3, 4, 5],
     graceMinutes: 90,
+    skipNext: null,
     ...overrides,
   };
 }
@@ -95,6 +96,51 @@ test('nextFireAt returns null when no schedule has a future slot today', () => {
   const now = new Date(2026, 6, 27, 20, 0);
   const result = nextFireAt(now, [schedule({ profile: 'harish' })]);
   assert.equal(result, null);
+});
+
+test('a matching skipNext (same date, same slot) suppresses an otherwise-owed slot', () => {
+  const now = new Date(2026, 6, 27, 14, 4);
+  const owed = isRunOwed(
+    now,
+    [
+      schedule({
+        profile: 'harish',
+        skipNext: { date: '2026-07-27', slot: '14:00' },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(owed, []);
+});
+
+test('a non-matching skipNext (past date) has no effect — the slot remains owed as normal', () => {
+  const now = new Date(2026, 6, 27, 14, 4);
+  const owed = isRunOwed(
+    now,
+    [
+      schedule({
+        profile: 'harish',
+        skipNext: { date: '2026-07-26', slot: '14:00' },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(owed, [{ profile: 'harish', date: '2026-07-27', slot: '14:00' }]);
+});
+
+test('a non-matching skipNext (different slot, same date) has no effect on the actually-owed slot', () => {
+  const now = new Date(2026, 6, 27, 14, 4);
+  const owed = isRunOwed(
+    now,
+    [
+      schedule({
+        profile: 'harish',
+        skipNext: { date: '2026-07-27', slot: '09:00' },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual(owed, [{ profile: 'harish', date: '2026-07-27', slot: '14:00' }]);
 });
 
 test('nextFireAt groups multiple profiles sharing the identical next slot, sorted by profile', () => {

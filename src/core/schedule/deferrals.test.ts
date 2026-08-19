@@ -12,6 +12,7 @@ function schedule(
     times: ['09:00', '11:30', '14:00', '16:30', '19:00'],
     weekdays: [1, 2, 3, 4, 5],
     graceMinutes: 90,
+    skipNext: null,
     ...overrides,
   };
 }
