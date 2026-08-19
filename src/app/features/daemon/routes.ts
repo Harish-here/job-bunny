@@ -11,10 +11,14 @@
  * this slice at one impl file plus `index.ts`).
  *
  * `stopDaemon()`/`startDaemon()` never throw, so their handlers need no
- * try/catch — every outcome is a value. `stopDaemon`'s two unresponsive
- * outcomes (`daemon_unresponsive`/`child_unresponsive`) map to a 409 so the
- * client can never mistake them for the 200 `stopped`/`already_stopped`
- * success line. `startDaemon`'s `'started'`/`'already_running'` both map to
+ * try/catch — every outcome is a value. `stopDaemon`'s three non-success
+ * outcomes (`daemon_unresponsive`/`child_unresponsive`/`stale_pidfile`) map
+ * to a 409 so the client can never mistake them for the 200
+ * `stopped`/`already_stopped` success line — `stale_pidfile` (stability-
+ * review fix) means the pidfile named the board server's own pid, so
+ * nothing was actually stopped even though there was no daemon left to
+ * kill either; collapsing it into `already_stopped` would hide that
+ * anomaly. `startDaemon`'s `'started'`/`'already_running'` both map to
  * 200 — the daemon ends up running either way, the same "target state
  * reached" posture `'already_stopped'` gets on the stop side — while
  * `'spawn_failed'` maps to 500 (a genuine operational failure, not a state
@@ -49,7 +53,8 @@ function statusHandler(source: BoardSource) {
 
 function stopStatusCode(outcome: StopDaemonOutcome): number {
   return outcome.outcome === 'daemon_unresponsive' ||
-    outcome.outcome === 'child_unresponsive'
+    outcome.outcome === 'child_unresponsive' ||
+    outcome.outcome === 'stale_pidfile'
     ? 409
     : 200;
 }

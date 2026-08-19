@@ -167,6 +167,7 @@ const OUTCOMES: Array<{ outcome: StopDaemonOutcome; expectedStatus: number }> = 
   { outcome: { outcome: 'already_stopped' }, expectedStatus: 200 },
   { outcome: { outcome: 'daemon_unresponsive' }, expectedStatus: 409 },
   { outcome: { outcome: 'child_unresponsive', childPid: 5300 }, expectedStatus: 409 },
+  { outcome: { outcome: 'stale_pidfile' }, expectedStatus: 409 },
 ];
 
 for (const { outcome, expectedStatus } of OUTCOMES) {

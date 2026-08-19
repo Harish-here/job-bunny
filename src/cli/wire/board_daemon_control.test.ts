@@ -13,7 +13,7 @@
  * function into its own module.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -163,6 +163,44 @@ test('daemon dies but its in-flight child survives SIGKILL: child_unresponsive w
   ]);
 });
 
+test('pidfile names THIS process itself (self-referential/stale, stability-review fix): stale_pidfile, never killed', async () => {
+  // Mirrors the real bug: `startBoardDaemon` writes the BOARD SERVER's own
+  // pid into the pidfile before the not-yet-spawned daemon child exists.
+  // `selfPid` stubs that identity here rather than using the real
+  // `process.pid`, so the test asserts the guard's own comparison, not an
+  // accident of which pid the test runner happens to have.
+  writePidfile({ pid: 8888 });
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    selfPid: 8888,
+    pidIsAlive: () => true,
+    killPid: (pid, signal) => killCalls.push({ pid, signal }),
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'stale_pidfile' });
+  assert.deepEqual(killCalls, []);
+  assert.notDeepEqual(outcome, { outcome: 'already_stopped' });
+});
+
+test('pidfile names a DIFFERENT pid than this process: normal kill path still runs (guard is not over-broad)', async () => {
+  writePidfile({ pid: 4242 });
+  const alive = new Set([4242]);
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    selfPid: 8888, // this process's own pid — distinct from the pidfile's 4242
+    pidIsAlive: (pid) => alive.has(pid),
+    killPid: (pid, signal) => {
+      killCalls.push({ pid, signal });
+      if (signal === 'SIGTERM') alive.delete(pid);
+    },
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'stopped' });
+  assert.deepEqual(killCalls, [{ pid: 4242, signal: 'SIGTERM' }]);
+});
+
 // --- startBoardDaemon (task 12) -------------------------------------------
 
 function freshRoot(): string {
@@ -267,4 +305,30 @@ test('startBoardDaemon: a synchronous spawn throw is caught: spawn_failed, never
     listLaunchAgentFiles: () => [],
   });
   assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+});
+
+test('startBoardDaemon: a spawn-setup throw releases the just-acquired pidfile (no permanent self-referential leak, stability-review fix)', async () => {
+  // Reproduces the PERMANENT-LEAK half of the bug: `acquireDaemonPidfile`
+  // writes `deps.pid` (here 8888, standing in for the board server's own
+  // pid) into the pidfile BEFORE the not-yet-spawned child exists; a throw
+  // from spawn-setup used to leave that pidfile behind forever, naming a
+  // live process (the board) that is not actually the daemon.
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(undefined, true); // synchronous throw
+  const pidfilePath = path.join(testRoot, '.jobbunny-daemon.pid');
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    pid: 8888,
+    spawn,
+    pidIsAlive: () => true,
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+  assert.equal(
+    existsSync(pidfilePath),
+    false,
+    'the self-referential placeholder must be released, not leaked',
+  );
 });

@@ -84,6 +84,11 @@ export interface BoardDaemonControlOverrides {
    * waits out `SIGKILL_GRACE_MS`. Default: a real `setTimeout`-backed
    * sleep. */
   sleep?: (ms: number) => Promise<void>;
+  /** Test-only seam: overrides this process's own pid, used ONLY for the
+   * self-referential-pidfile guard below (never for anything else — this
+   * function itself never has a pid to write). Default: the real
+   * `process.pid`. */
+  selfPid?: number;
 }
 
 /** `BoardSource.stopDaemon`'s real implementation. Never throws — every
@@ -104,6 +109,17 @@ export async function stopBoardDaemon(
   // Step 1 — no pidfile at all: nothing to stop.
   const file = readDaemonPidfile(overrides.root, pidfileDeps);
   if (!file) return { outcome: 'already_stopped' };
+
+  // Guard (stability-review fix) — a pidfile naming THIS process (the
+  // board server) is stale/self-referential, never a real daemon:
+  // `startBoardDaemon` writes the board's OWN pid into the pidfile before
+  // the not-yet-spawned child exists (`ServeDeps.pid`, see that function's
+  // own doc comment), so a stop request that lands in that narrow boot
+  // window — or an earlier spawn failure that leaked the placeholder —
+  // would otherwise read the board's own pid here and kill it. Return a
+  // distinct, visible outcome instead of ever reaching `killAndConfirmDead`.
+  const selfPid = overrides.selfPid ?? process.pid;
+  if (file.pid === selfPid) return { outcome: 'stale_pidfile' };
 
   // Step 2 — daemon FIRST (D10, `lifecycle.ts`'s own comment: killing the
   // child first would let the daemon's own `await` on it resolve and spawn
@@ -282,6 +298,23 @@ export async function startBoardDaemon(
     }
     return { outcome: 'spawn_failed' };
   } catch {
+    // Stability-review fix: every step of `runServeStartParent` that can
+    // throw here (log-file rotate/open, `deps.spawn` itself — none of
+    // which are wrapped in try/catch, unlike the legacy-plist listing and
+    // pidfile reads) runs AFTER `acquireDaemonPidfile` has already written
+    // THIS process's (the board server's) own pid into the pidfile, and
+    // BEFORE any child exists to overwrite it with a real pid. Left alone,
+    // that permanently leaks a pidfile naming the board's own live pid —
+    // the next `stopDaemon()` would then try to kill the board itself
+    // (closed defense-in-depth by the self-referential guard in
+    // `stopBoardDaemon` above too). Re-read and release ONLY if the
+    // pidfile still names exactly the pid we would have written: a throw
+    // can only ever leak OUR OWN just-acquired placeholder, never a
+    // concurrently, legitimately started daemon's real pidfile.
+    const maybeOwn = readDaemonPidfile(root, deps.pidfile);
+    if (maybeOwn?.pid === deps.pid) {
+      releaseDaemonPidfile(root, deps.pidfile);
+    }
     return { outcome: 'spawn_failed' };
   }
 }
