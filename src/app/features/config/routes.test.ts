@@ -78,6 +78,7 @@ function fakeSource(opts: FakeSourceOptions = {}): BoardSource & {
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };

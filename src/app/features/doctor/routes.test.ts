@@ -56,6 +56,7 @@ function fakeSource(runDoctor: BoardSource['runDoctor']): BoardSource {
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     close() {},
   };
 }

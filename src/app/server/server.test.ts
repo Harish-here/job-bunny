@@ -168,6 +168,7 @@ function fakeSource(
     removeProfile,
     runDoctor,
     readDaemonStatus,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     close() {
       if (closed) closed.value = true;
     },
@@ -369,6 +370,7 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -410,6 +412,7 @@ test('POST /api/profiles reaches source.createProfile and returns 201', async ()
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -480,6 +483,7 @@ test('a throwing source.openStore is also a 500 internal envelope (never a crash
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -681,6 +685,7 @@ test('PUT then GET /api/secrets round-trips presence without echoing the value',
     },
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -722,6 +727,7 @@ test('close() still calls source.close() when httpServer.close() rejects', async
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {
       closeCallCount += 1;

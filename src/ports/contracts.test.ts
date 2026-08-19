@@ -234,6 +234,7 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => ({
       state: 'stopped',
       pid: null,

@@ -71,6 +71,7 @@ import path from 'node:path';
 import {
   openJobsDb,
   SqliteBoardStore,
+  SqliteCheckpointStore,
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
 import { hasEnvValue, upsertEnvLine } from '../../core/env_file/index.ts';
@@ -79,6 +80,7 @@ import {
   type BoardSource,
   type BoardStore,
   type DaemonStatus,
+  type FilterPreviewResult,
   type RemoveProfileOutcome,
   SECRET_KEYS,
   type SecretKey,
@@ -91,6 +93,7 @@ import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
 import { runBoardDoctor } from './board_doctor.ts';
+import { previewFilterRule as previewFilterRuleImpl } from './board_preview.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
 const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
@@ -376,6 +379,15 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       // Gate 6 — delete. Never touches Notion or the network.
       await rm(path.join(root, 'profiles', name), { recursive: true, force: true });
       return { outcome: 'removed' };
+    },
+
+    // Thin delegate to `board_preview.ts` (file-size cap, same precedent as
+    // `readDaemonStatus`/`runDoctor` above) — the checkpoint store adapter
+    // is built HERE (carve-out-legal) and injected in.
+    previewFilterRule(name: string, draft: unknown): Promise<FilterPreviewResult> {
+      const openCheckpointStore = (n: string) =>
+        new SqliteCheckpointStore(resolveDbPath(root, n));
+      return previewFilterRuleImpl({ source: this, openCheckpointStore }, name, draft);
     },
 
     close(): void {

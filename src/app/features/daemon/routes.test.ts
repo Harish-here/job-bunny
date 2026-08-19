@@ -22,6 +22,7 @@ function fakeSource(readDaemonStatus: BoardSource['readDaemonStatus']): BoardSou
     writeConfigDoc: async () => {},
     createProfile: async () => {},
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus,
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),

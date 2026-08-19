@@ -108,6 +108,23 @@ export interface DaemonStatus {
   profiles: DaemonProfileSchedule[];
 }
 
+/** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
+ * `newlyDropped` (jobs that drop under the draft but not the current config)
+ * is capped at 12 entries, matching the mockup's disclosure ("see which 12
+ * →"). `available: false` covers both "this profile has never run" and
+ * "the most recent runs' pre-filter checkpoint has already been pruned" —
+ * see `previewFilterRule`'s own doc comment for exactly which reason maps
+ * to which. */
+export type FilterPreviewResult =
+  | {
+      available: true;
+      totalJobs: number;
+      baselineDrops: number;
+      draftDrops: number;
+      newlyDropped: Array<{ title: string; company: string }>;
+    }
+  | { available: false; reason: 'no_recent_run' | 'checkpoint_expired' };
+
 export interface TrackingRow extends TrackingFields {
   jobId: string;
   updatedAt: string;
@@ -288,5 +305,20 @@ export interface BoardSource {
    * Irreversible — there is no dry-run mode on this method, because the
    * UI's type-the-name confirmation dialog is the dry run. */
   removeProfile(name: string): Promise<RemoveProfileOutcome>;
+  /** R15: "what would this filter rule drop?" Re-runs `core/filter`'s
+   * existing evaluation, once against the profile's CURRENT `filter.json`
+   * and once against `draftFilterConfig`, over the most recent run's
+   * pre-filter candidate pool (read from a checkpoint) — it never reruns
+   * the pipeline and never mutates any stored config. Throws on an invalid
+   * `draftFilterConfig` (caller turns that into a 422, same posture as
+   * `writeConfigDoc`'s validator-throw contract); `available: false` with
+   * `reason: 'no_recent_run'` when the profile has no run to read from at
+   * all, or `'checkpoint_expired'` when recent runs exist but none has a
+   * usable pre-filter checkpoint left (pruned, or its payload carries no
+   * structured job). Read-only. */
+  previewFilterRule(
+    name: string,
+    draftFilterConfig: unknown,
+  ): Promise<FilterPreviewResult>;
   close(): void;
 }

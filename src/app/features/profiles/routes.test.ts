@@ -60,6 +60,7 @@ function fakeSource(
     writeSecret: async () => {},
     removeProfile,
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
