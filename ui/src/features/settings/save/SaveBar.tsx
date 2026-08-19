@@ -14,6 +14,12 @@ export interface SaveBarProps {
    * applying `discard()`'s returned value back onto its own draft state
    * (e.g. `onDiscard={() => setCurrentValue(discard())}`). */
   onDiscard: () => void;
+  /** Purely visual de-emphasis, never a validation gate (`save-button` is
+   * NEVER `disabled` — see the field above). Defaults to `'default'`;
+   * WhereYouWorkSection (task 11) passes `'outline'` while its
+   * `geo-conflict-notice` is the screen's one visually distinct element,
+   * so the save button doesn't compete with it. */
+  saveButtonVariant?: 'default' | 'outline';
 }
 
 /**
@@ -28,6 +34,7 @@ export function SaveBar({
   successMessage,
   onSave,
   onDiscard,
+  saveButtonVariant = 'default',
 }: SaveBarProps) {
   const errorEntries = Object.entries(errors);
 
@@ -85,7 +92,7 @@ export function SaveBar({
           </Button>
           <Button
             type="button"
-            variant="default"
+            variant={saveButtonVariant}
             size="sm"
             data-qa="save-button"
             data-testid="save-button"

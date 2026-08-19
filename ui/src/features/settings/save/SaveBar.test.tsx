@@ -49,6 +49,33 @@ describe('SaveBar — dirty bar', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it('defaults save-button to the default variant, and honors an explicit saveButtonVariant override', () => {
+    const { rerender } = render(
+      <SaveBar
+        isDirty
+        errors={{}}
+        successMessage={null}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('save-button')).toHaveAttribute('data-variant', 'default');
+
+    rerender(
+      <SaveBar
+        isDirty
+        errors={{}}
+        successMessage={null}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        saveButtonVariant="outline"
+      />,
+    );
+    expect(screen.getByTestId('save-button')).toHaveAttribute('data-variant', 'outline');
+    // never disabled, regardless of variant — the de-emphasis is purely visual.
+    expect(screen.getByTestId('save-button')).not.toBeDisabled();
+  });
+
   // The dirty bar's own precondition is `isDirty && errors is empty` (a
   // previously-attempted save leaves errors, which routes to the
   // validation-summary state instead — see the "validation summary" describe

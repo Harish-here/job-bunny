@@ -119,7 +119,10 @@ function TitleRuleEditor({
   );
 }
 
-function LocationRow({
+// Exported for WhereYouWorkSection.tsx (task 11), which reuses this
+// unchanged rather than duplicating it — the geo screen's Rules card owns
+// the same locations[] field this component already edits.
+export function LocationRow({
   location,
   onChange,
   onRemove,

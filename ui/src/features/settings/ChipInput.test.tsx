@@ -73,4 +73,17 @@ describe('ChipInput', () => {
     await user.click(screen.getByRole('button', { name: 'Add' }));
     expect(onAdd).not.toHaveBeenCalled();
   });
+
+  it('forwards an optional data-qa id onto the outer wrapper', () => {
+    const { container } = render(
+      <ChipInput
+        values={[]}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        ariaLabel="Allowed timezones rule"
+        data-qa="geo-timezones-rule"
+      />,
+    );
+    expect(container.querySelector('[data-qa="geo-timezones-rule"]')).not.toBeNull();
+  });
 });
