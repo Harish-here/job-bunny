@@ -284,7 +284,12 @@ describe('RunsList — bare RunSummary rows (the real /runs list contract)', () 
 // `softErrors`.
 describe('RunsList — soft-error-driven degraded row (fix-round finding #4)', () => {
   it('a full RunDetail row with all 10 stages, zero yield, and softErrors over threshold classifies degraded, not empty', () => {
-    const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
+    const softErrors: SoftErrorSummary = {
+      total: 12,
+      groups: [],
+      breakerOpen: false,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    };
     const row: RunDetail & { softErrors: SoftErrorSummary } = {
       id: 30,
       ...BASE,
@@ -301,7 +306,12 @@ describe('RunsList — soft-error-driven degraded row (fix-round finding #4)', (
   });
 
   it('the SAME row shape with breakerOpen instead of a high total also classifies degraded, not empty', () => {
-    const softErrors: SoftErrorSummary = { total: 1, groups: [], breakerOpen: true };
+    const softErrors: SoftErrorSummary = {
+      total: 1,
+      groups: [],
+      breakerOpen: true,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    };
     const row: RunDetail & { softErrors: SoftErrorSummary } = {
       id: 31,
       ...BASE,
@@ -340,7 +350,12 @@ describe('RunsList — soft-error-driven degraded row (fix-round finding #4)', (
 // per-row fetch.
 describe('RunsList — degraded row soft-error-count subline', () => {
   it('a degraded row with softErrors.total 8 renders "8 soft errors"', () => {
-    const softErrors: SoftErrorSummary = { total: 8, groups: [], breakerOpen: false };
+    const softErrors: SoftErrorSummary = {
+      total: 8,
+      groups: [],
+      breakerOpen: false,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    };
     const row: RunDetail & { softErrors: SoftErrorSummary } = {
       id: 40,
       ...BASE,
@@ -357,7 +372,12 @@ describe('RunsList — degraded row soft-error-count subline', () => {
   });
 
   it('a degraded row with softErrors.total 1 renders the singular "1 soft error"', () => {
-    const softErrors: SoftErrorSummary = { total: 1, groups: [], breakerOpen: true };
+    const softErrors: SoftErrorSummary = {
+      total: 1,
+      groups: [],
+      breakerOpen: true,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    };
     const row: RunDetail & { softErrors: SoftErrorSummary } = {
       id: 41,
       ...BASE,

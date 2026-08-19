@@ -9,6 +9,7 @@ function summary(over: Partial<SoftErrorSummary> = {}): SoftErrorSummary {
     total: 0,
     groups: [],
     breakerOpen: false,
+    capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
     ...over,
   };
 }

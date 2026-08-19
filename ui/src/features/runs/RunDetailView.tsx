@@ -30,7 +30,12 @@ const UNRECORDED_COPY =
 /** Fallback passed to `EvidenceSection` (whose `summary` prop is required)
  * when the caller hasn't yet resolved a `SoftErrorSummary` for this run —
  * reads as "no soft errors recorded" rather than a loading gap. */
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = {
+  total: 0,
+  groups: [],
+  breakerOpen: false,
+  capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+};
 
 /** The four outcome kinds `DiagnosisPanel` renders for (plan.md B20 step 4:
  * "only when kind is one of failed/crashed/degraded/empty (never for

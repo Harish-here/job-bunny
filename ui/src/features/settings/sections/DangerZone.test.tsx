@@ -92,7 +92,12 @@ describe('DangerZone', () => {
           heartbeatAt: '2026-08-08T09:01:00Z',
           progress: null,
           catchupSlots: null,
-          softErrors: { total: 0, groups: [], breakerOpen: false },
+          softErrors: {
+            total: 0,
+            groups: [],
+            breakerOpen: false,
+            capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+          },
         },
       ],
       total: 1,

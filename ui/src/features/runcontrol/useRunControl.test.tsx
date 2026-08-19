@@ -61,7 +61,12 @@ function runRow(over: Partial<RunSummary> = {}): ListRunsResponse['rows'][number
     heartbeatAt: null,
     progress: null,
     catchupSlots: null,
-    softErrors: { total: 0, groups: [], breakerOpen: false },
+    softErrors: {
+      total: 0,
+      groups: [],
+      breakerOpen: false,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    },
     ...over,
   };
 }
