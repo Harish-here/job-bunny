@@ -62,6 +62,7 @@ function fakeSource(
     runDoctor: async () => null,
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };

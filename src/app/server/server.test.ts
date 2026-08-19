@@ -166,6 +166,7 @@ function fakeSource(
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
     close() {
       if (closed) closed.value = true;
     },

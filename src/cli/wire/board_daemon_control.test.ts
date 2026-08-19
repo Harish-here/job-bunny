@@ -1,17 +1,21 @@
 /**
- * board_daemon_control.test.ts (settings-overhaul, task 11) — TDD for
- * `stopBoardDaemon`, against a REAL temporary home for the pidfile (written
- * by hand, mirroring `board_daemon.test.ts`'s own posture) but with
- * `pidIsAlive`/`killPid`/`sleep` fully stubbed — NEVER a real OS process.
- * SAFETY: per this brief's own constraint, no test here spawns, signals, or
- * waits on anything but these in-memory stubs.
+ * board_daemon_control.test.ts (settings-overhaul, task 11 `stopBoardDaemon`;
+ * task 12 adds `startBoardDaemon`) — TDD against a REAL temporary home for
+ * the pidfile (written by hand, mirroring `board_daemon.test.ts`'s own
+ * posture) but with `pidIsAlive`/`killPid`/`sleep`/`spawn` fully stubbed —
+ * NEVER a real OS process. SAFETY: per this brief's own constraint, no test
+ * here spawns, signals, or waits on anything but these in-memory stubs; the
+ * `startBoardDaemon` tests below additionally stub `listLaunchAgentFiles`
+ * and `home` (a throwaway subdirectory of the same tmpdir) so no test ever
+ * touches the real `~/Library/LaunchAgents` or `~/.jobbunny/logs`.
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { stopBoardDaemon } from './board_daemon_control.ts';
+import type { SpawnFn, SpawnHandle } from '../commands/serve/index.ts';
+import { startBoardDaemon, stopBoardDaemon } from './board_daemon_control.ts';
 
 let root: string;
 
@@ -154,4 +158,110 @@ test('daemon dies but its in-flight child survives SIGKILL: child_unresponsive w
     { pid: 5300, signal: 'SIGTERM' },
     { pid: 5300, signal: 'SIGKILL' },
   ]);
+});
+
+// --- startBoardDaemon (task 12) -------------------------------------------
+
+function freshRoot(): string {
+  return mkdtempSync(path.join(root, 'start-'));
+}
+
+function fakeSpawn(
+  pid: number | undefined,
+  throwsSync = false,
+): {
+  spawn: SpawnFn;
+  killCalls: string[];
+} {
+  const killCalls: string[] = [];
+  const spawn: SpawnFn = () => {
+    if (throwsSync) throw new Error('boom: spawn failed synchronously');
+    const handle: SpawnHandle = {
+      pid,
+      on: () => {},
+      kill: (signal) => {
+        killCalls.push(signal);
+        return true;
+      },
+      unref: () => {},
+    };
+    return handle;
+  };
+  return { spawn, killCalls };
+}
+
+test('startBoardDaemon: no existing pidfile, child comes up alive: started', async () => {
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(9001);
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn,
+    pidIsAlive: () => true, // the post-spawn alive-confirm sees the child up
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'started' });
+});
+
+test('startBoardDaemon: a fresh (not-stale) pidfile already exists: already_running, spawn never called', async () => {
+  const testRoot = freshRoot();
+  writeFileSync(
+    path.join(testRoot, '.jobbunny-daemon.pid'),
+    JSON.stringify({
+      pid: 4242,
+      startedAt: '2026-08-19T09:00:00.000Z',
+      lastTickAt: new Date().toISOString(), // fresh heartbeat — never stale
+      attempts: [],
+      degraded: [],
+      schemaDriftNotifiedAt: null,
+      schemaDriftNoNotifierWarnedAt: null,
+      schemaDriftNotifyFailedAt: null,
+      slotGateDeclines: [],
+      deferredNotifyAttempts: [],
+    }),
+  );
+  let spawnCalled = false;
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn: () => {
+      spawnCalled = true;
+      throw new Error('must never spawn when a daemon is already running');
+    },
+    pidIsAlive: () => true, // the incumbent (4242) is genuinely alive
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'already_running' });
+  assert.equal(spawnCalled, false);
+});
+
+test('startBoardDaemon: the child dies immediately (post-spawn alive-confirm fails): spawn_failed, never already_running', async () => {
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(9002);
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn,
+    pidIsAlive: () => false, // the child never comes up
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+  assert.notDeepEqual(outcome, { outcome: 'already_running' });
+});
+
+test('startBoardDaemon: a synchronous spawn throw is caught: spawn_failed, never an unhandled exception', async () => {
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(undefined, true);
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn,
+    pidIsAlive: () => true,
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'spawn_failed' });
 });

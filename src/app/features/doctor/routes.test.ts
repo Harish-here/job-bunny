@@ -58,6 +58,7 @@ function fakeSource(runDoctor: BoardSource['runDoctor']): BoardSource {
     removeProfile: async () => ({ outcome: 'removed' }),
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
     close() {},
   };
 }

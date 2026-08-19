@@ -126,6 +126,20 @@ export type StopDaemonOutcome =
   | { outcome: 'daemon_unresponsive' }
   | { outcome: 'child_unresponsive'; childPid: number };
 
+/** `BoardSource.startDaemon`'s result (R20 = Option 1, board-initiated
+ * detached spawn — task 12, this brief's Start counterpart to
+ * `StopDaemonOutcome` above). `'started'` and `'already_running'` are BOTH
+ * a success from the caller's point of view (the daemon ends up running
+ * either way — the same "target state reached" posture `'already_stopped'`
+ * takes on the stop side), while `'spawn_failed'` is a DISTINCT, visible
+ * failure — never collapsed into a false success. Defined HERE, not in
+ * `cli/wire/`, for the identical reachability reason `StopDaemonOutcome`
+ * is: a `cli/wire/` type is not reachable through the `ports` →
+ * `app/features/<name>/index.ts` → `ui/src/lib/api/types.ts` chain. */
+export type StartDaemonOutcome = {
+  outcome: 'started' | 'already_running' | 'spawn_failed';
+};
+
 /** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
  * `newlyDropped` (jobs that drop under the draft but not the current config)
  * is capped at 12 entries, matching the mockup's disclosure ("see which 12
@@ -306,6 +320,15 @@ export interface BoardSource {
    * daemon/child is never reported as a success. NEVER throws; every
    * failure mode is a typed outcome. */
   stopDaemon(): Promise<StopDaemonOutcome>;
+  /** R20 = Option 1 (board-initiated detached spawn) — task 12, the Start
+   * counterpart to `stopDaemon` above. Spawns exactly the SAME zero-argument
+   * supervisor process `jobbunny serve start` spawns, detached, and confirms
+   * it's alive before resolving — see `StartDaemonOutcome`'s own doc comment
+   * for the outcome shape. NEVER throws; every failure mode is a typed
+   * outcome. This is the board's ONLY spawn capability — it can never spawn
+   * a pipeline run directly; every run stays daemon-spawned off a schedule
+   * slot or claimed off a `run_intents` row. */
+  startDaemon(): Promise<StartDaemonOutcome>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this
    * OPENS-OR-CREATES the profile's db: an intent is durable state a

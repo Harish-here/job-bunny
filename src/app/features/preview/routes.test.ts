@@ -83,6 +83,7 @@ function fakeSource(mode: Mode): BoardSource {
       profiles: [],
     }),
     stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
     async previewFilterRule(_name, draftFilterConfig): Promise<FilterPreviewResult> {
       const parsed = FilterConfigSchema.safeParse(draftFilterConfig);
       if (!parsed.success) {
