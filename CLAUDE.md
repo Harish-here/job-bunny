@@ -79,7 +79,7 @@ Layers: `core/` (pure, no I/O) + `ports/` (interfaces) + `adapters/` + `pipeline
 
 Note: `boundaries` parses via `@swc/core` with `tsConfig` omitted — setting `tsConfig` silently cruises 0 modules (dependency-cruiser's typescript resolver caps below TS7).
 
-**`ui/` may import `src/core/**` at runtime — but only dependency-free modules.** `depcruise src` never traverses `ui/`, so no gate can see an import originating there; this seam is convention-enforced. A `core` module the SPA imports must itself import nothing (no `node:` builtins, no other `src/` module), or it will break `ui:build` rather than `npm run check`. Currently the only such module is `src/core/datetime/`.
+**`ui/` may import `src/core/**` at runtime — but only dependency-free modules.** `depcruise src` never traverses `ui/`, so no gate can see an import originating there; this seam is convention-enforced. A `core` module the SPA imports must itself import nothing (no `node:` builtins, no other `src/` module), or it will break `ui:build` rather than `npm run check`. Currently the only such modules are `src/core/datetime/` and `src/core/normalize_token/`.
 
 Key invariants:
 
