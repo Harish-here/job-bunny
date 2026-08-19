@@ -27,10 +27,29 @@ import type {
   StopDaemonOutcome,
 } from '../../../ports/board.ts';
 import type { BoardRequest } from '../../shared/index.ts';
+import { HttpError } from '../../shared/index.ts';
 import { makeDaemonRoutes } from './routes.ts';
 
 function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
+}
+
+async function assertHttpError(
+  fn: () => unknown,
+  status: number,
+  code: string,
+  message?: string,
+) {
+  await assert.rejects(
+    async () => fn(),
+    (err: unknown) => {
+      assert.ok(err instanceof HttpError);
+      assert.equal(err.status, status);
+      assert.equal(err.code, code);
+      if (message !== undefined) assert.equal(err.message, message);
+      return true;
+    },
+  );
 }
 
 function fakeSource(overrides: Partial<BoardSource> = {}): BoardSource {
@@ -307,4 +326,26 @@ test('daemon autostart PUT: a missing body is rejected before reaching BoardSour
     await route.handler(req({ body: undefined }));
   });
   assert.equal(called, false);
+});
+
+test('daemon autostart PUT: a thrown HttpError(409, autostart_conflict) from BoardSource.setAutostart propagates through the handler unchanged (fix round F13 — a legacy-plist conflict must never be swallowed by a future try/catch)', async () => {
+  const route = findRoute(
+    fakeSource({
+      setAutostart: async () => {
+        throw new HttpError(
+          409,
+          'autostart_conflict',
+          'launchctl: service already loaded',
+        );
+      },
+    }),
+    'PUT',
+    '/api/daemon/autostart',
+  );
+  await assertHttpError(
+    () => route.handler(req({ body: { enabled: true } })),
+    409,
+    'autostart_conflict',
+    'launchctl: service already loaded',
+  );
 });
