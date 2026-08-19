@@ -1,7 +1,8 @@
 /** Edits exactly the seven owned resume.json keys via useDocForm's mutate
  * callback — every other key survives by construction (resume.json has no
- * schema — see this brief's Rationale). The settings-section wrapper and
- * JsonEscapeHatch are SettingsPage-owned (task 7); renders neither. */
+ * schema — see this brief's Rationale). The settings-section wrapper is
+ * owned by the Settings shell; this component renders neither it nor a
+ * raw-JSON editor. */
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';

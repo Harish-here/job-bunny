@@ -11,8 +11,7 @@ vi.mock('../config.api', () => ({ getConfigDoc: vi.fn(), putConfigDoc: vi.fn() }
 // Deliberately distinct from HousekeepingSection's own shipped defaults
 // (30/2/7/30) — a value equal to the default would let a `waitFor` on that
 // value pass trivially on the very first synchronous (pre-load) render,
-// never actually waiting for the async doc load. See the same note in
-// `ProfileSection.test.tsx`.
+// never actually waiting for the async doc load.
 const BASE_PROFILE_JSON = {
   connector: 'sqlite',
   routines: ['cleanup'],

@@ -1,13 +1,13 @@
 /**
  * "Where jobs come from" section (blueprint.md:790-797, step 17's component
  * half) — merges TWO pieces of existing UI into one section: the lane
- * checkboxes that live on `ProfileSection.tsx` (profile.json's `lanes`
- * field) and the search-URL row editor that lives on `SearchUrlsSection.tsx`
- * (search_urls.md, plain markdown text — not JSON, so it round-trips via
- * `configDocQuery`/`useConfigMutation` directly, same seam
- * `SearchUrlsSection.tsx` already uses, never `useDocForm`). Both source
- * files stay UNCHANGED and unmounted-but-not-deleted until later briefs
- * (task 22's switchover, task 23's `ProfileSection.tsx` deletion) — see
+ * checkboxes that used to live on the old per-profile section
+ * (profile.json's `lanes` field) and the search-URL row editor that lives on
+ * `SearchUrlsSection.tsx` (search_urls.md, plain markdown text — not JSON,
+ * so it round-trips via `configDocQuery`/`useConfigMutation` directly, same
+ * seam `SearchUrlsSection.tsx` already uses, never `useDocForm`). The old
+ * per-profile section is now deleted (task 23); `SearchUrlsSection.tsx`
+ * itself stays UNCHANGED and unmounted-but-not-deleted — see
  * task-17-brief's TASK section.
  *
  * Spans TWO documents like `WhereYouWorkSection.tsx` (task 11) does, so this
@@ -35,7 +35,7 @@ import {
   serializeSearchUrlRows,
 } from './searchUrls.model';
 
-// Lifted UNCHANGED from `ProfileSection.tsx:9`.
+// Lifted UNCHANGED from the old (now-deleted) per-profile section's lane list.
 const LANES = ['linkedin', 'greenhouse', 'keka'] as const;
 
 const DEFAULT_SLUG = 'linkedin__jobs-search';
@@ -45,7 +45,7 @@ const LABEL_MESSAGE = 'Give this search a short label.';
 const COVERAGE_MESSAGE =
   'No page inventory exists for this page type yet — run /page-analyse.';
 
-// Lifted UNCHANGED from `ProfileSection.tsx:11-15`.
+// Lifted UNCHANGED from the old (now-deleted) per-profile section's array-coercion helper.
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((v): v is string => typeof v === 'string')
@@ -167,7 +167,7 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
     onSave: async (value) => {
       const [profileOk, searchUrlsOk] = await Promise.all([
         // Same "keep any unknown lane name, replace only the three known
-        // ones" split as `ProfileSection.tsx:66-69`'s `handleSave`.
+        // ones" split the old (now-deleted) profile section's `handleSave` used to do.
         profileForm.save((cfg) => {
           const otherLanes = asStringArray(cfg.lanes).filter(
             (l) => !(LANES as readonly string[]).includes(l),

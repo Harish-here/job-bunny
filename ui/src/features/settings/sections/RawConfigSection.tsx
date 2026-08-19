@@ -1,12 +1,13 @@
 /**
  * "Raw config" settings section (blueprint.md:868-885, step 23's component
- * half) — the single consolidated raw-JSON/markdown editor superseding all
- * six of today's per-section "Edit as JSON" dialogs (`JsonEscapeHatch.tsx`,
- * deleted in task 23, not this brief). Two-pane layout: a doc list on the
- * left, one inline editor on the right, over the SAME `configDocQuery` +
- * `useConfigMutation` seam `JsonEscapeHatch.tsx` already uses (see that
- * file's read/write plumbing, blueprint.md:31-49) — rendered inline in the
- * page instead of inside a `Dialog`.
+ * half) — the single consolidated raw-JSON/markdown editor that supersedes
+ * the six per-section "Edit as JSON" dialogs the old per-section escape
+ * hatch used to render (that escape hatch is deleted as part of this same
+ * task). Two-pane layout: a doc list on the left, one inline editor on the
+ * right, over the same `configDocQuery` + `useConfigMutation` seam that
+ * escape hatch used (its read/write plumbing carried over unchanged,
+ * blueprint.md:31-49) — rendered inline in the page instead of inside a
+ * `Dialog`.
  *
  * Discoverability stays asymmetric BY DESIGN: this section is reachable in
  * exactly one click from the nav (Advanced group, task 22) and deliberately
@@ -117,7 +118,8 @@ export function RawConfigSection({ profile }: { profile: string }) {
 
   // Seed only when the selected doc's text first loads — a background
   // refetch of the currently-selected doc never silently clobbers
-  // mid-typing edits, mirroring `JsonEscapeHatch.tsx`'s own rationale.
+  // mid-typing edits — the same anti-clobber rationale the escape hatch
+  // this section replaced used to follow.
   const initializedDoc = useRef<ConfigDocName | null>(null);
   useEffect(() => {
     if (query.isLoading) return;

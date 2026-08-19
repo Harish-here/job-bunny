@@ -5,8 +5,9 @@
  *
  * Connector (R11) is deliberately **read-only display**, not a form
  * control: a plain `<span>` + explanatory copy, no `<select>` at all — the
- * `<select>` in `ProfileSection.tsx` is the control being DELETED from the
- * product (task 23), never migrated here in any form (not even disabled —
+ * `<select>` the old profile section used to render is the control being
+ * DELETED from the product (task 23), never migrated here in any form (not
+ * even disabled —
  * a disabled control reads as "temporarily can't touch this", the opposite
  * of "this is a migration, not a setting"). This section therefore never
  * writes `cfg.connector` back on save.
@@ -14,7 +15,7 @@
  * Notion `mirror`/`dryRun` are two currently-unsurfaced booleans
  * (`profile.json.settings.notion.*`) — the first form surface for them.
  *
- * Telegram notifier is extracted unchanged from `ProfileSection.tsx`: the
+ * Telegram notifier is extracted unchanged from the old profile section: the
  * bare checkbox plus the save-time "keep everything that isn't 'telegram',
  * then add it back conditionally" merge against `profile.json.notifiers`.
  *
@@ -70,8 +71,8 @@ function parseDeliveryState(profileDoc: Record<string, unknown>): DeliveryState 
 }
 
 // Delivery → profile.json's connector (read-only), `settings.notion.*`
-// (mirror/dryRun) and `notifiers` (telegram) only. `lanes`/`routines` stay
-// ProfileSection's job in this brief.
+// (mirror/dryRun) and `notifiers` (telegram) only. `lanes` live on Where jobs
+// come from and `routines` live on Housekeeping.
 export function DeliverySection({ profile }: { profile: string }) {
   const docForm = useDocForm(profile, 'profile.json');
 

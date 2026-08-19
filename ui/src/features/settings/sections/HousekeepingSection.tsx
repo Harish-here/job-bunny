@@ -2,8 +2,8 @@
  * "Housekeeping" settings section (blueprint.md:862-867, step 22's
  * component half). Two cards over `profile.json`: cleanup TTLs
  * (`settings.cleanup.*` — new fields, currently unsurfaced anywhere in the
- * UI) and routines (extracted unchanged from `ProfileSection.tsx`'s chip
- * list, now rendered with the shared `ChipInput`).
+ * UI) and routines (extracted unchanged from the old per-profile section's
+ * chip list, now rendered with the shared `ChipInput`).
  *
  * Defaults mirror `src/routines/cleanup/cleanup.ts`'s own zod schema
  * (`passedOlderThanDays: 7`, `untouchedOlderThanDays: 30`,
@@ -140,8 +140,9 @@ function validateState(state: HousekeepingState): Record<string, string> {
 }
 
 // Housekeeping → profile.json's `settings.cleanup.*` (four new TTL fields)
-// and `routines` only. `ProfileSection.tsx` keeps owning everything else
-// until task 23 deletes it.
+// and `routines` only. `lanes` live on Where jobs come from and
+// connector/Notion/Telegram live on Delivery — the old profile section that
+// used to own all of this is deleted (task 23).
 export function HousekeepingSection({ profile }: { profile: string }) {
   const docForm = useDocForm(profile, 'profile.json');
 
