@@ -62,7 +62,7 @@ export interface CheckpointStore {
    *
    * `readAt` (below) is a deliberate exception to this "latest" framing: it
    * reads a NAMED, possibly non-latest stage's checkpoint from within the
-   * last 5 days' worth of runs (bounded by `settings.cleanup.checkpointsOlderThanDays`,
+   * 5 most recent runs (bounded by `settings.cleanup.checkpointsOlderThanDays`,
    * default 2 — not by "latest" semantics), backing the R15 filter-preview
    * feature. */
   latestTimeDir(runDate: string): string | undefined;
@@ -77,7 +77,7 @@ export interface CheckpointStore {
    *
    * `readAt` (below) is a deliberate exception to this "latest" framing: it
    * reads a NAMED, possibly non-latest stage's checkpoint from within the
-   * last 5 days' worth of runs (bounded by `settings.cleanup.checkpointsOlderThanDays`,
+   * 5 most recent runs (bounded by `settings.cleanup.checkpointsOlderThanDays`,
    * default 2 — not by "latest" semantics), backing the R15 filter-preview
    * feature. */
   latestCheckpointTimeDir(runDate: string): string | undefined;

@@ -38,8 +38,8 @@ export interface SoftErrorSummary {
   /** Whether a run-yield cap's warn message appears anywhere in `events`,
    * per cap, independently — same scanning discipline as `breakerOpen`
    * (every raw event's `msg`, never a group's `sample`). `maxProbesPerRun`
-   * is deliberately absent: no signal exists yet to detect it from run
-   * events. */
+   * cap detection exists in the `source` stage and is not currently tracked
+   * here. */
   capsHit: { maxNewPerLane: boolean; maxCardsPerUrl: boolean };
 }
 

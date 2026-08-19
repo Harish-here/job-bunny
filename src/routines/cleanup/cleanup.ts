@@ -17,7 +17,7 @@ import type { Routine } from '../types.ts';
  * window was pure dead weight (~95% of the DB in practice). DELIBERATE
  * EXCEPTION: `CheckpointStore.readAt` (added for the R15 filter-preview
  * feature) reads a NAMED, possibly non-latest stage's checkpoint from
- * within the last 5 days' worth of runs, not same-day-latest — so it is
+ * within the 5 most recent runs, not same-day-latest — so it is
  * this `checkpointsOlderThanDays` TTL (default 2 days, below) that actually
  * bounds `readAt`'s reach, not the "every read path is same-day" claim
  * above.
