@@ -98,8 +98,9 @@ test('settings: fetching section blocks Save on an inverted jitter range (R13) a
 }) => {
   const original = await fetchConfigText(page, 'profile.json');
   const before = await fetchConfigJson(page, 'profile.json');
-  const beforeLinkedin = (before.settings as { linkedin?: Record<string, number> } | undefined)
-    ?.linkedin;
+  const beforeLinkedin = (
+    before.settings as { linkedin?: Record<string, number> } | undefined
+  )?.linkedin;
   try {
     await page.goto('/#/settings/fetching');
     await expect(section(page)).toHaveAttribute('data-section', 'fetching');
@@ -120,8 +121,9 @@ test('settings: fetching section blocks Save on an inverted jitter range (R13) a
     await expect(summary).toContainText('jitterMaxMs');
 
     const after = await fetchConfigJson(page, 'profile.json');
-    const afterLinkedin = (after.settings as { linkedin?: Record<string, number> } | undefined)
-      ?.linkedin;
+    const afterLinkedin = (
+      after.settings as { linkedin?: Record<string, number> } | undefined
+    )?.linkedin;
     expect(afterLinkedin).toEqual(beforeLinkedin);
   } finally {
     await putConfigText(page, 'profile.json', original);
