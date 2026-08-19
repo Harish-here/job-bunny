@@ -1268,6 +1268,20 @@ api/types.ts`'s own new/extended re-export blocks are product-ui's file to
 amend (already flagged in the UI-gate ruling as part of its own step-9
 correction), not touched here.
 
+**`AutostartOutcome`'s error channel — implementation-time clarification, not
+a contract change.** The two variants above (`ok`, `unsupported_platform`)
+are unchanged and remain byte-identical to what §3.41 froze; they are the
+success and platform-no-op cases, and **no third variant is added**. A real
+darwin legacy-plist conflict is not one of them — it surfaces at the API
+boundary as a **thrown** `HttpError(409, 'autostart_conflict', <message>)`
+(raised in `cli/wire/board_autostart_control.ts`, propagated unchanged
+through `app/features/daemon/routes.ts`), never as a discriminated-union
+case. Callers must therefore handle autostart failure on **two** channels:
+narrow `outcome` for the two success/no-op values, and a separate
+catch/error branch for the 409. A client that only narrows
+`AutostartOutcome` type-checks cleanly while being blind to a real,
+reachable failure on any machine carrying a legacy plist.
+
 ---
 
 ## NOTES
