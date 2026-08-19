@@ -1,12 +1,26 @@
 /**
- * routes.test.ts (UI phase 1, Task 7) — TDD for `makeDaemonRoutes`. Fakes
- * are plain object literals (`fakeSource`), mirroring
- * `features/doctor/routes.test.ts`'s pattern — no `src/adapters/**` import
- * anywhere in this file.
+ * routes.test.ts (UI phase 1, Task 7; settings-overhaul task 11 adds Stop)
+ * — TDD for `makeDaemonRoutes`. Fakes are plain object literals
+ * (`fakeSource`), mirroring `features/doctor/routes.test.ts`'s pattern —
+ * no `src/adapters/**` import anywhere in this file.
+ *
+ * The `stopDaemon` tests here cover the ROUTE's outcome-to-HTTP mapping
+ * only (all four `StopDaemonOutcome` values, via a stubbed
+ * `BoardSource.stopDaemon`) — the actual kill-and-confirm SIGKILL
+ * escalation sequencing (SIGTERM → poll → SIGKILL → poll, daemon before
+ * child) is exercised against the real implementation in
+ * `cli/wire/board_daemon_control.test.ts`, the only layer with a stubbed
+ * process seam to assert it against. Per this brief's own safety
+ * constraint, no test in this file (or in `board_daemon_control.test.ts`)
+ * ever spawns, signals, or waits on a real OS process.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { BoardSource, DaemonStatus } from '../../../ports/board.ts';
+import type {
+  BoardSource,
+  DaemonStatus,
+  StopDaemonOutcome,
+} from '../../../ports/board.ts';
 import type { BoardRequest } from '../../shared/index.ts';
 import { makeDaemonRoutes } from './routes.ts';
 
@@ -14,7 +28,7 @@ function req(overrides: Partial<BoardRequest> = {}): BoardRequest {
   return { params: {}, query: new URLSearchParams(), body: undefined, ...overrides };
 }
 
-function fakeSource(readDaemonStatus: BoardSource['readDaemonStatus']): BoardSource {
+function fakeSource(overrides: Partial<BoardSource> = {}): BoardSource {
   return {
     listProfiles: async () => [],
     openStore: async () => null,
@@ -23,29 +37,24 @@ function fakeSource(readDaemonStatus: BoardSource['readDaemonStatus']): BoardSou
     createProfile: async () => {},
     runDoctor: async () => null,
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
-    readDaemonStatus,
+    readDaemonStatus: async () => defaultStatus(),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     close() {},
+    ...overrides,
   };
 }
 
-function findRoute(source: BoardSource) {
+function findRoute(source: BoardSource, method: 'GET' | 'POST', path: string) {
   const route = makeDaemonRoutes(source).find(
-    (r) => r.method === 'GET' && r.path === '/api/daemon',
+    (r) => r.method === method && r.path === path,
   );
-  assert.ok(route, 'no route for GET /api/daemon');
+  assert.ok(route, `no route for ${method} ${path}`);
   return route;
 }
-
-test('makeDaemonRoutes: registers exactly one GET route at /api/daemon', () => {
-  const routes = makeDaemonRoutes(fakeSource(async () => defaultStatus()));
-  assert.equal(routes.length, 1);
-  assert.equal(routes[0]?.method, 'GET');
-  assert.equal(routes[0]?.path, '/api/daemon');
-});
 
 function defaultStatus(): DaemonStatus {
   return {
@@ -77,9 +86,20 @@ function defaultStatus(): DaemonStatus {
   };
 }
 
+test('makeDaemonRoutes: registers exactly one GET and one POST route', () => {
+  const routes = makeDaemonRoutes(fakeSource());
+  assert.equal(routes.length, 2);
+  assert.ok(routes.some((r) => r.method === 'GET' && r.path === '/api/daemon'));
+  assert.ok(routes.some((r) => r.method === 'POST' && r.path === '/api/daemon/stop'));
+});
+
 test('daemon: returns the status verbatim', async () => {
   const status = defaultStatus();
-  const route = findRoute(fakeSource(async () => status));
+  const route = findRoute(
+    fakeSource({ readDaemonStatus: async () => status }),
+    'GET',
+    '/api/daemon',
+  );
   const res = await route.handler(req());
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, status);
@@ -104,8 +124,57 @@ test('daemon: a stopped daemon reports nulls and still lists profiles', async ()
       },
     ],
   };
-  const route = findRoute(fakeSource(async () => status));
+  const route = findRoute(
+    fakeSource({ readDaemonStatus: async () => status }),
+    'GET',
+    '/api/daemon',
+  );
   const res = await route.handler(req());
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, status);
+});
+
+const OUTCOMES: Array<{ outcome: StopDaemonOutcome; expectedStatus: number }> = [
+  { outcome: { outcome: 'stopped' }, expectedStatus: 200 },
+  { outcome: { outcome: 'already_stopped' }, expectedStatus: 200 },
+  { outcome: { outcome: 'daemon_unresponsive' }, expectedStatus: 409 },
+  { outcome: { outcome: 'child_unresponsive', childPid: 5300 }, expectedStatus: 409 },
+];
+
+for (const { outcome, expectedStatus } of OUTCOMES) {
+  test(`daemon stop: ${outcome.outcome} maps to ${expectedStatus} with the outcome as the body, no envelope`, async () => {
+    const route = findRoute(
+      fakeSource({ stopDaemon: async () => outcome }),
+      'POST',
+      '/api/daemon/stop',
+    );
+    const res = await route.handler(req());
+    assert.equal(res.status, expectedStatus);
+    assert.deepEqual(res.body, outcome);
+  });
+}
+
+test('daemon stop: an unresponsive outcome never has status 200 (never reads as success)', async () => {
+  for (const { outcome } of OUTCOMES.filter(
+    (o) => o.outcome.outcome !== 'stopped' && o.outcome.outcome !== 'already_stopped',
+  )) {
+    const route = findRoute(
+      fakeSource({ stopDaemon: async () => outcome }),
+      'POST',
+      '/api/daemon/stop',
+    );
+    const res = await route.handler(req());
+    assert.notEqual(res.status, 200);
+  }
+});
+
+test('daemon stop: a survived-SIGKILL daemon (daemon_unresponsive) never reports already_stopped', async () => {
+  const route = findRoute(
+    fakeSource({ stopDaemon: async () => ({ outcome: 'daemon_unresponsive' }) }),
+    'POST',
+    '/api/daemon/stop',
+  );
+  const res = await route.handler(req());
+  assert.deepEqual(res.body, { outcome: 'daemon_unresponsive' });
+  assert.notDeepEqual(res.body, { outcome: 'already_stopped' });
 });

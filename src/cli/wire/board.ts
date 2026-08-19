@@ -66,7 +66,7 @@
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
-import { chmod as fsChmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod as fsChmod, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openJobsDb,
@@ -74,17 +74,16 @@ import {
   SqliteCheckpointStore,
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
-import { hasEnvValue, upsertEnvLine } from '../../core/env_file/index.ts';
-import {
-  type BoardProfile,
-  type BoardSource,
-  type BoardStore,
-  type DaemonStatus,
-  type FilterPreviewResult,
-  type RemoveProfileOutcome,
-  SECRET_KEYS,
-  type SecretKey,
-  type SecretPresence,
+import type {
+  BoardProfile,
+  BoardSource,
+  BoardStore,
+  DaemonStatus,
+  FilterPreviewResult,
+  RemoveProfileOutcome,
+  SecretKey,
+  SecretPresence,
+  StopDaemonOutcome,
 } from '../../ports/board.ts';
 import type { ConfigDocKey } from '../../ports/config_store.ts';
 import type { DoctorReport } from '../../ports/doctor.ts';
@@ -92,8 +91,10 @@ import type { RunIntentStore } from '../../ports/run_intents.ts';
 import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
+import { stopBoardDaemon } from './board_daemon_control.ts';
 import { runBoardDoctor } from './board_doctor.ts';
 import { previewFilterRule as previewFilterRuleImpl } from './board_preview.ts';
+import { listBoardSecrets, writeBoardSecret } from './board_secrets.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
 const PROFILE_NAME_RE = /^[a-z0-9_-]+$/;
@@ -118,18 +119,6 @@ interface ProfileInfo extends BoardProfile {
  * `connector` (config→db Phase 4 — `settings.sqlite.path` is retired). */
 function resolveDbPath(root: string, name: string): string {
   return canonicalDbPath(root, name);
-}
-
-/** `<root>/.env`'s current text, UTF-8. A missing file (ENOENT) reads as
- * the empty string, not an error — same tolerant posture as every other
- * "file may not exist yet" read in this module. */
-async function readEnvText(root: string): Promise<string> {
-  try {
-    return await readFile(path.join(root, '.env'), 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return '';
-    throw err;
-  }
 }
 
 /** Reads `profile.json`'s `connector` field through a short-lived,
@@ -280,6 +269,12 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       return readBoardDaemonStatus({ root });
     },
 
+    // Thin delegate to `board_daemon_control.ts` (task 11, F8) — read vs.
+    // write is the same split `readDaemonStatus` above already draws.
+    stopDaemon(): Promise<StopDaemonOutcome> {
+      return stopBoardDaemon({ root });
+    },
+
     async openIntents(name: string): Promise<RunIntentStore | null> {
       // Same membership gate as `openStore` (gate 1) — re-derived against
       // the CURRENT directory names, never path math. Unlike `openStore`,
@@ -298,32 +293,14 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       return store;
     },
 
-    async listSecrets(): Promise<SecretPresence> {
-      const text = await readEnvText(root);
-      return Object.fromEntries(
-        SECRET_KEYS.map((key) => [key, hasEnvValue(text, key) ? 'present' : 'absent']),
-      ) as SecretPresence;
+    // Thin delegates to `board_secrets.ts` (file-size cap, same precedent
+    // as `readDaemonStatus`/`runDoctor`/`stopDaemon` above/below).
+    listSecrets(): Promise<SecretPresence> {
+      return listBoardSecrets(root);
     },
 
-    async writeSecret(key: SecretKey, value: string): Promise<void> {
-      const text = await readEnvText(root);
-      const updated = upsertEnvLine(text, key, value);
-      const envPath = path.join(root, '.env');
-      // `mode` on `writeFile` only applies when the file is CREATED — an
-      // already-existing `.env` (the common case: most calls are updates
-      // to a file `setup` already created) keeps whatever permissions it
-      // already had unless chmod'd explicitly, so every write chmods the
-      // file to `0o600` afterward regardless of whether it already existed.
-      await writeFile(envPath, updated, { mode: 0o600 });
-      await chmodEnvFile(envPath, 0o600);
-      // `.env` is loaded exactly once, at CLI startup (`main.ts`'s
-      // `dotenv.config`) — the long-lived board process never re-reads
-      // it. Without this, `GET /api/profiles/:name/doctor` (which reads
-      // `process.env` via `ops/doctor/aggregate.ts`'s `resolveEnv`) keeps
-      // reporting the token missing until the server restarts, even
-      // though `GET /api/secrets` (which re-reads the file) already says
-      // 'present' — process-visible so the two endpoints agree.
-      process.env[key] = value;
+    writeSecret(key: SecretKey, value: string): Promise<void> {
+      return writeBoardSecret(root, key, value, chmodEnvFile);
     },
 
     // Guard order is the design (Task 8) — membership, protected, running

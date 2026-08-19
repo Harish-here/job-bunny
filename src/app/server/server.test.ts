@@ -138,24 +138,20 @@ function fakeIntentStore(): RunIntentStore & { cancelCalls: number[] } {
   };
 }
 
+/** `store`/`closed`/`intents` are convenience threading for the common
+ * cases; anything else on `BoardSource` (including `close` itself) can be
+ * overridden directly — this is the ONE shared fake every test in this
+ * file builds on, rather than each test hand-rolling its own full literal
+ * (which is how this file kept nearly blowing its own 800-line test-file
+ * cap: six near-identical ~18-line literals differing in one method). */
 function fakeSource(
   opts: {
     store?: BoardStore | null;
     closed?: { value: boolean };
     intents?: RunIntentStore | null;
-    runDoctor?: BoardSource['runDoctor'];
-    readDaemonStatus?: BoardSource['readDaemonStatus'];
-    removeProfile?: BoardSource['removeProfile'];
-  } = {},
+  } & Partial<BoardSource> = {},
 ): BoardSource {
-  const {
-    store = null,
-    closed,
-    intents = null,
-    runDoctor = async () => null,
-    readDaemonStatus = async () => FAKE_DAEMON_STATUS,
-    removeProfile = async () => ({ outcome: 'removed' }),
-  } = opts;
+  const { store = null, closed, intents = null, ...overrides } = opts;
   return {
     listProfiles: async () => PROFILES,
     openStore: async () => store,
@@ -165,13 +161,15 @@ function fakeSource(
     openIntents: async () => intents,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
     writeSecret: async () => {},
-    removeProfile,
-    runDoctor,
-    readDaemonStatus,
+    removeProfile: async () => ({ outcome: 'removed' }),
+    runDoctor: async () => null,
+    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
     close() {
       if (closed) closed.value = true;
     },
+    ...overrides,
   };
 }
 
@@ -357,23 +355,11 @@ test('PATCH with a body reaches the fake store parsed', async () => {
 
 test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', async () => {
   const writeCalls: Array<{ name: string; doc: string; rawText: string }> = [];
-  const source: BoardSource = {
-    listProfiles: async () => PROFILES,
-    openStore: async () => null,
-    readConfigDoc: async () => undefined,
+  const source = fakeSource({
     writeConfigDoc: async (name, doc, rawText) => {
       writeCalls.push({ name, doc, rawText });
     },
-    createProfile: async () => {},
-    openIntents: async () => null,
-    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
-    writeSecret: async () => {},
-    removeProfile: async () => ({ outcome: 'removed' }),
-    runDoctor: async () => null,
-    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
-    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
-    close() {},
-  };
+  });
   const server = createBoardServer({
     source,
     logger: silentLogger,
@@ -399,23 +385,11 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
 
 test('POST /api/profiles reaches source.createProfile and returns 201', async () => {
   const createCalls: string[] = [];
-  const source: BoardSource = {
-    listProfiles: async () => PROFILES,
-    openStore: async () => null,
-    readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+  const source = fakeSource({
     createProfile: async (name) => {
       createCalls.push(name);
     },
-    openIntents: async () => null,
-    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
-    writeSecret: async () => {},
-    removeProfile: async () => ({ outcome: 'removed' }),
-    runDoctor: async () => null,
-    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
-    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
-    close() {},
-  };
+  });
   const server = createBoardServer({
     source,
     logger: silentLogger,
@@ -470,23 +444,11 @@ test('a throwing store method is a 500 internal envelope whose message is NOT th
 });
 
 test('a throwing source.openStore is also a 500 internal envelope (never a crash)', async () => {
-  const source: BoardSource = {
-    listProfiles: async () => PROFILES,
+  const source = fakeSource({
     openStore: async () => {
       throw new Error('db schema is newer than this build supports');
     },
-    readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
-    createProfile: async () => {},
-    openIntents: async () => null,
-    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
-    writeSecret: async () => {},
-    removeProfile: async () => ({ outcome: 'removed' }),
-    runDoctor: async () => null,
-    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
-    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
-    close() {},
-  };
+  });
   const server = createBoardServer({
     source,
     logger: silentLogger,
@@ -669,13 +631,7 @@ test('a real ZodError leaking from a route handler is converted to 400 validatio
 
 test('PUT then GET /api/secrets round-trips presence without echoing the value', async () => {
   const written = new Map<string, string>();
-  const source: BoardSource = {
-    listProfiles: async () => PROFILES,
-    openStore: async () => null,
-    readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
-    createProfile: async () => {},
-    openIntents: async () => null,
+  const source = fakeSource({
     listSecrets: async () => ({
       NOTION_TOKEN: written.has('NOTION_TOKEN') ? 'present' : 'absent',
       TELEGRAM_BOT_TOKEN: written.has('TELEGRAM_BOT_TOKEN') ? 'present' : 'absent',
@@ -683,12 +639,7 @@ test('PUT then GET /api/secrets round-trips presence without echoing the value',
     writeSecret: async (key, value) => {
       written.set(key, value);
     },
-    removeProfile: async () => ({ outcome: 'removed' }),
-    runDoctor: async () => null,
-    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
-    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
-    close() {},
-  };
+  });
   const server = createBoardServer({
     source,
     logger: silentLogger,
@@ -716,24 +667,12 @@ test('PUT then GET /api/secrets round-trips presence without echoing the value',
 test('close() still calls source.close() when httpServer.close() rejects', async () => {
   const closed = { value: false };
   let closeCallCount = 0;
-  const source: BoardSource = {
-    listProfiles: async () => PROFILES,
-    openStore: async () => null,
-    readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
-    createProfile: async () => {},
-    openIntents: async () => null,
-    listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
-    writeSecret: async () => {},
-    removeProfile: async () => ({ outcome: 'removed' }),
-    runDoctor: async () => null,
-    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
-    readDaemonStatus: async () => FAKE_DAEMON_STATUS,
+  const source = fakeSource({
     close() {
       closeCallCount += 1;
       closed.value = true;
     },
-  };
+  });
   const server = createBoardServer({
     source,
     logger: silentLogger,

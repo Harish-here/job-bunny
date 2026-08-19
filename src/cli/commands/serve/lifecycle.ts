@@ -3,6 +3,15 @@
  * machinery: SIGTERM, poll for death, SIGKILL if it didn't take, poll
  * again. Split out of `serve.ts` (task 5, 2026-07-28 file-size split
  * plan); see `./index.ts` for the shared `ServeDeps` bag and dispatch.
+ *
+ * `waitUntilDead`/`killAndConfirmDead` take the narrower `KillDeps`, not
+ * the full `ServeDeps`, purely so `cli/wire/board_daemon_control.ts` (the
+ * board's `stopDaemon()`, settings-overhaul task 11) can reuse these two
+ * functions verbatim without constructing an entire `ServeDeps` bag just
+ * to satisfy the type — a type-only narrowing, not a behavior change:
+ * `ServeDeps` is structurally a superset of `KillDeps`, so every existing
+ * caller here (which already passes a full `ServeDeps`) keeps compiling
+ * unchanged.
  */
 import {
   readDaemonPidfile,
@@ -13,10 +22,13 @@ import type { ServeDeps } from './index.ts';
 
 const POLL_INTERVAL_MS = 250;
 
+/** The exact subset of `ServeDeps` the kill-and-confirm loop needs. */
+export type KillDeps = Pick<ServeDeps, 'pidIsAlive' | 'killPid' | 'sleep'>;
+
 export async function waitUntilDead(
   pid: number,
   graceMs: number,
-  deps: ServeDeps,
+  deps: KillDeps,
 ): Promise<boolean> {
   const maxAttempts = Math.ceil(graceMs / POLL_INTERVAL_MS);
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -30,7 +42,7 @@ export async function waitUntilDead(
  * `ESRCH` at any step is already-dead, not an error (absorbed by
  * `pidIsAlive`/`killPid`). Reused for both the daemon and its `inFlight`
  * child (D10) — same constant, not a second one. */
-export async function killAndConfirmDead(pid: number, deps: ServeDeps): Promise<boolean> {
+export async function killAndConfirmDead(pid: number, deps: KillDeps): Promise<boolean> {
   if (!deps.pidIsAlive(pid)) return true;
   deps.killPid(pid, 'SIGTERM');
   if (await waitUntilDead(pid, SIGKILL_GRACE_MS, deps)) return true;

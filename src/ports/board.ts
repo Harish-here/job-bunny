@@ -108,6 +108,24 @@ export interface DaemonStatus {
   profiles: DaemonProfileSchedule[];
 }
 
+/** `BoardSource.stopDaemon`'s result (R20 = Option 1, board-initiated
+ * detached spawn). Deliberately NOT a bare "did the signal go through" —
+ * `'stopped'` is reached only after the FULL kill-and-confirm lifecycle
+ * (`cli/wire/board_daemon_control.ts`, reusing `cli/commands/serve/
+ * lifecycle.ts`'s `runServeStop` sequence) succeeds for both the daemon and
+ * any in-flight run child it owned. `'daemon_unresponsive'`/
+ * `'child_unresponsive'` are DISTINCT, visible failures — a daemon or child
+ * that survives SIGKILL must NEVER be reported as `'already_stopped'`; that
+ * would be a false success (the exact defect BE-gate finding F1 caught in
+ * this step's original spec). `'child_unresponsive'` carries `childPid`
+ * because a stuck run child is a different operator action (manual `kill
+ * -9`, or a reboot) than a stuck daemon. */
+export type StopDaemonOutcome =
+  | { outcome: 'stopped' }
+  | { outcome: 'already_stopped' }
+  | { outcome: 'daemon_unresponsive' }
+  | { outcome: 'child_unresponsive'; childPid: number };
+
 /** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
  * `newlyDropped` (jobs that drop under the draft but not the current config)
  * is capped at 12 entries, matching the mockup's disclosure ("see which 12
@@ -282,6 +300,12 @@ export interface BoardSource {
    * scheduled slot. Never starts, stops, or signals the daemon, and never
    * opens a profile database. */
   readDaemonStatus(): Promise<DaemonStatus>;
+  /** R20 = Option 1 (board-initiated detached spawn): stops the daemon and,
+   * if one is in flight, the run child it owns — see `StopDaemonOutcome`'s
+   * own doc comment for the outcome shape and why a survived-SIGKILL
+   * daemon/child is never reported as a success. NEVER throws; every
+   * failure mode is a typed outcome. */
+  stopDaemon(): Promise<StopDaemonOutcome>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this
    * OPENS-OR-CREATES the profile's db: an intent is durable state a

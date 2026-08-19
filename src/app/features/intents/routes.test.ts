@@ -132,6 +132,7 @@ function fakeSource(opts: {
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
     previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
