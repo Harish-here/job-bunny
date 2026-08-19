@@ -123,7 +123,7 @@ function ChipEditor({
   );
 }
 
-export function ResumeSection({ profile }: { profile: string }) {
+export function AboutYouSection({ profile }: { profile: string }) {
   const doc = useDocForm(profile, 'resume.json');
   const [form, setForm] = useState<ResumeForm>(EMPTY_FORM);
 

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as configApi from '../config.api';
-import { ResumeSection } from './ResumeSection';
+import { AboutYouSection } from './AboutYouSection';
 
 vi.mock('../config.api', () => ({
   getConfigDoc: vi.fn(),
@@ -33,14 +33,14 @@ function renderSection(profile = 'rajni') {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
-  return render(<ResumeSection profile={profile} />, { wrapper });
+  return render(<AboutYouSection profile={profile} />, { wrapper });
 }
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('ResumeSection', () => {
+describe('AboutYouSection', () => {
   it('a failed load renders a blocking error and never a Save button', async () => {
     vi.mocked(configApi.getConfigDoc).mockRejectedValue(new Error('network error'));
     renderSection();
