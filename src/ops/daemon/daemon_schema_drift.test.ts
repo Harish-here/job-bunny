@@ -44,8 +44,10 @@ test('schema drift: two profiles degrading in the same tick produce exactly one 
   });
   await createDaemon(deps).tick();
   assert.equal(notifyCalls.length, 1);
-  assert.match(notifyCalls[0]!.text, /harish/);
-  assert.match(notifyCalls[0]!.text, /rajni/);
+  const [call] = notifyCalls;
+  assert.ok(call);
+  assert.match(call.text, /harish/);
+  assert.match(call.text, /rajni/);
 });
 
 test('schema drift: a third profile degrading on a later tick does not trigger a second notify call', async () => {

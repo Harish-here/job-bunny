@@ -37,8 +37,8 @@ export function composeSchemaDriftAlertText(
   const causeLines =
     degraded.length === 1
       ? [
-          `Cause: the database schema (v${degraded[0]!.schemaVersion}) is newer than the`,
-          `running daemon's build (v${degraded[0]!.buildVersion}). This happens after an`,
+          `Cause: the database schema (v${degraded[0]?.schemaVersion}) is newer than the`,
+          `running daemon's build (v${degraded[0]?.buildVersion}). This happens after an`,
           `update that changes the schema.`,
         ]
       : [
@@ -49,7 +49,7 @@ export function composeSchemaDriftAlertText(
         ];
   const affectedLine =
     degraded.length === 1
-      ? `Affected profiles: ${degraded[0]!.profile}`
+      ? `Affected profiles: ${degraded[0]?.profile}`
       : `Affected profiles: ${degraded
           .map((d) => `${d.profile} (v${d.schemaVersion})`)
           .join(', ')}`;
