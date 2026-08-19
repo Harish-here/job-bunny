@@ -17,8 +17,10 @@
  * preserves them by spreading, never overwriting.
  *
  * `RulePreviewStrip.tsx` (task 14, `data-qa="rule-preview-strip"`) mounts
- * alongside this section in a later step of the overall build — this file
- * renders its own three cards only.
+ * here, right after `companies-avoid-card` and before the save bar — the
+ * position the mockup fragment (task 27's `mockup-fragment.html`) renders
+ * it in, fed the current (unsaved) draft `state` so it always previews what
+ * the user is about to save, not the last-saved value.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button';
@@ -36,6 +38,7 @@ import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 import { TitleRuleEditor } from './FiltersSection';
 import { TITLE_RULE_KEYS } from './filters.model';
+import { RulePreviewStrip } from './RulePreviewStrip';
 import {
   applyRolesCompaniesEditorState,
   parseRolesCompaniesDoc,
@@ -259,6 +262,8 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
               />
             </CardContent>
           </Card>
+
+          <RulePreviewStrip profile={profile} draft={state} />
 
           {serverError && (
             <p data-testid="settings-error" className="text-sm text-destructive">

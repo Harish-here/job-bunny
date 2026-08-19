@@ -55,6 +55,7 @@ function renderSection(profile = 'rajni') {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('RolesCompaniesSection', () => {
@@ -127,6 +128,33 @@ describe('RolesCompaniesSection', () => {
     expect(
       screen.queryByText('No rules — nothing is dropped for this reason'),
     ).not.toBeInTheDocument();
+  });
+
+  it('mounts RulePreviewStrip, fed with the profile and the current draft state', async () => {
+    stubDocs();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ available: false, reason: 'no_recent_run' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderSection();
+
+    await screen.findByText('engineer');
+
+    // The strip only renders once its own request resolves (task 14's
+    // "no layout hole" design) — this is the actual regression assertion:
+    // it fails if RolesCompaniesSection stops mounting RulePreviewStrip at
+    // all, since the text below would then never appear.
+    await screen.findByText('No recent run to preview against.');
+    expect(document.querySelector('[data-qa="rule-preview-strip"]')).not.toBeNull();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/profiles/rajni/preview/filter');
+    const body = JSON.parse(init.body as string);
+    expect(body.title.domain.match).toEqual(['engineer']);
+    expect(body.companies.avoid).toEqual(['Acme Staffing']);
   });
 
   it('adding a domain keyword, a seniority target and a companies-avoid entry saves both docs, preserving the point-weight fields', async () => {
