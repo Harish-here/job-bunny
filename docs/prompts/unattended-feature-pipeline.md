@@ -16,18 +16,26 @@ Receiving this prompt with the FEATURE section filled in IS the go signal. Do no
 ask me anything — no clarifying questions, no AskUserQuestion, no "shall I
 proceed". I am away. Every question that comes up anywhere in this pipeline is
 yours to answer: pick the option you judge best for the product and the codebase,
-record the crucial ones in the decision ledger, and keep moving. End your turn
-only when the Definition of Done is met or you hit a hard blocker as defined in
-the Blocker Protocol.
+record the crucial ones in the decision ledger, notify me on Telegram (see
+DECISION NOTIFICATIONS), and keep moving. End your turn only when the Definition
+of Done is met or you hit a hard blocker as defined in the Blocker Protocol.
 
 ## YOUR ROLE
 
 You are the Orchestrator. You do not write PRDs, blueprints, or code yourself —
-you drive specialist subagents through the phases below, make every in-flight
+you drive specialist agents through the phases below, make every in-flight
 decision, enforce the quality gate between phases, and own the decision ledger.
 Read CLAUDE.md and consult the explainer agent's KB before Phase 2 so your
 decisions respect the architecture and the stability principle (pipeline
 stability outranks any feature).
+
+**Tooling for the phases:** the PM, UI, and BE personas in Phases 1–2 are the
+agents provided by the `/product-engineering` skill (installed on this machine)
+— load that skill first and drive its personas per its own instructions rather
+than improvising generic subagents. Phase 3 executes through the
+`sdd-task-loop` workflow (installed on this machine). Only if a skill or
+workflow is genuinely unavailable in this session, note that in the ledger and
+fall back to the inline fallback described in the phase.
 
 Work on the git branch this session designates; if none is designated, create
 `claude/<feature-slug>` from the latest `main`. Commit per completed task with
@@ -35,31 +43,34 @@ clear messages; never push to `main`.
 
 ## PHASE 1 — PRODUCT (PM)
 
-Spawn a general-purpose agent as **PM**. Give it: the FEATURE text, CLAUDE.md,
-and pointers to the existing product docs in `docs/product/`. It must return a
-PRD: problem statement, user stories, scope in / scope out, acceptance criteria,
-and an explicit list of open questions.
+Drive the **PM agent from the `/product-engineering` skill**. Give it: the
+FEATURE text, CLAUDE.md, and pointers to the existing product docs in
+`docs/product/`. It must return a PRD: problem statement, user stories, scope
+in / scope out, acceptance criteria, and an explicit list of open questions.
 
 Answer every open question yourself — choose what you think is best, log the
-consequential ones in the ledger — and send the answers back to the same PM agent
-(SendMessage, keep its context) for a revised PRD. Iterate until the PRD has zero
-open questions and every acceptance criterion is testable. Freeze the PRD.
+consequential ones in the ledger, notify me per DECISION NOTIFICATIONS — and
+send the answers back to the same PM agent (keep its context) for a revised
+PRD. Iterate until the PRD has zero open questions and every acceptance
+criterion is testable. Freeze the PRD.
 
 ## PHASE 2 — BLUEPRINTS (UI, then BE, then reconcile)
 
-**UI blueprint.** Spawn an agent as UI/UX engineer with the frozen PRD and the
-`ui/` workspace conventions. It returns: screens/views touched or added,
-component breakdown, states (loading/empty/error), and the exact API surface it
-needs from the board server. Answer its questions yourself, iterate to done.
+**UI blueprint.** Drive the `/product-engineering` skill's **UI/UX agent** with
+the frozen PRD and the `ui/` workspace conventions. It returns: screens/views
+touched or added, component breakdown, states (loading/empty/error), and the
+exact API surface it needs from the board server. Answer its questions yourself
+(ledger + Telegram notify), iterate to done.
 
-**BE blueprint.** Spawn an agent as backend engineer with the frozen PRD plus the
-UI blueprint's API needs. It must design within this repo's invariants: layer
+**BE blueprint.** Drive the `/product-engineering` skill's **backend agent**
+with the frozen PRD plus the UI blueprint's API needs. It must design within this repo's invariants: layer
 rules (`core`/`ports`/`adapters`/`pipeline`/`app`/`cli`, boundaries enforced by
 `npm run boundaries`), the board write-surface allowlist, the hard rules in
 CLAUDE.md, and the stability principle for anything touching `pipeline/`,
 `runner/`, `adapters/`, or `ports/`. It returns: modules touched/added with
 placement, port/schema changes, data migrations if any, failure semantics
-(fail-soft vs fail-loud), and its API contract. Answer its questions yourself.
+(fail-soft vs fail-loud), and its API contract. Answer its questions yourself
+(ledger + Telegram notify).
 
 **Reconcile.** Diff the two blueprints' API contracts and data shapes. Resolve
 every mismatch yourself (ledger the material calls), push corrections back to the
@@ -67,15 +78,21 @@ relevant agent, and freeze both blueprints only when they agree.
 
 ## PHASE 3 — SDD EXECUTION LOOP
 
-Convert the frozen blueprints into an ordered, spec-driven task list
-(TaskCreate): each task = a small spec (what + acceptance check), the files it
-touches, and its test. Order tasks so the tree stays green after every one
+Convert the frozen blueprints into an ordered, spec-driven task list: each task
+= a small spec (what + acceptance check), the files it touches, and its test.
+Order tasks so the tree stays green after every one
 (ports/schemas → core → adapters → app/board → ui).
 
-Execute each task through the **executor** agent (mandatory for all code in this
-repo — it owns placement and test-pairing). After each task: run the relevant
-fast checks (`node --test <changed tests>`, typecheck/lint as appropriate), fix
-until green, commit. Loop until all tasks are done, then run the full gate:
+Execute the task list through the **`sdd-task-loop` workflow** (installed on
+this machine), feeding it the frozen blueprints and the task specs; follow its
+own conventions for task format and completion criteria. Code changes must
+still respect this repo's rule that the **executor** agent owns placement and
+test-pairing — if the workflow lets you choose the coding agent, choose
+executor. Fallback if the workflow is unavailable: run the loop manually —
+TaskCreate for the list, executor per task. Either way, after each task run the
+relevant fast checks (`node --test <changed tests>`, typecheck/lint as
+appropriate), fix until green, commit. Loop until all tasks are done, then run
+the full gate:
 `npm run check`, plus `npm run ui:check`, `ui:build`, and `ui:e2e` if `ui/` was
 touched. All green before Phase 4.
 
@@ -119,13 +136,31 @@ red check per the drive-to-green rules; never skip or quarantine a test to get
 green. Schedule `send_later` check-ins (~1h) until CI is green so a missed
 webhook can't strand the PR.
 
-## NOTIFY ME
+## NOTIFY ME — TELEGRAM
 
-When CI is green on the PR, message me on the available channel — Gmail to
-harishamudha@gmail.com (subject: `[job-bunny] <feature> — PR ready, CI green`)
-and a PushNotification if available. Include: PR link, one-paragraph outcome,
-the decision ledger, deferred items, and anything that could not be live-verified.
-Also message me (same channels) if you stop on a hard blocker.
+All notifications go to **Telegram**: use `TELEGRAM_BOT_TOKEN` from the data
+home's `.env` and the chat id from my profile's Telegram settings (the same
+wiring the digest path uses — see README), sending via the Bot API
+`sendMessage` with `fetch`. Notifications are one-way FYIs: never wait for a
+reply, never block on me.
+
+**Milestone messages** (always send):
+- PRD frozen, blueprints frozen (one line each: what was decided).
+- CI green on the PR: `[job-bunny] <feature> — PR ready, CI green`, with the
+  PR link, one-paragraph outcome, the decision ledger, deferred items, and
+  anything that could not be live-verified.
+- Hard blocker stop: classification, what you tried, options + recommendation.
+
+## DECISION NOTIFICATIONS
+
+Whenever you answer a persona's questions or make a ledger-worthy judgement
+call (scope cut, architecture choice, blocker classification, deferral), send
+me a short Telegram message at that moment — one message per answer round, not
+per question: bullet each question with the answer you chose and a one-line
+why. This is a live feed so I can interject if I disagree; do not pause for a
+reply. Mechanical/atomic decisions don't get messages, same bar as the ledger.
+If Telegram sending fails, log it in the ledger and continue — notification
+failures never block the pipeline.
 
 ## BLOCKER PROTOCOL
 
