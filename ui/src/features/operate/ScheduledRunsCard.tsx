@@ -164,6 +164,33 @@ export function ScheduledRunsCard({ profile }: { profile: string }) {
     );
   }
 
+  // B5 fix (QA settings-overhaul): an empty `profiles[]` (no profile has
+  // `schedule.enabled` — including the committed `rajni` fixture's
+  // default first-run state) used to render only the footer note, which
+  // describes rows that don't exist. ux-notes §12's empty rule — "an empty
+  // rule list says what its emptiness means" — applies here the same way
+  // it does to a config surface's rule list: the footer is hidden (it has
+  // nothing to describe) and one line states the emptiness, pointing at
+  // the SAME `#/settings/schedule` link the footer would otherwise use.
+  if (daemon.data.profiles.length === 0) {
+    return (
+      <Card data-qa="card-scheduled-runs" size="sm">
+        <CardHeader>
+          <CardTitle>Scheduled runs</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <p data-qa="scheduled-runs-empty" className="text-sm text-muted-foreground">
+            No scheduled runs — enable a schedule in{' '}
+            <a href="#/settings/schedule" className="text-primary hover:underline">
+              Settings → Schedule
+            </a>
+            .
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card data-qa="card-scheduled-runs" size="sm">
       <CardHeader>

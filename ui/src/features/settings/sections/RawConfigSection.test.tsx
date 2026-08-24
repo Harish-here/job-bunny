@@ -45,6 +45,29 @@ afterEach(() => {
 });
 
 describe('RawConfigSection', () => {
+  // B9 fix (QA settings-overhaul): a textarea-shaped skeleton renders
+  // while the selected doc is pending, and disappears once it resolves —
+  // replacing the old bare "Loading…" text that shrank the right pane to
+  // one line and caused a large layout shift on resolve (ux-notes §12's
+  // S5 row).
+  it('renders a textarea-shaped skeleton while the selected doc is loading, gone once it resolves', async () => {
+    let resolveDoc!: (v: { text: string }) => void;
+    vi.mocked(configApi.getConfigDoc).mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveDoc = res;
+        }),
+    );
+    const { container } = renderSection();
+
+    expect(screen.getByTestId('raw-editor-skeleton')).toBeInTheDocument();
+    expect(editor(container)).toBeNull();
+
+    resolveDoc({ text: '{"a":1}' });
+    await waitFor(() => expect(editor(container)).toHaveValue('{"a":1}'));
+    expect(screen.queryByTestId('raw-editor-skeleton')).not.toBeInTheDocument();
+  });
+
   it('defaults selectedDoc to profile.json, styling its row active, and loads its text', async () => {
     stubDocs({ 'profile.json': '{"connector":"sqlite"}' });
     const { container } = renderSection();

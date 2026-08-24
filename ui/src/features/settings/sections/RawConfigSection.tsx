@@ -17,6 +17,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { Textarea } from '../../../components/ui/textarea';
 import type { SettingsSection } from '../../../lib/router';
 import { cn } from '../../../lib/utils';
@@ -255,7 +256,14 @@ export function RawConfigSection({ profile }: { profile: string }) {
             {selectedDoc}
           </label>
           {query.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            // B9 fix (QA settings-overhaul): sized to match the loaded
+            // `Textarea` (same `rows={14}` box) so resolving the doc
+            // doesn't shift the page — ux-notes §12's S5 row ("textarea
+            // skeleton at same height, no layout shift").
+            <Skeleton
+              data-testid="raw-editor-skeleton"
+              className="h-80 w-full rounded-lg"
+            />
           ) : query.isError ? (
             <p className="text-sm text-destructive">
               Couldn't load {selectedDoc}: {query.error.message}

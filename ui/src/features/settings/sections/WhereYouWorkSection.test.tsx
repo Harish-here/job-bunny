@@ -72,6 +72,40 @@ afterEach(() => {
 });
 
 describe('WhereYouWorkSection', () => {
+  // B9 fix (QA settings-overhaul): a field-shaped skeleton renders while
+  // BOTH docs are pending, and disappears once they resolve — replacing
+  // the old bare "Loading…" text (ux-notes §12's S2/S4 row).
+  it('renders a field-shaped skeleton while loading, gone once both docs resolve', async () => {
+    // Both `filterForm` and `profileForm` call `getConfigDoc` on mount —
+    // each call needs its OWN resolver, keyed by doc, since a single
+    // shared resolver variable would be overwritten by the second call
+    // and leave the first doc's query pending forever.
+    const resolvers: Record<string, (v: { text: string }) => void> = {};
+    vi.mocked(configApi.getConfigDoc).mockImplementation(
+      (_profile, doc) =>
+        new Promise((res) => {
+          resolvers[doc] = res;
+        }),
+    );
+    vi.mocked(runsApi.listRuns).mockResolvedValue({
+      rows: [],
+      total: 0,
+      limit: 1,
+      offset: 0,
+    });
+    renderSection();
+
+    expect(screen.getByTestId('where-you-work-skeleton')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Rules — a job that fails these is dropped'),
+    ).not.toBeInTheDocument();
+
+    resolvers['filter.json']?.({ text: `${JSON.stringify(BASE_FILTER)}\n` });
+    resolvers['profile.json']?.({ text: `${JSON.stringify(BASE_PROFILE)}\n` });
+    await screen.findByText('Rules — a job that fails these is dropped');
+    expect(screen.queryByTestId('where-you-work-skeleton')).not.toBeInTheDocument();
+  });
+
   it('renders both cards, in fixed order, with the connective line between them and no conflict notice when nothing conflicts', async () => {
     stubDocs();
     renderSection();

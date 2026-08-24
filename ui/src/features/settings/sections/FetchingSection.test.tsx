@@ -74,6 +74,30 @@ afterEach(() => {
 });
 
 describe('FetchingSection', () => {
+  // B9 fix (QA settings-overhaul): a field-shaped skeleton (caps grid +
+  // outline preset cards) renders while the doc is pending, and
+  // disappears once it resolves — replacing the old bare "Loading…" text
+  // (ux-notes §12's S3 row).
+  it('renders a field-shaped skeleton while loading, gone once the doc resolves', async () => {
+    let resolveDoc!: (v: { text: string }) => void;
+    vi.mocked(configApi.getConfigDoc).mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveDoc = res;
+        }),
+    );
+    stubRuns();
+    stubSoftErrors();
+    renderSection();
+
+    expect(screen.getByTestId('fetching-skeleton')).toBeInTheDocument();
+    expect(screen.queryByText('maxNewPerLane')).not.toBeInTheDocument();
+
+    resolveDoc({ text: JSON.stringify(NORMAL_PROFILE_JSON) });
+    await screen.findByText('maxNewPerLane');
+    expect(screen.queryByTestId('fetching-skeleton')).not.toBeInTheDocument();
+  });
+
   it('renders the four cap fields with their bounds and effect copy, maxAgeDays phrased as freshness never yield', async () => {
     stubDoc();
     stubRuns();

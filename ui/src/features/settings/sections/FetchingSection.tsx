@@ -23,6 +23,7 @@ import {
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
 import { RadioGroup } from '../../../components/ui/radio-group';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { runsQuery, softErrorsQuery } from '../../runs/runs.queries';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
@@ -50,6 +51,58 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : {};
+}
+
+const PRESET_SKELETON_KEYS = ['safe', 'normal', 'fast'] as const;
+
+/** ux-notes §12 S3 row: "skeleton inputs, preset cards render as
+ * outlines" — the preset placeholders stay outline-only (no shimmering
+ * fill), distinct from the shimmering `Skeleton` blocks the caps card
+ * uses for its own fields. */
+function PresetOutlineSkeleton() {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-border p-3">
+      <Skeleton className="h-4 w-16" />
+      <Skeleton className="h-3 w-full" />
+    </div>
+  );
+}
+
+/**
+ * B9 fix (QA settings-overhaul): field-shaped skeleton for both cards —
+ * ux-notes §12's S3 row. Sized close to the loaded cards (a 2x2 field
+ * grid + a 3-card preset row) so resolving the doc doesn't shift the page.
+ */
+function FetchingSkeleton() {
+  return (
+    <div data-testid="fetching-skeleton" className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-56" />
+          <Skeleton className="h-3 w-72" />
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4">
+          {CAP_FIELDS.map((field) => (
+            <div key={field.key} className="flex flex-col gap-1.5">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-3 w-72" />
+        </CardHeader>
+        <CardContent className="grid grid-cols-3 gap-3">
+          {PRESET_SKELETON_KEYS.map((key) => (
+            <PresetOutlineSkeleton key={key} />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 export function FetchingSection({ profile }: { profile: string }) {
@@ -196,6 +249,7 @@ export function FetchingSection({ profile }: { profile: string }) {
       isLoading={docForm.isLoading}
       loadError={docForm.loadError}
       parseError={docForm.parseError}
+      loadingFallback={<FetchingSkeleton />}
     >
       <div className="flex flex-col gap-4">
         <ValidationSummary errors={allErrors} attempt={attempt} />

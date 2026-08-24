@@ -17,6 +17,8 @@ import { AlertTriangle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Button } from '../../../components/ui/button';
+import { Card, CardContent, CardHeader } from '../../../components/ui/card';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
@@ -37,6 +39,45 @@ import {
 const EMPTY_STATE = parseWhereYouWorkDoc({}, {});
 
 const HARD_CONFLICT_ACTIONS = ['Add to rule', 'Remove from preference'] as const;
+
+/**
+ * B9 fix (QA settings-overhaul): field-shaped skeleton for the two cards
+ * (Rules, Preferences) — ux-notes §12's S2/S4 row. Passed to BOTH nested
+ * `DocFormGate`s below so it renders identically whichever of the two docs
+ * is still pending, and deliberately contains no conflict-notice shape
+ * (this file's own top comment: the notice never skeletons).
+ */
+function WhereYouWorkSkeleton() {
+  return (
+    <div data-testid="where-you-work-skeleton" className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-64" />
+          <Skeleton className="h-3 w-80" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-9 w-full" />
+        </CardContent>
+      </Card>
+      <Skeleton className="h-4 w-full" />
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-72" />
+          <Skeleton className="h-3 w-64" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-8 w-48" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 export function WhereYouWorkSection({ profile }: { profile: string }) {
   const filterForm = useDocForm(profile, 'filter.json');
@@ -132,12 +173,14 @@ export function WhereYouWorkSection({ profile }: { profile: string }) {
       isLoading={filterForm.isLoading}
       loadError={filterForm.loadError}
       parseError={filterForm.parseError}
+      loadingFallback={<WhereYouWorkSkeleton />}
     >
       <DocFormGate
         doc="profile.json"
         isLoading={profileForm.isLoading}
         loadError={profileForm.loadError}
         parseError={profileForm.parseError}
+        loadingFallback={<WhereYouWorkSkeleton />}
       >
         <div className="flex flex-col gap-4">
           <ValidationSummary errors={saveState.errors} attempt={attempt} />

@@ -97,6 +97,24 @@ describe('ScheduledRunsCard — loading and error', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await screen.findByText('harish');
   });
+
+  // B5 fix (QA settings-overhaul): an empty `profiles[]` (no profile has
+  // `schedule.enabled` — including the committed `rajni` fixture's
+  // default first-run state) used to render only the footer note, which
+  // describes rows that don't exist.
+  it('empty: renders the no-scheduled-runs line, no rows, and hides the footer note', async () => {
+    stubDaemon(baseDaemon({ profiles: [] }));
+    const { container } = renderCard();
+    await screen.findByRole('link', { name: 'Settings → Schedule' });
+    const empty = container.querySelector('[data-qa="scheduled-runs-empty"]');
+    expect(empty?.textContent).toContain('No scheduled runs — enable a schedule in');
+    expect(container.querySelector('[data-qa^="schedule-row-"]')).toBeNull();
+    expect(
+      screen.queryByText(/Pausing here removes a profile from this list/),
+    ).not.toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Settings → Schedule' });
+    expect(link).toHaveAttribute('href', '#/settings/schedule');
+  });
 });
 
 describe('ScheduledRunsCard — rows', () => {

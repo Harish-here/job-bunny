@@ -14,12 +14,25 @@ export function DocFormGate({
   isLoading,
   loadError,
   parseError,
+  loadingFallback,
   children,
 }: {
   doc: string;
   isLoading: boolean;
   loadError: Error | null;
   parseError: boolean;
+  /**
+   * Rendered instead of the default "Loading…" line while `isLoading` is
+   * true. B9 fix (QA settings-overhaul): a bare text line under-represents
+   * a section's real loaded height, which shows up as a large layout shift
+   * the instant the doc resolves (ux-notes §12: "field-shaped skeletons"
+   * for S2/S4, "skeleton inputs, preset cards render as outlines" for S3,
+   * "textarea skeleton at same height" for S5). Sections whose loaded
+   * content has real height pass a field-shaped `Skeleton` composition
+   * here; a section that doesn't pass one keeps the original text
+   * unchanged.
+   */
+  loadingFallback?: ReactNode;
   children: ReactNode;
 }) {
   if (loadError) {
@@ -30,7 +43,9 @@ export function DocFormGate({
     );
   }
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <>{loadingFallback ?? <p className="text-sm text-muted-foreground">Loading…</p>}</>
+    );
   }
   if (parseError) {
     return (
