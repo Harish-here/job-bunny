@@ -18,7 +18,7 @@
  * cover the section's two distinct cards (Lanes, Search URLs).
  */
 import { expect, type Page, test } from '@playwright/test';
-import { pinProfile } from './wizard.helpers';
+import { pinProfile, removeProfileDir, uniqueProfileName } from './wizard.helpers';
 
 test.beforeEach(async ({ page }) => {
   await pinProfile(page);
@@ -276,4 +276,84 @@ test('settings: where-jobs-come-from search-url rows are reachable by a real scr
   // extra rows render, without needing a fragile pixel-perfect estimate.
   await page.mouse.wheel(0, 4000);
   await expect(lastRowUrlInput).toBeInViewport();
+});
+
+test('settings: raw config edit propagates to the owning form section with no page reload (shared configDocQuery cache)', async ({
+  page,
+}) => {
+  const original = await fetchConfigText(page, 'profile.json');
+  const originalDoc = JSON.parse(original) as { schedule?: { graceMinutes?: number } };
+  const originalGrace = originalDoc.schedule?.graceMinutes;
+  // Distinct from both the captured original (if set) and the form's own
+  // fallback default (90, `ScheduleSection.tsx`'s `DEFAULT_GRACE_MINUTES`)
+  // so the assertion below can only pass via real propagation, never by
+  // coincidentally matching a default.
+  const newGrace = (typeof originalGrace === 'number' ? originalGrace : 90) + 15;
+  try {
+    await page.goto('/#/settings/raw-config');
+    await page
+      .locator('[data-qa="raw-doc-profile-json"]')
+      .getByRole('button', { name: 'profile.json', exact: true })
+      .click();
+    const textarea = page.locator('[data-qa="raw-editor"]');
+    await expect(textarea).toBeVisible();
+
+    const parsed: { schedule?: Record<string, unknown> } = JSON.parse(
+      await textarea.inputValue(),
+    );
+    parsed.schedule ??= {};
+    parsed.schedule.graceMinutes = newGrace;
+    await textarea.fill(JSON.stringify(parsed, null, 2));
+    await saveSection(page);
+
+    // Client-side navigation via a real nav click, not page.goto/reload —
+    // proves the propagation without relying on a fresh fetch.
+    await page
+      .locator('[data-qa="settings-nav"]')
+      .getByRole('button', { name: 'Schedule', exact: true })
+      .click();
+    await expect(section(page)).toHaveAttribute('data-section', 'schedule');
+    await expect(section(page).getByLabel('Grace minutes')).toHaveValue(String(newGrace));
+  } finally {
+    await putConfigText(page, 'profile.json', original);
+  }
+});
+
+test('settings: raw config selecting a not-yet-created doc for a freshly onboarded profile shows the create-on-first-write placeholder, then creates it on save', async ({
+  page,
+}) => {
+  const name = uniqueProfileName();
+  try {
+    await page.goto('/#/onboarding');
+    await page.getByLabel('Profile name').fill(name);
+    await page.getByTestId('wizard-next').click();
+    await expect(
+      page.locator('[data-testid="wizard-step"][data-step="2"]'),
+    ).toBeVisible();
+
+    // Same-origin, hash-only navigation — no full reload in this app (see
+    // the propagation test above) — so the active-profile selection from
+    // step 1 above is preserved.
+    await page.goto('/#/settings/raw-config');
+    await page
+      .locator('[data-qa="raw-doc-resume-json"]')
+      .getByRole('button', { name: 'resume.json', exact: true })
+      .click();
+    const textarea = page.locator('[data-qa="raw-editor"]');
+    await expect(textarea).toHaveAttribute(
+      'placeholder',
+      'Not created yet — saving will create it',
+    );
+
+    const content = JSON.stringify({ note: 'e2e create-on-first-write' });
+    await textarea.fill(content);
+    await saveSection(page);
+
+    const res = await page.request.get(`/api/profiles/${name}/config/resume.json`);
+    expect(res.ok()).toBe(true);
+    const body = (await res.json()) as { text: string };
+    expect(body.text).toContain('e2e create-on-first-write');
+  } finally {
+    removeProfileDir(name);
+  }
 });
