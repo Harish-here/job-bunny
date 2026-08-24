@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../lib/api/client';
 import type { DoctorReport } from './operate.api';
 import {
   getDoctorReport,
@@ -42,6 +43,32 @@ describe('stopDaemon', () => {
       body: JSON.stringify({}),
     });
   });
+
+  it("resolves (does not throw) on a 409 { outcome: 'daemon_unresponsive' } body", async () => {
+    const outcome = { outcome: 'daemon_unresponsive' as const };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(409, outcome)));
+    await expect(stopDaemon()).resolves.toEqual(outcome);
+  });
+
+  it(
+    'resolves and preserves childPid on a 409 ' +
+      "{ outcome: 'child_unresponsive', childPid } body",
+    async () => {
+      const outcome = { outcome: 'child_unresponsive' as const, childPid: 123 };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(409, outcome)));
+      await expect(stopDaemon()).resolves.toEqual(outcome);
+    },
+  );
+
+  it('still throws ApiError on a 409 body without a recognized outcome field', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(409, { error: 'autostart_conflict' })),
+    );
+    const err = await stopDaemon().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 409, code: 'unknown' });
+  });
 });
 
 describe('startDaemon', () => {
@@ -56,6 +83,12 @@ describe('startDaemon', () => {
       body: JSON.stringify({}),
     });
   });
+
+  it("resolves (does not throw) on a 500 { outcome: 'spawn_failed' } body", async () => {
+    const outcome = { outcome: 'spawn_failed' as const };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, outcome)));
+    await expect(startDaemon()).resolves.toEqual(outcome);
+  });
 });
 
 describe('setAutostart', () => {
@@ -69,6 +102,20 @@ describe('setAutostart', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ enabled: true }),
     });
+  });
+
+  it("still throws ApiError on a 409 'autostart_conflict' envelope", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(409, {
+          error: { code: 'autostart_conflict', message: 'legacy plist present' },
+        }),
+      ),
+    );
+    const err = await setAutostart(true).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 409, code: 'autostart_conflict' });
   });
 });
 
