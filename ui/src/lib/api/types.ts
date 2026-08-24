@@ -42,3 +42,7 @@ export type {
   SoftErrorGroup,
   SoftErrorSummary,
 } from '../../../../src/app/features/runs/index.ts';
+export type {
+  SecretKey,
+  SecretPresence,
+} from '../../../../src/app/features/secrets/index.ts';
