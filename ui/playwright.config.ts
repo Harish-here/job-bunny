@@ -11,6 +11,33 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 // baseURL must agree cross-platform, and CI runs one suite at a time. If
 // it's busy locally, free it or override with PW_PORT if you add that
 // plumbing later.
+
+// These spec files read-modify-write the SAME shared `profiles/rajni`
+// config docs (`profile.json`/`filter.json`) through the board API and
+// each restores its own captured `original` in a `finally` — at default
+// parallelism two of these files' workers interleave their writes and one
+// file's restore clobbers another's in-flight edit (QA B11). Grepped via
+// `grep -rl "request.put(\`/api/profiles/rajni/config"` /
+// `grep -rl "request.put('/api/profiles/rajni/config"` over `ui/e2e/*.spec.ts`
+// — `settings-landing.spec.ts` and `settings-rule-preview.spec.ts` only
+// read/stub and are correctly excluded; `wizard.spec.ts` and
+// `profile-lifecycle.spec.ts` write to their own throwaway profiles, not
+// the shared `rajni` docs, and are also excluded. The `shared-docs`
+// project below runs these serially (`fullyParallel: false`) and the
+// `ui:e2e` script additionally pins it to one worker, so no two of these
+// files ever run concurrently; every other spec file keeps the default
+// parallel project.
+const SHARED_DOC_SPECS = [
+  'operate.spec.ts',
+  'settings.spec.ts',
+  'settings-delivery.spec.ts',
+  'settings-fetching.spec.ts',
+  'settings-housekeeping.spec.ts',
+  'settings-roles-companies.spec.ts',
+  'settings-save-model.spec.ts',
+  'settings-where-you-work.spec.ts',
+];
+
 export default defineConfig({
   testDir: './e2e',
   // `env-guard.ts` runs alongside the DB seeder and snapshots the repo
@@ -32,5 +59,17 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 30_000,
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    {
+      name: 'shared-docs',
+      testMatch: SHARED_DOC_SPECS,
+      fullyParallel: false,
+      use: { browserName: 'chromium' },
+    },
+    {
+      name: 'default',
+      testIgnore: SHARED_DOC_SPECS,
+      use: { browserName: 'chromium' },
+    },
+  ],
 });
