@@ -1,6 +1,11 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
 import { wizardKeys } from '../wizard/wizard.queries';
-import { getDoctorReport, putSkipNext } from './operate.api';
+import {
+  getDoctorReport,
+  putSkipNext,
+  type SkipNext,
+  setScheduleEnabled,
+} from './operate.api';
 
 export const operateKeys = {
   doctor: (p: string) => [p, 'doctor'] as const,
@@ -27,7 +32,19 @@ export const doctorQuery = (p: string) =>
 export function usePutSkipNext(profile: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (skipNext: boolean) => putSkipNext(profile, skipNext),
+    mutationFn: (skipNext: SkipNext) => putSkipNext(profile, skipNext),
+    onSuccess: () => qc.invalidateQueries({ queryKey: wizardKeys.daemon() }),
+  });
+}
+
+// ScheduledRunsCard.tsx's per-row pause switch — reuses wizardKeys.daemon()
+// on success for the same reason usePutSkipNext does: the switch's checked
+// state is read straight off daemon.profiles[].enabled, not local state, so
+// the next render must see the server's fresh value.
+export function useSetScheduleEnabled(profile: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => setScheduleEnabled(profile, enabled),
     onSuccess: () => qc.invalidateQueries({ queryKey: wizardKeys.daemon() }),
   });
 }

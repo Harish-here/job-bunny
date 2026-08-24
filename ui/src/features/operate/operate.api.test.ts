@@ -6,6 +6,7 @@ import {
   pauseProfile,
   putSkipNext,
   setAutostart,
+  setScheduleEnabled,
   startDaemon,
   stopDaemon,
 } from './operate.api';
@@ -120,7 +121,7 @@ describe('setAutostart', () => {
 });
 
 describe('putSkipNext', () => {
-  it('performs a GET then a PUT of profile.json with schedule.skipNext set', async () => {
+  it('performs a GET then a PUT of profile.json with schedule.skipNext set to the {date,slot} pair', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -128,14 +129,37 @@ describe('putSkipNext', () => {
       )
       .mockResolvedValueOnce(jsonResponse(200, { text: 'ok' }));
     vi.stubGlobal('fetch', fetchMock);
-    await putSkipNext('rajni', true);
+    await putSkipNext('rajni', { date: '2026-08-24', slot: '09:00' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/profiles/rajni/config/profile.json');
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/profiles/rajni/config/profile.json');
     const putInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
     const sentBody = JSON.parse(putInit.body as string) as { text: string };
     expect(JSON.parse(sentBody.text)).toEqual({
-      schedule: { enabled: true, times: ['09:00'], skipNext: true },
+      schedule: {
+        enabled: true,
+        times: ['09:00'],
+        skipNext: { date: '2026-08-24', slot: '09:00' },
+      },
+    });
+  });
+});
+
+describe('setScheduleEnabled', () => {
+  it('performs a GET then a PUT of profile.json with schedule.enabled set to the given value', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { text: '{"schedule":{"enabled":false,"times":["09:00"]}}' }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { text: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await setScheduleEnabled('rajni', true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const putInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const sentBody = JSON.parse(putInit.body as string) as { text: string };
+    expect(JSON.parse(sentBody.text)).toEqual({
+      schedule: { enabled: true, times: ['09:00'] },
     });
   });
 });

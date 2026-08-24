@@ -124,26 +124,46 @@ export function setAutostart(enabled: boolean): Promise<AutostartOutcome> {
   return putJson('/api/daemon/autostart', { enabled });
 }
 
-/** Read-modify-write of profile.json's `schedule.skipNext` flag, reusing
+/** The `{date, slot}` pair `ScheduledRunsCard.tsx`'s `nextSlotFor` derives
+ * client-side from a profile's `nextRunAt` — `slot` is the next scheduled
+ * `HH:MM` to skip, `date` is today's local date. */
+export interface SkipNext {
+  date: string;
+  slot: string;
+}
+
+/** Read-modify-write of profile.json's `schedule.skipNext` object, reusing
  * wizard.api's `patchProfileConfig` (same GET-then-PUT of
  * `/api/profiles/:name/config/profile.json` every other profile.json write
  * in this app goes through) rather than duplicating that logic here. */
-export async function putSkipNext(profile: string, skipNext: boolean): Promise<void> {
+export async function putSkipNext(profile: string, skipNext: SkipNext): Promise<void> {
   await patchProfileConfig(profile, (cfg) => {
     const schedule = (cfg.schedule as Record<string, unknown> | undefined) ?? {};
     cfg.schedule = { ...schedule, skipNext };
   });
 }
 
-/** Read-modify-write of profile.json's `schedule.enabled` flag to false,
- * reusing wizard.api's `patchProfileConfig`. `usePauseAll.ts` calls this
- * once per profile inside a `Promise.allSettled` fan-out — a single
- * profile's rejection here must not affect the sibling calls, which is
- * why this stays a plain async function rather than something that
- * swallows its own errors. */
-export async function pauseProfile(profile: string): Promise<void> {
+/** Read-modify-write of profile.json's `schedule.enabled` flag to the given
+ * value, reusing wizard.api's `patchProfileConfig`. `ScheduledRunsCard.tsx`'s
+ * per-row pause switch writes through this — the same config PUT
+ * `putSkipNext` above uses, per blueprint step 33's "zero new backend
+ * surface" instruction. */
+export async function setScheduleEnabled(
+  profile: string,
+  enabled: boolean,
+): Promise<void> {
   await patchProfileConfig(profile, (cfg) => {
     const schedule = (cfg.schedule as Record<string, unknown> | undefined) ?? {};
-    cfg.schedule = { ...schedule, enabled: false };
+    cfg.schedule = { ...schedule, enabled };
   });
+}
+
+/** Read-modify-write of profile.json's `schedule.enabled` flag to false —
+ * `usePauseAll.ts`'s one-directional special case of `setScheduleEnabled`
+ * above. Calls it once per profile inside a `Promise.allSettled` fan-out —
+ * a single profile's rejection here must not affect the sibling calls,
+ * which is why this stays a plain async function rather than something
+ * that swallows its own errors. */
+export async function pauseProfile(profile: string): Promise<void> {
+  await setScheduleEnabled(profile, false);
 }
