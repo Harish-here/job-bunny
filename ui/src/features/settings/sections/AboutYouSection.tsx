@@ -9,6 +9,7 @@ import { Button } from '../../../components/ui/button';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
 import { DocFormGate } from '../DocFormGate';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useDocForm } from '../useDocForm';
 
 interface ResumeForm {
@@ -127,6 +128,11 @@ function ChipEditor({
 export function AboutYouSection({ profile }: { profile: string }) {
   const doc = useDocForm(profile, 'resume.json');
   const [form, setForm] = useState<ResumeForm>(EMPTY_FORM);
+  // The last-loaded (or last-saved) form, for `isDirty`/discard — see this
+  // component's own `useRegisterSettingsSave` doc comment below for why
+  // this is a locally-computed equivalent rather than a full
+  // `useSectionSaveState` migration.
+  const [savedForm, setSavedForm] = useState<ResumeForm | null>(null);
 
   // Reset only once the doc's initial load completes, mirroring
   // FiltersSection's own ref-guarded precedent: `doc.value` is a fresh
@@ -138,19 +144,49 @@ export function AboutYouSection({ profile }: { profile: string }) {
     if (doc.isLoading || doc.value == null) return;
     if (initialized.current === profile) return;
     initialized.current = profile;
-    setForm(formFromValue(doc.value));
+    const parsed = formFromValue(doc.value);
+    setForm(parsed);
+    setSavedForm(parsed);
   }, [profile, doc.isLoading, doc.value]);
 
   const yoeError = validateResumeForm(form);
+  // Only meaningful once the baseline has loaded — `savedForm == null`
+  // (initial/loading render) never reads as dirty.
+  const isDirty = savedForm != null && JSON.stringify(form) !== JSON.stringify(savedForm);
 
   function update(patch: Partial<ResumeForm>) {
     setForm((prev) => ({ ...prev, ...patch }));
   }
 
-  async function handleSave() {
-    if (yoeError) return;
-    await doc.save((value) => applyForm(value, form));
+  /** Returns whether the save actually persisted — `false` on the years-
+   * of-experience validation failure or a failed PUT, never throws. Same
+   * true/false contract every `useSectionSaveState`-backed section's
+   * `save()` carries. */
+  async function handleSave(): Promise<boolean> {
+    if (yoeError) return false;
+    const ok = await doc.save((value) => applyForm(value, form));
+    if (ok) setSavedForm(form);
+    return ok;
   }
+
+  function handleDiscard(): void {
+    if (savedForm != null) setForm(savedForm);
+  }
+
+  // Lifts this section's dirty state into `SettingsSaveContext` so the nav
+  // guard isn't inert for it (re-review finding — this section previously
+  // never registered at all). Locally-computed `isDirty`/`handleDiscard`
+  // rather than a full `useSectionSaveState`/`SaveBar` migration: this
+  // section's Save button today is always enabled (not dirty-gated) and
+  // has no discard affordance — folding it onto the shared shape is a
+  // larger, UX-changing rework than this fix warrants; this is the
+  // minimal fix the fix-round brief allows (same posture
+  // `ScheduleSection.tsx` takes for the same reason).
+  useRegisterSettingsSave({
+    isDirty,
+    save: handleSave,
+    discard: handleDiscard,
+  });
 
   return (
     <DocFormGate

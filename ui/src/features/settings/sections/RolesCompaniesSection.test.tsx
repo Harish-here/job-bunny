@@ -3,12 +3,14 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { navigate } from '../../../lib/router';
 import * as runsApi from '../../runs/runs.api';
 import * as configApi from '../config.api';
 import { RolesCompaniesSection } from './RolesCompaniesSection';
 
 vi.mock('../config.api', () => ({ getConfigDoc: vi.fn(), putConfigDoc: vi.fn() }));
 vi.mock('../../runs/runs.api', () => ({ listRuns: vi.fn() }));
+vi.mock('../../../lib/router', () => ({ navigate: vi.fn() }));
 
 const BASE_FILTER = {
   title: { domain: { match: ['engineer'], reject: ['intern'], severity: 'hard' } },
@@ -225,5 +227,18 @@ describe('RolesCompaniesSection', () => {
       maxPoints: 15,
     });
     expect(writtenProfile.settings.rank.location).toEqual({ homeCities: ['Chennai'] });
+  });
+
+  it('the "Raw config" footer button navigates to the raw-config section (fix-round-2: was a bare hash anchor, unguarded by the dirty-nav guard)', async () => {
+    const user = userEvent.setup();
+    stubDocs();
+    renderSection();
+    await screen.findByText('engineer');
+
+    await user.click(screen.getByRole('button', { name: 'Raw config →' }));
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith({
+      name: 'settings',
+      section: 'raw-config',
+    });
   });
 });

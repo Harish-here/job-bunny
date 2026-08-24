@@ -471,6 +471,85 @@ test('operate-schedule: schedule-skip-next writes {date, slot} matching the stub
   }
 });
 
+test('operate-schedule: schedule-pause-<profile> writes schedule.enabled=false through a real config PUT, and shows the Paused chip', async ({
+  page,
+}) => {
+  await stubDaemon(page, {
+    state: 'running',
+    profiles: [
+      {
+        profile: 'rajni',
+        enabled: true,
+        nextRunAt: null,
+        degraded: false,
+        degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
+      },
+    ],
+  });
+
+  const original = await fetchRajniProfileConfigText(page);
+  try {
+    await page.goto('/#/setup');
+    const card = page.locator('[data-qa="card-scheduled-runs"]');
+    // Re-review finding: the Pause button's `data-qa` is now per-row
+    // (`schedule-pause-${profile}`), not active-row-only — the pinned
+    // profile is `rajni`, the only entry this stub returns.
+    await card.locator('[data-qa="schedule-pause-rajni"]').click();
+    await expect(card.getByText('Paused')).toBeVisible();
+
+    const saved = JSON.parse(await fetchRajniProfileConfigText(page)) as {
+      schedule?: { enabled?: boolean };
+    };
+    expect(saved.schedule?.enabled).toBe(false);
+  } finally {
+    await putRajniProfileConfigText(page, original);
+  }
+});
+
+test("operate-schedule: every row's Pause button carries its own profile-scoped data-qa and accessible name", async ({
+  page,
+}) => {
+  // A second, non-active fixture-only row (`harish`) never gets clicked —
+  // this test only proves per-row disambiguation is visible in the DOM,
+  // it never PUTs against a profile the real board server doesn't have.
+  await stubDaemon(page, {
+    state: 'running',
+    profiles: [
+      {
+        profile: 'rajni',
+        enabled: true,
+        nextRunAt: null,
+        degraded: false,
+        degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
+      },
+      {
+        profile: 'harish',
+        enabled: true,
+        nextRunAt: null,
+        degraded: false,
+        degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
+      },
+    ],
+  });
+
+  await page.goto('/#/setup');
+  const card = page.locator('[data-qa="card-scheduled-runs"]');
+  await expect(card.locator('[data-qa="schedule-pause-rajni"]')).toBeVisible();
+  await expect(card.locator('[data-qa="schedule-pause-harish"]')).toBeVisible();
+  await expect(
+    card.getByRole('button', { name: 'Pause schedule — rajni' }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole('button', { name: 'Pause schedule — harish' }),
+  ).toBeVisible();
+});
+
 // --- Setup & health (blueprint step 35's e2e half) ----------------------
 
 test('operate-health: all-ok findings collapse to a single summary line, with zero visible rows until the disclosure is opened', async ({

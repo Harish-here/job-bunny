@@ -1,7 +1,10 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { navigate } from '../../../lib/router';
 import { WhereYouWorkPrefsCard } from './WhereYouWorkPrefsCard';
+
+vi.mock('../../../lib/router', () => ({ navigate: vi.fn() }));
 
 // Each ChipInput renders its own "Add" button beside its own input, so a
 // bare getAllByRole(...)[n] index guess is fragile — scope to the specific
@@ -44,8 +47,12 @@ describe('WhereYouWorkPrefsCard', () => {
     expect(screen.getByText('EMEA')).toBeInTheDocument();
     expect(document.querySelector('[data-qa="geo-timezones-acceptable"]')).not.toBeNull();
     expect(document.querySelector('[data-qa="geo-timezones-borderline"]')).not.toBeNull();
-    const footerLink = screen.getByRole('link', { name: 'Raw config →' });
-    expect(footerLink).toHaveAttribute('href', '#/settings/raw-config');
+    // A button styled as a link, not an `<a href>` — a bare hash anchor
+    // can't be intercepted by the in-section `guardedNavigate` dirty-nav
+    // guard (fix-round-2 finding). Outside a `SettingsSaveProvider` (this
+    // test renders the card standalone), `guardedNavigate` falls back to
+    // the plain unguarded `navigate`.
+    expect(screen.getByRole('button', { name: 'Raw config →' })).toBeInTheDocument();
   });
 
   it('adding a chip to acceptable/borderline timezone inputs calls the matching change handler', async () => {
@@ -67,5 +74,15 @@ describe('WhereYouWorkPrefsCard', () => {
       'remote-first',
     );
     expect(props.onWorkTypePreferenceChange).toHaveBeenCalledWith('remote-first');
+  });
+
+  it('clicking the footer "Raw config" button navigates to the raw-config section', async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(screen.getByRole('button', { name: 'Raw config →' }));
+    expect(vi.mocked(navigate)).toHaveBeenCalledWith({
+      name: 'settings',
+      section: 'raw-config',
+    });
   });
 });

@@ -34,7 +34,7 @@ import {
 import { ChipInput } from '../ChipInput';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
-import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
+import { useGuardedNavigate, useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 import { TitleRuleEditor } from './FiltersSection';
@@ -64,6 +64,7 @@ function isRulesEmpty(title: RolesCompaniesEditorState['title']): boolean {
 export function RolesCompaniesSection({ profile }: { profile: string }) {
   const filterForm = useDocForm(profile, 'filter.json');
   const profileForm = useDocForm(profile, 'profile.json');
+  const guardedNavigate = useGuardedNavigate();
 
   const [state, setState] = useState<RolesCompaniesEditorState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<RolesCompaniesEditorState>(EMPTY_STATE);
@@ -241,9 +242,15 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
               </div>
               <p className="text-xs text-muted-foreground">
                 Point weights for these live in{' '}
-                <a href="#/settings/raw-config" className="text-primary hover:underline">
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() =>
+                    guardedNavigate({ name: 'settings', section: 'raw-config' })
+                  }
+                >
                   Raw config →
-                </a>
+                </button>
               </p>
             </CardContent>
           </Card>

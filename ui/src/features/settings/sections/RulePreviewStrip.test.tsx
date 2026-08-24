@@ -139,4 +139,34 @@ describe('RulePreviewStrip', () => {
     const strip = await screen.findByText('No recent run to preview against.');
     expect(strip.getAttribute('data-qa')).toBe('rule-preview-strip');
   });
+
+  // Re-review finding: `RolesCompaniesSection`'s real `baseDoc` prop
+  // (`useDocForm.value`) is a fresh `JSON.parse` every render, so an
+  // unrelated re-render that passes a content-EQUAL but reference-DIFFERENT
+  // `baseDoc`/`draft` must not refire the debounced preview POST.
+  it('a rerender with content-equal but reference-different baseDoc/draft does not refetch', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ available: false, reason: 'no_recent_run' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { rerender } = render(
+      <RulePreviewStrip profile="rajni" baseDoc={BASE_DOC} draft={DRAFT} />,
+    );
+    await screen.findByText('No recent run to preview against.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Same content, fresh object/array identities throughout — mirrors
+    // what a real `JSON.parse` re-run and a fresh draft-state spread
+    // actually produce on an unrelated re-render.
+    rerender(
+      <RulePreviewStrip
+        profile="rajni"
+        baseDoc={structuredClone(BASE_DOC)}
+        draft={structuredClone(DRAFT)}
+      />,
+    );
+    // Give the debounce window a chance to fire if it (incorrectly) would.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

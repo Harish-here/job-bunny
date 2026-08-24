@@ -18,12 +18,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Textarea } from '../../../components/ui/textarea';
-import { navigate, type SettingsSection } from '../../../lib/router';
+import type { SettingsSection } from '../../../lib/router';
 import { cn } from '../../../lib/utils';
 import type { ConfigDocName } from '../config.api';
 import { configDocQuery } from '../config.queries';
 import { SaveBar } from '../save/SaveBar';
-import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
+import { useGuardedNavigate, useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useConfigMutation } from '../useConfigMutation';
 
 const DOCS: readonly ConfigDocName[] = [
@@ -116,6 +116,7 @@ export function RawConfigSection({ profile }: { profile: string }) {
 
   const query = useQuery(configDocQuery(profile, selectedDoc));
   const mutation = useConfigMutation(profile, selectedDoc);
+  const guardedNavigate = useGuardedNavigate();
 
   // Seed only when the selected (profile, doc) pair's text first loads — a
   // background refetch of the currently-selected doc never silently
@@ -216,7 +217,7 @@ export function RawConfigSection({ profile }: { profile: string }) {
                         type="button"
                         data-qa={route.dataQa}
                         onClick={() =>
-                          navigate({ name: 'settings', section: route.section })
+                          guardedNavigate({ name: 'settings', section: route.section })
                         }
                       >
                         has a form →

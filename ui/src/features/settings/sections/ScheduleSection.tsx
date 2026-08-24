@@ -16,6 +16,7 @@ import { daemonStatusWord } from '../../shell/daemonState';
 import { daemonQuery } from '../../wizard/wizard.queries';
 import type { DaemonStatus } from '../../wizard/wizard.types';
 import { DocFormGate } from '../DocFormGate';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useDocForm } from '../useDocForm';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -95,6 +96,13 @@ function DaemonBridgeLine({
   );
 }
 
+interface ScheduleFormSnapshot {
+  times: string[];
+  enabled: boolean;
+  weekdays: number[];
+  graceMinutes: number;
+}
+
 // Schedule → profile.json's `schedule` block only. "Next run" reads
 // GET /api/daemon rather than reimplementing the daemon's own scheduling
 // predicate client-side — see Rationale.
@@ -109,6 +117,12 @@ export function ScheduleSection({ profile }: { profile: string }) {
   const [weekdays, setWeekdays] = useState<number[]>(DEFAULT_WEEKDAYS);
   const [graceMinutes, setGraceMinutes] = useState(DEFAULT_GRACE_MINUTES);
   const [graceError, setGraceError] = useState<string | null>(null);
+  // The last-loaded (or last-saved) values, for `isDirty`/discard — this
+  // section predates `useSectionSaveState` and isn't migrated onto it (see
+  // this component's own re-review-finding note below `useRegisterSettingsSave`);
+  // this is the minimal locally-computed equivalent, same posture
+  // `RawConfigSection.tsx` already uses.
+  const [savedSnapshot, setSavedSnapshot] = useState<ScheduleFormSnapshot | null>(null);
 
   const initialized = useRef<string | null>(null);
   useEffect(() => {
@@ -117,16 +131,33 @@ export function ScheduleSection({ profile }: { profile: string }) {
     initialized.current = profile;
     const schedule =
       (docForm.value.schedule as Record<string, unknown> | undefined) ?? {};
-    setTimes(asStringArray(schedule.times));
-    setEnabled(typeof schedule.enabled === 'boolean' ? schedule.enabled : true);
-    const weekdayValues = asNumberArray(schedule.weekdays);
-    setWeekdays(weekdayValues.length > 0 ? weekdayValues : DEFAULT_WEEKDAYS);
-    setGraceMinutes(
-      typeof schedule.graceMinutes === 'number'
-        ? schedule.graceMinutes
-        : DEFAULT_GRACE_MINUTES,
-    );
+    const snapshot: ScheduleFormSnapshot = {
+      times: asStringArray(schedule.times),
+      enabled: typeof schedule.enabled === 'boolean' ? schedule.enabled : true,
+      weekdays:
+        asNumberArray(schedule.weekdays).length > 0
+          ? asNumberArray(schedule.weekdays)
+          : DEFAULT_WEEKDAYS,
+      graceMinutes:
+        typeof schedule.graceMinutes === 'number'
+          ? schedule.graceMinutes
+          : DEFAULT_GRACE_MINUTES,
+    };
+    setTimes(snapshot.times);
+    setEnabled(snapshot.enabled);
+    setWeekdays(snapshot.weekdays);
+    setGraceMinutes(snapshot.graceMinutes);
+    setSavedSnapshot(snapshot);
   }, [profile, docForm.isLoading, docForm.value]);
+
+  // Only meaningful once the baseline has loaded — `savedSnapshot == null`
+  // (initial/loading render) never reads as dirty, same "don't mistake
+  // loading for dirty" rule `SettingsSaveContext.tsx`'s own doc comment
+  // states for every registrant.
+  const isDirty =
+    savedSnapshot != null &&
+    JSON.stringify({ times, enabled, weekdays, graceMinutes }) !==
+      JSON.stringify(savedSnapshot);
 
   function addTime() {
     const trimmed = newTime.trim();
@@ -147,17 +178,50 @@ export function ScheduleSection({ profile }: { profile: string }) {
     );
   }
 
-  async function handleSave() {
+  /** Returns whether the save actually persisted — `false` on the grace-
+   * minutes validation failure or a failed PUT, never throws. Same
+   * true/false contract every `useSectionSaveState`-backed section's
+   * `save()` carries, so `DirtyNavGuard`'s "Save and continue" only
+   * navigates away once this genuinely persisted. */
+  async function handleSave(): Promise<boolean> {
     if (!Number.isInteger(graceMinutes) || graceMinutes <= 0) {
       setGraceError('Grace minutes must be a positive whole number.');
-      return;
+      return false;
     }
     setGraceError(null);
-    await docForm.save((cfg) => {
+    const ok = await docForm.save((cfg) => {
       const schedule = (cfg.schedule as Record<string, unknown> | undefined) ?? {};
       cfg.schedule = { ...schedule, times, enabled, weekdays, graceMinutes };
     });
+    if (ok) setSavedSnapshot({ times, enabled, weekdays, graceMinutes });
+    return ok;
   }
+
+  function handleDiscard(): void {
+    if (savedSnapshot == null) return;
+    setTimes(savedSnapshot.times);
+    setEnabled(savedSnapshot.enabled);
+    setWeekdays(savedSnapshot.weekdays);
+    setGraceMinutes(savedSnapshot.graceMinutes);
+    setTimeError(null);
+    setGraceError(null);
+  }
+
+  // Lifts this section's dirty state into `SettingsSaveContext` so the
+  // nav guard (`SettingsShell`/`Shell.tsx`'s sidebar) isn't inert for it
+  // (re-review finding — this section previously never registered at
+  // all). Locally-computed `isDirty`/`handleDiscard` rather than a full
+  // `useSectionSaveState`/`SaveBar` migration: this section's existing
+  // save flow has no discard affordance or dirty-gated Save button today,
+  // and splits validation across two independent error states
+  // (`timeError`/`graceError`) rather than a single `errors` map — folding
+  // it onto the shared shape is a larger, UX-changing rework than this
+  // fix warrants; this is the minimal fix the fix-round brief allows.
+  useRegisterSettingsSave({
+    isDirty,
+    save: handleSave,
+    discard: handleDiscard,
+  });
 
   const entry = daemon.data?.profiles.find((p) => p.profile === profile);
   const now = new Date();

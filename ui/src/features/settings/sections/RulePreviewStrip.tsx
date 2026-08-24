@@ -30,7 +30,7 @@
  * appear in the body — those live in `profile.json`, not `filter.json`,
  * and never factor into `core/filter`'s drop decision.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { postJson } from '../../../lib/api/client';
 import type { FilterPreviewResult } from '../../../lib/api/types';
 import {
@@ -74,12 +74,27 @@ export function RulePreviewStrip({
   const [result, setResult] = useState<FilterPreviewResult | null>(null);
   const [expanded, setExpanded] = useState(false);
 
+  // Keyed on the SERIALIZED body, not `baseDoc`/`draft` object identity.
+  // `RolesCompaniesSection`'s `baseDoc` prop is `useDocForm.value`, a fresh
+  // `JSON.parse(rawText)` on every render of that section (even ones that
+  // change nothing about the draft, e.g. an unrelated react-query refetch)
+  // — an effect keyed on that object directly re-fires this debounced POST
+  // on every such unrelated re-render (re-review finding). Re-running
+  // `buildDraftFilterBody`/`JSON.stringify` themselves on every render is
+  // cheap; what must NOT happen on unrelated churn is the network call, and
+  // gating the effect on this string (structurally, not referentially,
+  // stable across content-equal re-renders) achieves exactly that.
+  const requestBodyKey = useMemo(
+    () => JSON.stringify(buildDraftFilterBody(baseDoc, draft)),
+    [baseDoc, draft],
+  );
+
   useEffect(() => {
     let cancelled = false;
     const handle = setTimeout(() => {
       postJson<FilterPreviewResult>(
         `/api/profiles/${encodeURIComponent(profile)}/preview/filter`,
-        buildDraftFilterBody(baseDoc, draft),
+        JSON.parse(requestBodyKey) as Record<string, unknown>,
       )
         .then((data) => {
           if (!cancelled) setResult(data);
@@ -95,7 +110,7 @@ export function RulePreviewStrip({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [profile, baseDoc, draft]);
+  }, [profile, requestBodyKey]);
 
   if (result === null) return null;
 

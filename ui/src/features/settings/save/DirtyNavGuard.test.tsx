@@ -72,6 +72,33 @@ describe('DirtyNavGuard — isDirty=true', () => {
     expect(screen.getByTestId('dirty-nav-dialog')).toBeInTheDocument();
   });
 
+  // Re-review finding: the dialog previously stayed open on a failed save
+  // with no visible reason why — the section's own validation summary /
+  // server error is still mounted, but hidden under the modal overlay.
+  it('a failed "Save and continue" renders an inline error next to the dialog buttons', async () => {
+    const save = vi.fn().mockResolvedValue(false);
+    renderGuard({ isDirty: true, save });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    expect(screen.queryByTestId('dirty-nav-save-error')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    expect(screen.getByTestId('dirty-nav-save-error')).toHaveTextContent(
+      "Couldn't save — fix the errors on the section first.",
+    );
+  });
+
+  it('the inline save-error clears once a fresh guarded-navigate attempt reopens the dialog', async () => {
+    const save = vi.fn().mockResolvedValue(false);
+    renderGuard({ isDirty: true, save });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    expect(screen.getByTestId('dirty-nav-save-error')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stay here' }));
+    await userEvent.click(screen.getByTestId('nav-link'));
+    expect(screen.queryByTestId('dirty-nav-save-error')).toBeNull();
+  });
+
   it('"Discard changes" calls discard then navigate with the pending target', async () => {
     const discard = vi.fn();
     renderGuard({ isDirty: true, discard });

@@ -7,6 +7,10 @@ import { navigate } from '../../../lib/router';
 import * as wizardApi from '../../wizard/wizard.api';
 import type { DaemonStatus } from '../../wizard/wizard.types';
 import * as configApi from '../config.api';
+import {
+  SettingsSaveProvider,
+  useSettingsSaveGuardState,
+} from '../save/SettingsSaveContext';
 import { ScheduleSection } from './ScheduleSection';
 
 vi.mock('../config.api', () => ({ getConfigDoc: vi.fn(), putConfigDoc: vi.fn() }));
@@ -278,6 +282,49 @@ describe('ScheduleSection', () => {
         await screen.findByRole('button', { name: 'Manage the daemon on Operate →' }),
       );
       expect(vi.mocked(navigate)).toHaveBeenCalledWith({ name: 'setup' });
+    });
+  });
+
+  // Re-review finding: this section previously never registered into
+  // `SettingsSaveContext` at all, so the dirty-nav guard was inert for it
+  // — a nav click or profile switch could silently unmount an unsaved
+  // schedule edit. Minimal fix: a locally-computed `isDirty` via
+  // `useRegisterSettingsSave` (see the component's own doc comment).
+  describe('SettingsSaveContext registration', () => {
+    function GuardProbe() {
+      const { isDirty } = useSettingsSaveGuardState();
+      return <span data-testid="guard-isDirty">{String(isDirty)}</span>;
+    }
+
+    function renderWithGuard(profile = 'rajni') {
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={qc}>
+          <SettingsSaveProvider>
+            <GuardProbe />
+            <ScheduleSection profile={profile} />
+          </SettingsSaveProvider>
+        </QueryClientProvider>,
+      );
+    }
+
+    it('registers isDirty as the schedule draft changes, and clears it after a successful save', async () => {
+      stubDoc();
+      stubDaemon();
+      vi.mocked(configApi.putConfigDoc).mockResolvedValue({ text: '{}' });
+      const user = userEvent.setup();
+      renderWithGuard();
+
+      await screen.findByRole('button', { name: 'Sun' });
+      expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('false');
+
+      await user.click(screen.getByRole('switch'));
+      expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('true');
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() =>
+        expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('false'),
+      );
     });
   });
 });

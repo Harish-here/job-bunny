@@ -59,9 +59,18 @@ export function DirtyNavGuard<T>({
   children,
 }: DirtyNavGuardProps<T>) {
   const [pendingTarget, setPendingTarget] = useState<T | null>(null);
+  // Set when `save()` resolves `false` while the dialog is open — the
+  // section's own validation summary / server error renders UNDER the
+  // modal overlay (still mounted, but hidden), so without this the dialog
+  // just... sits there with no visible reason "Save and continue" didn't
+  // move. Reset on every fresh guarded-navigate attempt and on Discard/Stay
+  // so a stale failure from a PRIOR pending target never lingers into the
+  // next one.
+  const [saveFailed, setSaveFailed] = useState(false);
 
   function guardedNavigate(target: T) {
     if (isDirty) {
+      setSaveFailed(false);
       setPendingTarget(target);
       return;
     }
@@ -72,7 +81,11 @@ export function DirtyNavGuard<T>({
     if (pendingTarget === null) return;
     const target = pendingTarget;
     const ok = await save();
-    if (!ok) return; // validation failure or failed PUT — stay put, dialog stays open
+    if (!ok) {
+      setSaveFailed(true);
+      return; // validation failure or failed PUT — stay put, dialog stays open
+    }
+    setSaveFailed(false);
     setPendingTarget(null);
     navigate(target);
   }
@@ -81,11 +94,13 @@ export function DirtyNavGuard<T>({
     if (pendingTarget === null) return;
     const target = pendingTarget;
     discard();
+    setSaveFailed(false);
     setPendingTarget(null);
     navigate(target);
   }
 
   function handleStay() {
+    setSaveFailed(false);
     setPendingTarget(null);
   }
 
@@ -95,7 +110,10 @@ export function DirtyNavGuard<T>({
       <Dialog
         open={pendingTarget !== null}
         onOpenChange={(next) => {
-          if (!next) setPendingTarget(null);
+          if (!next) {
+            setSaveFailed(false);
+            setPendingTarget(null);
+          }
         }}
       >
         <DialogContent data-qa="dirty-nav-dialog" data-testid="dirty-nav-dialog">
@@ -105,6 +123,15 @@ export function DirtyNavGuard<T>({
               You have unsaved changes on this section. What would you like to do?
             </DialogDescription>
           </DialogHeader>
+          {saveFailed && (
+            <p
+              data-qa="dirty-nav-save-error"
+              data-testid="dirty-nav-save-error"
+              className="text-sm text-destructive"
+            >
+              Couldn't save — fix the errors on the section first.
+            </p>
+          )}
           <DialogFooter>
             <Button
               type="button"

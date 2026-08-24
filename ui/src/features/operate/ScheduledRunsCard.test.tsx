@@ -149,9 +149,8 @@ describe('ScheduledRunsCard — rows', () => {
   // `enabled: false` (`scanProfileSchedules` skips those rows entirely), so
   // a two-way switch bound to `schedule.enabled` was always stuck on
   // `true` and, worse, toggling it off made the row vanish from this card
-  // with no way back in. The pause action is now one-way, `data-qa`'d only
-  // on the active row (mirrors `schedule-skip-next`'s own convention).
-  it("schedule-pause: only the active row's button carries the id, writes schedule.enabled=false through setScheduleEnabled, and shows a Paused chip", async () => {
+  // with no way back in. The pause action is now one-way.
+  it('schedule-pause-<profile>: writes schedule.enabled=false through setScheduleEnabled for the clicked row, and shows a Paused chip', async () => {
     stubDaemon(
       baseDaemon({
         profiles: [scheduleFor('harish'), scheduleFor('rajni')],
@@ -161,15 +160,37 @@ describe('ScheduledRunsCard — rows', () => {
     const { container } = renderCard('harish');
     await screen.findByText('harish');
 
-    const taggedButtons = container.querySelectorAll('[data-qa="schedule-pause"]');
-    expect(taggedButtons).toHaveLength(1);
-    const btn = taggedButtons[0];
-    if (!btn) throw new Error('expected the tagged pause button to exist');
+    const btn = container.querySelector('[data-qa="schedule-pause-harish"]');
+    if (!btn) throw new Error('expected the harish row pause button to exist');
     expect(btn.closest('[data-qa="schedule-row-harish"]')).not.toBeNull();
 
     await userEvent.click(btn);
     expect(operateApi.setScheduleEnabled).toHaveBeenCalledWith('harish', false);
     await screen.findByText('Paused');
+  });
+
+  // Re-review finding: every row's Pause button used to share the bare
+  // accessible name "Pause" and only the ACTIVE row carried a `data-qa`
+  // at all — neither assistive tech nor a selector could disambiguate a
+  // non-active row's own Pause button.
+  it("every row's Pause button carries its own profile-scoped data-qa and accessible name", async () => {
+    stubDaemon(
+      baseDaemon({
+        profiles: [scheduleFor('harish'), scheduleFor('rajni')],
+      }),
+    );
+    const { container } = renderCard('harish');
+    await screen.findByText('harish');
+    expect(screen.getByText('rajni')).toBeInTheDocument();
+
+    expect(container.querySelector('[data-qa="schedule-pause-harish"]')).not.toBeNull();
+    expect(container.querySelector('[data-qa="schedule-pause-rajni"]')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Pause schedule — harish' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Pause schedule — rajni' }),
+    ).toBeInTheDocument();
   });
 
   it('the footer note points a paused profile back at Settings → Schedule to resume it', async () => {

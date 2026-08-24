@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from '../../../components/ui/card';
 import { ChipInput } from '../ChipInput';
+import { useGuardedNavigate } from '../save/SettingsSaveContext';
 import type { WorkTypePreferenceOption } from './whereYouWork.model';
 
 export function WhereYouWorkPrefsCard({
@@ -37,6 +38,7 @@ export function WhereYouWorkPrefsCard({
   workTypePreference: WorkTypePreferenceOption;
   onWorkTypePreferenceChange: (next: WorkTypePreferenceOption) => void;
 }) {
+  const guardedNavigate = useGuardedNavigate();
   return (
     <Card data-qa="geo-prefs-card">
       <CardHeader>
@@ -95,9 +97,13 @@ export function WhereYouWorkPrefsCard({
         </label>
         <p className="text-xs text-muted-foreground">
           Point weights for these live in{' '}
-          <a href="#/settings/raw-config" className="text-primary hover:underline">
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => guardedNavigate({ name: 'settings', section: 'raw-config' })}
+          >
             Raw config →
-          </a>
+          </button>
         </p>
       </CardContent>
     </Card>

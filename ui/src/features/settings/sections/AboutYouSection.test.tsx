@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as configApi from '../config.api';
+import {
+  SettingsSaveProvider,
+  useSettingsSaveGuardState,
+} from '../save/SettingsSaveContext';
 import { AboutYouSection } from './AboutYouSection';
 
 vi.mock('../config.api', () => ({
@@ -137,5 +141,51 @@ describe('AboutYouSection', () => {
     expect(await screen.findByTestId('settings-error')).toHaveTextContent(
       'resume.json is not valid JSON: unexpected token',
     );
+  });
+
+  // Re-review finding: this section previously never registered into
+  // `SettingsSaveContext` at all, so the dirty-nav guard was inert for it
+  // — a nav click or profile switch could silently unmount an unsaved
+  // edit. Minimal fix: a locally-computed `isDirty` via
+  // `useRegisterSettingsSave` (see the component's own doc comment).
+  describe('SettingsSaveContext registration', () => {
+    function GuardProbe() {
+      const { isDirty } = useSettingsSaveGuardState();
+      return <span data-testid="guard-isDirty">{String(isDirty)}</span>;
+    }
+
+    function renderWithGuard(profile = 'rajni') {
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={qc}>
+          <SettingsSaveProvider>
+            <GuardProbe />
+            <AboutYouSection profile={profile} />
+          </SettingsSaveProvider>
+        </QueryClientProvider>,
+      );
+    }
+
+    it('registers isDirty as the draft changes, and clears it after a successful save', async () => {
+      vi.mocked(configApi.getConfigDoc).mockResolvedValue({
+        text: JSON.stringify(RAJNI_RESUME),
+      });
+      vi.mocked(configApi.putConfigDoc).mockResolvedValue({ text: '' });
+      renderWithGuard();
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Current years of experience')).toHaveValue('9');
+      });
+      expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('false');
+
+      await userEvent.type(screen.getByLabelText('Add to Core skills'), 'GraphQL');
+      await userEvent.click(screen.getAllByRole('button', { name: 'Add' })[1]!);
+      expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('true');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() =>
+        expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('false'),
+      );
+    });
   });
 });

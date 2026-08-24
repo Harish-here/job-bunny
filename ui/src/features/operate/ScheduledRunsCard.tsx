@@ -52,7 +52,15 @@ function getErrorMessage(error: unknown): string {
  * refetch with no way back in from here. Pausing a profile removes its row
  * on the next refresh; re-enabling it is Settings → Schedule's job (its own
  * `enabled` toggle there is the real two-way control), pointed at by the
- * footer note below. */
+ * footer note below.
+ *
+ * Re-review finding: unlike `schedule-skip-next` (still `data-qa`'d only on
+ * the ACTIVE row — its own test covers that), the Pause button's `data-qa`
+ * and accessible name are PER-ROW (`schedule-pause-${profile}`, `aria-label
+ * ="Pause schedule — ${profile}"`) — a card listing several profiles had
+ * every row's button share the bare name "Pause", so assistive tech and any
+ * selector reaching for a specific profile's Pause action had no way to
+ * disambiguate rows. */
 function ScheduleRow({
   schedule,
   active,
@@ -93,7 +101,8 @@ function ScheduleRow({
       )}
       <Button
         type="button"
-        data-qa={active ? 'schedule-pause' : undefined}
+        data-qa={`schedule-pause-${schedule.profile}`}
+        aria-label={`Pause schedule — ${schedule.profile}`}
         variant="outline"
         size="sm"
         disabled={pauseMutation.isPending || pauseMutation.isSuccess}

@@ -18,6 +18,15 @@
  * `useSettingsSaveGuardState()` and each wrap their own navigation trigger
  * in its own `DirtyNavGuard` instance, driven by the same underlying dirty
  * flag (only one can ever actually be triggered by a click at a time).
+ *
+ * `guardedNavigate` (fix-round-2 finding) closes the same gap for
+ * IN-SECTION navigation triggers — e.g. `RawConfigSection`'s "has a form →"
+ * badges, or a footer "see the raw doc" link on another section — that
+ * don't go through `SettingsNav` or the sidebar at all. The provider wraps
+ * its own `children` in a THIRD `DirtyNavGuard<Route>` instance (same
+ * pattern `Shell.tsx`'s `GuardedSidebar` already uses for two): only one of
+ * the three can ever actually be triggered by a single click, so the extra
+ * instance never conflicts with the other two.
  */
 import {
   createContext,
@@ -27,6 +36,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { type Route, navigate as realNavigate } from '../../../lib/router';
+import { DirtyNavGuard } from './DirtyNavGuard';
 
 export interface RegisteredSectionSave {
   isDirty: boolean;
@@ -45,6 +56,13 @@ interface SettingsSaveContextValue {
   save: () => Promise<boolean>;
   discard: () => void;
   register: (state: RegisteredSectionSave | null) => void;
+  /** Guarded equivalent of the app-wide `navigate()` for triggers that live
+   * INSIDE a settings section's own render tree (not `SettingsNav`, not the
+   * sidebar — those already have their own dedicated `DirtyNavGuard`
+   * instances). Delegates to the provider's own internal `DirtyNavGuard<Route>`
+   * — see this module's doc comment. Outside a `SettingsSaveProvider`, this
+   * is the plain unguarded `navigate` (there is no dirty state to guard). */
+  guardedNavigate: (target: Route) => void;
 }
 
 async function noopSave(): Promise<boolean> {
@@ -57,6 +75,7 @@ const SettingsSaveContext = createContext<SettingsSaveContextValue>({
   save: noopSave,
   discard: noopDiscard,
   register: () => {},
+  guardedNavigate: realNavigate,
 });
 
 export function SettingsSaveProvider({ children }: { children: ReactNode }) {
@@ -66,21 +85,41 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
   // invokes the section's current draft-closing closures, never a stale
   // one captured at the guard's last render.
   const currentRef = useRef<RegisteredSectionSave | null>(null);
+  // Set on every render by the internal `DirtyNavGuard<Route>`'s own
+  // render-prop below — read at CALL time by `guardedNavigate`, same
+  // "never a stale closure" reasoning as `currentRef` above.
+  const goRef = useRef<(target: Route) => void>(realNavigate);
 
   function register(state: RegisteredSectionSave | null): void {
     currentRef.current = state;
     setIsDirty(state?.isDirty ?? false);
   }
 
+  const save = () => currentRef.current?.save() ?? noopSave();
+  const discard = () => currentRef.current?.discard();
+
   const value: SettingsSaveContextValue = {
     isDirty,
-    save: () => currentRef.current?.save() ?? noopSave(),
-    discard: () => currentRef.current?.discard(),
+    save,
+    discard,
     register,
+    guardedNavigate: (target) => goRef.current(target),
   };
 
   return (
-    <SettingsSaveContext.Provider value={value}>{children}</SettingsSaveContext.Provider>
+    <SettingsSaveContext.Provider value={value}>
+      <DirtyNavGuard<Route>
+        isDirty={isDirty}
+        navigate={realNavigate}
+        save={save}
+        discard={discard}
+      >
+        {(go) => {
+          goRef.current = go;
+          return children;
+        }}
+      </DirtyNavGuard>
+    </SettingsSaveContext.Provider>
   );
 }
 
@@ -94,6 +133,15 @@ export function useSettingsSaveGuardState(): {
 } {
   const { isDirty, save, discard } = useContext(SettingsSaveContext);
   return { isDirty, save, discard };
+}
+
+/** Read by any in-section navigation trigger (e.g. `RawConfigSection`'s
+ * "has a form →" badges, or a footer link pointing at another section) that
+ * needs to leave the currently-mounted section without going through
+ * `SettingsNav` or the sidebar. See this module's doc comment. */
+export function useGuardedNavigate(): (target: Route) => void {
+  const { guardedNavigate } = useContext(SettingsSaveContext);
+  return guardedNavigate;
 }
 
 /** Called by every SaveBar-owning section (and `RawConfigSection`, which
