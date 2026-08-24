@@ -54,3 +54,16 @@ export async function putSkipNext(profile: string, skipNext: boolean): Promise<v
     cfg.schedule = { ...schedule, skipNext };
   });
 }
+
+/** Read-modify-write of profile.json's `schedule.enabled` flag to false,
+ * reusing wizard.api's `patchProfileConfig`. `usePauseAll.ts` calls this
+ * once per profile inside a `Promise.allSettled` fan-out — a single
+ * profile's rejection here must not affect the sibling calls, which is
+ * why this stays a plain async function rather than something that
+ * swallows its own errors. */
+export async function pauseProfile(profile: string): Promise<void> {
+  await patchProfileConfig(profile, (cfg) => {
+    const schedule = (cfg.schedule as Record<string, unknown> | undefined) ?? {};
+    cfg.schedule = { ...schedule, enabled: false };
+  });
+}

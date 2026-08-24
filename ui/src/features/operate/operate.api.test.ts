@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DoctorReport } from './operate.api';
 import {
   getDoctorReport,
+  pauseProfile,
   putSkipNext,
   setAutostart,
   startDaemon,
@@ -88,6 +89,27 @@ describe('putSkipNext', () => {
     const sentBody = JSON.parse(putInit.body as string) as { text: string };
     expect(JSON.parse(sentBody.text)).toEqual({
       schedule: { enabled: true, times: ['09:00'], skipNext: true },
+    });
+  });
+});
+
+describe('pauseProfile', () => {
+  it('performs a GET then a PUT of profile.json with schedule.enabled set false', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { text: '{"schedule":{"enabled":true,"times":["09:00"]}}' }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { text: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await pauseProfile('rajni');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/profiles/rajni/config/profile.json');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/profiles/rajni/config/profile.json');
+    const putInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const sentBody = JSON.parse(putInit.body as string) as { text: string };
+    expect(JSON.parse(sentBody.text)).toEqual({
+      schedule: { enabled: false, times: ['09:00'] },
     });
   });
 });

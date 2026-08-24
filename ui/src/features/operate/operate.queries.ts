@@ -1,12 +1,6 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
 import { wizardKeys } from '../wizard/wizard.queries';
-import {
-  getDoctorReport,
-  putSkipNext,
-  setAutostart,
-  startDaemon,
-  stopDaemon,
-} from './operate.api';
+import { getDoctorReport, putSkipNext } from './operate.api';
 
 export const operateKeys = {
   doctor: (p: string) => [p, 'doctor'] as const,
@@ -22,33 +16,13 @@ export const doctorQuery = (p: string) =>
     enabled: p !== '',
   });
 
-// Reuses wizardKeys.daemon() — the SAME cache entry wizard's daemonQuery
-// reads. DaemonCard (a later brief) and ScheduleSection's bridge line both
-// invalidate off this one key; introducing a second daemon key here would
-// let the two surfaces show different daemon states simultaneously.
-export function useStopDaemon() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: stopDaemon,
-    onSuccess: () => qc.invalidateQueries({ queryKey: wizardKeys.daemon() }),
-  });
-}
-
-export function useStartDaemon() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: startDaemon,
-    onSuccess: () => qc.invalidateQueries({ queryKey: wizardKeys.daemon() }),
-  });
-}
-
-export function useSetAutostart() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (enabled: boolean) => setAutostart(enabled),
-    onSuccess: () => qc.invalidateQueries({ queryKey: wizardKeys.daemon() }),
-  });
-}
+// The stop/start/autostart daemon-control mutations live in
+// ./useDaemonControl.ts, not here — mirrors the codebase-wide convention
+// of keeping `useMutation` wrappers in their own `use*.ts` file, separate
+// from the `queryOptions` this module holds (see useConfigMutation.ts).
+// They still reuse wizardKeys.daemon() — the SAME cache entry wizard's
+// daemonQuery reads — so DaemonCard and ScheduleSection's bridge line
+// never show different daemon states simultaneously.
 
 export function usePutSkipNext(profile: string) {
   const qc = useQueryClient();
