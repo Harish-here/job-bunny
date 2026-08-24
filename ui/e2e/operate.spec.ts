@@ -2,13 +2,17 @@
  * e2e coverage for the Operate page (blueprint step 29), superseding the
  * deleted `hub.spec.ts`. Cards other than Daemon (`ScheduledRunsCard`,
  * `SetupHealthCard`, `SecretsCard`) hit the REAL board server against the
- * committed `rajni` fixture — only `GET /api/daemon` and its three
- * mutation routes are stubbed, per test, for the scenarios this file
- * exists to prove. `card-linkedin` is deliberately out of scope (see
- * `OperatePage.tsx`'s own doc comment) and is asserted absent, never
- * built or stubbed.
+ * committed `rajni` fixture — `GET /api/daemon` and its three mutation
+ * routes are stubbed, per test, for the daemon-card scenarios this file
+ * exists to prove; task 38's Scheduled runs/Setup & health/Secrets tests
+ * additionally stub `GET /api/profiles/rajni/doctor` (`stubDoctor`) where a
+ * specific finding shape is the point of the test, and drive
+ * `PUT /api/secrets/:key` for real (guarded — see that test's own comment).
+ * `card-linkedin` is deliberately out of scope (see `OperatePage.tsx`'s own
+ * doc comment) and is asserted absent, never built or stubbed.
  */
 import { expect, type Page, test } from '@playwright/test';
+import { repoRoot, restoreEnvFile, snapshotEnvFile } from './env-guard';
 import {
   DAEMON_SETTLE_TIMEOUT_MS,
   type DaemonProfileScheduleFixture,
@@ -57,6 +61,29 @@ async function stubDaemon(
     });
   });
   return { setState: (s) => (current = s) };
+}
+
+interface Finding {
+  check: string;
+  status: 'ok' | 'warn' | 'red';
+  detail: string;
+}
+
+/** A `GET /api/profiles/rajni/doctor` stub — mirrors the deleted
+ * `hub.spec.ts`'s own `stubDoctor` helper (SURVIVE disposition: same
+ * mechanics, new host file). Used only by the Setup & health tests below,
+ * which need a specific finding shape (`status`/`check`/destination) the
+ * committed rajni fixture's real doctor report can't be relied on to
+ * produce. */
+async function stubDoctor(
+  page: Page,
+  status: 'ok' | 'warn' | 'red',
+  findings: Finding[],
+): Promise<void> {
+  await page.route('**/api/profiles/rajni/doctor', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({ json: { status, findings } });
+  });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -361,4 +388,231 @@ test('daemon: the schedule-vs-daemon banner renders when stopped + an enabled sc
   daemon.setState({ state: 'running' });
   await page.reload();
   await expect(card.getByRole('alert')).toHaveCount(0);
+});
+
+// --- Scheduled runs (blueprint step 33's e2e half) ---------------------
+
+async function fetchRajniProfileConfigText(page: Page): Promise<string> {
+  const res = await page.request.get('/api/profiles/rajni/config/profile.json');
+  expect(res.ok()).toBe(true);
+  const body = (await res.json()) as { text: string };
+  return body.text;
+}
+
+async function putRajniProfileConfigText(page: Page, text: string): Promise<void> {
+  const res = await page.request.put('/api/profiles/rajni/config/profile.json', {
+    data: { text },
+  });
+  expect(res.ok()).toBe(true);
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+test('operate-schedule: schedule-skip-next writes {date, slot} matching the stubbed next run, and shows the success chip', async ({
+  page,
+}) => {
+  // `nextRunAt` is built off "now" so `expectedDate`/`expectedSlot` agree
+  // with `ScheduledRunsCard.tsx`'s own `todayISODate`/`nextSlotFor` (both
+  // local-time, not UTC) regardless of what day this test happens to run.
+  const now = new Date();
+  const expectedDate = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  const expectedSlot = '23:59';
+  const nextRunAt = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    23,
+    59,
+    0,
+  ).toISOString();
+
+  await stubDaemon(page, {
+    state: 'running',
+    profiles: [
+      {
+        profile: 'rajni',
+        enabled: true,
+        nextRunAt,
+        degraded: false,
+        degradedReason: null,
+        schemaVersion: null,
+        buildVersion: null,
+      },
+    ],
+  });
+
+  const original = await fetchRajniProfileConfigText(page);
+  try {
+    await page.goto('/#/setup');
+    const card = page.locator('[data-qa="card-scheduled-runs"]');
+    // `schedule-skip-next` only ever carries a `data-qa` on the ACTIVE
+    // row (`ScheduledRunsCard.tsx`'s `ScheduleRow`) — the pinned profile
+    // is `rajni`, the only entry this stub returns, so this button is
+    // unambiguously rajni's.
+    await card.locator('[data-qa="schedule-skip-next"]').click();
+    await expect(card.getByText('Next run skipped')).toBeVisible();
+
+    // Server round-trip, not the form's own echo (the e2e idiom this
+    // suite follows throughout): re-fetch the doc the mutation wrote and
+    // check its persisted `schedule.skipNext`.
+    const saved = JSON.parse(await fetchRajniProfileConfigText(page)) as {
+      schedule?: { skipNext?: { date: string; slot: string } };
+    };
+    expect(saved.schedule?.skipNext).toEqual({ date: expectedDate, slot: expectedSlot });
+  } finally {
+    await putRajniProfileConfigText(page, original);
+  }
+});
+
+// --- Setup & health (blueprint step 35's e2e half) ----------------------
+
+test('operate-health: all-ok findings collapse to a single summary line, with zero visible rows until the disclosure is opened', async ({
+  page,
+}) => {
+  const findings: Finding[] = Array.from({ length: 5 }, (_, i) => ({
+    check: `ok-check-${i}`,
+    status: 'ok',
+    detail: `check ${i} passing`,
+  }));
+  await stubDoctor(page, 'ok', findings);
+  await page.goto('/#/setup');
+  const card = page.locator('[data-qa="card-setup-health"]');
+
+  const trigger = card.getByRole('button', {
+    name: 'Setup complete · 5/5 checks passing',
+  });
+  await expect(trigger).toBeVisible();
+  // Radix's Accordion.Content unmounts (not merely hides) while closed —
+  // zero `health-row-*` elements exist in the DOM at all until opened.
+  await expect(card.locator('[data-qa^="health-row-"]')).toHaveCount(0);
+
+  await trigger.click();
+  await expect(card.locator('[data-qa^="health-row-"]')).toHaveCount(5);
+});
+
+test('operate-health: a warn finding with a cli-command destination renders a Copy button that writes the exact command to the clipboard', async ({
+  page,
+}) => {
+  await stubDoctor(page, 'warn', [
+    { check: 'daemon-liveness', status: 'warn', detail: 'the daemon is not running' },
+  ]);
+  // Chromium denies `clipboard-write` by default in a fresh Playwright
+  // context (see `shell.spec.ts`'s identical grant for the same reason) —
+  // without it `navigator.clipboard.writeText` throws `NotAllowedError`.
+  await page.context().grantPermissions(['clipboard-write'], {
+    origin: 'http://127.0.0.1:4199',
+  });
+  // The spy: wraps (never replaces) the real `writeText` so both the
+  // mockup's `copyCmd()` contract (a real clipboard write happens) and
+  // this test's assertion (the exact string written) hold at once.
+  await page.addInitScript(() => {
+    const original = navigator.clipboard.writeText.bind(navigator.clipboard);
+    (window as unknown as { __copyCalls: string[] }).__copyCalls = [];
+    navigator.clipboard.writeText = (text: string) => {
+      (window as unknown as { __copyCalls: string[] }).__copyCalls.push(text);
+      return original(text);
+    };
+  });
+
+  await page.goto('/#/setup');
+  const card = page.locator('[data-qa="card-setup-health"]');
+  const copyButton = card.getByRole('button', { name: 'Copy: jobbunny serve start' });
+  await expect(copyButton).toBeVisible();
+  await copyButton.click();
+
+  const calls = await page.evaluate(
+    () => (window as unknown as { __copyCalls: string[] }).__copyCalls,
+  );
+  expect(calls).toEqual(['jobbunny serve start']);
+});
+
+test('operate-health: a warn finding with a settings-link destination renders inside health-group-needs-action and navigates on click', async ({
+  page,
+}) => {
+  await stubDoctor(page, 'warn', [
+    {
+      check: 'notion-db-reachable',
+      status: 'warn',
+      detail: "the Notion database isn't reachable",
+    },
+  ]);
+  await page.goto('/#/setup');
+  const card = page.locator('[data-qa="card-setup-health"]');
+
+  // Group MEMBERSHIP, not mere presence on the card: the row must be a
+  // descendant of `health-group-needs-action` specifically, not
+  // `health-group-not-configured` (both are candidate `warn` homes —
+  // `checkDestination.ts`'s `groupHealthFindings` sorts by destination
+  // kind, and a `settings-link` destination belongs in needs-action).
+  const group = card.locator('[data-qa="health-group-needs-action"]');
+  const row = group.locator('[data-qa="health-row-notion-db-reachable"]');
+  await expect(row).toBeVisible();
+  await expect(
+    card.locator(
+      '[data-qa="health-group-not-configured"] [data-qa="health-row-notion-db-reachable"]',
+    ),
+  ).toHaveCount(0);
+
+  await row.getByRole('button', { name: 'Settings' }).click();
+  // `navigate()` sets `window.location.hash` to the route it's given
+  // (`lib/router.ts`) — the URL is the observable proof `navigate()` fired
+  // with `{name:'settings', section:'delivery'}`.
+  await expect(page).toHaveURL(/#\/settings\/delivery/);
+});
+
+test('operate-health: Set up a new profile navigates to the onboarding wizard', async ({
+  page,
+}) => {
+  // Carried over from the deleted `hub.spec.ts` ("hub: Set up a new
+  // profile navigates to the onboarding wizard") unchanged in substance —
+  // new host file and page context only, per the e2e Disposition Ledger's
+  // SURVIVE disposition for this test.
+  await page.goto('/#/setup');
+  await page.getByRole('button', { name: 'Set up a new profile' }).click();
+  await expect(page).toHaveURL(/#\/onboarding/);
+  await expect(page.getByTestId('wizard')).toBeVisible();
+});
+
+// --- Secrets (blueprint step 36's e2e half) -----------------------------
+
+test('operate-secrets: the [Set] dialog writes a value, flips the row to configured, and the typed value never renders anywhere in the DOM', async ({
+  page,
+}) => {
+  // Security-flagged (this brief's own note): `PUT /api/secrets/:key`
+  // upserts into the data home's real `.env`, which `playwright.config.ts`
+  // pins to the repo root — the SAME file a developer's real
+  // `NOTION_TOKEN`/`TELEGRAM_BOT_TOKEN` live in. `env-guard.ts`'s
+  // snapshot/restore (the same guard `env-guard.spec.ts`'s own live PUT
+  // test uses) backs up the raw bytes and restores them in `finally`,
+  // whether this test passes or throws — never reads or asserts against
+  // any *real* secret value. `TELEGRAM_BOT_TOKEN`, not `NOTION_TOKEN`, to
+  // avoid racing `env-guard.spec.ts`'s own NOTION_TOKEN write under
+  // Playwright's cross-file worker parallelism. The typed value itself is
+  // an obviously-fake placeholder, never a real token.
+  const root = repoRoot();
+  const before = snapshotEnvFile(root);
+  const fakeValue = 'test-fake-token-not-real';
+  try {
+    await page.goto('/#/setup');
+    const row = page.locator('[data-qa="secret-row-telegram-bot-token"]');
+    await expect(row.getByText('not configured')).toBeVisible();
+
+    await row.getByRole('button', { name: 'Set' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('Value').fill(fakeValue);
+    await dialog.getByRole('button', { name: 'Save' }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(row.getByText('configured', { exact: true })).toBeVisible();
+
+    // R24's "no secret value is ever returned/shown" as a positive,
+    // mechanical assertion — a full-page content scan, not just the row.
+    const content = await page.content();
+    expect(content).not.toContain(fakeValue);
+  } finally {
+    restoreEnvFile(root, before);
+  }
 });
