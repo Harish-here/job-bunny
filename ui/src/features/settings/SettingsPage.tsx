@@ -59,7 +59,12 @@ export function SettingsPage({
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
       <h1 className="text-lg font-semibold font-heading">Settings</h1>
       <SettingsShell section={section} profile={profile}>
-        <SectionBody profile={profile} section={section} />
+        {/* `key={profile}` remounts the active section clean on every
+         * profile switch — belt-and-braces alongside each section's own
+         * (profile, doc)-keyed seed guard (see RawConfigSection.tsx's own
+         * fix), so a section that ever forgets its own guard still can't
+         * carry stale draft state across a profile switch. */}
+        <SectionBody key={profile} profile={profile} section={section} />
       </SettingsShell>
     </div>
   );

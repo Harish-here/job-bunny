@@ -25,6 +25,7 @@ import { Input } from '../../../components/ui/input';
 import { configDocQuery } from '../config.queries';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useConfigMutation } from '../useConfigMutation';
 import { useDocForm } from '../useDocForm';
@@ -176,8 +177,16 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
         }),
         saveSearchUrls(serializeSearchUrlRows(value.rows)),
       ]);
-      if (profileOk && searchUrlsOk) setSavedState(value);
+      const ok = profileOk && searchUrlsOk;
+      if (ok) setSavedState(value);
+      return ok;
     },
+  });
+
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => setState(saveState.discard()),
   });
 
   const serverError =

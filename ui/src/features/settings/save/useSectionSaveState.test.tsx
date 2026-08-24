@@ -37,7 +37,7 @@ describe('useSectionSaveState', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper } = wrapper();
     const { result, rerender } = renderHook(
       ({ currentValue }) =>
@@ -62,7 +62,7 @@ describe('useSectionSaveState', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper, qc } = wrapper();
     const { result, rerender } = renderHook(
       ({ currentValue }) =>
@@ -97,7 +97,7 @@ describe('useSectionSaveState', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper, qc } = wrapper();
     const { result } = renderHook(
       () =>
@@ -126,7 +126,7 @@ describe('useSectionSaveState', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper } = wrapper();
     const { result } = renderHook(
       () =>
@@ -147,6 +147,62 @@ describe('useSectionSaveState', () => {
     expect(result.current.successMessage).toBeNull();
   });
 
+  it('save() resolves true on a successful onSave, false on a failed one — and a false does not set successMessage (DirtyNavGuard depends on this to keep the dialog open on a failed PUT)', async () => {
+    vi.mocked(runsApi.listRuns).mockResolvedValue({
+      rows: [],
+      total: 0,
+      limit: 1,
+      offset: 0,
+    });
+    const onSave = vi.fn().mockResolvedValue(false);
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(
+      () =>
+        useSectionSaveState({
+          profile: 'rajni',
+          initialValue: { a: 1 },
+          currentValue: { a: 2 },
+          validate: () => ({}),
+          onSave,
+        }),
+      { wrapper: Wrapper },
+    );
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await result.current.save();
+    });
+    expect(outcome).toBe(false);
+    expect(result.current.successMessage).toBeNull();
+  });
+
+  it('save() resolves false, without calling onSave, when validate reports errors', async () => {
+    vi.mocked(runsApi.listRuns).mockResolvedValue({
+      rows: [],
+      total: 0,
+      limit: 1,
+      offset: 0,
+    });
+    const onSave = vi.fn().mockResolvedValue(true);
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(
+      () =>
+        useSectionSaveState({
+          profile: 'rajni',
+          initialValue: { a: 1 },
+          currentValue: { a: 2 },
+          validate: () => ({ a: 'must be 1' }),
+          onSave,
+        }),
+      { wrapper: Wrapper },
+    );
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await result.current.save();
+    });
+    expect(outcome).toBe(false);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('discard() clears successMessage and returns initialValue', async () => {
     vi.mocked(runsApi.listRuns).mockResolvedValue({
       rows: [],
@@ -154,7 +210,7 @@ describe('useSectionSaveState', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper } = wrapper();
     const { result } = renderHook(
       () =>

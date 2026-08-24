@@ -9,24 +9,40 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../../components/ui/dialog';
-import type { Route } from '../../../lib/router';
 
-export interface DirtyNavGuardProps {
-  /** The current section's dirty flag (`useSectionSaveState`'s `isDirty`). */
+// Generic over the navigation TARGET type, not fixed to `Route`: the
+// sidebar's own `onChoose` (a profile switch) takes a bare `string`, not a
+// `Route`, and per the S8 save model's own spec ("wraps navigate() calls
+// originating from SettingsNav.tsx AND the sidebar profile switcher",
+// blueprint.md:503-510) both need guarding with the same dialog mechanics —
+// `Shell.tsx` wraps `Sidebar`'s `onNavigate` (`T = Route`) and `onChoose`
+// (`T = string`) in two separate `DirtyNavGuard<...>` instances, both
+// driven by the same underlying dirty flag.
+export interface DirtyNavGuardProps<T> {
+  /** The current section's dirty flag (`useSectionSaveState`'s `isDirty`,
+   * lifted via `SettingsSaveContext`). */
   isDirty: boolean;
-  /** The real app-wide `navigate` (`ui/src/lib/router.ts:57-59`), or a
+  /** The real navigation function for this target type — the app-wide
+   * `navigate` (`ui/src/lib/router.ts:57-59`) for `T = Route`, or
+   * `setStored` (`ui/src/lib/profile.ts`) for `T = string` — or a
    * test-injected stand-in. */
-  navigate: (route: Route) => void;
-  /** `useSectionSaveState`'s `save`. */
-  save: () => void | Promise<void>;
+  navigate: (target: T) => void;
+  /** `useSectionSaveState`'s `save` — reports whether the save actually
+   * succeeded (`false` for a non-empty `errors` map or a failed PUT), never
+   * throws. `handleSaveAndContinue` below only navigates on `true`; on
+   * `false` it keeps the dialog open so the section's own validation
+   * summary / server error (rendered underneath, in the still-mounted
+   * section) stays visible instead of being unmounted out from under the
+   * user by a navigate that silently discarded their unsaved, un-persisted
+   * edit. */
+  save: () => Promise<boolean>;
   /** A caller-supplied discard that also applies the reverted value back
    * onto the caller's draft state (mirrors `SaveBar`'s `onDiscard`). */
   discard: () => void;
   /** Render-prop: receives the wrapped navigate function to hand to
-   * whatever triggers navigation (task 22 wires this into `SettingsNav` and
-   * the sidebar's profile switcher — usage there is
-   * `<DirtyNavGuard ...>{(go) => <SettingsNav navigate={go} />}</DirtyNavGuard>`). */
-  children: (guardedNavigate: (route: Route) => void) => ReactNode;
+   * whatever triggers navigation — usage:
+   * `<DirtyNavGuard ...>{(go) => <SettingsNav navigate={go} />}</DirtyNavGuard>`. */
+  children: (guardedNavigate: (target: T) => void) => ReactNode;
 }
 
 /**
@@ -35,50 +51,51 @@ export interface DirtyNavGuardProps {
  * confirmation dialog is shown instead of navigating immediately; when
  * `isDirty` is false, navigation passes straight through.
  */
-export function DirtyNavGuard({
+export function DirtyNavGuard<T>({
   isDirty,
   navigate,
   save,
   discard,
   children,
-}: DirtyNavGuardProps) {
-  const [pendingRoute, setPendingRoute] = useState<Route | null>(null);
+}: DirtyNavGuardProps<T>) {
+  const [pendingTarget, setPendingTarget] = useState<T | null>(null);
 
-  function guardedNavigate(route: Route) {
+  function guardedNavigate(target: T) {
     if (isDirty) {
-      setPendingRoute(route);
+      setPendingTarget(target);
       return;
     }
-    navigate(route);
+    navigate(target);
   }
 
   async function handleSaveAndContinue() {
-    if (pendingRoute === null) return;
-    const target = pendingRoute;
-    await save();
-    setPendingRoute(null);
+    if (pendingTarget === null) return;
+    const target = pendingTarget;
+    const ok = await save();
+    if (!ok) return; // validation failure or failed PUT — stay put, dialog stays open
+    setPendingTarget(null);
     navigate(target);
   }
 
   function handleDiscardAndContinue() {
-    if (pendingRoute === null) return;
-    const target = pendingRoute;
+    if (pendingTarget === null) return;
+    const target = pendingTarget;
     discard();
-    setPendingRoute(null);
+    setPendingTarget(null);
     navigate(target);
   }
 
   function handleStay() {
-    setPendingRoute(null);
+    setPendingTarget(null);
   }
 
   return (
     <>
       {children(guardedNavigate)}
       <Dialog
-        open={pendingRoute !== null}
+        open={pendingTarget !== null}
         onOpenChange={(next) => {
-          if (!next) setPendingRoute(null);
+          if (!next) setPendingTarget(null);
         }}
       >
         <DialogContent data-qa="dirty-nav-dialog" data-testid="dirty-nav-dialog">

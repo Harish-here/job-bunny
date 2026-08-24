@@ -8,8 +8,14 @@ export interface SaveBarProps {
   /** Wraps `useSectionSaveState`'s (task 4) own `save`. Always called on
    * click, unconditionally — `save-button` is NEVER `disabled`; the hook's
    * own `save()` is what refuses to call the caller's `onSave` when
-   * validation fails (task 4's job, already built). */
-  onSave: () => void | Promise<void>;
+   * validation fails (task 4's job, already built). Returns whether the
+   * save actually persisted — the same `Promise<boolean>` contract
+   * `SettingsSaveContext`'s `useRegisterSettingsSave` and `DirtyNavGuard`
+   * depend on; `SaveBar` itself ignores the resolved value (its own click
+   * handler discards it), it only needs the type to line up so every
+   * caller can hand the SAME `save` reference to both `SaveBar` and the
+   * registration hook. */
+  onSave: () => Promise<boolean>;
   /** Wraps `useSectionSaveState`'s `discard`; the caller is responsible for
    * applying `discard()`'s returned value back onto its own draft state
    * (e.g. `onDiscard={() => setCurrentValue(discard())}`). */

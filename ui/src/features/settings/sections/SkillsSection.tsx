@@ -33,6 +33,7 @@ import { Input } from '../../../components/ui/input';
 import { ChipInput } from '../ChipInput';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 import {
@@ -73,7 +74,14 @@ export function SkillsSection({ profile }: { profile: string }) {
     onSave: async (value) => {
       const ok = await docForm.save((cfg) => applyFilterEditorState(cfg, value));
       if (ok) setSavedState(value);
+      return ok;
     },
+  });
+
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => setState(saveState.discard()),
   });
 
   return (

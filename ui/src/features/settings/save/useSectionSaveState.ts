@@ -20,7 +20,12 @@ export interface UseSectionSaveStateArgs<T> {
   initialValue: T;
   currentValue: T;
   validate: (value: T) => Record<string, string>;
-  onSave: (value: T) => Promise<void>;
+  /** Returns whether the save actually persisted — `false` on a failed PUT
+   * (each caller already computes this `ok` flag internally; it must
+   * return it, not discard it, so `save()` below — and, through it,
+   * `DirtyNavGuard` — can tell a real save from a silently-swallowed
+   * failure). */
+  onSave: (value: T) => Promise<boolean>;
 }
 
 // `discard()` does not own the caller's state setter (`currentValue` is
@@ -32,7 +37,11 @@ export interface UseSectionSaveStateResult<T> {
   errors: Record<string, string>;
   isSaving: boolean;
   successMessage: string | null;
-  save: () => Promise<void>;
+  /** Resolves `true` when the save actually persisted, `false` on a
+   * validation failure (non-empty `errors`) or a failed `onSave` — never
+   * throws. `DirtyNavGuard`'s "Save and continue" only navigates on
+   * `true`. */
+  save: () => Promise<boolean>;
   discard: () => T;
 }
 
@@ -47,14 +56,18 @@ export function useSectionSaveState<T>(
   const isDirty = !deepEqual(initialValue, currentValue);
   const errors = validate(currentValue);
 
-  async function save(): Promise<void> {
-    if (Object.keys(errors).length > 0) return;
+  async function save(): Promise<boolean> {
+    if (Object.keys(errors).length > 0) return false;
     setIsSaving(true);
-    await onSave(currentValue);
+    const ok = await onSave(currentValue);
     setIsSaving(false);
-    // `undefined` (still loading) fails toward the more common case rather
-    // than blocking the success message on a slow, unrelated query.
-    setSuccessMessage(runInFlight === true ? RUNNING_MESSAGE : NOT_RUNNING_MESSAGE);
+    if (ok) {
+      // `undefined` (still loading) fails toward the more common case
+      // rather than blocking the success message on a slow, unrelated
+      // query.
+      setSuccessMessage(runInFlight === true ? RUNNING_MESSAGE : NOT_RUNNING_MESSAGE);
+    }
+    return ok;
   }
 
   function discard(): T {

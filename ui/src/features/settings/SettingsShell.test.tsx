@@ -1,11 +1,29 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { navigate } from '../../lib/router';
 import { SettingsShell } from './SettingsShell';
+import {
+  SettingsSaveProvider,
+  useRegisterSettingsSave,
+} from './save/SettingsSaveContext';
 
 vi.mock('../../lib/router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/router')>();
   return { ...actual, navigate: vi.fn() };
 });
+
+// A minimal stand-in for a dirty SaveBar-owning section — registers itself
+// with the real `SettingsSaveProvider` exactly like `RolesCompaniesSection`
+// etc. do, without dragging in a whole section's own doc-form plumbing.
+function DirtyRegistrant() {
+  useRegisterSettingsSave({
+    isDirty: true,
+    save: vi.fn().mockResolvedValue(true),
+    discard: vi.fn(),
+  });
+  return null;
+}
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -46,5 +64,19 @@ describe('SettingsShell', () => {
     expect(document.querySelector('[data-qa="scope-chip-profile"]')).toHaveTextContent(
       'Profile: harish',
     );
+  });
+
+  it('a dirty registered section intercepts SettingsNav navigation with the unsaved-changes dialog, instead of navigating immediately (cross-section dirty-nav guard)', async () => {
+    render(
+      <SettingsSaveProvider>
+        <DirtyRegistrant />
+        <SettingsShell section="landing" profile="rajni">
+          <p>body</p>
+        </SettingsShell>
+      </SettingsSaveProvider>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Roles & companies' }));
+    expect(await screen.findByTestId('dirty-nav-dialog')).toBeInTheDocument();
+    expect(vi.mocked(navigate)).not.toHaveBeenCalled();
   });
 });

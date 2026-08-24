@@ -3,6 +3,7 @@ import { Badge } from '../../components/ui/badge';
 import { navigate, type SettingsSection } from '../../lib/router';
 import { SettingsNav } from './SettingsNav';
 import { DirtyNavGuard } from './save/DirtyNavGuard';
+import { useSettingsSaveGuardState } from './save/SettingsSaveContext';
 
 export interface SettingsShellProps {
   section: SettingsSection;
@@ -17,24 +18,22 @@ export interface SettingsShellProps {
  * (`Sidebar.tsx`) is out of its scope.
  *
  * `DirtyNavGuard` wraps `SettingsNav` per that component's own wiring
- * contract (`DirtyNavGuard.tsx`'s docstring). No section currently lifts its
- * `useSectionSaveState` dirty flag up to this shell — each section owns and
- * renders its own `SaveBar` locally — so `isDirty`/`save`/`discard` here are
- * a structural stub (always clean) until a later task lifts real
- * per-section dirty state up to this level; see this brief's own NOTES.
+ * contract (`DirtyNavGuard.tsx`'s docstring). `isDirty`/`save`/`discard`
+ * come from `SettingsSaveContext` — the CURRENTLY mounted section (there is
+ * ever only one) registers its own live dirty state into that context via
+ * `useRegisterSettingsSave`, so this guard always reflects the actual
+ * section on screen rather than a hardcoded-clean stub. The sidebar's own
+ * profile switcher / cross-page nav is guarded separately, by `Shell.tsx`,
+ * reading the same context.
  */
 export function SettingsShell({ section, profile, children }: SettingsShellProps) {
+  const { isDirty, save, discard } = useSettingsSaveGuardState();
   return (
     <div
       data-qa="settings-shell"
       className="grid min-h-0 flex-1 grid-cols-[224px_1fr] overflow-hidden"
     >
-      <DirtyNavGuard
-        isDirty={false}
-        navigate={navigate}
-        save={() => {}}
-        discard={() => {}}
-      >
+      <DirtyNavGuard isDirty={isDirty} navigate={navigate} save={save} discard={discard}>
         {(go) => <SettingsNav section={section} navigate={go} />}
       </DirtyNavGuard>
       <main className="flex min-h-0 flex-col gap-4 overflow-y-auto p-6">

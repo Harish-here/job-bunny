@@ -145,15 +145,42 @@ describe('ScheduledRunsCard — rows', () => {
     await screen.findByText('Next run skipped');
   });
 
-  it('the per-row pause switch writes schedule.enabled through setScheduleEnabled', async () => {
-    stubDaemon(baseDaemon({ profiles: [scheduleFor('rajni', { enabled: true })] }));
+  // Fix-round finding: `daemon.profiles[]` can never carry
+  // `enabled: false` (`scanProfileSchedules` skips those rows entirely), so
+  // a two-way switch bound to `schedule.enabled` was always stuck on
+  // `true` and, worse, toggling it off made the row vanish from this card
+  // with no way back in. The pause action is now one-way, `data-qa`'d only
+  // on the active row (mirrors `schedule-skip-next`'s own convention).
+  it("schedule-pause: only the active row's button carries the id, writes schedule.enabled=false through setScheduleEnabled, and shows a Paused chip", async () => {
+    stubDaemon(
+      baseDaemon({
+        profiles: [scheduleFor('harish'), scheduleFor('rajni')],
+      }),
+    );
     vi.mocked(operateApi.setScheduleEnabled).mockResolvedValue(undefined);
-    renderCard('harish');
+    const { container } = renderCard('harish');
+    await screen.findByText('harish');
+
+    const taggedButtons = container.querySelectorAll('[data-qa="schedule-pause"]');
+    expect(taggedButtons).toHaveLength(1);
+    const btn = taggedButtons[0];
+    if (!btn) throw new Error('expected the tagged pause button to exist');
+    expect(btn.closest('[data-qa="schedule-row-harish"]')).not.toBeNull();
+
+    await userEvent.click(btn);
+    expect(operateApi.setScheduleEnabled).toHaveBeenCalledWith('harish', false);
+    await screen.findByText('Paused');
+  });
+
+  it('the footer note points a paused profile back at Settings → Schedule to resume it', async () => {
+    stubDaemon(baseDaemon({ profiles: [scheduleFor('rajni')] }));
+    renderCard('rajni');
     await screen.findByText('rajni');
-    const sw = screen.getByRole('switch', { name: 'Schedule enabled — rajni' });
-    expect(sw).toHaveAttribute('aria-checked', 'true');
-    await userEvent.click(sw);
-    expect(operateApi.setScheduleEnabled).toHaveBeenCalledWith('rajni', false);
+    expect(
+      screen.getByText(/Pausing here removes a profile from this list/),
+    ).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Edit times in Settings →' });
+    expect(link).toHaveAttribute('href', '#/settings/schedule');
   });
 
   it('a profile with no next run disables its skip-next button', async () => {

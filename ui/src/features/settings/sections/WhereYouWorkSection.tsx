@@ -19,6 +19,7 @@ import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Button } from '../../../components/ui/button';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 import { WhereYouWorkPrefsCard } from './WhereYouWorkPrefsCard';
@@ -80,8 +81,16 @@ export function WhereYouWorkSection({ profile }: { profile: string }) {
         filterForm.save((doc) => applyWhereYouWorkFilterState(doc, value)),
         profileForm.save((doc) => applyWhereYouWorkProfileState(doc, value)),
       ]);
-      if (filterOk && profileOk) setSavedState(value);
+      const ok = filterOk && profileOk;
+      if (ok) setSavedState(value);
+      return ok;
     },
+  });
+
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => setState(saveState.discard()),
   });
 
   function addToRule(tz: string) {

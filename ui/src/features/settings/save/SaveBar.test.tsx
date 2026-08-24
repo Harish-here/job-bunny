@@ -91,7 +91,7 @@ describe('SaveBar — dirty bar', () => {
   function DirtyBarWiredToRealGuardedSave({
     onSave,
   }: {
-    onSave: (value: { a: number }) => Promise<void>;
+    onSave: (value: { a: number }) => Promise<boolean>;
   }) {
     const state = useSectionSaveState({
       profile: 'rajni',
@@ -118,7 +118,7 @@ describe('SaveBar — dirty bar', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper, qc } = wrapper();
     render(<DirtyBarWiredToRealGuardedSave onSave={onSave} />, { wrapper: Wrapper });
     await waitForRunInFlightResolved(qc, 'rajni');
@@ -207,7 +207,7 @@ describe('SaveBar — idle', () => {
 });
 
 describe('SaveBar — effect-asserting discard', () => {
-  function Harness({ onSave }: { onSave: (value: { a: number }) => Promise<void> }) {
+  function Harness({ onSave }: { onSave: (value: { a: number }) => Promise<boolean> }) {
     const [currentValue, setCurrentValue] = useState({ a: 2 });
     const state = useSectionSaveState({
       profile: 'rajni',
@@ -237,7 +237,7 @@ describe('SaveBar — effect-asserting discard', () => {
       limit: 1,
       offset: 0,
     });
-    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onSave = vi.fn().mockResolvedValue(true);
     const { Wrapper, qc } = wrapper();
     render(<Harness onSave={onSave} />, { wrapper: Wrapper });
     await waitForRunInFlightResolved(qc, 'rajni');

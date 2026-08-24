@@ -14,10 +14,10 @@ afterEach(() => {
 
 function renderGuard(props: {
   isDirty: boolean;
-  save?: () => void;
+  save?: () => Promise<boolean>;
   discard?: () => void;
 }) {
-  const save = props.save ?? vi.fn();
+  const save = props.save ?? vi.fn().mockResolvedValue(true);
   const discard = props.discard ?? vi.fn();
   render(
     <DirtyNavGuard
@@ -53,13 +53,23 @@ describe('DirtyNavGuard — isDirty=true', () => {
     expect(vi.mocked(navigate)).not.toHaveBeenCalled();
   });
 
-  it('"Save and continue" calls save then navigate with the pending target', async () => {
-    const save = vi.fn().mockResolvedValue(undefined);
+  it('"Save and continue" calls save then navigate with the pending target, when save succeeds', async () => {
+    const save = vi.fn().mockResolvedValue(true);
     renderGuard({ isDirty: true, save });
     await userEvent.click(screen.getByTestId('nav-link'));
     await userEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
     expect(save).toHaveBeenCalledTimes(1);
     expect(vi.mocked(navigate)).toHaveBeenCalledWith(TARGET);
+  });
+
+  it('"Save and continue" keeps the dialog open and never navigates when save reports failure (a validation error or a failed PUT)', async () => {
+    const save = vi.fn().mockResolvedValue(false);
+    renderGuard({ isDirty: true, save });
+    await userEvent.click(screen.getByTestId('nav-link'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(navigate)).not.toHaveBeenCalled();
+    expect(screen.getByTestId('dirty-nav-dialog')).toBeInTheDocument();
   });
 
   it('"Discard changes" calls discard then navigate with the pending target', async () => {

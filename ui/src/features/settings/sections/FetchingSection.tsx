@@ -26,6 +26,7 @@ import { RadioGroup } from '../../../components/ui/radio-group';
 import { runsQuery, softErrorsQuery } from '../../runs/runs.queries';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 import {
@@ -159,6 +160,16 @@ export function FetchingSection({ profile }: { profile: string }) {
     onSave: async (value) => {
       const ok = await handleSave(value);
       if (ok) setSavedState(value);
+      return ok;
+    },
+  });
+
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => {
+      setPacingErrors({});
+      setState(saveState.discard());
     },
   });
 

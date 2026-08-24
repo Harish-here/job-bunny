@@ -34,6 +34,7 @@ import {
 import { ChipInput } from '../ChipInput';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 import { TitleRuleEditor } from './FiltersSection';
@@ -114,8 +115,19 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
         filterForm.save((doc) => applyRolesCompaniesEditorState('filter', doc, value)),
         profileForm.save((doc) => applyRolesCompaniesEditorState('profile', doc, value)),
       ]);
-      if (filterOk && profileOk) setSavedState(value);
+      const ok = filterOk && profileOk;
+      if (ok) setSavedState(value);
+      return ok;
     },
+  });
+
+  // Lifts this section's live dirty state into the shared
+  // `SettingsSaveContext` — `SettingsShell`'s nav guard and `Shell.tsx`'s
+  // sidebar guard both read it. See that module's own doc comment.
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => setState(saveState.discard()),
   });
 
   const serverError = filterForm.serverError ?? profileForm.serverError;
@@ -263,7 +275,15 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
             </CardContent>
           </Card>
 
-          <RulePreviewStrip profile={profile} draft={state} />
+          {/* `filterForm.value ?? {}` is defensive only — this render path
+           * is nested inside `filterForm`'s own `DocFormGate` above, which
+           * never renders `children` while `filterForm.value` is `null`
+           * (loading/error/parse-error all short-circuit first). */}
+          <RulePreviewStrip
+            profile={profile}
+            baseDoc={filterForm.value ?? {}}
+            draft={state}
+          />
 
           {serverError && (
             <p data-testid="settings-error" className="text-sm text-destructive">

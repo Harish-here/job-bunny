@@ -23,6 +23,7 @@ import { cn } from '../../../lib/utils';
 import type { ConfigDocName } from '../config.api';
 import { configDocQuery } from '../config.queries';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useConfigMutation } from '../useConfigMutation';
 
 const DOCS: readonly ConfigDocName[] = [
@@ -116,42 +117,67 @@ export function RawConfigSection({ profile }: { profile: string }) {
   const query = useQuery(configDocQuery(profile, selectedDoc));
   const mutation = useConfigMutation(profile, selectedDoc);
 
-  // Seed only when the selected doc's text first loads — a background
-  // refetch of the currently-selected doc never silently clobbers
-  // mid-typing edits — the same anti-clobber rationale the escape hatch
-  // this section replaced used to follow.
-  const initializedDoc = useRef<ConfigDocName | null>(null);
+  // Seed only when the selected (profile, doc) pair's text first loads — a
+  // background refetch of the currently-selected doc never silently
+  // clobbers mid-typing edits — the same anti-clobber rationale the escape
+  // hatch this section replaced used to follow. Keyed on the PAIR, not just
+  // `selectedDoc`: keying on the doc alone left the guard permanently
+  // satisfied across a profile switch (the doc name doesn't change even
+  // though the profile did), so the effect below never re-fired and this
+  // section kept rendering — and, worse, was willing to PUT — the PRIOR
+  // profile's text against the new one. See this brief's cross-profile
+  // overwrite finding.
+  const initializedFor = useRef<string | null>(null);
+  const initializedKey = `${profile}:${selectedDoc}`;
   useEffect(() => {
     if (query.isLoading) return;
-    if (initializedDoc.current === selectedDoc) return;
-    initializedDoc.current = selectedDoc;
+    if (initializedFor.current === initializedKey) return;
+    initializedFor.current = initializedKey;
     setDraft(query.data?.text ?? '');
     setParseError(null);
     setSuccessMessage(null);
-  }, [selectedDoc, query.isLoading, query.data]);
+  }, [initializedKey, query.isLoading, query.data]);
 
-  const ready = !query.isLoading && initializedDoc.current === selectedDoc;
+  const ready = !query.isLoading && initializedFor.current === initializedKey;
   const savedText = query.data?.text ?? '';
   const isDirty = ready && draft !== savedText;
 
-  async function handleSave() {
+  /** Returns whether the save actually persisted — `false` on a parse
+   * error or a failed PUT, never throws. `DirtyNavGuard`'s "Save and
+   * continue" (via `useRegisterSettingsSave` below) only navigates away on
+   * `true`, same contract every `useSectionSaveState`-backed section's
+   * `save()` carries. */
+  async function handleSave(): Promise<boolean> {
     setParseError(null);
     if (JSON_DOCS.has(selectedDoc) && draft.trim() !== '') {
       try {
         JSON.parse(draft);
       } catch (err) {
         setParseError(deriveParseErrorMessage(draft, err));
-        return;
+        return false;
       }
     }
     try {
       await mutation.mutateAsync(draft);
       setSuccessMessage('Saved.');
+      return true;
     } catch {
       // mutation.isError renders inline below; rejection leaves the draft
       // in place, never stomping the user's edit.
+      return false;
     }
   }
+
+  function handleDiscard(): void {
+    setDraft(savedText);
+    setParseError(null);
+  }
+
+  useRegisterSettingsSave({
+    isDirty,
+    save: handleSave,
+    discard: handleDiscard,
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -250,10 +276,7 @@ export function RawConfigSection({ profile }: { profile: string }) {
         errors={parseError ? { 'raw-editor': parseError } : {}}
         successMessage={successMessage}
         onSave={handleSave}
-        onDiscard={() => {
-          setDraft(savedText);
-          setParseError(null);
-        }}
+        onDiscard={handleDiscard}
       />
     </div>
   );

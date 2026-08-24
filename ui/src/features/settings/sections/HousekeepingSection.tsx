@@ -24,6 +24,7 @@ import { Input } from '../../../components/ui/input';
 import { ChipInput } from '../ChipInput';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 
@@ -190,7 +191,14 @@ export function HousekeepingSection({ profile }: { profile: string }) {
     onSave: async (value) => {
       const ok = await handleSave(value);
       if (ok) setSavedState(value);
+      return ok;
     },
+  });
+
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => setState(saveState.discard()),
   });
 
   return (

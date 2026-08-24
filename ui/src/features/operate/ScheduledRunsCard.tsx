@@ -3,7 +3,6 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
-import { Switch } from '../../components/ui/switch';
 import { daemonQuery } from '../wizard/wizard.queries';
 import type { DaemonProfileSchedule } from '../wizard/wizard.types';
 import { usePutSkipNext, useSetScheduleEnabled } from './operate.queries';
@@ -40,8 +39,20 @@ function getErrorMessage(error: unknown): string {
 }
 
 /** One row — a private, per-row component so each row owns its own
- * skip-next / pause-switch mutation state; a shared mutation object would
- * make one row's pending/success state bleed into every other row. */
+ * skip-next / pause mutation state; a shared mutation object would make one
+ * row's pending/success state bleed into every other row.
+ *
+ * Pause is a ONE-WAY action, deliberately not a two-way switch (fix-round
+ * finding): `daemon.profiles[]` is built from `scanProfileSchedules`
+ * (`src/ops/daemon/scan/scan.ts`), which — by its own documented contract —
+ * SKIPS any profile with `schedule.enabled === false`. The API can
+ * therefore never return a row with `enabled: false`, so a two-way
+ * `checked={schedule.enabled}` switch was always showing `true` and,
+ * worse, clicking it off made the row disappear from this card on the next
+ * refetch with no way back in from here. Pausing a profile removes its row
+ * on the next refresh; re-enabling it is Settings → Schedule's job (its own
+ * `enabled` toggle there is the real two-way control), pointed at by the
+ * footer note below. */
 function ScheduleRow({
   schedule,
   active,
@@ -50,7 +61,7 @@ function ScheduleRow({
   active: boolean;
 }) {
   const skipNextMutation = usePutSkipNext(schedule.profile);
-  const setEnabledMutation = useSetScheduleEnabled(schedule.profile);
+  const pauseMutation = useSetScheduleEnabled(schedule.profile);
   const nextSlot = nextSlotFor(schedule.nextRunAt);
 
   return (
@@ -80,15 +91,20 @@ function ScheduleRow({
           Couldn't skip: {getErrorMessage(skipNextMutation.error)}
         </span>
       )}
-      <Switch
-        aria-label={`Schedule enabled — ${schedule.profile}`}
-        checked={schedule.enabled}
-        disabled={setEnabledMutation.isPending}
-        onCheckedChange={(checked: boolean) => setEnabledMutation.mutate(checked)}
-      />
-      {setEnabledMutation.isError && (
+      <Button
+        type="button"
+        data-qa={active ? 'schedule-pause' : undefined}
+        variant="outline"
+        size="sm"
+        disabled={pauseMutation.isPending || pauseMutation.isSuccess}
+        onClick={() => pauseMutation.mutate(false)}
+      >
+        Pause
+      </Button>
+      {pauseMutation.isSuccess && <Badge variant="success">Paused</Badge>}
+      {pauseMutation.isError && (
         <span className="text-xs text-destructive">
-          Couldn't update: {getErrorMessage(setEnabledMutation.error)}
+          Couldn't pause: {getErrorMessage(pauseMutation.error)}
         </span>
       )}
     </div>
@@ -153,7 +169,8 @@ export function ScheduledRunsCard({ profile }: { profile: string }) {
           />
         ))}
         <p className="text-xs text-muted-foreground">
-          Active profile row highlighted.{' '}
+          Active profile row highlighted. Pausing here removes a profile from this list —
+          to resume it, or edit its times,{' '}
           <a href="#/settings/schedule" className="text-primary hover:underline">
             Edit times in Settings →
           </a>

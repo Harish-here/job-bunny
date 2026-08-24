@@ -192,6 +192,26 @@ describe('RawConfigSection', () => {
     );
   });
 
+  it("re-keys its seed guard on (profile, doc) — switching profile shows the new profile's text, never the stale one (cross-profile overwrite guard)", async () => {
+    vi.mocked(configApi.getConfigDoc).mockImplementation((profile, doc) => {
+      if (doc !== 'profile.json') return Promise.resolve({ text: '' });
+      return Promise.resolve({
+        text: profile === 'rajni' ? '{"profile":"rajni"}' : '{"profile":"harish"}',
+      });
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    const { container, rerender } = render(<RawConfigSection profile="rajni" />, {
+      wrapper,
+    });
+    await waitFor(() => expect(editor(container)).toHaveValue('{"profile":"rajni"}'));
+
+    rerender(<RawConfigSection profile="harish" />);
+    await waitFor(() => expect(editor(container)).toHaveValue('{"profile":"harish"}'));
+  });
+
   it('a JSON parse error at save time renders in the SaveBar validation-summary, never a toast', async () => {
     stubDocs({ 'profile.json': '{"a":1}' });
     const user = userEvent.setup();

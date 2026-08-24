@@ -117,7 +117,7 @@ function writeRawConfigDoc(name: string, key: string, valueText: string): void {
   db.close();
 }
 
-function structuredJob(id: string, company: string): unknown {
+function structuredJob(id: string, company: string, workType?: string): unknown {
   return {
     identity: {
       id,
@@ -127,7 +127,12 @@ function structuredJob(id: string, company: string): unknown {
       title: `Engineer ${id}`,
       scrapedAt: '2026-08-01T00:00:00.000Z',
     },
-    structured: { titleParts: {}, locations: [], skills: [] },
+    // `locations: []` (city unknown) + a known `workType` puts
+    // `core/filter`'s `locationRule` on its "workType-only" branch
+    // (`rules/location.ts`'s own doc comment) — exactly what the happy-path
+    // test below needs to exercise a REAL locations-rule drop, not just the
+    // company rule.
+    structured: { titleParts: {}, locations: [], skills: [], workType },
   };
 }
 
@@ -238,18 +243,44 @@ describe('wireBoard — previewFilterRule (via board.ts delegate + real SqliteCh
     await migrateProfile('happy');
     insertRun('happy', '2026-08-01', '09-00', '2026-08-01T09:00:00.000Z');
     insertCheckpoint('happy', '2026-08-01', '09-00', 'assemble', {
+      // All three jobs are `workType: 'onsite'` — the baseline's
+      // `locations` rule below (accept only `remote`) hard-fails every one
+      // of them on location alone, independent of company.
       jobs: [
-        structuredJob('1', 'GoodCo'),
-        structuredJob('2', 'BadCo'),
-        structuredJob('3', 'BadCo'),
+        structuredJob('1', 'GoodCo', 'onsite'),
+        structuredJob('2', 'BadCo', 'onsite'),
+        structuredJob('3', 'BadCo', 'onsite'),
       ],
       dropped: [],
     });
 
     const source = wireBoard({ root });
-    // Current filter.json has no company avoid-list.
-    await source.writeConfigDoc('happy', 'filter.json', JSON.stringify({}));
+    // Current (baseline) filter.json has NO company avoid-list, but DOES
+    // have a `locations` rule — every real profile has one (filter.json's
+    // `locations[]` is the sole geo authority, CLAUDE.md), and the
+    // fix-round finding this test now guards against is specifically about
+    // a caller sending a draft that OMITS a config section the baseline
+    // has: `core/filter/engine.ts`'s own `evaluate` drops a rule whose
+    // config section is absent entirely, rather than treating it as "no
+    // restriction" — so a truncated draft silently skips whatever section
+    // it left out.
+    await source.writeConfigDoc(
+      'happy',
+      'filter.json',
+      JSON.stringify({ locations: [{ city: '*', workTypes: ['remote'] }] }),
+    );
 
+    // A TRUNCATED draft — company-only, exactly the shape
+    // `RulePreviewStrip.tsx` used to send before its own fix-round finding
+    // (never send a partial draft; always clone the full loaded doc). This
+    // is deliberately still what this test exercises: `previewFilterRule`
+    // itself is CORRECT to evaluate whatever it's handed (`core/filter`'s
+    // "absent section = no restriction" semantics are intentional, not a
+    // backend bug) — the point of this assertion is to pin that a
+    // truncated draft under-reports drops relative to a location-aware
+    // baseline, so nobody "fixes" `previewFilterRule` itself into silently
+    // merging the draft over the stored config (see `board_preview.ts`'s
+    // own doc comment: it deliberately evaluates the draft STANDALONE).
     const draft = { companies: { avoid: ['BadCo'] } };
     const result = (await source.previewFilterRule('happy', draft)) as Extract<
       FilterPreviewResult,
@@ -257,12 +288,22 @@ describe('wireBoard — previewFilterRule (via board.ts delegate + real SqliteCh
     >;
     assert.ok(result.available, `expected available:true, got ${JSON.stringify(result)}`);
     assert.equal(result.totalJobs, 3);
-    assert.equal(result.baselineDrops, 0);
+    // Baseline: all 3 fail the locations rule (onsite, rule accepts only
+    // remote) — company rule contributes nothing (baseline has no
+    // avoid-list).
+    assert.equal(result.baselineDrops, 3);
+    // Draft: locations is ABSENT from the draft, so the locations rule
+    // never runs against it at all — only the 2 BadCo jobs are dropped, for
+    // company reasons. A truncated draft reports FEWER drops than the
+    // baseline here even though it only ever ADDED a rule (companies) on
+    // top of an unfilled-in baseline — exactly the negative-delta symptom
+    // `RulePreviewStrip.tsx`'s fix-round finding described.
     assert.equal(result.draftDrops, 2);
-    assert.deepEqual(
-      result.newlyDropped.map((j) => j.company),
-      ['BadCo', 'BadCo'],
-    );
+    // `newlyDropped` only tracks jobs the DRAFT drops that the BASELINE
+    // didn't — GoodCo (job 1) is the opposite case (baseline drops it,
+    // draft doesn't), which `newlyDropped` never surfaces; BadCo (jobs 2,3)
+    // are dropped by BOTH, so neither is "newly" dropped either.
+    assert.deepEqual(result.newlyDropped, []);
     source.close();
   });
 

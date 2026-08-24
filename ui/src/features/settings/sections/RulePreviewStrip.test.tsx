@@ -15,6 +15,23 @@ const DRAFT: RolesCompaniesEditorState = {
   companiesAvoid: ['Acme Staffing'],
 };
 
+// A realistic stored filter.json — has a `locations` rule, same as every
+// real profile does (`filter.json`'s `locations[]` is the sole geo
+// authority, CLAUDE.md) — plus a DIFFERENT title/companies than `DRAFT`
+// above, so the test can tell "carried over from baseDoc" apart from
+// "overwritten by the draft".
+const BASE_DOC: Record<string, unknown> = {
+  locations: [{ mode: 'accept', values: ['Bengaluru', 'Remote'] }],
+  timezones: { accept: ['Asia/Kolkata'] },
+  skills: { required: ['TypeScript'] },
+  title: {
+    domain: { match: ['old-domain'], reject: [], severity: 'hard' },
+    function: { match: [], reject: [], severity: 'hard' },
+    seniority: { match: [], reject: [], severity: 'hard' },
+  },
+  companies: { avoid: ['Old Co'] },
+};
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -32,16 +49,16 @@ describe('RulePreviewStrip', () => {
       'fetch',
       vi.fn(() => new Promise<Response>(() => {})),
     );
-    render(<RulePreviewStrip profile="rajni" draft={DRAFT} />);
+    render(<RulePreviewStrip profile="rajni" baseDoc={BASE_DOC} draft={DRAFT} />);
     expect(document.querySelector('[data-qa="rule-preview-strip"]')).toBeNull();
   });
 
-  it('POSTs the draft filter.json shape (title + companies, not the profile.json prefs fields)', async () => {
+  it('POSTs the FULL loaded filter.json — draft title/companies applied on top, every other section (locations/timezones/skills) carried over unchanged, never the profile.json prefs fields (cross-check against board_preview.ts, which evaluates the draft STANDALONE and drops any rule whose config section is absent)', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse({ available: false, reason: 'no_recent_run' }));
     vi.stubGlobal('fetch', fetchMock);
-    render(<RulePreviewStrip profile="rajni" draft={DRAFT} />);
+    render(<RulePreviewStrip profile="rajni" baseDoc={BASE_DOC} draft={DRAFT} />);
 
     await screen.findByText('No recent run to preview against.');
 
@@ -51,6 +68,11 @@ describe('RulePreviewStrip', () => {
     expect(init.method).toBe('POST');
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({
+      // Carried over from `baseDoc`, untouched by the draft.
+      locations: [{ mode: 'accept', values: ['Bengaluru', 'Remote'] }],
+      timezones: { accept: ['Asia/Kolkata'] },
+      skills: { required: ['TypeScript'] },
+      // Overwritten by the draft.
       title: {
         domain: { match: ['engineer'], reject: [], severity: 'hard' },
         function: { match: [], reject: [], severity: 'hard' },
@@ -60,6 +82,19 @@ describe('RulePreviewStrip', () => {
     });
     expect(body.domainKeywords).toBeUndefined();
     expect(body.seniorityTargets).toBeUndefined();
+  });
+
+  it('never mutates the caller-supplied baseDoc object', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ available: false, reason: 'no_recent_run' })),
+    );
+    const original = structuredClone(BASE_DOC);
+    render(<RulePreviewStrip profile="rajni" baseDoc={BASE_DOC} draft={DRAFT} />);
+    await screen.findByText('No recent run to preview against.');
+    expect(BASE_DOC).toEqual(original);
   });
 
   it('renders counts and an expandable disclosure when available', async () => {
@@ -78,7 +113,7 @@ describe('RulePreviewStrip', () => {
         }),
       ),
     );
-    render(<RulePreviewStrip profile="rajni" draft={DRAFT} />);
+    render(<RulePreviewStrip profile="rajni" baseDoc={BASE_DOC} draft={DRAFT} />);
 
     const strip = await screen.findByText(/would drop/);
     expect(strip.textContent).toContain('214 jobs');
@@ -99,7 +134,7 @@ describe('RulePreviewStrip', () => {
         .fn()
         .mockResolvedValue(jsonResponse({ available: false, reason: 'no_recent_run' })),
     );
-    render(<RulePreviewStrip profile="rajni" draft={DRAFT} />);
+    render(<RulePreviewStrip profile="rajni" baseDoc={BASE_DOC} draft={DRAFT} />);
 
     const strip = await screen.findByText('No recent run to preview against.');
     expect(strip.getAttribute('data-qa')).toBe('rule-preview-strip');

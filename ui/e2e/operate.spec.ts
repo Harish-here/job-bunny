@@ -40,9 +40,14 @@ async function stubDaemon(
   let current = opts;
   await page.route('**/api/daemon', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
+    // `enabled: true` — the real backend (`scanProfileSchedules`, per its
+    // own documented contract) can NEVER return a row with
+    // `enabled: false`; it skips those profiles entirely rather than
+    // listing them. `enabled: false` here used to assert a state the app
+    // can't actually produce (fix-round finding).
     const entry: DaemonProfileScheduleFixture = current.profiles?.[0] ?? {
       profile: 'rajni',
-      enabled: false,
+      enabled: true,
       nextRunAt: null,
       degraded: current.degraded ?? false,
       degradedReason: current.degradedReason ?? null,

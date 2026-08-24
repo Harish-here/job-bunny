@@ -34,6 +34,7 @@ import { Field, FieldControl, FieldLabel } from '../../../components/ui/form';
 import { Switch } from '../../../components/ui/switch';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
+import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
 import { useDocForm } from '../useDocForm';
 
@@ -115,7 +116,14 @@ export function DeliverySection({ profile }: { profile: string }) {
     onSave: async (value) => {
       const ok = await handleSave(value);
       if (ok) setSavedState(value);
+      return ok;
     },
+  });
+
+  useRegisterSettingsSave({
+    isDirty: saveState.isDirty,
+    save: saveState.save,
+    discard: () => setState(saveState.discard()),
   });
 
   return (

@@ -14,15 +14,21 @@
  * "blur the whole section" moment, so debouncing every draft change is the
  * more reliable of the two implementer-choice triggers the brief allows.
  *
- * Only `title` + `companiesAvoid` are sent — the two `RolesCompaniesEditorState`
- * fields that actually live in `filter.json` (the shape
- * `POST .../preview/filter` validates against, `core/filter`'s
- * `FilterConfigSchema`). `domainKeywords`/`seniorityTargets` live in
- * `profile.json` and never factor into `core/filter`'s drop decision, so
- * they are deliberately not part of the wire body; reusing
- * `applyRolesCompaniesEditorState('filter', ...)` to build it keeps this
- * component from re-deriving that shape by hand (one writer of the
- * draft->filter.json transform).
+ * The wire body is a FULL clone of `baseDoc` (the section's already-loaded
+ * `filter.json`, e.g. `RolesCompaniesSection`'s own `filterForm.value`)
+ * with the draft's `title`/`companiesAvoid` applied on top via
+ * `applyRolesCompaniesEditorState('filter', ...)` — not a bare `{title,
+ * companies}` object built from scratch. `board_preview.ts` evaluates this
+ * body STANDALONE (never merged server-side with the stored config), and
+ * `core/filter/engine.ts` drops a rule whose config section is absent
+ * entirely, rather than treating it as "no restriction" — so a truncated
+ * draft silently omitted every geo/timezone/skills drop the CURRENT
+ * (baseline) evaluation includes, making the preview's delta wildly wrong
+ * for any real profile (filter.json's `locations[]` is the sole geo
+ * authority, CLAUDE.md, so every real profile has one). See this brief's
+ * own fix-round finding. `domainKeywords`/`seniorityTargets` still never
+ * appear in the body — those live in `profile.json`, not `filter.json`,
+ * and never factor into `core/filter`'s drop decision.
  */
 import { useEffect, useState } from 'react';
 import { postJson } from '../../../lib/api/client';
@@ -34,17 +40,33 @@ import {
 
 const PREVIEW_DEBOUNCE_MS = 300;
 
-function buildDraftFilterBody(draft: RolesCompaniesEditorState): Record<string, unknown> {
-  const body: Record<string, unknown> = {};
+// `structuredClone` (not a shallow `{ ...baseDoc }`) — `applyRolesCompaniesEditorState`
+// mutates `current.companies` via its own spread but assigns `current.title`
+// wholesale; a shallow clone would still risk the caller's nested objects
+// being shared if that ever changes. Cloning defensively here costs nothing
+// on a doc this size and guarantees the caller's own `baseDoc` (e.g.
+// `filterForm.value`, which other code may still be reading) is never
+// mutated by this component.
+function buildDraftFilterBody(
+  baseDoc: Record<string, unknown>,
+  draft: RolesCompaniesEditorState,
+): Record<string, unknown> {
+  const body = structuredClone(baseDoc);
   applyRolesCompaniesEditorState('filter', body, draft);
   return body;
 }
 
 export function RulePreviewStrip({
   profile,
+  baseDoc,
   draft,
 }: {
   profile: string;
+  /** The section's already-loaded `filter.json` (e.g.
+   * `RolesCompaniesSection`'s `filterForm.value`) — the preview body is
+   * built as a full clone of this with the draft applied on top, never a
+   * bare `{title, companies}` object. See this file's own doc comment. */
+  baseDoc: Record<string, unknown>;
   draft: RolesCompaniesEditorState;
 }) {
   // `null` until the first response lands — the "request not yet made"
@@ -57,7 +79,7 @@ export function RulePreviewStrip({
     const handle = setTimeout(() => {
       postJson<FilterPreviewResult>(
         `/api/profiles/${encodeURIComponent(profile)}/preview/filter`,
-        buildDraftFilterBody(draft),
+        buildDraftFilterBody(baseDoc, draft),
       )
         .then((data) => {
           if (!cancelled) setResult(data);
@@ -73,7 +95,7 @@ export function RulePreviewStrip({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [profile, draft]);
+  }, [profile, baseDoc, draft]);
 
   if (result === null) return null;
 
