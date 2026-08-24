@@ -1,5 +1,4 @@
-import type { DaemonState } from '../wizard/wizard.types';
-import type { DoctorFinding } from './hub.api';
+import type { DoctorFinding } from '../operate/operate.api';
 
 export type HubCardId =
   | 'profile'
@@ -93,20 +92,4 @@ export function cardStatus(findings: DoctorFinding[]): HubCardStatus {
   if (findings.some((f) => f.status === 'red')) return 'red';
   if (findings.some((f) => f.status === 'warn')) return 'warn';
   return 'ok';
-}
-
-// Top billing (frozen): fires only when the daemon is NOT running, the
-// schedule is enabled, and at least one time is set. `times[0]` is
-// `string | undefined` under noUncheckedIndexedAccess — the explicit check
-// is required, not an oversight.
-export function scheduleWarning(input: {
-  daemonState: DaemonState;
-  scheduleEnabled: boolean;
-  times: string[];
-}): { firstTime: string } | null {
-  if (input.daemonState === 'running') return null;
-  if (!input.scheduleEnabled) return null;
-  const firstTime = input.times[0];
-  if (firstTime === undefined) return null;
-  return { firstTime };
 }

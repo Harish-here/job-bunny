@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
+import { operateKeys } from '../operate/operate.queries';
 import type { ConfigDocName } from '../settings/config.api';
 import { configKeys } from '../settings/config.queries';
 import { Step3About } from '../wizard/steps/Step3About';
@@ -18,7 +19,6 @@ import {
   type WizardDraft,
   type WizardStepProps,
 } from '../wizard/wizard.types';
-import { hubKeys } from './hub.queries';
 
 export type HubDialogCardId = 'persona-filters' | 'search-urls' | 'integrations';
 
@@ -92,7 +92,7 @@ export function HubStepDialog({
     try {
       const ok = await submit();
       if (ok) {
-        qc.invalidateQueries({ queryKey: hubKeys.doctor(profile) });
+        qc.invalidateQueries({ queryKey: operateKeys.doctor(profile) });
         for (const doc of CONFIG_DOCS_TO_INVALIDATE) {
           qc.invalidateQueries({ queryKey: configKeys.doc(profile, doc) });
         }

@@ -9,6 +9,8 @@ import {
   CardTitle,
 } from '../../components/ui/card';
 import { navigate, type Route } from '../../lib/router';
+import { scheduleWarning } from '../operate/operate.model';
+import { doctorQuery } from '../operate/operate.queries';
 import { configDocQuery } from '../settings/config.queries';
 import { daemonQuery } from '../wizard/wizard.queries';
 import { type HubDialogCardId, HubStepDialog } from './HubStepDialog';
@@ -18,9 +20,7 @@ import {
   HUB_CARDS,
   type HubCardId,
   type HubCardStatus,
-  scheduleWarning,
 } from './hub.model';
-import { doctorQuery } from './hub.queries';
 
 const RUN_COMMAND = 'jobbunny serve start';
 

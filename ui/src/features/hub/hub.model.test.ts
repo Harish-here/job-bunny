@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DoctorFinding } from './hub.api';
-import {
-  CHECK_TO_CARD,
-  cardStatus,
-  groupFindings,
-  HUB_CARDS,
-  scheduleWarning,
-} from './hub.model';
+import type { DoctorFinding } from '../operate/operate.api';
+import { CHECK_TO_CARD, cardStatus, groupFindings, HUB_CARDS } from './hub.model';
 
 function finding(
   check: string,
@@ -80,30 +74,4 @@ describe('cardStatus', () => {
   ] as const)('%j → %s', (statuses, expected) => {
     expect(cardStatus(statuses.map((s, i) => finding(String(i), s)))).toBe(expected);
   });
-});
-
-describe('scheduleWarning', () => {
-  it('returns the first scheduled time when the daemon is down and the schedule is enabled', () => {
-    expect(
-      scheduleWarning({
-        daemonState: 'stopped',
-        scheduleEnabled: true,
-        times: ['09:00', '14:00'],
-      }),
-    ).toEqual({ firstTime: '09:00' });
-  });
-
-  it.each([
-    ['running', true, ['09:00']],
-    ['stopped', false, ['09:00']],
-    ['stopped', true, []],
-    ['stale', true, []],
-  ] as const)(
-    'returns null for daemonState=%s scheduleEnabled=%s times=%j',
-    (daemonState, scheduleEnabled, times) => {
-      expect(
-        scheduleWarning({ daemonState, scheduleEnabled, times: [...times] }),
-      ).toBeNull();
-    },
-  );
 });

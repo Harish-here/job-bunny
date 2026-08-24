@@ -3,8 +3,8 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { DoctorStatus } from '../operate/operate.api';
 import { HubPage } from './HubPage';
-import type { DoctorStatus } from './hub.api';
 
 beforeAll(() => {
   Element.prototype.hasPointerCapture = () => false;

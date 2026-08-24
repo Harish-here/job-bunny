@@ -3,9 +3,9 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { operateKeys } from '../operate/operate.queries';
 import type { WizardStepProps } from '../wizard/wizard.types';
 import { HubStepDialog } from './HubStepDialog';
-import { hubKeys } from './hub.queries';
 
 beforeAll(() => {
   Element.prototype.hasPointerCapture = () => false;
@@ -131,7 +131,7 @@ describe('HubStepDialog', () => {
 
     expect(onClose).toHaveBeenCalledOnce();
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: hubKeys.doctor('rajni') }),
+      expect.objectContaining({ queryKey: operateKeys.doctor('rajni') }),
     );
   });
 });
