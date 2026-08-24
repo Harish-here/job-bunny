@@ -11,12 +11,11 @@ import { Button } from '../../../components/ui/button';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
 import { Switch } from '../../../components/ui/switch';
-import { navigate } from '../../../lib/router';
 import { daemonStatusWord } from '../../shell/daemonState';
 import { daemonQuery } from '../../wizard/wizard.queries';
 import type { DaemonStatus } from '../../wizard/wizard.types';
 import { DocFormGate } from '../DocFormGate';
-import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
+import { useGuardedNavigate, useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useDocForm } from '../useDocForm';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -61,6 +60,7 @@ function DaemonBridgeLine({
   profile: string;
   daemon: UseQueryResult<DaemonStatus>;
 }) {
+  const guardedNavigate = useGuardedNavigate();
   let body: ReactNode;
   if (daemon.isLoading) {
     body = <span className="text-sm text-muted-foreground">Loading…</span>;
@@ -88,7 +88,7 @@ function DaemonBridgeLine({
       <button
         type="button"
         className="text-sm text-primary hover:underline"
-        onClick={() => navigate({ name: 'setup' })}
+        onClick={() => guardedNavigate({ name: 'setup' })}
       >
         Manage the daemon on Operate →
       </button>

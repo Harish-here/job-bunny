@@ -326,5 +326,31 @@ describe('ScheduleSection', () => {
         expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('false'),
       );
     });
+
+    // Fix-round-2 residual (finding 1): `DaemonBridgeLine`'s "Manage the
+    // daemon on Operate →" button used the raw app-wide `navigate` even
+    // though this section registers via `useRegisterSettingsSave` above —
+    // a dirty schedule draft was silently discarded on click, no dialog.
+    // Now wired through `useGuardedNavigate()`, same as
+    // `RawConfigSection`/`RolesCompaniesSection`/`WhereYouWorkPrefsCard`.
+    // This also closes finding 2 (no test anywhere exercised a
+    // `DirtyNavGuard` instance actually intercepting, inside a real
+    // `SettingsSaveProvider`).
+    it('dirtying the schedule then clicking "Manage the daemon on Operate →" opens the dirty-nav dialog and does not navigate', async () => {
+      stubDoc();
+      stubDaemon();
+      const user = userEvent.setup();
+      renderWithGuard();
+
+      await user.click(await screen.findByRole('switch'));
+      expect(screen.getByTestId('guard-isDirty')).toHaveTextContent('true');
+
+      await user.click(
+        screen.getByRole('button', { name: 'Manage the daemon on Operate →' }),
+      );
+
+      expect(await screen.findByTestId('dirty-nav-dialog')).toBeInTheDocument();
+      expect(vi.mocked(navigate)).not.toHaveBeenCalled();
+    });
   });
 });
