@@ -6,11 +6,11 @@ export type CheckDestination =
   | { kind: 'cli-command'; command: string };
 
 /**
- * Blueprint step 35: extends `hub.model.ts`'s (deleted by the router
- * switchover brief, still present in this tree today) `CHECK_TO_CARD`
- * check-name list one-for-one, now mapped to a DESTINATION the board can
- * act on instead of a card. Every route reuses the exact target
- * `HubPage.tsx`'s `cardAction()` already chose for that check's old card
+ * Blueprint step 35: extends `hub.model.ts`'s (now deleted, by the router
+ * switchover brief) `CHECK_TO_CARD` check-name list one-for-one, now
+ * mapped to a DESTINATION the board can act on instead of a card. Every
+ * route reuses the exact target the deleted `HubPage.tsx`'s `cardAction()`
+ * already chose for that check's old card
  * (its `'ok'`-status "Edit in Settings"/"View runs" branch — the only one
  * expressible here, since `HubStepDialog`'s dialog affordance has no
  * equivalent in the two-kind `CheckDestination` union) — reusing an

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { CHECK_TO_CARD } from '../hub/hub.model';
 import { CHECK_TO_DESTINATION, groupHealthFindings } from './checkDestination';
 import type { DoctorFinding } from './operate.api';
 
@@ -7,11 +6,30 @@ function finding(overrides: Partial<DoctorFinding> = {}): DoctorFinding {
   return { check: 'profile-parses', status: 'ok', detail: 'ok', ...overrides };
 }
 
+// The frozen 14 check names `hub.model.ts`'s (now-deleted) `CHECK_TO_CARD`
+// used to map one-for-one — `checkDestination.ts`'s own docstring names
+// each one's new destination. Inlined here rather than imported, since
+// the file that used to hold this list no longer exists.
+const FROZEN_CHECKS = [
+  'profile-parses',
+  'sqlite-path-retired',
+  'wire',
+  'filter-parses',
+  'empty-lanes',
+  'linkedin-inventory-freshness',
+  'env-tokens',
+  'notion-db-reachable',
+  'telegram-bot-token',
+  'daemon-liveness',
+  'claude-cli-on-path',
+  'cdp-reachable',
+  'sqlite-db-openable',
+  'config-legacy-divergence',
+];
+
 describe('CHECK_TO_DESTINATION', () => {
-  it('covers every check hub.model.ts previously mapped to a card, one-for-one', () => {
-    expect(Object.keys(CHECK_TO_DESTINATION).sort()).toEqual(
-      Object.keys(CHECK_TO_CARD).sort(),
-    );
+  it('covers the frozen 14 check names one-for-one', () => {
+    expect(Object.keys(CHECK_TO_DESTINATION).sort()).toEqual(FROZEN_CHECKS.sort());
   });
 
   it('maps notion-db-reachable to the delivery settings section (R23)', () => {

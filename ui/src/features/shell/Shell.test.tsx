@@ -87,6 +87,12 @@ function stubFetch(opts: {
           },
       } as unknown as Response;
     }
+    if (url.includes('/api/secrets')) {
+      return {
+        ok: true,
+        json: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+      } as unknown as Response;
+    }
     throw new Error(`unexpected fetch url: ${url}`);
   });
   vi.stubGlobal('fetch', impl as unknown as typeof fetch);
@@ -172,12 +178,12 @@ describe('Shell', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  it('renders HubPage on the setup route', async () => {
+  it('renders OperatePage on the setup route', async () => {
     stubFetch({});
     window.location.hash = '#/setup';
     renderShell();
 
-    expect(await screen.findByTestId('hub')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Operate' })).toBeInTheDocument();
   });
 
   // First-boot redirect (phase 3 task 4): once the profiles query resolves

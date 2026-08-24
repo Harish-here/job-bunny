@@ -26,9 +26,7 @@ import { type PauseAllResult, usePauseAll } from './usePauseAll';
 
 const RUN_COMMAND = 'jobbunny serve start';
 
-// `ScheduleSection.tsx`'s (now-removed) inline TONE_WORD_CLASS idiom:
-// `success`/`attention` need `-strong` (plain fails 4.5:1 as text);
-// `destructive`/`muted` are already fine plain.
+// success/attention need `-strong` (plain fails 4.5:1 as text); the rest are fine plain.
 const TONE_WORD_CLASS: Record<DaemonStatusTone, string> = {
   success: 'text-success-strong',
   attention: 'text-attention-strong',
@@ -107,9 +105,7 @@ function formatUptime(startedAt: string | null): string {
 
 /** `StopDaemonOutcome`'s 5 branches — `stopped`/`already_stopped` both
  * reached the target state; the other 3 are distinct, visible failures,
- * never styled as success. `child_unresponsive` renders its `childPid` —
- * the payload is used, not discarded. Exhaustive switch, explicit return
- * type: TS flags a missing branch if the union ever grows a 6th variant. */
+ * never styled as success. `child_unresponsive` renders its `childPid`. */
 function stopOutcomeMessage(outcome: StopDaemonOutcome): {
   text: string;
   tone: 'success' | 'destructive';
@@ -178,10 +174,7 @@ export function DaemonCard({ profile }: { profile: string }) {
   const autostartMutation = useSetAutostart();
   const pauseAllMutation = usePauseAll();
 
-  // No GET exists for "current autostart enabled" or "OS platform" — the
-  // switch renders live by default (unchecked) and a click's resolved
-  // `AutostartOutcome.outcome` converts it after the fact: `checked` for
-  // `'ok'`, the static disabled-look row for `'unsupported_platform'`.
+  // No GET for autostart-enabled/OS-platform — the switch renders unchecked; a click's resolved outcome converts it.
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [platformUnsupported, setPlatformUnsupported] = useState(false);
 
@@ -196,8 +189,7 @@ export function DaemonCard({ profile }: { profile: string }) {
       }
     } catch {
       // A 409 `autostart_conflict` or a network failure — rendered from
-      // `autostartMutation.isError` below. The switch's checked state is
-      // left untouched, not optimistically flipped.
+      // `autostartMutation.isError` below; the switch stays untouched.
     }
   }
 
@@ -247,6 +239,9 @@ export function DaemonCard({ profile }: { profile: string }) {
   const status = daemon.data;
   const statusWord = daemonStatusWord(status, profile);
   const troubled = statusWord.tone !== 'success';
+  // Only degraded's `.detail` is a real remedy — stopped's is the Start
+  // button (R20); stale/healthy's just repeats the meta line's own text.
+  const entry = status.profiles.find((p) => p.profile === profile);
   const isWorst = worstSeverity(troubled ? ['daemon-down'] : []) === 'daemon-down';
   const accentClass = !isWorst
     ? ''
@@ -281,6 +276,11 @@ export function DaemonCard({ profile }: { profile: string }) {
               className={`size-2 shrink-0 rounded-full ${TONE_DOT_CLASS[statusWord.tone]}`}
             />
             {statusWord.word}
+            {entry?.degraded === true && statusWord.detail && (
+              <span className="font-normal text-muted-foreground">
+                {statusWord.detail}
+              </span>
+            )}
           </span>
         </CardAction>
       </CardHeader>

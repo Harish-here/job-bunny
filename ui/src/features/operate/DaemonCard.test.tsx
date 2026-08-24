@@ -121,6 +121,9 @@ describe('DaemonCard — six states', () => {
     renderCard();
     const word = await screen.findByText('Degraded — schema v7 > daemon build v6');
     expect(word).toHaveClass('text-attention-strong');
+    expect(
+      screen.getByText('Fix: jobbunny serve stop && jobbunny serve start'),
+    ).toBeInTheDocument();
     expectMetaLineVisible();
   });
 

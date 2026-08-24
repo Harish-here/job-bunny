@@ -4,8 +4,8 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { pickProfile, useStoredProfile } from '../../lib/profile';
 import { navigate, type Route, useRoute } from '../../lib/router';
 import { AnalyticsPage } from '../analytics/AnalyticsPage';
-import { HubPage } from '../hub/HubPage';
 import { JobPage } from '../job/JobPage';
+import { OperatePage } from '../operate/OperatePage';
 import { useRunControl } from '../runcontrol/useRunControl';
 import { RunsPage } from '../runs/RunsPage';
 import { useRun, useRuns } from '../runs/useRunsData';
@@ -36,7 +36,7 @@ function Page({ route, profile }: { route: Route; profile: string }) {
     case 'onboarding':
       return null; // unreachable: Shell short-circuits to <WizardPage/> above
     case 'setup':
-      return <HubPage profile={profile} />;
+      return <OperatePage profile={profile} />;
     case 'settings':
       return (
         <SettingsPage
