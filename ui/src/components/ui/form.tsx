@@ -22,13 +22,23 @@ function useFieldContext(): FieldContextValue {
 function Field({
   className,
   invalid = false,
+  id,
   ...props
 }: React.ComponentProps<'div'> & { invalid?: boolean }) {
-  const id = useId();
+  // `id`, when the caller supplies one, becomes the CONTROL's own DOM id
+  // (via `FieldContext`, consumed by `FieldControl` below) — not merely
+  // the wrapping `<div>`'s id, which would do nothing for a caller that
+  // needs a stable, predictable id on the actual input (B2, QA
+  // settings-overhaul: the validation summary's "click a link, focus the
+  // field" contract needs the rendered `<input>`'s id to equal the
+  // field's error key). Falls back to `useId()` exactly as before when no
+  // `id` is passed, so every existing caller is unaffected.
+  const generatedId = useId();
+  const resolvedId = id ?? generatedId;
   const value: FieldContextValue = {
-    id,
-    descriptionId: `${id}-description`,
-    errorId: `${id}-error`,
+    id: resolvedId,
+    descriptionId: `${resolvedId}-description`,
+    errorId: `${resolvedId}-error`,
     invalid,
   };
   return (

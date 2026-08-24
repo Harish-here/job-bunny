@@ -21,6 +21,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useDocForm } from '../useDocForm';
 import { WhereYouWorkPrefsCard } from './WhereYouWorkPrefsCard';
 import { WhereYouWorkRulesCard } from './WhereYouWorkRulesCard';
@@ -43,6 +44,9 @@ export function WhereYouWorkSection({ profile }: { profile: string }) {
 
   const [state, setState] = useState<WhereYouWorkEditorState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<WhereYouWorkEditorState>(EMPTY_STATE);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment.
+  const [attempt, setAttempt] = useState(0);
 
   // Mirrors FiltersSection's own `initialized` ref pattern, extended to
   // BOTH docs: seeds the draft (and its saved baseline) once both have
@@ -93,6 +97,12 @@ export function WhereYouWorkSection({ profile }: { profile: string }) {
     discard: () => setState(saveState.discard()),
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
   function addToRule(tz: string) {
     setState((prev) => {
       const accept = prev.timezonesRule?.accept ?? [];
@@ -130,6 +140,8 @@ export function WhereYouWorkSection({ profile }: { profile: string }) {
         parseError={profileForm.parseError}
       >
         <div className="flex flex-col gap-4">
+          <ValidationSummary errors={saveState.errors} attempt={attempt} />
+
           <WhereYouWorkRulesCard
             locations={state.locations}
             onLocationsChange={(locations) =>
@@ -228,9 +240,8 @@ export function WhereYouWorkSection({ profile }: { profile: string }) {
 
           <SaveBar
             isDirty={saveState.isDirty}
-            errors={saveState.errors}
             successMessage={saveState.successMessage}
-            onSave={saveState.save}
+            onSave={handleSaveClick}
             onDiscard={() => setState(saveState.discard())}
             saveButtonVariant={hasConflict ? 'outline' : 'default'}
           />

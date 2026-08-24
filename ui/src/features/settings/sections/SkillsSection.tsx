@@ -35,6 +35,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useDocForm } from '../useDocForm';
 import {
   applyFilterEditorState,
@@ -51,6 +52,9 @@ export function SkillsSection({ profile }: { profile: string }) {
 
   const [state, setState] = useState<FilterEditorState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<FilterEditorState>(EMPTY_STATE);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment.
+  const [attempt, setAttempt] = useState(0);
 
   // Mirrors FiltersSection's own `initialized` ref pattern: seeds the
   // draft (and its saved baseline) once the doc has loaded, never on a
@@ -84,6 +88,12 @@ export function SkillsSection({ profile }: { profile: string }) {
     discard: () => setState(saveState.discard()),
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
   return (
     <DocFormGate
       doc="filter.json"
@@ -92,6 +102,8 @@ export function SkillsSection({ profile }: { profile: string }) {
       parseError={docForm.parseError}
     >
       <div className="flex flex-col gap-4">
+        <ValidationSummary errors={saveState.errors} attempt={attempt} />
+
         <Card>
           <CardHeader>
             <CardTitle>Skills — a job that fails this is dropped</CardTitle>
@@ -121,12 +133,12 @@ export function SkillsSection({ profile }: { profile: string }) {
               }
             />
             <label
-              htmlFor="filters-min-match"
+              htmlFor="skills.minMatch"
               className="flex items-center gap-1.5 text-sm"
             >
               Minimum skill matches
               <Input
-                id="filters-min-match"
+                id="skills.minMatch"
                 type="number"
                 aria-label="Minimum skill matches"
                 value={String(state.skills.minMatch)}
@@ -171,9 +183,8 @@ export function SkillsSection({ profile }: { profile: string }) {
 
         <SaveBar
           isDirty={saveState.isDirty}
-          errors={saveState.errors}
           successMessage={saveState.successMessage}
-          onSave={saveState.save}
+          onSave={handleSaveClick}
           onDiscard={() => setState(saveState.discard())}
         />
       </div>

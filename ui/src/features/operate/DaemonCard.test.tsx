@@ -132,7 +132,7 @@ describe('DaemonCard — six states', () => {
     stubDaemon(baseDaemon({ state: 'stopped' }));
     renderCard();
     const word = await screen.findByText('Not running');
-    expect(word).toHaveClass('text-destructive');
+    expect(word).toHaveClass('text-destructive-strong');
     expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
     expectMetaLineVisible();
   });

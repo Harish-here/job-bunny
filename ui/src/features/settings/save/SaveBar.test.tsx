@@ -32,15 +32,7 @@ afterEach(() => {
 describe('SaveBar — dirty bar', () => {
   it('renders save-bar/discard-button/save-button; clicking save-button calls save', async () => {
     const save = vi.fn();
-    render(
-      <SaveBar
-        isDirty
-        errors={{}}
-        successMessage={null}
-        onSave={save}
-        onDiscard={vi.fn()}
-      />,
-    );
+    render(<SaveBar isDirty successMessage={null} onSave={save} onDiscard={vi.fn()} />);
     expect(screen.getByTestId('save-bar')).toBeInTheDocument();
     expect(screen.getByTestId('discard-button')).toBeInTheDocument();
     const saveButton = screen.getByTestId('save-button');
@@ -51,20 +43,13 @@ describe('SaveBar — dirty bar', () => {
 
   it('defaults save-button to the default variant, and honors an explicit saveButtonVariant override', () => {
     const { rerender } = render(
-      <SaveBar
-        isDirty
-        errors={{}}
-        successMessage={null}
-        onSave={vi.fn()}
-        onDiscard={vi.fn()}
-      />,
+      <SaveBar isDirty successMessage={null} onSave={vi.fn()} onDiscard={vi.fn()} />,
     );
     expect(screen.getByTestId('save-button')).toHaveAttribute('data-variant', 'default');
 
     rerender(
       <SaveBar
         isDirty
-        errors={{}}
         successMessage={null}
         onSave={vi.fn()}
         onDiscard={vi.fn()}
@@ -76,18 +61,17 @@ describe('SaveBar — dirty bar', () => {
     expect(screen.getByTestId('save-button')).not.toBeDisabled();
   });
 
-  // The dirty bar's own precondition is `isDirty && errors is empty` (a
-  // previously-attempted save leaves errors, which routes to the
-  // validation-summary state instead — see the "validation summary" describe
-  // block below). To prove `save-button` carries no disabled/error gating of
-  // its OWN — the GOV.UK finding cited in blueprint.md:481 — this wires the
-  // button's `onSave` straight to a REAL `useSectionSaveState().save` whose
-  // OWN `validate` always fails, so `errors` (computed fresh from
-  // `currentValue`) is genuinely non-empty at click time. The click still
-  // calls through to `save`; `save` is then the one (task 4's job, already
-  // covered by useSectionSaveState.test.tsx) that refuses to call the
-  // underlying `onSave`. This is exactly the division of responsibility the
-  // brief calls out: SaveBar never itself gates the click behind `disabled`.
+  // B1 fix (QA settings-overhaul): `SaveBar` no longer takes `errors` at
+  // all — the dirty bar renders purely off `isDirty`, regardless of
+  // whether the caller's OWN validation currently fails. This proves the
+  // GOV.UK finding cited in blueprint.md:481 (the button carries no
+  // disabled/error gating of its own) survives that change: this wires
+  // the button's `onSave` straight to a REAL `useSectionSaveState().save`
+  // whose OWN `validate` always fails, and confirms the dirty bar (not a
+  // validation summary) is what renders and that the click still reaches
+  // `save`; `save` is then the one (task 4's job, already covered by
+  // useSectionSaveState.test.tsx) that refuses to call the underlying
+  // `onSave`.
   function DirtyBarWiredToRealGuardedSave({
     onSave,
   }: {
@@ -103,7 +87,6 @@ describe('SaveBar — dirty bar', () => {
     return (
       <SaveBar
         isDirty={state.isDirty}
-        errors={{}}
         successMessage={state.successMessage}
         onSave={state.save}
         onDiscard={() => {}}
@@ -122,6 +105,8 @@ describe('SaveBar — dirty bar', () => {
     const { Wrapper, qc } = wrapper();
     render(<DirtyBarWiredToRealGuardedSave onSave={onSave} />, { wrapper: Wrapper });
     await waitForRunInFlightResolved(qc, 'rajni');
+    // the dirty bar renders (never a validation summary — SaveBar has no
+    // concept of `errors` anymore) and stays mounted/enabled.
     const saveButton = screen.getByTestId('save-button');
     expect(saveButton).not.toBeDisabled();
     await userEvent.click(saveButton);
@@ -131,55 +116,11 @@ describe('SaveBar — dirty bar', () => {
   });
 });
 
-describe('SaveBar — validation summary', () => {
-  it('renders validation-summary with one <li> per error; clicking a link focuses the offending field', async () => {
-    render(
-      <>
-        <input id="jitter-min" aria-label="jitterMinMs" />
-        <input id="jitter-max" aria-label="jitterMaxMs" />
-        <SaveBar
-          isDirty={false}
-          errors={{
-            'jitter-min': 'Minimum jitter is above maximum jitter.',
-            'jitter-max': 'Maximum jitter is below minimum jitter.',
-          }}
-          successMessage={null}
-          onSave={vi.fn()}
-          onDiscard={vi.fn()}
-        />
-      </>,
-    );
-    expect(screen.getByTestId('validation-summary')).toBeInTheDocument();
-    expect(screen.getByTestId('validation-item-jitter-min')).toBeInTheDocument();
-    expect(screen.getByTestId('validation-item-jitter-max')).toBeInTheDocument();
-
-    await userEvent.click(
-      screen.getByRole('link', { name: 'Minimum jitter is above maximum jitter.' }),
-    );
-    expect(document.activeElement).toBe(document.getElementById('jitter-min'));
-  });
-
-  it('takes precedence over the dirty bar when both isDirty and errors are true', () => {
-    render(
-      <SaveBar
-        isDirty
-        errors={{ foo: 'bad' }}
-        successMessage={null}
-        onSave={vi.fn()}
-        onDiscard={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('validation-summary')).toBeInTheDocument();
-    expect(screen.queryByTestId('save-bar')).toBeNull();
-  });
-});
-
 describe('SaveBar — success line', () => {
   it('renders save-success-line with the verbatim successMessage', () => {
     render(
       <SaveBar
         isDirty={false}
-        errors={{}}
         successMessage="Saved. Takes effect from your next run — nothing is running right now."
         onSave={vi.fn()}
         onDiscard={vi.fn()}
@@ -192,11 +133,10 @@ describe('SaveBar — success line', () => {
 });
 
 describe('SaveBar — idle', () => {
-  it('renders nothing when not dirty, no errors, no success message', () => {
+  it('renders nothing when not dirty and no success message', () => {
     const { container } = render(
       <SaveBar
         isDirty={false}
-        errors={{}}
         successMessage={null}
         onSave={vi.fn()}
         onDiscard={vi.fn()}
@@ -221,7 +161,6 @@ describe('SaveBar — effect-asserting discard', () => {
         <span data-testid="current-value">{JSON.stringify(currentValue)}</span>
         <SaveBar
           isDirty={state.isDirty}
-          errors={state.errors}
           successMessage={state.successMessage}
           onSave={state.save}
           onDiscard={() => setCurrentValue(state.discard())}

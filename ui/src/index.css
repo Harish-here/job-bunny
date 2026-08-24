@@ -35,6 +35,7 @@
   --color-attention-foreground: var(--attention-foreground);
   --color-attention-strong: var(--attention-strong);
   --color-attention: var(--attention);
+  --color-destructive-strong: var(--destructive-strong);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -78,6 +79,15 @@
   --accent: #efe8fa;
   --accent-foreground: #3d2c55;
   --destructive: #d64545;
+  /* B7 fix (QA settings-overhaul): plain --destructive text fails 4.5:1
+   * both on its own tinted card background (measured ~3.6:1) and even on
+   * plain white (~4.38:1, ux-notes' own sanctioned pairing). Same hue/
+   * saturation as --destructive, lightness reduced until BOTH the
+   * destructive/10-over-background composite and plain white clear
+   * 4.5:1 (computed, not eyeballed — see executor NOTES for the exact
+   * ratios). Scoped to daemon-state only — every other --destructive
+   * consumer (borders, tints, other status lines) is unaffected. */
+  --destructive-strong: #c62c2c;
   --attention: #ff8a3d;
   --attention-foreground: #3d2c55;
   --attention-strong: #a04a06;
@@ -122,6 +132,10 @@
   --accent: #342a47;
   --accent-foreground: #e6ddf5;
   --destructive: #f08a8a;
+  /* Dark mode's plain --destructive already clears 4.5:1 against every
+   * background it renders on (computed ~6.3–7.4:1) — no darkening
+   * needed, same posture as --attention-strong/--success-strong below. */
+  --destructive-strong: #f08a8a;
   --attention: #ff9e5e;
   --attention-foreground: #1a1523;
   --attention-strong: #ff9e5e;

@@ -26,11 +26,11 @@ import { type PauseAllResult, usePauseAll } from './usePauseAll';
 
 const RUN_COMMAND = 'jobbunny serve start';
 
-// success/attention need `-strong` (plain fails 4.5:1 as text); the rest are fine plain.
+// success/attention/destructive need `-strong` (plain fails 4.5:1 here — B7); muted is fine plain.
 const TONE_WORD_CLASS: Record<DaemonStatusTone, string> = {
   success: 'text-success-strong',
   attention: 'text-attention-strong',
-  destructive: 'text-destructive',
+  destructive: 'text-destructive-strong',
   muted: 'text-muted-foreground',
 };
 const TONE_DOT_CLASS: Record<DaemonStatusTone, string> = {

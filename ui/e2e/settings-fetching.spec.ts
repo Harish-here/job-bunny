@@ -115,10 +115,19 @@ test('settings: fetching section blocks Save on an inverted jitter range (R13) a
 
     await section(page).getByRole('button', { name: /save/i }).click();
 
+    // B1/B3 (QA settings-overhaul): the summary renders at the top of the
+    // content column (not in place of the save bar), and names both
+    // fields, their values, and the consequence per ux-notes §11's named
+    // case, verbatim.
     const summary = page.locator('[data-qa="validation-summary"]');
     await expect(summary).toBeVisible();
-    await expect(summary).toContainText('jitterMinMs');
-    await expect(summary).toContainText('jitterMaxMs');
+    await expect(summary).toContainText('Minimum jitter (15000 ms)');
+    await expect(summary).toContainText('maximum jitter (12000 ms)');
+    await expect(summary).toContainText('The run would fail to start.');
+    await expect(section(page).locator('[data-qa="save-bar"]')).toBeVisible();
+    await expect(
+      section(page).getByRole('button', { name: 'Save changes' }),
+    ).toBeEnabled();
 
     const after = await fetchConfigJson(page, 'profile.json');
     const afterLinkedin = (

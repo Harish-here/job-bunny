@@ -36,6 +36,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useDocForm } from '../useDocForm';
 
 interface DeliveryState {
@@ -80,6 +81,11 @@ export function DeliverySection({ profile }: { profile: string }) {
   const [connector, setConnector] = useState<'sqlite' | 'notion'>('sqlite');
   const [state, setState] = useState<DeliveryState>(DEFAULTS);
   const [savedState, setSavedState] = useState<DeliveryState>(DEFAULTS);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment. This
+  // section's own `validate` never fails, so it is wired only for
+  // consistency with every other `SaveBar` consumer.
+  const [attempt, setAttempt] = useState(0);
 
   const initialized = useRef<string | null>(null);
   useEffect(() => {
@@ -126,6 +132,12 @@ export function DeliverySection({ profile }: { profile: string }) {
     discard: () => setState(saveState.discard()),
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
   return (
     <DocFormGate
       doc="profile.json"
@@ -134,6 +146,8 @@ export function DeliverySection({ profile }: { profile: string }) {
       parseError={docForm.parseError}
     >
       <div className="flex flex-col gap-4">
+        <ValidationSummary errors={saveState.errors} attempt={attempt} />
+
         <Card data-qa="delivery-connector-card">
           <CardHeader>
             <CardTitle>Connector</CardTitle>
@@ -206,9 +220,8 @@ export function DeliverySection({ profile }: { profile: string }) {
 
         <SaveBar
           isDirty={saveState.isDirty}
-          errors={saveState.errors}
           successMessage={saveState.successMessage}
-          onSave={saveState.save}
+          onSave={handleSaveClick}
           onDiscard={() => setState(saveState.discard())}
         />
       </div>

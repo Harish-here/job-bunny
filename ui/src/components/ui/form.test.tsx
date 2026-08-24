@@ -66,6 +66,20 @@ describe('form field composition', () => {
     expect(input.getAttribute('aria-describedby')).toContain(description.id);
   });
 
+  it('uses a caller-supplied id on the control, not just the wrapping div', () => {
+    render(
+      <Field id="fetching.jitterMinMs">
+        <FieldLabel>jitterMinMs</FieldLabel>
+        <FieldControl>
+          <input />
+        </FieldControl>
+      </Field>,
+    );
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveAttribute('id', 'fetching.jitterMinMs');
+    expect(document.getElementById('fetching.jitterMinMs')).toBe(input);
+  });
+
   it('throws when useFieldContext is used outside a Field', () => {
     expect(() => renderHook(() => useFieldContext())).toThrow(
       'Field components must be used inside <Field>',

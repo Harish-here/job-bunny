@@ -28,6 +28,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useDocForm } from '../useDocForm';
 import {
   type PacingPresetName,
@@ -61,6 +62,10 @@ export function FetchingSection({ profile }: { profile: string }) {
   const [state, setState] = useState<FetchingState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<FetchingState>(EMPTY_STATE);
   const [fastAck, setFastAck] = useState(false);
+  // B1/B2 fix (QA settings-overhaul): bumped only when a real Save click
+  // fails, never on a live-typing re-render — see `ValidationSummary`'s
+  // own `attempt` doc comment for why the distinction matters.
+  const [attempt, setAttempt] = useState(0);
   // Populated only by an attempted `handleSave` (never live/as-you-type —
   // see `validatePacingPairs`'s own doc comment) and cleared the instant
   // the draft changes again, so a stale post-submit error never survives
@@ -173,6 +178,18 @@ export function FetchingSection({ profile }: { profile: string }) {
     },
   });
 
+  // B1 fix: wraps `saveState.save` for the SaveBar click specifically —
+  // bumping `attempt` only on an actual failed click, never on every
+  // render — so `ValidationSummary` moves focus exactly once per failed
+  // submit (see its own doc comment).
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
+  const allErrors = { ...saveState.errors, ...pacingErrors };
+
   return (
     <DocFormGate
       doc="profile.json"
@@ -181,6 +198,8 @@ export function FetchingSection({ profile }: { profile: string }) {
       parseError={docForm.parseError}
     >
       <div className="flex flex-col gap-4">
+        <ValidationSummary errors={allErrors} attempt={attempt} />
+
         <Card data-qa="fetch-caps-card">
           <CardHeader>
             <CardTitle>How much each run pulls</CardTitle>
@@ -194,7 +213,12 @@ export function FetchingSection({ profile }: { profile: string }) {
               const error = saveState.errors[`fetching.${field.key}`];
               const hit = field.hitKey ? (capsHit?.[field.hitKey] ?? false) : false;
               return (
-                <Field key={field.key} data-qa={field.dataQa} invalid={Boolean(error)}>
+                <Field
+                  key={field.key}
+                  id={`fetching.${field.key}`}
+                  data-qa={field.dataQa}
+                  invalid={Boolean(error)}
+                >
                   <FieldLabel>{field.key}</FieldLabel>
                   <FieldControl>
                     <Input
@@ -274,9 +298,8 @@ export function FetchingSection({ profile }: { profile: string }) {
 
         <SaveBar
           isDirty={saveState.isDirty}
-          errors={{ ...saveState.errors, ...pacingErrors }}
           successMessage={saveState.successMessage}
-          onSave={saveState.save}
+          onSave={handleSaveClick}
           onDiscard={() => {
             setPacingErrors({});
             setState(saveState.discard());

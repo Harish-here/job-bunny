@@ -156,19 +156,41 @@ export function validateState(state: FetchingState): Record<string, string> {
 const RAW_PACING_PAIRS: Array<{
   minKey: 'jitterMinMs' | 'interUrlDelayMinMs';
   maxKey: 'jitterMaxMs' | 'interUrlDelayMaxMs';
+  minLabel: string;
+  maxLabel: string;
 }> = [
-  { minKey: 'jitterMinMs', maxKey: 'jitterMaxMs' },
-  { minKey: 'interUrlDelayMinMs', maxKey: 'interUrlDelayMaxMs' },
+  {
+    minKey: 'jitterMinMs',
+    maxKey: 'jitterMaxMs',
+    minLabel: 'Minimum jitter',
+    maxLabel: 'maximum jitter',
+  },
+  {
+    minKey: 'interUrlDelayMinMs',
+    maxKey: 'interUrlDelayMaxMs',
+    minLabel: 'Minimum time between searches',
+    maxLabel: 'maximum time between searches',
+  },
 ];
 
+// B3 fix (QA settings-overhaul): the copy is ux-notes §11's own named case,
+// verbatim for the jitter pair ("Minimum jitter (15000 ms) is above
+// maximum jitter (12000 ms). The run would fail to start.") — it names
+// BOTH fields, their values, and the CONSEQUENCE, because the consequence
+// is what happens at 07:00 while the user is asleep. Both entries of a
+// failing pair carry the identical sentence (not two half-sentences) so
+// either summary link explains the whole problem on its own.
 export function validatePacingPairs(state: FetchingState): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const pair of RAW_PACING_PAIRS) {
-    if (state[pair.minKey] > state[pair.maxKey]) {
-      errors[`fetching.${pair.minKey}`] =
-        `${pair.minKey} must be less than or equal to ${pair.maxKey}.`;
-      errors[`fetching.${pair.maxKey}`] =
-        `${pair.maxKey} must be greater than or equal to ${pair.minKey}.`;
+    const minValue = state[pair.minKey];
+    const maxValue = state[pair.maxKey];
+    if (minValue > maxValue) {
+      const message =
+        `${pair.minLabel} (${minValue} ms) is above ${pair.maxLabel} (${maxValue} ms). ` +
+        'The run would fail to start.';
+      errors[`fetching.${pair.minKey}`] = message;
+      errors[`fetching.${pair.maxKey}`] = message;
     }
   }
   return errors;

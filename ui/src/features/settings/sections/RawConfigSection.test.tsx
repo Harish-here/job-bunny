@@ -225,5 +225,9 @@ describe('RawConfigSection', () => {
     const summary = await screen.findByTestId('validation-summary');
     expect(summary).toBeInTheDocument();
     expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+    // B1 (QA settings-overhaul): the summary no longer takes the save bar
+    // down with it — Save/Discard stay mounted and enabled right alongside it.
+    expect(screen.getByTestId('save-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('save-button')).not.toBeDisabled();
   });
 });

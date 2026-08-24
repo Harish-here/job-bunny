@@ -24,6 +24,7 @@ import type { ConfigDocName } from '../config.api';
 import { configDocQuery } from '../config.queries';
 import { SaveBar } from '../save/SaveBar';
 import { useGuardedNavigate, useRegisterSettingsSave } from '../save/SettingsSaveContext';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useConfigMutation } from '../useConfigMutation';
 
 const DOCS: readonly ConfigDocName[] = [
@@ -113,6 +114,9 @@ export function RawConfigSection({ profile }: { profile: string }) {
   const [draft, setDraft] = useState('');
   const [parseError, setParseError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment.
+  const [attempt, setAttempt] = useState(0);
 
   const query = useQuery(configDocQuery(profile, selectedDoc));
   const mutation = useConfigMutation(profile, selectedDoc);
@@ -180,8 +184,18 @@ export function RawConfigSection({ profile }: { profile: string }) {
     discard: handleDiscard,
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await handleSave();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
+  const errors: Record<string, string> = parseError ? { 'raw-editor': parseError } : {};
+
   return (
     <div className="flex flex-col gap-4">
+      <ValidationSummary errors={errors} attempt={attempt} />
+
       <div
         data-qa="raw-scope-banner"
         className="mb-4 rounded-lg bg-muted p-3 text-xs text-muted-foreground"
@@ -237,7 +251,7 @@ export function RawConfigSection({ profile }: { profile: string }) {
         </div>
 
         <div className="flex-1">
-          <label htmlFor="raw-editor-ta" className="mb-1.5 block text-xs font-medium">
+          <label htmlFor="raw-editor" className="mb-1.5 block text-xs font-medium">
             {selectedDoc}
           </label>
           {query.isLoading ? (
@@ -248,7 +262,7 @@ export function RawConfigSection({ profile }: { profile: string }) {
             </p>
           ) : (
             <Textarea
-              id="raw-editor-ta"
+              id="raw-editor"
               data-qa="raw-editor"
               aria-label={`${selectedDoc} raw text`}
               className="rounded-lg bg-muted p-3 font-mono"
@@ -274,9 +288,8 @@ export function RawConfigSection({ profile }: { profile: string }) {
 
       <SaveBar
         isDirty={isDirty}
-        errors={parseError ? { 'raw-editor': parseError } : {}}
         successMessage={successMessage}
-        onSave={handleSave}
+        onSave={handleSaveClick}
         onDiscard={handleDiscard}
       />
     </div>

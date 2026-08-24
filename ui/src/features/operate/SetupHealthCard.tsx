@@ -85,9 +85,16 @@ function CopyCommandButton({ command }: { command: string }) {
  * hash router, a `cli-command` hands off to `CopyCommandButton`. `null`
  * destination (a check with no `CHECK_TO_DESTINATION` entry) renders
  * nothing but still carries the `data-qa` cell — a stable id even when
- * empty is preferable to a cell that sometimes doesn't exist. */
+ * empty is preferable to a cell that sometimes doesn't exist.
+ *
+ * `'setup'` (B6, QA settings-overhaul) is the Operate route itself — this
+ * card's own page — used by findings whose only fix is `card-secrets`,
+ * also on Operate; labelled the same as the sidebar names that page
+ * (`Sidebar.tsx`'s `NAV_ITEMS`), not "Settings". */
 function destinationLabel(route: Route): string {
-  return route.name === 'settings' ? 'Settings' : 'View runs';
+  if (route.name === 'settings') return 'Settings';
+  if (route.name === 'setup') return 'Operate';
+  return 'View runs';
 }
 
 function DestinationCell({

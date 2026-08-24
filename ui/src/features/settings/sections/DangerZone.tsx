@@ -68,7 +68,7 @@ export function DangerZone({ profile }: { profile: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div data-qa="danger-zone" className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
         Removing a profile permanently deletes its local SQLite database, its
         configuration documents, and its run history. Notion is never touched.
@@ -104,6 +104,7 @@ export function DangerZone({ profile }: { profile: string }) {
             <FieldLabel>Profile name</FieldLabel>
             <FieldControl>
               <Input
+                data-qa="danger-confirm-input"
                 data-testid="danger-confirm-input"
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
@@ -115,6 +116,7 @@ export function DangerZone({ profile }: { profile: string }) {
             <Button
               type="button"
               variant="destructive"
+              data-qa="danger-remove-button"
               data-testid="danger-confirm"
               disabled={!canConfirm || isSubmitting}
               onClick={handleConfirm}

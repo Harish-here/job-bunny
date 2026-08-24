@@ -36,6 +36,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useGuardedNavigate, useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useDocForm } from '../useDocForm';
 import { TitleRuleEditor } from './FiltersSection';
 import { TITLE_RULE_KEYS } from './filters.model';
@@ -68,6 +69,11 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
 
   const [state, setState] = useState<RolesCompaniesEditorState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<RolesCompaniesEditorState>(EMPTY_STATE);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment. This
+  // section's own `validate` never fails, so it is wired only for
+  // consistency with every other `SaveBar` consumer.
+  const [attempt, setAttempt] = useState(0);
 
   // Mirrors WhereYouWorkSection's own `initialized` ref pattern, extended
   // to BOTH docs: seeds the draft (and its saved baseline) once both have
@@ -131,6 +137,12 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
     discard: () => setState(saveState.discard()),
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
   const serverError = filterForm.serverError ?? profileForm.serverError;
 
   return (
@@ -147,6 +159,8 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
         parseError={profileForm.parseError}
       >
         <div className="flex flex-col gap-4">
+          <ValidationSummary errors={saveState.errors} attempt={attempt} />
+
           <Card data-qa="roles-rules-card">
             <CardHeader>
               <CardTitle>Rules — a job that fails these is dropped</CardTitle>
@@ -300,9 +314,8 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
 
           <SaveBar
             isDirty={saveState.isDirty}
-            errors={saveState.errors}
             successMessage={saveState.successMessage}
-            onSave={saveState.save}
+            onSave={handleSaveClick}
             onDiscard={() => setState(saveState.discard())}
           />
         </div>

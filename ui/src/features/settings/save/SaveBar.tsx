@@ -1,9 +1,7 @@
-import { Alert, AlertTitle } from '../../../components/ui/alert';
 import { Button } from '../../../components/ui/button';
 
 export interface SaveBarProps {
   isDirty: boolean;
-  errors: Record<string, string>;
   successMessage: string | null;
   /** Wraps `useSectionSaveState`'s (task 4) own `save`. Always called on
    * click, unconditionally — `save-button` is NEVER `disabled`; the hook's
@@ -30,53 +28,27 @@ export interface SaveBarProps {
 
 /**
  * The S8 save model's sticky bar (blueprint.md:479-496). Renders exactly one
- * of four states, in priority order: validation summary (errors present, any
- * `isDirty`) > dirty bar (unsaved, currently valid) > success line (just
- * saved) > idle (nothing).
+ * of three states, in priority order: dirty bar (unsaved) > success line
+ * (just saved) > idle (nothing).
+ *
+ * B1 fix (QA settings-overhaul): this used to ALSO render the validation
+ * summary as a fourth, higher-priority state — which unmounted the
+ * Save/Discard buttons the instant a submit failed, taking the primary
+ * action away exactly when the user needed it most. The summary now lives
+ * in `ValidationSummary.tsx`, rendered by each section at the TOP of its
+ * content column (ux-notes §11: "an error summary card at the top of the
+ * content column"), so the two are no longer mutually exclusive — a
+ * failed submit leaves `isDirty` true (the draft still differs from the
+ * saved value), so the dirty bar keeps rendering underneath it, Save
+ * button included, never disabled.
  */
 export function SaveBar({
   isDirty,
-  errors,
   successMessage,
   onSave,
   onDiscard,
   saveButtonVariant = 'default',
 }: SaveBarProps) {
-  const errorEntries = Object.entries(errors);
-
-  if (errorEntries.length > 0) {
-    return (
-      <Alert
-        variant="destructive"
-        role="alert"
-        data-qa="validation-summary"
-        data-testid="validation-summary"
-      >
-        <AlertTitle>{errorEntries.length} problems to fix</AlertTitle>
-        <ul className="list-disc pl-4 text-sm">
-          {errorEntries.map(([field, message]) => (
-            <li
-              key={field}
-              data-qa={`validation-item-${field}`}
-              data-testid={`validation-item-${field}`}
-            >
-              <a
-                href={`#${field}`}
-                className="underline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  document.getElementById(field)?.focus();
-                }}
-              >
-                {message}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </Alert>
-    );
-  }
-
   if (isDirty) {
     return (
       <div

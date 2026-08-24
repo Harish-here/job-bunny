@@ -106,6 +106,29 @@ describe('SetupHealthCard', () => {
     expect(window.location.hash).toBe('#/settings/delivery');
   });
 
+  // B6 (QA settings-overhaul): the missing-secret row must retarget to
+  // Operate (card-secrets), not to Delivery, which has no token field.
+  it('routes a missing-secret finding to Operate, labelled "Operate"', async () => {
+    stubDoctor([
+      {
+        check: 'env-tokens',
+        status: 'warn',
+        detail: 'NOTION_TOKEN is not set; TELEGRAM_BOT_TOKEN is not set',
+      },
+    ]);
+    renderCard();
+
+    await screen.findByText(/NOTION_TOKEN is not set/);
+    const group = document.querySelector('[data-qa="health-group-needs-action"]');
+    expect(group).not.toBeNull();
+
+    window.location.hash = '';
+    await userEvent.click(
+      within(group as HTMLElement).getByRole('button', { name: 'Operate' }),
+    );
+    expect(window.location.hash).toBe('#/setup');
+  });
+
   it('shows an error state with a retry control when the doctor request fails', async () => {
     vi.mocked(operateApi.getDoctorReport).mockRejectedValue(new Error('network down'));
     renderCard();

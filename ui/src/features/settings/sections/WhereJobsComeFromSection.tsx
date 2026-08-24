@@ -27,6 +27,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useConfigMutation } from '../useConfigMutation';
 import { useDocForm } from '../useDocForm';
 import type { SearchUrlRow } from './searchUrls.model';
@@ -96,6 +97,9 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
 
   const [state, setState] = useState<WhereJobsComeFromState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<WhereJobsComeFromState>(EMPTY_STATE);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment.
+  const [attempt, setAttempt] = useState(0);
 
   // Same "seed once both docs have loaded, never on a later background
   // refetch" posture as `WhereYouWorkSection.tsx`.
@@ -189,6 +193,12 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
     discard: () => setState(saveState.discard()),
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
   const serverError =
     profileForm.serverError ?? searchUrlsMutation.error?.message ?? null;
 
@@ -206,6 +216,8 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
         parseError={false}
       >
         <div className="flex flex-col gap-4">
+          <ValidationSummary errors={saveState.errors} attempt={attempt} />
+
           <Card data-qa="where-jobs-lanes-card">
             <CardHeader>
               <CardTitle>Lanes</CardTitle>
@@ -239,7 +251,11 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
                       className="flex flex-col gap-1 rounded-lg border border-border p-3"
                     >
                       <div className="flex gap-2">
-                        <Field invalid={Boolean(rowError)} className="flex-1">
+                        <Field
+                          id={`where-jobs-search-urls.${index}`}
+                          invalid={Boolean(rowError)}
+                          className="flex-1"
+                        >
                           <FieldLabel>Search URL</FieldLabel>
                           <FieldControl>
                             <Input
@@ -294,9 +310,8 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
 
           <SaveBar
             isDirty={saveState.isDirty}
-            errors={saveState.errors}
             successMessage={saveState.successMessage}
-            onSave={saveState.save}
+            onSave={handleSaveClick}
             onDiscard={() => setState(saveState.discard())}
           />
         </div>

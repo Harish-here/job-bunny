@@ -197,4 +197,44 @@ describe('FetchingSection', () => {
     const saveButton = await screen.findByTestId('save-button');
     expect(saveButton).not.toBeDisabled();
   });
+
+  // B1/B2/B3 (QA settings-overhaul): a real cross-field submit failure, on
+  // a REAL section — not SaveBar's own hand-built fixture — must (a) keep
+  // the save bar mounted and enabled, (b) name both fields/values/the
+  // consequence, and (c) actually move focus into the real offending
+  // input when the summary link is clicked.
+  it('a failing jitter pair keeps the save bar alive and the summary link focuses the real field', async () => {
+    stubDoc();
+    stubRuns();
+    stubSoftErrors();
+    const user = userEvent.setup();
+    const { container } = renderSection();
+
+    await user.click(await screen.findByRole('button', { name: /Advanced/ }));
+    const jitterMinInput = within(
+      container.querySelector('[data-qa="pacing-raw-jitter-min"]') as HTMLElement,
+    ).getByRole('spinbutton');
+    await user.clear(jitterMinInput);
+    await user.type(jitterMinInput, '99999');
+
+    await user.click(await screen.findByTestId('save-button'));
+
+    const summary = await screen.findByTestId('validation-summary');
+    expect(summary).toHaveTextContent(
+      'Minimum jitter (99999 ms) is above maximum jitter (12000 ms). The run would fail to start.',
+    );
+    // B1: the save bar (and its Save/Discard buttons) survives a failed
+    // submit — it must never unmount just because errors are present.
+    expect(screen.getByTestId('save-bar')).toBeInTheDocument();
+    const saveButton = screen.getByTestId('save-button');
+    expect(saveButton).not.toBeDisabled();
+
+    // B2: clicking the summary link actually moves focus into the real
+    // <input>, not merely to the <a> itself.
+    const link = within(summary).getAllByRole('link')[0];
+    expect(link).toBeDefined();
+    await user.click(link as HTMLElement);
+    expect(document.activeElement).toBe(document.getElementById('fetching.jitterMinMs'));
+    expect(document.activeElement).toBe(jitterMinInput);
+  });
 });

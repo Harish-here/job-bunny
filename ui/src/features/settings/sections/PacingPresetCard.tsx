@@ -83,7 +83,6 @@ export function PacingPresetCard({
         className={cn(
           'flex flex-col items-start gap-1.5 rounded-lg border border-border bg-card p-3 text-left text-sm',
           'data-[state=checked]:ring-2 data-[state=checked]:ring-primary',
-          isFast && 'border-l-2 border-attention',
         )}
       >
         <span className="flex items-center gap-1.5 font-medium">
@@ -188,7 +187,12 @@ export function PacingAdvancedDisclosure({
             {RAW_FIELDS.map((field) => {
               const error = errors?.[field.key];
               return (
-                <Field key={field.key} data-qa={field.dataQa} invalid={Boolean(error)}>
+                <Field
+                  key={field.key}
+                  id={`fetching.${field.key}`}
+                  data-qa={field.dataQa}
+                  invalid={Boolean(error)}
+                >
                   <FieldLabel>{field.label}</FieldLabel>
                   <FieldControl>
                     <Input

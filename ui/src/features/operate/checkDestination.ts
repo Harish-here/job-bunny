@@ -16,13 +16,22 @@ export type CheckDestination =
  * equivalent in the two-kind `CheckDestination` union) — reusing an
  * already-shipped, already-reviewed routing decision rather than
  * inventing a new one per check:
- *   - profile (`profile-parses`, `sqlite-path-retired`, `wire`) and
- *     integrations (`env-tokens`, `notion-db-reachable`,
- *     `telegram-bot-token`) both pointed at `{section:'delivery'}`.
- *     `'notion-db-reachable'` is also the task's explicitly named case
- *     (R23): the token/mirror fields ARE board-settable there — only
- *     Notion adopt-or-create is Claude-dependent, and that is never
- *     offered as a control on this card.
+ *   - profile (`profile-parses`, `sqlite-path-retired`, `wire`) pointed at
+ *     `{section:'delivery'}` — unaffected by the B6 fix below, none of the
+ *     three are about a secret.
+ *   - `'notion-db-reachable'` is the task's explicitly named case (R23)
+ *     and stays at `{section:'delivery'}`: it can fail for reasons other
+ *     than a missing token (a misconfigured db id), and mirror/dryRun ARE
+ *     board-settable there — only Notion adopt-or-create is
+ *     Claude-dependent, and that is never offered as a control on this
+ *     card.
+ *   - `'env-tokens'`/`'telegram-bot-token'` (QA settings-overhaul B6) point
+ *     at `{name:'setup'}` (Operate) instead: both are UNAMBIGUOUSLY "a
+ *     secret is missing/invalid" findings, and the only place that can
+ *     set a secret is Operate's `card-secrets` — `DeliverySection.tsx`
+ *     itself documents that it renders no secret value or input at all.
+ *     Pointing these at `{section:'delivery'}` (the old routing) sent the
+ *     user to a page with no token field to fix the finding with.
  *   - persona-filters (`filter-parses`) -> `roles-companies`.
  *   - search-urls (`empty-lanes`, `linkedin-inventory-freshness`) ->
  *     `where-jobs-come-from`.
@@ -69,7 +78,7 @@ export const CHECK_TO_DESTINATION: Record<string, CheckDestination> = {
   },
   'env-tokens': {
     kind: 'settings-link',
-    route: { name: 'settings', section: 'delivery' },
+    route: { name: 'setup' },
   },
   'notion-db-reachable': {
     kind: 'settings-link',
@@ -77,7 +86,7 @@ export const CHECK_TO_DESTINATION: Record<string, CheckDestination> = {
   },
   'telegram-bot-token': {
     kind: 'settings-link',
-    route: { name: 'settings', section: 'delivery' },
+    route: { name: 'setup' },
   },
   'daemon-liveness': { kind: 'cli-command', command: 'jobbunny serve start' },
   'claude-cli-on-path': { kind: 'settings-link', route: { name: 'runs' } },

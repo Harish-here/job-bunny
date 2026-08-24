@@ -1,0 +1,99 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import { describe, expect, it } from 'vitest';
+import { ValidationSummary } from './ValidationSummary';
+
+describe('ValidationSummary — presence', () => {
+  it('renders nothing when errors is empty', () => {
+    const { container } = render(<ValidationSummary errors={{}} attempt={0} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('pluralizes the heading: singular for one error, plural for more than one', () => {
+    const { rerender } = render(<ValidationSummary errors={{ a: 'bad' }} attempt={1} />);
+    expect(screen.getByTestId('validation-summary')).toHaveTextContent(
+      '1 problem to fix',
+    );
+
+    rerender(<ValidationSummary errors={{ a: 'bad', b: 'also bad' }} attempt={1} />);
+    expect(screen.getByTestId('validation-summary')).toHaveTextContent(
+      '2 problems to fix',
+    );
+  });
+
+  it('renders one <li> per error, keyed by field', () => {
+    render(
+      <ValidationSummary
+        errors={{ 'fetching.jitterMinMs': 'bad min', 'fetching.jitterMaxMs': 'bad max' }}
+        attempt={1}
+      />,
+    );
+    expect(screen.getByTestId('validation-item-fetching.jitterMinMs')).toHaveTextContent(
+      'bad min',
+    );
+    expect(screen.getByTestId('validation-item-fetching.jitterMaxMs')).toHaveTextContent(
+      'bad max',
+    );
+  });
+});
+
+describe('ValidationSummary — link focus (B2)', () => {
+  it('clicking a link focuses the REAL input carrying that exact id, not the anchor', async () => {
+    render(
+      <>
+        <input id="fetching.jitterMinMs" aria-label="jitterMinMs" />
+        <ValidationSummary
+          errors={{ 'fetching.jitterMinMs': 'jitterMinMs must be <= jitterMaxMs.' }}
+          attempt={1}
+        />
+      </>,
+    );
+    await userEvent.click(
+      screen.getByRole('link', { name: 'jitterMinMs must be <= jitterMaxMs.' }),
+    );
+    expect(document.activeElement).toBe(document.getElementById('fetching.jitterMinMs'));
+  });
+});
+
+describe('ValidationSummary — focus-on-attempt (B1/B2)', () => {
+  it('moves focus to the summary itself when attempt increases with errors present', () => {
+    const { rerender } = render(<ValidationSummary errors={{ a: 'bad' }} attempt={0} />);
+    expect(document.activeElement).not.toBe(screen.queryByTestId('validation-summary'));
+
+    rerender(<ValidationSummary errors={{ a: 'bad' }} attempt={1} />);
+    expect(document.activeElement).toBe(screen.getByTestId('validation-summary'));
+  });
+
+  it('does not steal focus back merely because the live errors object changed while attempt stayed the same', () => {
+    function Harness() {
+      const [errors, setErrors] = useState<Record<string, string>>({ a: 'bad' });
+      return (
+        <>
+          <input aria-label="unrelated field" />
+          <button type="button" onClick={() => setErrors({ a: 'bad', b: 'also bad' })}>
+            edit
+          </button>
+          <ValidationSummary errors={errors} attempt={1} />
+        </>
+      );
+    }
+    render(<Harness />);
+    // Summary already focused once for attempt=1 above; move focus
+    // elsewhere (simulating the user continuing to edit a field) and
+    // confirm a later errors-only change (no new attempt) leaves it there.
+    // `fireEvent` (not `userEvent`) deliberately: jsdom's own click event
+    // carries no browser-native focus-follows-click behaviour, so this
+    // isolates "did the COMPONENT move focus" from "did clicking a
+    // <button> move focus", which is not what this test is about.
+    const input = screen.getByRole('textbox', { name: 'unrelated field' });
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit' }));
+    expect(screen.getByTestId('validation-summary')).toHaveTextContent(
+      '2 problems to fix',
+    );
+    expect(document.activeElement).toBe(input);
+  });
+});

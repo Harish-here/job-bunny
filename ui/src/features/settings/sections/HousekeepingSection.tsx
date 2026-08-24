@@ -26,6 +26,7 @@ import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
 import { useRegisterSettingsSave } from '../save/SettingsSaveContext';
 import { useSectionSaveState } from '../save/useSectionSaveState';
+import { ValidationSummary } from '../save/ValidationSummary';
 import { useDocForm } from '../useDocForm';
 
 interface CleanupState {
@@ -149,6 +150,9 @@ export function HousekeepingSection({ profile }: { profile: string }) {
 
   const [state, setState] = useState<HousekeepingState>(EMPTY_STATE);
   const [savedState, setSavedState] = useState<HousekeepingState>(EMPTY_STATE);
+  // B1/B2 fix (QA settings-overhaul): bumped only on a real failed Save
+  // click — see `ValidationSummary`'s own `attempt` doc comment.
+  const [attempt, setAttempt] = useState(0);
 
   const initialized = useRef<string | null>(null);
   useEffect(() => {
@@ -201,6 +205,12 @@ export function HousekeepingSection({ profile }: { profile: string }) {
     discard: () => setState(saveState.discard()),
   });
 
+  async function handleSaveClick(): Promise<boolean> {
+    const ok = await saveState.save();
+    if (!ok) setAttempt((n) => n + 1);
+    return ok;
+  }
+
   return (
     <DocFormGate
       doc="profile.json"
@@ -209,6 +219,8 @@ export function HousekeepingSection({ profile }: { profile: string }) {
       parseError={docForm.parseError}
     >
       <div className="flex flex-col gap-4">
+        <ValidationSummary errors={saveState.errors} attempt={attempt} />
+
         <Card data-qa="cleanup-ttls-card">
           <CardHeader>
             <CardTitle>Cleanup TTLs</CardTitle>
@@ -222,7 +234,12 @@ export function HousekeepingSection({ profile }: { profile: string }) {
               const value = state.cleanup[field.key];
               const error = saveState.errors[`housekeeping.${field.key}`];
               return (
-                <Field key={field.key} data-qa={field.dataQa} invalid={Boolean(error)}>
+                <Field
+                  key={field.key}
+                  id={`housekeeping.${field.key}`}
+                  data-qa={field.dataQa}
+                  invalid={Boolean(error)}
+                >
                   <FieldLabel>{field.label}</FieldLabel>
                   <FieldControl>
                     <Input
@@ -264,9 +281,8 @@ export function HousekeepingSection({ profile }: { profile: string }) {
 
         <SaveBar
           isDirty={saveState.isDirty}
-          errors={saveState.errors}
           successMessage={saveState.successMessage}
-          onSave={saveState.save}
+          onSave={handleSaveClick}
           onDiscard={() => setState(saveState.discard())}
         />
       </div>
