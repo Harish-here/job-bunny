@@ -35,6 +35,12 @@ export interface SoftErrorSummary {
    * of this same three-message list, duplicated rather than imported
    * across the adapters/app layer boundary. */
   breakerOpen: boolean;
+  /** Whether a run-yield cap's warn message appears anywhere in `events`,
+   * per cap, independently — same scanning discipline as `breakerOpen`
+   * (every raw event's `msg`, never a group's `sample`). `maxProbesPerRun`
+   * cap detection exists in the `source` stage and is not currently tracked
+   * here. */
+  capsHit: { maxNewPerLane: boolean; maxCardsPerUrl: boolean };
 }
 
 const UNKNOWN_KEY = 'unknown';
@@ -53,6 +59,25 @@ function hasBreakerMessage(events: RunEventRow[]): boolean {
   return events.some((event) =>
     BREAKER_MESSAGE_SUBSTRINGS.some((substring) => event.msg.includes(substring)),
   );
+}
+
+/** Exact substrings of the two run-yield cap warn messages a run can log:
+ * the `maxNewPerLane` cap (`pipeline/stages/source.ts`) and the
+ * `maxCardsPerUrl` cap (`adapters/lanes/linkedin/fire/loop/cards.ts`). */
+const CAP_MESSAGE_SUBSTRINGS = [
+  'source: maxNewPerLane cap hit — dropping remainder',
+  'linkedin lane: maxCardsPerUrl cap hit — dropping remainder for this url',
+] as const;
+
+function capsHit(events: RunEventRow[]): {
+  maxNewPerLane: boolean;
+  maxCardsPerUrl: boolean;
+} {
+  const [maxNewPerLaneSubstring, maxCardsPerUrlSubstring] = CAP_MESSAGE_SUBSTRINGS;
+  return {
+    maxNewPerLane: events.some((event) => event.msg.includes(maxNewPerLaneSubstring)),
+    maxCardsPerUrl: events.some((event) => event.msg.includes(maxCardsPerUrlSubstring)),
+  };
 }
 
 function keyOf(data: Record<string, unknown> | undefined): {
@@ -112,5 +137,10 @@ export function groupSoftErrors(events: RunEventRow[]): SoftErrorSummary {
     }))
     .sort((a, b) => b.count - a.count);
 
-  return { total: events.length, groups, breakerOpen: hasBreakerMessage(events) };
+  return {
+    total: events.length,
+    groups,
+    breakerOpen: hasBreakerMessage(events),
+    capsHit: capsHit(events),
+  };
 }

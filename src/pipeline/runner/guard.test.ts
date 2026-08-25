@@ -48,6 +48,9 @@ function fakeCheckpointStore(): CheckpointStore {
     readLatest() {
       return undefined;
     },
+    readAt() {
+      return undefined;
+    },
     latestTimeDir() {
       return undefined;
     },

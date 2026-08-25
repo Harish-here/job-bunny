@@ -10,6 +10,7 @@ import { JdText } from '../job/JdText';
 import { JobFacts } from '../job/JobFacts';
 import { JobHeader } from '../job/JobHeader';
 import { TrackingPanel } from '../job/TrackingPanel';
+import { ErrorRetry } from '../shared/ErrorRetry';
 import { DecideBar } from './DecideBar';
 import { DECIDE_STATUS, type DecideAction, nextUndecided } from './decide';
 import { FilterPopover } from './FilterPopover';
@@ -30,27 +31,6 @@ const SKELETON_ROW_KEYS = ['s1', 's2', 's3', 's4', 's5', 's6'];
 
 function isNoLocalDb(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'no_local_db';
-}
-
-/** Shared shape for the list-pane and detail-pane error states — text
- * copy plus a Retry button wired to the failed query's own `refetch`. */
-function ErrorRetry({
-  message,
-  onRetry,
-  padded = false,
-}: {
-  message: string;
-  onRetry: () => void;
-  padded?: boolean;
-}) {
-  return (
-    <div className={`flex flex-col items-start gap-2 text-sm ${padded ? 'p-4' : ''}`}>
-      <span className="text-destructive">{message}</span>
-      <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
-        Retry
-      </Button>
-    </div>
-  );
 }
 
 export function TriagePage({ profile }: { profile: string }) {

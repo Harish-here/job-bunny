@@ -3,8 +3,8 @@
  * search_urls.md is markdown, so useDocForm (JSON-shaped, task 7, frozen)
  * cannot express it: this section reads via configDocQuery and writes via
  * useConfigMutation directly instead — see Global constraints. The
- * settings-section wrapper and JsonEscapeHatch are SettingsPage-owned
- * (task 7); this component renders neither. */
+ * settings-section wrapper is owned by the Settings shell; this component
+ * renders neither it nor a raw-JSON editor. */
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';

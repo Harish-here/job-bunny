@@ -18,6 +18,7 @@ export interface ProfileSchedule {
   times: string[]; // "HH:MM", local wall clock
   weekdays: Weekday[]; // default [1, 2, 3, 4, 5]
   graceMinutes: number; // default 90
+  skipNext: { date: string; slot: string } | null;
 }
 
 /**

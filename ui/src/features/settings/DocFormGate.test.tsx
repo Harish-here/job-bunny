@@ -12,6 +12,23 @@ describe('DocFormGate', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
+  it('renders the caller-supplied loadingFallback instead of the default text, while isLoading is true (B9)', () => {
+    render(
+      <DocFormGate
+        doc="profile.json"
+        isLoading
+        loadError={null}
+        parseError={false}
+        loadingFallback={<div data-testid="my-skeleton" />}
+      >
+        <button type="button">Save</button>
+      </DocFormGate>,
+    );
+    expect(screen.getByTestId('my-skeleton')).toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+
   it('renders a blocking load-error state and no children when loadError is set', () => {
     render(
       <DocFormGate

@@ -22,13 +22,23 @@ function useFieldContext(): FieldContextValue {
 function Field({
   className,
   invalid = false,
+  id,
   ...props
 }: React.ComponentProps<'div'> & { invalid?: boolean }) {
-  const id = useId();
+  // `id`, when the caller supplies one, becomes the CONTROL's own DOM id
+  // (via `FieldContext`, consumed by `FieldControl` below) — not merely
+  // the wrapping `<div>`'s id, which would do nothing for a caller that
+  // needs a stable, predictable id on the actual input (B2, QA
+  // settings-overhaul: the validation summary's "click a link, focus the
+  // field" contract needs the rendered `<input>`'s id to equal the
+  // field's error key). Falls back to `useId()` exactly as before when no
+  // `id` is passed, so every existing caller is unaffected.
+  const generatedId = useId();
+  const resolvedId = id ?? generatedId;
   const value: FieldContextValue = {
-    id,
-    descriptionId: `${id}-description`,
-    errorId: `${id}-error`,
+    id: resolvedId,
+    descriptionId: `${resolvedId}-description`,
+    errorId: `${resolvedId}-error`,
     invalid,
   };
   return (
@@ -90,7 +100,13 @@ function FieldError({ className, children, ...props }: React.ComponentProps<'p'>
       id={errorId}
       role="alert"
       data-slot="field-error"
-      className={cn('text-sm text-destructive', className)}
+      // B13 fix (QA settings-overhaul, round 2): plain `text-destructive`
+      // at this size/weight fails 4.5:1 against a plain white background
+      // (4.38:1, computed) — the same failure B7 already fixed for
+      // `daemon-state`. `--destructive-strong` (5.53:1 on white) is the
+      // token B7 introduced for exactly this; `--destructive` itself stays
+      // reserved for borders/tints (see ux-notes §14's amended pairing).
+      className={cn('text-sm text-destructive-strong', className)}
       {...props}
     >
       {children}

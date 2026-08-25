@@ -12,6 +12,7 @@ export const ScheduleSchema = z.object({
   enabled: z.boolean().default(true),
   weekdays: z.array(z.number().int().min(0).max(6)).default([1, 2, 3, 4, 5]),
   graceMinutes: z.number().int().positive().default(90),
+  skipNext: z.object({ date: z.string(), slot: z.string() }).nullable().default(null),
 });
 
 export const PipelineConfigSchema = z.object({

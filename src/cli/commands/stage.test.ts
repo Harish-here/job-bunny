@@ -42,6 +42,10 @@ function fakeCheckpointStore(): CheckpointStore & {
     readLatest(runDate, timeDir) {
       return rows.get(key(runDate, timeDir));
     },
+    readAt(runDate, timeDir, stage) {
+      const row = rows.get(key(runDate, timeDir));
+      return row && row.ref.stage === stage ? row : undefined;
+    },
     latestTimeDir(runDate) {
       const dirs = [...rows.values()]
         .filter((r) => r.ref.runDate === runDate)

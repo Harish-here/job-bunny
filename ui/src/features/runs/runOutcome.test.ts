@@ -54,7 +54,12 @@ function detail(overrides: {
   };
 }
 
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = {
+  total: 0,
+  groups: [],
+  breakerOpen: false,
+  capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+};
 
 // The real shape `groupSoftErrors` (app/features/runs/soft_errors.ts)
 // returns: `breakerOpen` is a FIRST-CLASS field computed by scanning every
@@ -74,6 +79,7 @@ const BREAKER_OPEN_SOFT_ERRORS: SoftErrorSummary = {
     },
   ],
   breakerOpen: true,
+  capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
 };
 
 describe('classifyOutcome', () => {
@@ -153,6 +159,7 @@ describe('classifyOutcome', () => {
           },
         ],
         breakerOpen: true,
+        capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
       };
       expect(classifyOutcome(run, softErrors)).toBe('degraded');
     });
@@ -163,6 +170,7 @@ describe('classifyOutcome', () => {
         total: SOFT_ERROR_RATE_THRESHOLD,
         groups: [],
         breakerOpen: false,
+        capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
       };
       expect(classifyOutcome(run, softErrors)).toBe('degraded');
     });

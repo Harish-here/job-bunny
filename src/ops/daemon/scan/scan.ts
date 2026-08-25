@@ -76,6 +76,7 @@ export async function scanProfileSchedules(
       times: schedule.times,
       weekdays: schedule.weekdays as ProfileSchedule['weekdays'],
       graceMinutes: schedule.graceMinutes,
+      skipNext: schedule.skipNext ?? null,
     });
   }
   return schedules;

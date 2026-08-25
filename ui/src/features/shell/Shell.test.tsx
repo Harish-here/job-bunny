@@ -3,8 +3,24 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardProfile } from '../../lib/api/types';
+import {
+  SettingsSaveProvider,
+  useRegisterSettingsSave,
+} from '../settings/save/SettingsSaveContext';
 import { Shell } from './Shell';
 import { resetSidebarCollapsedForTests } from './useSidebarCollapsed';
+
+// Mirrors `SettingsShell.test.tsx`'s own stand-in: registers a dirty
+// section into the real `SettingsSaveProvider`, without a whole section's
+// doc-form plumbing.
+function DirtyRegistrant() {
+  useRegisterSettingsSave({
+    isDirty: true,
+    save: vi.fn().mockResolvedValue(true),
+    discard: vi.fn(),
+  });
+  return null;
+}
 
 beforeAll(() => {
   // radix Select (inside TriagePage's FilterPopover) needs these in jsdom.
@@ -87,6 +103,12 @@ function stubFetch(opts: {
           },
       } as unknown as Response;
     }
+    if (url.includes('/api/secrets')) {
+      return {
+        ok: true,
+        json: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
+      } as unknown as Response;
+    }
     throw new Error(`unexpected fetch url: ${url}`);
   });
   vi.stubGlobal('fetch', impl as unknown as typeof fetch);
@@ -98,6 +120,18 @@ function renderShell() {
   return render(
     <QueryClientProvider client={qc}>
       <Shell />
+    </QueryClientProvider>,
+  );
+}
+
+function renderShellWithDirtySection() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <SettingsSaveProvider>
+        <DirtyRegistrant />
+        <Shell />
+      </SettingsSaveProvider>
     </QueryClientProvider>,
   );
 }
@@ -128,7 +162,7 @@ describe('Shell', () => {
       'Tracker',
       'Runs',
       'Analytics',
-      'Setup & Health',
+      'Operate',
       'Settings',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
@@ -172,12 +206,12 @@ describe('Shell', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  it('renders HubPage on the setup route', async () => {
+  it('renders OperatePage on the setup route', async () => {
     stubFetch({});
     window.location.hash = '#/setup';
     renderShell();
 
-    expect(await screen.findByTestId('hub')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Operate' })).toBeInTheDocument();
   });
 
   // First-boot redirect (phase 3 task 4): once the profiles query resolves
@@ -227,7 +261,7 @@ describe('Shell', () => {
       'Tracker',
       'Runs',
       'Analytics',
-      'Setup & Health',
+      'Operate',
       'Settings',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
@@ -277,5 +311,22 @@ describe('Shell', () => {
       'harish schema is behind',
     );
     expect(screen.queryByRole('button', { name: /dismiss/i })).toBeNull();
+  });
+
+  // Fix-round finding: the sidebar's own `onNavigate`/`onChoose` used to
+  // bypass the dirty-nav guard entirely (no `key` on `SectionBody`, no
+  // guard wiring at all), so leaving Settings with unsaved changes silently
+  // discarded them. `GuardedSidebar` (this file's `Shell.tsx`) now reads the
+  // same `SettingsSaveContext` a dirty section registers into.
+  it('a dirty registered Settings section intercepts the sidebar nav (leaving Settings entirely) with the unsaved-changes dialog', async () => {
+    stubFetch({});
+    window.location.hash = '#/settings';
+    renderShellWithDirtySection();
+
+    await screen.findByRole('heading', { name: 'Settings' });
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }));
+
+    expect(await screen.findByTestId('dirty-nav-dialog')).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/settings');
   });
 });

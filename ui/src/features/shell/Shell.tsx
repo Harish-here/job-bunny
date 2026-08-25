@@ -4,12 +4,14 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { pickProfile, useStoredProfile } from '../../lib/profile';
 import { navigate, type Route, useRoute } from '../../lib/router';
 import { AnalyticsPage } from '../analytics/AnalyticsPage';
-import { HubPage } from '../hub/HubPage';
 import { JobPage } from '../job/JobPage';
+import { OperatePage } from '../operate/OperatePage';
 import { useRunControl } from '../runcontrol/useRunControl';
 import { RunsPage } from '../runs/RunsPage';
 import { useRun, useRuns } from '../runs/useRunsData';
 import { SettingsPage } from '../settings/SettingsPage';
+import { DirtyNavGuard } from '../settings/save/DirtyNavGuard';
+import { useSettingsSaveGuardState } from '../settings/save/SettingsSaveContext';
 import { TrackerPage } from '../tracker/TrackerPage';
 import { TriagePage } from '../triage/TriagePage';
 import { WizardPage } from '../wizard/WizardPage';
@@ -36,12 +38,12 @@ function Page({ route, profile }: { route: Route; profile: string }) {
     case 'onboarding':
       return null; // unreachable: Shell short-circuits to <WizardPage/> above
     case 'setup':
-      return <HubPage profile={profile} />;
+      return <OperatePage profile={profile} />;
     case 'settings':
       return (
         <SettingsPage
           profile={profile}
-          section={'section' in route ? route.section : 'profile'}
+          section={'section' in route ? route.section : 'landing'}
         />
       );
     case 'job':
@@ -148,7 +150,7 @@ export function Shell() {
     <div className="flex h-screen flex-col overflow-hidden">
       <DaemonDegradedBanner profile={profile} />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar
+        <GuardedSidebar
           route={route}
           profile={profile}
           profiles={profiles}
@@ -157,7 +159,6 @@ export function Shell() {
           mascot={mascot}
           runControl={control}
           onChoose={setStored}
-          onNavigate={navigate}
           onToggleCollapsed={() => setCollapsed(!collapsed)}
         />
         <main className="flex-1">
@@ -165,5 +166,45 @@ export function Shell() {
         </main>
       </div>
     </div>
+  );
+}
+
+/**
+ * Wraps `Sidebar`'s two navigation-originating callbacks — `onNavigate`
+ * (any cross-page route, including leaving Settings entirely) and
+ * `onChoose` (the profile switcher) — in `DirtyNavGuard`, reading the same
+ * `SettingsSaveContext` a dirty `Settings` section registers into
+ * (`SettingsShell.tsx`'s own guard reads the identical state). Two separate
+ * `DirtyNavGuard<...>` instances because the two callbacks take different
+ * target types (`Route` vs a bare profile-name `string`) — only one can
+ * ever actually be triggered by a single click, so rendering two
+ * independent dialogs never conflicts.
+ */
+function GuardedSidebar(
+  props: Omit<Parameters<typeof Sidebar>[0], 'onNavigate' | 'onChoose'> & {
+    onChoose: (name: string) => void;
+  },
+) {
+  const { isDirty, save, discard } = useSettingsSaveGuardState();
+  return (
+    <DirtyNavGuard<Route>
+      isDirty={isDirty}
+      navigate={navigate}
+      save={save}
+      discard={discard}
+    >
+      {(goRoute) => (
+        <DirtyNavGuard<string>
+          isDirty={isDirty}
+          navigate={props.onChoose}
+          save={save}
+          discard={discard}
+        >
+          {(goProfile) => (
+            <Sidebar {...props} onNavigate={goRoute} onChoose={goProfile} />
+          )}
+        </DirtyNavGuard>
+      )}
+    </DirtyNavGuard>
   );
 }

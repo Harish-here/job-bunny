@@ -146,6 +146,10 @@ function fakeSource(store: BoardStore | null, connector = 'sqlite'): BoardSource
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -257,6 +261,10 @@ test('list: an UNKNOWN connector ("") with no openable store still 404s no_local
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -396,6 +404,10 @@ test('meta: lists both vocabularies without ever touching the store', async () =
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };
@@ -421,6 +433,10 @@ test('meta: returns 200 even for an unknown profile name (vocab is profile-indep
     writeSecret: async () => {},
     removeProfile: async () => ({ outcome: 'removed' }),
     runDoctor: async () => null,
+    previewFilterRule: async () => ({ available: false, reason: 'no_recent_run' }),
+    stopDaemon: async () => ({ outcome: 'stopped' }),
+    startDaemon: async () => ({ outcome: 'started' }),
+    setAutostart: async () => ({ outcome: 'ok' }),
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,
     close() {},
   };

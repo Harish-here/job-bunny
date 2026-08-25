@@ -144,6 +144,9 @@ function fakeCheckpointStore(opts?: { throwOn?: number }): {
     readLatest() {
       return undefined;
     },
+    readAt() {
+      return undefined;
+    },
     latestTimeDir() {
       return undefined;
     },

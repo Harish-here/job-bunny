@@ -149,6 +149,9 @@ function fakeCheckpointStore(opts?: { prunedResult?: number }): {
     readLatest() {
       return undefined;
     },
+    readAt() {
+      return undefined;
+    },
     latestTimeDir() {
       return undefined;
     },
@@ -348,18 +351,19 @@ test('selectPrunableRunDirs: a recent date within the TTL is kept', () => {
 
 test('run(): prunes run folders older than runsOlderThanDays, keeps today and recent, and still archives', async () => {
   const connector = fakeConnector();
+  // Recent dirs are computed relative to the real clock: the routine derives
+  // "today" from Date.now(), so hardcoded recent dates silently age past the
+  // TTL (this test broke on 2026-08-24 with a fixed '2026-07-20').
+  const isoDaysAgo = (days: number) =>
+    new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
   const storage = fakeRunsStorage({
-    runDirs: ['2026-06-01', '2026-07-20', '2026-07-26', 'not-a-date'],
+    runDirs: ['2026-06-01', isoDaysAgo(6), isoDaysAgo(0), 'not-a-date'],
   });
   const ctx = fakeCtx({
     connector,
     storage,
     settings: { cleanup: { runsOlderThanDays: 30 } },
   });
-  // Pin "today" via the fake ctx's storage listSubdirs('runs') input above;
-  // the routine itself computes today from Date.now(), so this test only
-  // exercises 2026-06-01 (unambiguously > 30 days before any plausible
-  // "today") to avoid coupling to wall-clock time.
 
   await cleanupRoutine.run(ctx);
 
@@ -472,6 +476,9 @@ test('run(): a throwing checkpointStore.pruneOlderThan is warned about but does 
   const checkpointStore: CheckpointStore = {
     write() {},
     readLatest() {
+      return undefined;
+    },
+    readAt() {
       return undefined;
     },
     latestTimeDir() {

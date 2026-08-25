@@ -7,6 +7,7 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
 import type { RunDetail, RunSummary, SoftErrorSummary } from '../../lib/api/types';
 import { useRunControl } from '../runcontrol/useRunControl';
+import { ErrorRetry } from '../shared/ErrorRetry';
 import { DeferredGroup } from './DeferredGroup';
 import { LiveRunHeader } from './LiveRunHeader';
 import { RunDetailView } from './RunDetailView';
@@ -72,26 +73,6 @@ function FreshnessChip({
     <span data-testid="freshness-chip" className="text-xs text-muted-foreground">
       Updated {formatRelative(new Date(dataUpdatedAt).toISOString(), new Date())}
     </span>
-  );
-}
-
-/** Shared list-pane/detail-pane error state — same shape TriagePage uses. */
-function ErrorRetry({
-  message,
-  onRetry,
-  padded = false,
-}: {
-  message: string;
-  onRetry: () => void;
-  padded?: boolean;
-}) {
-  return (
-    <div className={`flex flex-col items-start gap-2 text-sm ${padded ? 'p-4' : ''}`}>
-      <span className="text-destructive">{message}</span>
-      <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
-        Retry
-      </Button>
-    </div>
   );
 }
 

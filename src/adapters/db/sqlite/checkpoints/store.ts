@@ -74,6 +74,26 @@ export class SqliteCheckpointStore implements CheckpointStore {
       )
       .get(runDate, timeDir) as CheckpointRow | undefined;
     if (!row) return undefined;
+    return this.toResult(row);
+  }
+
+  readAt(
+    runDate: string,
+    timeDir: string,
+    stage: string,
+  ): { ref: CheckpointRef; payload: unknown } | undefined {
+    const db = this.open();
+    const row = db
+      .prepare(
+        `SELECT * FROM checkpoints WHERE run_date = ? AND time_dir = ? AND stage = ?
+         ORDER BY position DESC LIMIT 1`,
+      )
+      .get(runDate, timeDir, stage) as CheckpointRow | undefined;
+    if (!row) return undefined;
+    return this.toResult(row);
+  }
+
+  private toResult(row: CheckpointRow): { ref: CheckpointRef; payload: unknown } {
     return {
       ref: {
         runDate: row.run_date,

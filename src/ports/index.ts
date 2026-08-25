@@ -1,4 +1,5 @@
 export * from './board.ts';
+export * from './board_preview.ts';
 export * from './browser.ts';
 export * from './checkpoint_store.ts';
 export * from './config_store.ts';

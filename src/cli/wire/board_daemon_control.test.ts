@@ -1,0 +1,334 @@
+/**
+ * board_daemon_control.test.ts (settings-overhaul, task 11 `stopBoardDaemon`;
+ * task 12 adds `startBoardDaemon`) — TDD against a REAL temporary home for
+ * the pidfile (written by hand, mirroring `board_daemon.test.ts`'s own
+ * posture) but with `pidIsAlive`/`killPid`/`sleep`/`spawn` fully stubbed —
+ * NEVER a real OS process. SAFETY: per this brief's own constraint, no test
+ * here spawns, signals, or waits on anything but these in-memory stubs; the
+ * `startBoardDaemon` tests below additionally stub `listLaunchAgentFiles`
+ * and `home` (a throwaway subdirectory of the same tmpdir) so no test ever
+ * touches the real `~/Library/LaunchAgents` or `~/.jobbunny/logs`.
+ * `setBoardAutostart`'s tests moved to the sibling
+ * `board_autostart_control.test.ts` when the fix round's F13 split that
+ * function into its own module.
+ */
+import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { after, before, test } from 'node:test';
+import type { SpawnFn, SpawnHandle } from '../commands/serve/index.ts';
+import { startBoardDaemon, stopBoardDaemon } from './board_daemon_control.ts';
+
+let root: string;
+
+function pidfilePath(): string {
+  return path.join(root, '.jobbunny-daemon.pid');
+}
+
+function writePidfile(overrides: Record<string, unknown> = {}): void {
+  writeFileSync(
+    pidfilePath(),
+    JSON.stringify({
+      pid: 4242,
+      startedAt: '2026-08-07T09:00:00.000Z',
+      lastTickAt: '2026-08-07T09:59:30.000Z',
+      attempts: [],
+      degraded: [],
+      schemaDriftNotifiedAt: null,
+      schemaDriftNoNotifierWarnedAt: null,
+      schemaDriftNotifyFailedAt: null,
+      slotGateDeclines: [],
+      deferredNotifyAttempts: [],
+      ...overrides,
+    }),
+  );
+}
+
+/** A no-op stub — no test in this file ever actually waits. */
+const noSleep = async () => {};
+
+before(() => {
+  root = mkdtempSync(path.join(tmpdir(), 'jobbunny-board-daemon-control-'));
+});
+
+after(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('no pidfile at all: already_stopped, no kill attempted', async () => {
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root: path.join(root, 'no-such-dir-here'),
+    pidIsAlive: () => false,
+    killPid: (pid, signal) => killCalls.push({ pid, signal }),
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'already_stopped' });
+  assert.deepEqual(killCalls, []);
+});
+
+test('daemon dies on SIGTERM, no in-flight child: stopped, pidfile released', async () => {
+  writePidfile();
+  const alive = new Set([4242]);
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    pidIsAlive: (pid) => alive.has(pid),
+    killPid: (pid, signal) => {
+      killCalls.push({ pid, signal });
+      if (signal === 'SIGTERM') alive.delete(pid); // dies immediately on SIGTERM
+    },
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'stopped' });
+  assert.deepEqual(killCalls, [{ pid: 4242, signal: 'SIGTERM' }]);
+});
+
+test('daemon survives SIGTERM but dies on SIGKILL, in-flight child dies too: stopped', async () => {
+  writePidfile({
+    inFlight: { pid: 5300, profile: 'rajni', startedAt: '2026-08-07T09:59:00.000Z' },
+  });
+  const alive = new Set([4242, 5300]);
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    pidIsAlive: (pid) => alive.has(pid),
+    killPid: (pid, signal) => {
+      killCalls.push({ pid, signal });
+      if (signal === 'SIGKILL') alive.delete(pid); // needs the hard kill
+    },
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'stopped' });
+  // Daemon fully escalated (SIGTERM then SIGKILL) BEFORE the child was ever
+  // touched — D10's daemon-before-child ordering, asserted by call order.
+  assert.deepEqual(killCalls, [
+    { pid: 4242, signal: 'SIGTERM' },
+    { pid: 4242, signal: 'SIGKILL' },
+    { pid: 5300, signal: 'SIGTERM' },
+    { pid: 5300, signal: 'SIGKILL' },
+  ]);
+});
+
+test('daemon survives even SIGKILL: daemon_unresponsive, child never touched, pidfile untouched', async () => {
+  writePidfile({
+    inFlight: { pid: 5300, profile: 'rajni', startedAt: '2026-08-07T09:59:00.000Z' },
+  });
+  const alive = new Set([4242, 5300]);
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    pidIsAlive: (pid) => alive.has(pid), // never removed — survives everything
+    killPid: (pid, signal) => killCalls.push({ pid, signal }),
+    sleep: noSleep,
+  });
+  // The exact false-success this design exists to prevent: NEVER
+  // already_stopped for a daemon that outlived SIGKILL.
+  assert.deepEqual(outcome, { outcome: 'daemon_unresponsive' });
+  assert.notDeepEqual(outcome, { outcome: 'already_stopped' });
+  // SIGKILL was attempted (full escalation ran) before the unresponsive
+  // outcome fired, and the child pid (5300) was never signaled at all.
+  assert.deepEqual(killCalls, [
+    { pid: 4242, signal: 'SIGTERM' },
+    { pid: 4242, signal: 'SIGKILL' },
+  ]);
+});
+
+test('daemon dies but its in-flight child survives SIGKILL: child_unresponsive with childPid', async () => {
+  writePidfile({
+    inFlight: { pid: 5300, profile: 'rajni', startedAt: '2026-08-07T09:59:00.000Z' },
+  });
+  const alive = new Set([4242, 5300]);
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    pidIsAlive: (pid) => alive.has(pid),
+    killPid: (pid, signal) => {
+      killCalls.push({ pid, signal });
+      if (pid === 4242 && signal === 'SIGTERM') alive.delete(4242); // daemon dies fast
+      // child 5300 never removed — survives everything
+    },
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'child_unresponsive', childPid: 5300 });
+  assert.notDeepEqual(outcome, { outcome: 'already_stopped' });
+  // Full escalation (SIGTERM then SIGKILL) was attempted on the CHILD
+  // before the unresponsive outcome fired, after the daemon was confirmed
+  // dead first (daemon-before-child ordering).
+  assert.deepEqual(killCalls, [
+    { pid: 4242, signal: 'SIGTERM' },
+    { pid: 5300, signal: 'SIGTERM' },
+    { pid: 5300, signal: 'SIGKILL' },
+  ]);
+});
+
+test('pidfile names THIS process itself (self-referential/stale, stability-review fix): stale_pidfile, never killed', async () => {
+  // Mirrors the real bug: `startBoardDaemon` writes the BOARD SERVER's own
+  // pid into the pidfile before the not-yet-spawned daemon child exists.
+  // `selfPid` stubs that identity here rather than using the real
+  // `process.pid`, so the test asserts the guard's own comparison, not an
+  // accident of which pid the test runner happens to have.
+  writePidfile({ pid: 8888 });
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    selfPid: 8888,
+    pidIsAlive: () => true,
+    killPid: (pid, signal) => killCalls.push({ pid, signal }),
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'stale_pidfile' });
+  assert.deepEqual(killCalls, []);
+  assert.notDeepEqual(outcome, { outcome: 'already_stopped' });
+});
+
+test('pidfile names a DIFFERENT pid than this process: normal kill path still runs (guard is not over-broad)', async () => {
+  writePidfile({ pid: 4242 });
+  const alive = new Set([4242]);
+  const killCalls: Array<{ pid: number; signal: string }> = [];
+  const outcome = await stopBoardDaemon({
+    root,
+    selfPid: 8888, // this process's own pid — distinct from the pidfile's 4242
+    pidIsAlive: (pid) => alive.has(pid),
+    killPid: (pid, signal) => {
+      killCalls.push({ pid, signal });
+      if (signal === 'SIGTERM') alive.delete(pid);
+    },
+    sleep: noSleep,
+  });
+  assert.deepEqual(outcome, { outcome: 'stopped' });
+  assert.deepEqual(killCalls, [{ pid: 4242, signal: 'SIGTERM' }]);
+});
+
+// --- startBoardDaemon (task 12) -------------------------------------------
+
+function freshRoot(): string {
+  return mkdtempSync(path.join(root, 'start-'));
+}
+
+function fakeSpawn(
+  pid: number | undefined,
+  throwsSync = false,
+): {
+  spawn: SpawnFn;
+  killCalls: string[];
+} {
+  const killCalls: string[] = [];
+  const spawn: SpawnFn = () => {
+    if (throwsSync) throw new Error('boom: spawn failed synchronously');
+    const handle: SpawnHandle = {
+      pid,
+      on: () => {},
+      kill: (signal) => {
+        killCalls.push(signal);
+        return true;
+      },
+      unref: () => {},
+    };
+    return handle;
+  };
+  return { spawn, killCalls };
+}
+
+test('startBoardDaemon: no existing pidfile, child comes up alive: started', async () => {
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(9001);
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn,
+    pidIsAlive: () => true, // the post-spawn alive-confirm sees the child up
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'started' });
+});
+
+test('startBoardDaemon: a fresh (not-stale) pidfile already exists: already_running, spawn never called', async () => {
+  const testRoot = freshRoot();
+  writeFileSync(
+    path.join(testRoot, '.jobbunny-daemon.pid'),
+    JSON.stringify({
+      pid: 4242,
+      startedAt: '2026-08-19T09:00:00.000Z',
+      lastTickAt: new Date().toISOString(), // fresh heartbeat — never stale
+      attempts: [],
+      degraded: [],
+      schemaDriftNotifiedAt: null,
+      schemaDriftNoNotifierWarnedAt: null,
+      schemaDriftNotifyFailedAt: null,
+      slotGateDeclines: [],
+      deferredNotifyAttempts: [],
+    }),
+  );
+  let spawnCalled = false;
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn: () => {
+      spawnCalled = true;
+      throw new Error('must never spawn when a daemon is already running');
+    },
+    pidIsAlive: () => true, // the incumbent (4242) is genuinely alive
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'already_running' });
+  assert.equal(spawnCalled, false);
+});
+
+test('startBoardDaemon: the child dies immediately (post-spawn alive-confirm fails): spawn_failed, never already_running', async () => {
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(9002);
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn,
+    pidIsAlive: () => false, // the child never comes up
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+  assert.notDeepEqual(outcome, { outcome: 'already_running' });
+});
+
+test('startBoardDaemon: a synchronous spawn throw is caught: spawn_failed, never an unhandled exception', async () => {
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(undefined, true);
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    spawn,
+    pidIsAlive: () => true,
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+});
+
+test('startBoardDaemon: a spawn-setup throw releases the just-acquired pidfile (no permanent self-referential leak, stability-review fix)', async () => {
+  // Reproduces the PERMANENT-LEAK half of the bug: `acquireDaemonPidfile`
+  // writes `deps.pid` (here 8888, standing in for the board server's own
+  // pid) into the pidfile BEFORE the not-yet-spawned child exists; a throw
+  // from spawn-setup used to leave that pidfile behind forever, naming a
+  // live process (the board) that is not actually the daemon.
+  const testRoot = freshRoot();
+  const { spawn } = fakeSpawn(undefined, true); // synchronous throw
+  const pidfilePath = path.join(testRoot, '.jobbunny-daemon.pid');
+  const outcome = await startBoardDaemon({
+    root: testRoot,
+    home: testRoot,
+    pid: 8888,
+    spawn,
+    pidIsAlive: () => true,
+    sleep: noSleep,
+    listLaunchAgentFiles: () => [],
+  });
+  assert.deepEqual(outcome, { outcome: 'spawn_failed' });
+  assert.equal(
+    existsSync(pidfilePath),
+    false,
+    'the self-referential placeholder must be released, not leaked',
+  );
+});

@@ -3,11 +3,12 @@
 Job Bunny is a single-user, local-first tool. There is exactly one persona, and they wear two
 hats. Every product decision resolves against this one person.
 
-Status: v1.2, derived 2026-08-10 during the `run-experience-overhaul` spec and confirmed in that
+Status: v1.3, derived 2026-08-10 during the `run-experience-overhaul` spec and confirmed in that
 spec's interview round 1; extended 2026-08-13 during the `pipeline-stability-hardening` spec,
-which closed the open discovery-channel question. Derived from repo recon + the orchestrator's
-grounding, then corrected against the user's own answers. Refine this file on every product run —
-it is not frozen.
+which closed the open discovery-channel question; extended again 2026-08-17 during the
+`settings-overhaul` spec, which named a **third hat** and added **JTBD-4**. Derived from repo recon
++ the orchestrator's grounding, then corrected against the user's own answers. Refine this file on
+every product run — it is not frozen.
 
 ---
 
@@ -30,7 +31,10 @@ job-searching and who built their own pipeline rather than trust a job board's f
   job-search leads quietly lost. There is no monitoring, no alerting team, no SLA — only
   whether this one person happened to notice.
 
-### The two hats
+### The three hats
+
+*(Named as "two hats" until 2026-08-17; the `settings-overhaul` spec identified a third that the
+first two do not cover, because it is the only one worn when nothing is wrong.)*
 
 **Job seeker hat** (the reason the tool exists)
 - Wants leads, not telemetry. Opens the board to see what is new and worth applying to.
@@ -50,6 +54,17 @@ job-searching and who built their own pipeline rather than trust a job board's f
   with being thin, and exactly why it is expensive: capability is not the same as
   willingness, and every log dig is time not spent applying to jobs.
 
+**Tuner hat** (added 2026-08-17, `settings-overhaul`)
+- Worn **deliberately and calmly**, not under duress — typically right after reading a run's
+  results and thinking "that's not quite what I want." Nothing is broken. The user is *aiming*
+  the machine, not repairing it.
+- This is the only hat that involves sustained **editing** rather than glancing, and the only one
+  where the user chose to be there. Designs that assume interruption-mode urgency are wrong here.
+- **Capability is not the constraint, and this hat proves it.** The user wrote the config schema.
+  He is not lost — he is paying a toll: leave the board, find the file, hand-edit JSON, and trust
+  himself not to have broken it. Design for **friction removal**, never for teaching.
+- Worn less often than the job-seeker hat, more deliberately than the operator hat.
+
 ### Jobs to be done
 
 - **JTBD-1 (primary, job-seeker hat):** When a run finishes, I want to know within seconds
@@ -61,6 +76,10 @@ job-searching and who built their own pipeline rather than trust a job board's f
 - **JTBD-3 (operator hat):** When a run fails or comes back empty, I want to know what broke
   and what to do about it without opening a terminal, so a bad run costs me minutes instead
   of an evening.
+- **JTBD-4 (tuner hat, added 2026-08-17):** When my board isn't showing what I expect — too
+  little, too much, or the wrong things ranked first — I want to find and change the rule or
+  limit responsible without opening a file, so I can correct the machine's aim in a few minutes
+  rather than losing an evening to it.
 
 ### Frustrations (evidenced)
 
@@ -75,6 +94,18 @@ job-searching and who built their own pipeline rather than trust a job board's f
 - Run history and run detail do not answer "did this run do anything useful?"; funnels and
   drops are buried. (User-stated.) The runs list today shows only timestamp, status, kind,
   and duration — nothing about yield.
+
+- **Confirmed 2026-08-17 (`settings-overhaul`, Q1).** Three frictions hit within the preceding
+  month, in the user's own selection: (i) **hand-editing raw JSON** because a form lacked the knob;
+  (ii) **daemon and login blindness** — wanting to start/stop the daemon from the board, and not
+  knowing whether Chrome is still signed into LinkedIn; (iii) **a thin run where a cap or a filter
+  rule was suspected** but could not be confirmed. Explicitly **not** selected, and therefore to be
+  treated as plausible-but-unevidenced: changing scrape pacing after a soft-block, and setting up a
+  new profile.
+- **Corroborating evidence for (iii):** the knobs that bound a run's yield (`maxNewPerLane: 40`,
+  `maxProbesPerRun: 25`) are live, unsurfaced, and reachable only as raw JSON in a document the
+  board never touches. The user suspected a cap and had no way to check — the suspicion was
+  well-founded and the surface simply could not answer it.
 
 ### What this persona is NOT
 
@@ -104,6 +135,13 @@ job-searching and who built their own pipeline rather than trust a job board's f
     user arrives already knowing something is wrong and wanting to know *what*. Designs that
     assume the board is being watched are designing for the minority case — the same correction
     already recorded above for live run-watching.
+
+- **Closed 2026-08-17 (`settings-overhaul`, Q3): the audience is one person, permanently.** The user
+  confirmed this tool is **not** being handed to other people and is not being prepared for
+  distribution. Standing design consequence: **onboarding-for-strangers is not a real requirement**
+  in this product. Anything justified by "a new user would need this" is justified by nobody. Setup
+  surfaces earn their place only as *repair and completeness* aids for the profiles that already
+  exist — never as first-run tutorials.
 
 ### Still open (?)
 

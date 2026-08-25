@@ -1,37 +1,17 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { navigate, type SettingsSection } from '../../lib/router';
-import type { ConfigDocName } from './config.api';
-import { JsonEscapeHatch } from './JsonEscapeHatch';
+import type { SettingsSection } from '../../lib/router';
+import { SettingsShell } from './SettingsShell';
+import { AboutYouSection } from './sections/AboutYouSection';
 import { DangerZone } from './sections/DangerZone';
-import { FiltersSection } from './sections/FiltersSection';
-import { ProfileSection } from './sections/ProfileSection';
-import { ResumeSection } from './sections/ResumeSection';
+import { DeliverySection } from './sections/DeliverySection';
+import { FetchingSection } from './sections/FetchingSection';
+import { HousekeepingSection } from './sections/HousekeepingSection';
+import { LandingSection } from './sections/LandingSection';
+import { RawConfigSection } from './sections/RawConfigSection';
+import { RolesCompaniesSection } from './sections/RolesCompaniesSection';
 import { ScheduleSection } from './sections/ScheduleSection';
-import { SearchUrlsSection } from './sections/SearchUrlsSection';
-
-const TABS: { section: SettingsSection; label: string }[] = [
-  { section: 'profile', label: 'Profile' },
-  { section: 'schedule', label: 'Schedule' },
-  { section: 'filters', label: 'Filters' },
-  { section: 'resume', label: 'Resume' },
-  { section: 'search-urls', label: 'Search URLs' },
-  { section: 'danger', label: 'Danger zone' },
-];
-
-const SECTION_DOC: Partial<Record<SettingsSection, ConfigDocName>> = {
-  profile: 'profile.json',
-  schedule: 'profile.json',
-  filters: 'filter.json',
-  resume: 'resume.json',
-  'search-urls': 'search_urls.md',
-};
-
-// Owned by later tasks: resume/search-urls → 10, danger → 11.
-const PLACEHOLDER_COPY: Partial<Record<SettingsSection, string>> = {
-  resume: 'Resume settings — coming soon.',
-  'search-urls': 'Search URL settings — coming soon.',
-  danger: 'Danger zone — coming soon.',
-};
+import { SkillsSection } from './sections/SkillsSection';
+import { WhereJobsComeFromSection } from './sections/WhereJobsComeFromSection';
+import { WhereYouWorkSection } from './sections/WhereYouWorkSection';
 
 function SectionBody({
   profile,
@@ -40,13 +20,32 @@ function SectionBody({
   profile: string;
   section: SettingsSection;
 }) {
-  if (section === 'profile') return <ProfileSection profile={profile} />;
-  if (section === 'schedule') return <ScheduleSection profile={profile} />;
-  if (section === 'filters') return <FiltersSection profile={profile} />;
-  if (section === 'resume') return <ResumeSection profile={profile} />;
-  if (section === 'search-urls') return <SearchUrlsSection profile={profile} />;
-  if (section === 'danger') return <DangerZone profile={profile} />;
-  return <p className="text-sm text-muted-foreground">{PLACEHOLDER_COPY[section]}</p>;
+  switch (section) {
+    case 'landing':
+      return <LandingSection profile={profile} />;
+    case 'roles-companies':
+      return <RolesCompaniesSection profile={profile} />;
+    case 'where-you-work':
+      return <WhereYouWorkSection profile={profile} />;
+    case 'skills':
+      return <SkillsSection profile={profile} />;
+    case 'about-you':
+      return <AboutYouSection profile={profile} />;
+    case 'where-jobs-come-from':
+      return <WhereJobsComeFromSection profile={profile} />;
+    case 'schedule':
+      return <ScheduleSection profile={profile} />;
+    case 'fetching':
+      return <FetchingSection profile={profile} />;
+    case 'delivery':
+      return <DeliverySection profile={profile} />;
+    case 'housekeeping':
+      return <HousekeepingSection profile={profile} />;
+    case 'raw-config':
+      return <RawConfigSection profile={profile} />;
+    case 'danger':
+      return <DangerZone profile={profile} />;
+  }
 }
 
 export function SettingsPage({
@@ -56,35 +55,17 @@ export function SettingsPage({
   profile: string;
   section: SettingsSection;
 }) {
-  const doc = SECTION_DOC[section];
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
       <h1 className="text-lg font-semibold font-heading">Settings</h1>
-      <Tabs
-        data-testid="settings-tabs"
-        value={section}
-        onValueChange={(value) =>
-          navigate({ name: 'settings', section: value as SettingsSection })
-        }
-      >
-        <TabsList>
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab.section} value={tab.section}>
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        <TabsContent value={section}>
-          <div
-            data-testid="settings-section"
-            data-section={section}
-            className="flex flex-col gap-4"
-          >
-            <SectionBody profile={profile} section={section} />
-            {doc && <JsonEscapeHatch profile={profile} doc={doc} />}
-          </div>
-        </TabsContent>
-      </Tabs>
+      <SettingsShell section={section} profile={profile}>
+        {/* `key={profile}` remounts the active section clean on every
+         * profile switch — belt-and-braces alongside each section's own
+         * (profile, doc)-keyed seed guard (see RawConfigSection.tsx's own
+         * fix), so a section that ever forgets its own guard still can't
+         * carry stale draft state across a profile switch. */}
+        <SectionBody key={profile} profile={profile} section={section} />
+      </SettingsShell>
     </div>
   );
 }

@@ -1,12 +1,12 @@
 import {
   Activity,
+  BarChart3,
   Columns3,
   Inbox,
   PanelLeftClose,
   PanelLeftOpen,
   Play,
-  Rocket,
-  Settings,
+  SlidersHorizontal,
 } from 'lucide-react';
 import logo from '../../assets/logo.svg';
 import { Wordmark } from '../../assets/Wordmark';
@@ -24,9 +24,9 @@ const NAV_ITEMS: { name: RouteName; label: string; Icon: typeof Inbox }[] = [
   { name: 'triage', label: 'Triage', Icon: Inbox },
   { name: 'tracker', label: 'Tracker', Icon: Columns3 },
   { name: 'runs', label: 'Runs', Icon: Play },
-  { name: 'analytics', label: 'Analytics', Icon: Activity },
-  { name: 'setup', label: 'Setup & Health', Icon: Rocket },
-  { name: 'settings', label: 'Settings', Icon: Settings },
+  { name: 'analytics', label: 'Analytics', Icon: BarChart3 },
+  { name: 'setup', label: 'Operate', Icon: Activity },
+  { name: 'settings', label: 'Settings', Icon: SlidersHorizontal },
 ];
 
 export function Sidebar({

@@ -47,6 +47,9 @@ function fakeCheckpointStore(
     readLatest() {
       return opts.readLatestResult;
     },
+    readAt() {
+      return undefined; // not exercised by run.ts's own tests
+    },
     latestTimeDir(runDate) {
       latestTimeDirCalls.push(runDate);
       return opts.latestTimeDirResult;

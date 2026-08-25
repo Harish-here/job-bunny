@@ -76,6 +76,13 @@ export function isRunOwed(
       const graceEndAt = graceEndAtFor(slotAt, schedule);
       if (now < slotAt || now > graceEndAt) continue;
 
+      if (
+        schedule.skipNext &&
+        schedule.skipNext.date === date &&
+        schedule.skipNext.slot === slot
+      )
+        continue;
+
       if (isServed(history, schedule.profile, date, slotAt, graceEndAt)) continue;
 
       owed.push({ profile: schedule.profile, date, slot });

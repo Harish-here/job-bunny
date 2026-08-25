@@ -84,6 +84,9 @@ function fakeCtx(store: Map<string, unknown>): PipelineCtx {
       readLatest() {
         return undefined;
       },
+      readAt() {
+        return undefined;
+      },
       latestTimeDir() {
         return undefined;
       },

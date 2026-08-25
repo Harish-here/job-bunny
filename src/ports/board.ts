@@ -1,5 +1,11 @@
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
+import type {
+  AutostartOutcome,
+  DaemonStatus,
+  StartDaemonOutcome,
+  StopDaemonOutcome,
+} from './board_daemon.ts';
 import type { ConfigDocKey } from './config_store.ts';
 import type { DeferredSlotRow } from './deferred_slots.ts';
 import type { DoctorReport } from './doctor.ts';
@@ -86,27 +92,36 @@ export interface RunDurationEstimate {
  * — absence, not a guess, when history is too thin. */
 export const MIN_DURATION_SAMPLE_SIZE = 3;
 
-export type DaemonState = 'running' | 'stopped' | 'stale';
+// Daemon-control result types (`DaemonState`/`DaemonProfileSchedule`/
+// `DaemonStatus`/`StopDaemonOutcome`/`StartDaemonOutcome`/
+// `AutostartOutcome`) live in `./board_daemon.ts` (split out purely for the
+// file-size cap) and are re-exported here so every existing
+// `from '../../ports/board.ts'` import keeps working unchanged.
+export type {
+  AutostartOutcome,
+  DaemonProfileSchedule,
+  DaemonState,
+  DaemonStatus,
+  StartDaemonOutcome,
+  StopDaemonOutcome,
+} from './board_daemon.ts';
 
-export interface DaemonProfileSchedule {
-  profile: string;
-  enabled: boolean;
-  /** ISO 8601 UTC, or `null` when the profile has no enabled schedule. */
-  nextRunAt: string | null;
-  degraded: boolean;
-  degradedReason: string | null; // human-readable, mirrors T6's cause line, null when not degraded
-  schemaVersion: number | null; // the profile's own DB schema version when degraded, else null
-  buildVersion: number | null; // this daemon build's LATEST_SCHEMA_VERSION when degraded, else null
-}
-
-export interface DaemonStatus {
-  state: DaemonState;
-  pid: number | null;
-  startedAt: string | null;
-  lastTickAt: string | null;
-  inFlight: { profile: string; pid: number; startedAt: string } | null;
-  profiles: DaemonProfileSchedule[];
-}
+/** R15 filter-rule drop preview — `BoardSource.previewFilterRule`'s result.
+ * `newlyDropped` (jobs that drop under the draft but not the current config)
+ * is capped at 12 entries, matching the mockup's disclosure ("see which 12
+ * →"). `available: false` covers both "this profile has never run" and
+ * "the most recent runs' pre-filter checkpoint has already been pruned" —
+ * see `previewFilterRule`'s own doc comment for exactly which reason maps
+ * to which. */
+export type FilterPreviewResult =
+  | {
+      available: true;
+      totalJobs: number;
+      baselineDrops: number;
+      draftDrops: number;
+      newlyDropped: Array<{ title: string; company: string }>;
+    }
+  | { available: false; reason: 'no_recent_run' | 'checkpoint_expired' };
 
 export interface TrackingRow extends TrackingFields {
   jobId: string;
@@ -265,6 +280,31 @@ export interface BoardSource {
    * scheduled slot. Never starts, stops, or signals the daemon, and never
    * opens a profile database. */
   readDaemonStatus(): Promise<DaemonStatus>;
+  /** R20 = Option 1 (board-initiated detached spawn): stops the daemon and,
+   * if one is in flight, the run child it owns — see `StopDaemonOutcome`'s
+   * own doc comment for the outcome shape and why a survived-SIGKILL
+   * daemon/child is never reported as a success. NEVER throws; every
+   * failure mode is a typed outcome. */
+  stopDaemon(): Promise<StopDaemonOutcome>;
+  /** R20 = Option 1 (board-initiated detached spawn) — task 12, the Start
+   * counterpart to `stopDaemon` above. Spawns exactly the SAME zero-argument
+   * supervisor process `jobbunny serve start` spawns, detached, and confirms
+   * it's alive before resolving — see `StartDaemonOutcome`'s own doc comment
+   * for the outcome shape. NEVER throws; every failure mode is a typed
+   * outcome. This is the board's ONLY spawn capability — it can never spawn
+   * a pipeline run directly; every run stays daemon-spawned off a schedule
+   * slot or claimed off a `run_intents` row. */
+  startDaemon(): Promise<StartDaemonOutcome>;
+  /** R20 = Option 1, task 13 — enables or disables the darwin autostart
+   * LaunchAgent, reusing `cli/commands/autostart.ts`'s `runEnable`/
+   * `runDisable` verbatim (same darwin gate, same tolerant launchctl
+   * posture, same idempotent re-enable/re-disable). Fix round F13: a
+   * darwin legacy-plist-conflict refusal on enable throws
+   * `HttpError(409, 'autostart_conflict', ...)` rather than returning a
+   * value — see `AutostartOutcome`'s own doc comment. On any non-darwin
+   * platform this never attempts a filesystem write or `launchctl`
+   * shell-out. */
+  setAutostart(enabled: boolean): Promise<AutostartOutcome>;
   /** One profile's run-intent store. `null` for a name that is not a
    * current directory under `<root>/profiles`. Unlike `openStore`, this
    * OPENS-OR-CREATES the profile's db: an intent is durable state a
@@ -288,5 +328,25 @@ export interface BoardSource {
    * Irreversible — there is no dry-run mode on this method, because the
    * UI's type-the-name confirmation dialog is the dry run. */
   removeProfile(name: string): Promise<RemoveProfileOutcome>;
+  /** R15: "what would this filter rule drop?" Re-runs `core/filter`'s
+   * existing evaluation, once against the profile's CURRENT `filter.json`
+   * and once against `draftFilterConfig`, over the most recent run's
+   * pre-filter candidate pool (read from a checkpoint) — it never reruns
+   * the pipeline and never mutates any stored config. Throws
+   * `InvalidDraftFilterConfigError` (`ports/board_preview.ts`) on an
+   * invalid `draftFilterConfig` — the caller turns THAT, and only that,
+   * into a 422 (same posture as `writeConfigDoc`'s validator-throw
+   * contract). Any OTHER throw (a corrupted stored `filter.json`, a broken
+   * store, ...) is deliberately a plain `Error`, not that class — it is a
+   * server-side data problem, not the caller's input, and callers must not
+   * misattribute it as one (fix round). `available: false` with `reason:
+   * 'no_recent_run'` when the profile has no run to read from at all, or
+   * `'checkpoint_expired'` when recent runs exist but none has a usable
+   * pre-filter checkpoint left (pruned, or its payload carries no
+   * structured job). Read-only. */
+  previewFilterRule(
+    name: string,
+    draftFilterConfig: unknown,
+  ): Promise<FilterPreviewResult>;
   close(): void;
 }

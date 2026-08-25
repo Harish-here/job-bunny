@@ -176,6 +176,39 @@ test('maxProbesPerRun cap respected (cap 2 with 5 candidates -> only 2 probed)',
   assert.equal(probeCalls.length, 2);
 });
 
+test('maxProbesPerRun cap hit: logs loudly once with the configured cap value', async () => {
+  const stateStore = fakeStateStore();
+  const names = ['C1', 'C2', 'C3', 'C4', 'C5'];
+  stateStore.store.set('registry/companies_seen.json', { linkedin: names });
+
+  const lane = makeFakeLane({ name: 'greenhouse' });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 2 });
+  const ctx = fakeCtx(stateStore, { warn: (msg, data) => warnings.push({ msg, data }) });
+  await stage.run(emptyPayload(), ctx);
+
+  const capWarnings = warnings.filter((w) => w.msg.includes('maxProbesPerRun cap hit'));
+  assert.equal(capWarnings.length, 1);
+  assert.deepEqual(capWarnings[0]?.data, { maxProbesPerRun: 2 });
+});
+
+test('maxProbesPerRun cap NOT hit: no warning is logged when candidates fit under the cap', async () => {
+  const stateStore = fakeStateStore();
+  const names = ['C1', 'C2'];
+  stateStore.store.set('registry/companies_seen.json', { linkedin: names });
+
+  const lane = makeFakeLane({ name: 'greenhouse' });
+
+  const warnings: Array<{ msg: string; data?: unknown }> = [];
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+  const ctx = fakeCtx(stateStore, { warn: (msg, data) => warnings.push({ msg, data }) });
+  await stage.run(emptyPayload(), ctx);
+
+  const capWarnings = warnings.filter((w) => w.msg.includes('maxProbesPerRun cap hit'));
+  assert.equal(capWarnings.length, 0);
+});
+
 test('a fetchBoard throwing is soft: recordFetchFailure applied, other boards still processed, run() does not throw', async () => {
   const stateStore = fakeStateStore();
   stateStore.store.set('registry/companies_seen.json', {

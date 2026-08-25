@@ -37,6 +37,15 @@ export interface CheckpointStore {
     runDate: string,
     timeDir: string,
   ): { ref: CheckpointRef; payload: unknown } | undefined;
+  /** The highest-`position` row matching `stage` within this
+   * (runDate, timeDir) group — defensive against a same-stage retry within
+   * one group writing more than one row for that stage — or `undefined` if
+   * no row for that stage exists in the group. */
+  readAt(
+    runDate: string,
+    timeDir: string,
+    stage: string,
+  ): { ref: CheckpointRef; payload: unknown } | undefined;
   /** Lexicographically greatest `time_dir` for `runDate` across BOTH
    * `checkpoints` and `runs` — a group exists if EITHER table mentions
    * it, so an early-killed run (a `runs` row with no checkpoints yet)
@@ -49,7 +58,13 @@ export interface CheckpointStore {
    * from" must use `latestCheckpointTimeDir` instead: a bare `runs` row
    * (no checkpoint written yet — e.g. a run that opened, then died before
    * its first stage completed) would otherwise SHADOW the last group that
-   * genuinely holds a payload, silently losing a resumable checkpoint. */
+   * genuinely holds a payload, silently losing a resumable checkpoint.
+   *
+   * `readAt` (below) is a deliberate exception to this "latest" framing: it
+   * reads a NAMED, possibly non-latest stage's checkpoint from within the
+   * 5 most recent runs (bounded by `settings.cleanup.checkpointsOlderThanDays`,
+   * default 2 — not by "latest" semantics), backing the R15 filter-preview
+   * feature. */
   latestTimeDir(runDate: string): string | undefined;
   /** The greatest `time_dir` for `runDate` that has AT LEAST ONE row in
    * `checkpoints` — never a bare `runs` row. `undefined` when this date
@@ -58,7 +73,13 @@ export interface CheckpointStore {
    * `reconcile.ts`'s same-day chain all use this (never `latestTimeDir`)
    * so a group that only ever opened a `runs` row — died before writing
    * anything resumable — is skipped in favor of the last group that
-   * actually has a payload. */
+   * actually has a payload.
+   *
+   * `readAt` (below) is a deliberate exception to this "latest" framing: it
+   * reads a NAMED, possibly non-latest stage's checkpoint from within the
+   * 5 most recent runs (bounded by `settings.cleanup.checkpointsOlderThanDays`,
+   * default 2 — not by "latest" semantics), backing the R15 filter-preview
+   * feature. */
   latestCheckpointTimeDir(runDate: string): string | undefined;
   /** `time` itself, or `time`-2, `time`-3, … — the first candidate absent
    * from the same (`checkpoints` ∪ `runs`) time_dir set for `runDate`. */

@@ -25,6 +25,7 @@ import { makeDaemonRoutes } from '../features/daemon/index.ts';
 import { makeDoctorRoutes } from '../features/doctor/index.ts';
 import { makeIntentRoutes } from '../features/intents/index.ts';
 import { makePersonasRoutes } from '../features/personas/index.ts';
+import { makePreviewRoutes } from '../features/preview/index.ts';
 import { makeProfilesRoutes } from '../features/profiles/index.ts';
 import { makeRunsRoutes } from '../features/runs/index.ts';
 import { makeSecretsRoutes } from '../features/secrets/index.ts';
@@ -66,6 +67,7 @@ export function createBoardServer(opts: BoardServerOptions): BoardServer {
     ...makeDoctorRoutes(source),
     ...makeAppInfoRoutes(version),
     ...makePersonasRoutes(),
+    ...makePreviewRoutes(source),
   ];
 
   const httpServer = createServer((req, res) => {

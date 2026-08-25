@@ -68,7 +68,12 @@ function detail(overrides: {
   };
 }
 
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = {
+  total: 0,
+  groups: [],
+  breakerOpen: false,
+  capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+};
 
 // The real shape `groupSoftErrors` returns: `breakerOpen` is a first-class
 // field, never inferred from a group's `sample` (fix-round finding #3) —
@@ -85,6 +90,7 @@ const BREAKER_OPEN_SOFT_ERRORS: SoftErrorSummary = {
     },
   ],
   breakerOpen: true,
+  capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
 };
 
 // The real producer shape (src/adapters/lanes/linkedin/lane.ts:154-157).
@@ -198,7 +204,7 @@ describe('classifyFailure', () => {
     expect(verdict.action).toEqual({
       kind: 'navigate',
       label: 'Review filter rules →',
-      route: { name: 'settings', section: 'filters' },
+      route: { name: 'settings', section: 'roles-companies' },
     });
     expect(verdict.secondaryAction).toBeUndefined();
   });
@@ -260,7 +266,12 @@ describe('classifyFailure', () => {
 
   it("'degraded' — a status:'passed' run with all 10 stages but a high soft-error count (fix-round finding #2)", () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
-    const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
+    const softErrors: SoftErrorSummary = {
+      total: 12,
+      groups: [],
+      breakerOpen: false,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    };
     const verdict = classifyFailure(input({ run, softErrors }));
     expect(verdict.kind).toBe('degraded');
     expect(verdict.title).toContain('12 soft errors');

@@ -64,7 +64,12 @@ function detail(overrides: {
   };
 }
 
-const EMPTY_SOFT_ERRORS: SoftErrorSummary = { total: 0, groups: [], breakerOpen: false };
+const EMPTY_SOFT_ERRORS: SoftErrorSummary = {
+  total: 0,
+  groups: [],
+  breakerOpen: false,
+  capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+};
 
 const EVENTS: RunEventRow[] = [
   { ts: '2026-08-05T09:00:01.000Z', level: 'info', msg: 'stage started' },
@@ -217,7 +222,12 @@ describe("RunDetailView — 'degraded' never reads as a whole-run failure (fix-r
 
   it('a 10-stage zero-yield passed run with soft errors over threshold (soft-error-rate degraded) renders the same amber, non-destructive treatment', () => {
     const run = detail({ status: 'passed', result: { stages: stages(10, 0) } });
-    const softErrors: SoftErrorSummary = { total: 12, groups: [], breakerOpen: false };
+    const softErrors: SoftErrorSummary = {
+      total: 12,
+      groups: [],
+      breakerOpen: false,
+      capsHit: { maxNewPerLane: false, maxCardsPerUrl: false },
+    };
     const { container } = renderDetail({ run, softErrors });
 
     expect(screen.queryByText(/^Failed at/)).not.toBeInTheDocument();

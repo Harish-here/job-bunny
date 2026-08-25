@@ -120,7 +120,7 @@ test('profile lifecycle: creating a profile through the wizard makes it appear i
   expect(profileCfg.lanes).toEqual(['greenhouse', 'keka']);
 
   // Visually, through Settings (Acceptance item 2, half 2).
-  await page.goto('/#/settings/resume');
+  await page.goto('/#/settings/about-you');
   await expect(
     page.getByTestId('settings-section').getByLabel('Current years of experience'),
   ).toHaveValue('8');

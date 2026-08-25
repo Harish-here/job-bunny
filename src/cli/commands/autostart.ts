@@ -8,6 +8,12 @@
  * or reused — this writes plain XML text and shells out to `launchctl`
  * directly, the same posture `serve.ts`'s D15 migration scan already
  * takes.
+ *
+ * `runEnable`/`runDisable` are exported (settings-overhaul task 13,
+ * non-behavioural refactor) so `cli/wire/board_daemon_control.ts` can call
+ * them directly for the board's `setAutostart` control, reusing this
+ * command's own darwin gate, legacy-plist gate, and tolerant-launchctl
+ * posture verbatim instead of re-deriving any of it.
  */
 import { execFile } from 'node:child_process';
 import {
@@ -203,7 +209,7 @@ const NON_DARWIN_ALTERNATIVE =
   '"run at login" mechanism by hand (Task Scheduler on Windows, a systemd --user unit ' +
   'on Linux) pointing at `jobbunny serve start` with no arguments';
 
-async function runEnable(deps: AutostartDeps): Promise<number> {
+export async function runEnable(deps: AutostartDeps): Promise<number> {
   if (deps.platform !== 'darwin') {
     deps.writeErr(
       `autostart enable: not supported on this platform — ${NON_DARWIN_ALTERNATIVE}.`,
@@ -234,7 +240,7 @@ async function runEnable(deps: AutostartDeps): Promise<number> {
   return 0;
 }
 
-async function runDisable(deps: AutostartDeps): Promise<number> {
+export async function runDisable(deps: AutostartDeps): Promise<number> {
   if (deps.platform !== 'darwin') {
     deps.writeErr(
       `autostart disable: not supported on this platform — there is nothing to ` +

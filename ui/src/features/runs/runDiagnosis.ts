@@ -225,7 +225,10 @@ const REGISTRY: DiagnosisEntry[] = [
     matches: ({ run, softErrors }) => classifyOutcome(run, softErrors) === 'empty',
     title: ({ run }) => zeroYieldHealthyTitle(run),
     action: () =>
-      navigateAction('Review filter rules →', { name: 'settings', section: 'filters' }),
+      navigateAction('Review filter rules →', {
+        name: 'settings',
+        section: 'roles-companies',
+      }),
   },
   {
     kind: 'breaker-open',

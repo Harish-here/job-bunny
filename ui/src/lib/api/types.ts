@@ -19,6 +19,12 @@ export type {
   CreateProfileResponse,
 } from '../../../../src/app/features/config/index.ts';
 export type {
+  AutostartOutcome,
+  StartDaemonOutcome,
+  StopDaemonOutcome,
+} from '../../../../src/app/features/daemon/index.ts';
+export type { FilterPreviewResult } from '../../../../src/app/features/preview/index.ts';
+export type {
   BoardProfile,
   ProfilesResponse,
 } from '../../../../src/app/features/profiles/index.ts';
@@ -36,3 +42,7 @@ export type {
   SoftErrorGroup,
   SoftErrorSummary,
 } from '../../../../src/app/features/runs/index.ts';
+export type {
+  SecretKey,
+  SecretPresence,
+} from '../../../../src/app/features/secrets/index.ts';

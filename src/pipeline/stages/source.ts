@@ -202,7 +202,15 @@ export function makeSourceStage(
           const candidates = probeCandidates(reg, apiLane.name, policy, now);
 
           for (const candidate of candidates) {
-            if (probesIssued >= opts.maxProbesPerRun) break;
+            if (probesIssued >= opts.maxProbesPerRun) {
+              ctx.logger.warn(
+                'source: maxProbesPerRun cap hit — stopping probes for this run',
+                {
+                  maxProbesPerRun: opts.maxProbesPerRun,
+                },
+              );
+              break;
+            }
             throwIfAborted(ctx.signal);
             if (laneSignal.aborted) {
               budgetExpired = true;
