@@ -112,7 +112,7 @@ function DetailRail({ stages, failedStage, currentStage }: StageRailProps) {
               data-testid="stage-rail-group"
               className="flex flex-1 flex-col gap-1"
             >
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              <span className="text-micro uppercase tracking-[0.04em] font-medium text-muted-foreground">
                 {group.label}
               </span>
               <div className="flex gap-1">

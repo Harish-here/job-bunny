@@ -190,7 +190,7 @@ describe('LandingSection', () => {
     expect(container.querySelector('[data-qa="landing-rules-summary"]')).not.toBeNull();
 
     expect(runsApi.listRuns).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(runsApi.listRuns).toHaveBeenCalledTimes(2));
   });
 });

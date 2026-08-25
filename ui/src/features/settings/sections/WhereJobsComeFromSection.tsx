@@ -22,6 +22,7 @@ import { Button } from '../../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
+import { laneLabel } from '../../../lib/vocabulary';
 import { configDocQuery } from '../config.queries';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
@@ -230,7 +231,7 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
                     checked={state.lanes.includes(lane)}
                     onChange={() => toggleLane(lane)}
                   />
-                  {lane}
+                  {laneLabel(lane)}
                 </label>
               ))}
             </CardContent>

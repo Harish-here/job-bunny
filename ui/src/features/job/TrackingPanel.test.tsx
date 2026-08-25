@@ -174,4 +174,34 @@ describe('TrackingPanel', () => {
     resolve({ tracking: { jobId: 'li-1', updatedAt: 't1' } });
     await waitFor(() => expect(screen.queryByText('Saving…')).not.toBeInTheDocument());
   });
+
+  it('renders the Card markup (title + description)', () => {
+    stubFetchOk({});
+    const job = makeJob(null);
+    renderPanel(job);
+
+    expect(screen.getByText('Tracking')).toBeInTheDocument();
+    expect(screen.getByText('Fill this in after you decide.')).toBeInTheDocument();
+  });
+
+  it('renders the excitement badge verbatim when job.excitement is set', () => {
+    stubFetchOk({});
+    const job = { ...makeJob(null), excitement: 'Kandipa podu' };
+    renderPanel(job);
+
+    const badge = screen.getByText('Kandipa podu');
+    expect(badge).toBeInTheDocument();
+    expect(document.querySelector('[data-qa="tracking-excitement"]')).toContainElement(
+      badge,
+    );
+  });
+
+  it('renders no tracking-excitement element when job.excitement is null', () => {
+    stubFetchOk({});
+    const job = makeJob(null);
+    expect(job.excitement).toBeNull();
+    renderPanel(job);
+
+    expect(document.querySelector('[data-qa="tracking-excitement"]')).toBeNull();
+  });
 });

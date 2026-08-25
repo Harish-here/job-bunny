@@ -1,12 +1,18 @@
-import { Badge } from '../../components/ui/badge';
 import type { BoardJobRow } from '../../lib/api/types';
 import { cn } from '../../lib/utils';
+import { laneLabel } from '../../lib/vocabulary';
+import { StatusPip } from './StatusPip';
 
-function dotClass(status: string | null | undefined): string {
-  if (status == null) return 'bg-muted-foreground/40';
-  if (status === 'Rejected' || status === 'Passed') return 'bg-destructive';
-  if (status === 'Offer') return 'bg-success';
-  return 'bg-primary';
+/** Row-level score weight band (ux-notes.md §6, verbatim — DIFFERENT
+ * thresholds than `scoreBand()`/`scoreSegments()` in `core/job/score.ts`,
+ * used only inside `MatchScore` in the detail pane; the two must not be
+ * conflated). `null` -> no weight class (base `text-sm` only, per the S1
+ * mockup's "Infrastructure Engineer" row). */
+function scoreWeightClass(score: number | null): string {
+  if (score == null) return '';
+  if (score >= 75) return 'font-semibold text-foreground';
+  if (score >= 50) return 'font-medium text-foreground';
+  return 'font-normal text-muted-foreground';
 }
 
 export function JobRow({
@@ -25,6 +31,7 @@ export function JobRow({
       tabIndex={0}
       aria-selected={selected}
       data-testid="job-row"
+      data-qa="job-row"
       data-job-id={row.id}
       onClick={() => onSelect(row.id)}
       onKeyDown={(e) => {
@@ -34,26 +41,30 @@ export function JobRow({
         }
       }}
       className={cn(
-        'flex cursor-pointer flex-col gap-0.5 border-b px-3 py-1.5 hop',
-        selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+        'flex cursor-pointer flex-col gap-0.5 border-b px-3 py-2 hop',
+        selected
+          ? 'border-l-2 border-l-primary bg-accent text-accent-foreground'
+          : 'hover:bg-muted/50',
       )}
     >
       <div className="flex items-center gap-2">
-        <span
+        <StatusPip
+          status={row.tracking?.status ?? null}
           data-testid="job-row-status"
           title={row.tracking?.status ?? 'Undecided'}
-          className={cn('size-1.5 shrink-0 rounded-full', dotClass(row.tracking?.status))}
         />
-        <span className="flex-1 truncate text-sm font-medium">{row.title}</span>
-        {row.score != null && (
-          <Badge variant="secondary" className="shrink-0">
-            {row.score}
-          </Badge>
-        )}
+        <span className={cn('flex-1 truncate text-sm', scoreWeightClass(row.score))}>
+          {row.title}
+        </span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {row.score != null ? `${row.score} /100` : '—'}
+        </span>
       </div>
       <div className="truncate pl-3.5 text-xs text-muted-foreground">
         {row.company}
         {line && ` · ${line}`}
+        {' · '}
+        {laneLabel(row.lane)}
       </div>
     </div>
   );

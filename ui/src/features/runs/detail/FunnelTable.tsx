@@ -107,7 +107,7 @@ function FarmRow({ stage, failed }: { stage: FunnelStage; failed: boolean }) {
             data-testid="funnel-farm-info"
             title={FARM_INFO_TEXT}
             aria-label={FARM_INFO_TEXT}
-            className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted align-super text-[9px] font-normal text-muted-foreground"
+            className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted align-super text-micro font-normal text-muted-foreground"
           >
             i
           </button>

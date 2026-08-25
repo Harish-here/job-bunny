@@ -77,5 +77,11 @@ export default function seed(): void {
     },
     { jobId: 'rajni-e2e-4', fields: { status: 'Rejected' }, updatedAt: now },
   ]);
+  // QA round 1 bug 2 (S6 `detail-archived`) — `archived` is a store column,
+  // not part of the JD schema, so it's set here rather than in
+  // `fixtures.ts`'s `makeJd()`. Excluded from every default query
+  // (`TriagePage`/`TrackerPage`'s `archived: 'false'`), so this never
+  // shifts `smoke.spec.ts`'s literal `toHaveCount(11)` assertions.
+  store.markArchived(['rajni-e2e-12'], now);
   db.close();
 }

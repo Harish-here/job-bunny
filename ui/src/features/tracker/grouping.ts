@@ -2,9 +2,10 @@ import type { BoardJobRow } from '../../lib/api/types';
 
 /** The kanban's "Closed" pool — terminal statuses never get their own
  * column (spec decision, CLAUDE.md task brief).
- * Mirror of src/core/tracking/vocab.ts terminal statuses — update both together
- * (ui imports backend types only via lib/api/types.ts, so this is a deliberate
- * value-level mirror). */
+ * `src/core/tracking/vocab.ts` (surfaced to ui via `ui/src/lib/vocabulary`)
+ * is the status vocabulary's source of truth, but it only names
+ * PASSED_STATUS, not the full terminal set — so this stays a deliberate
+ * value-level mirror; update both together if either changes. */
 export const TERMINAL_STATUSES = ['Rejected', 'Passed'] as const;
 
 export interface KanbanColumnGroup {

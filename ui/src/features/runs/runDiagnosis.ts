@@ -1,4 +1,5 @@
 import type { RunDetail, RunEventRow, SoftErrorSummary } from '../../lib/api/types';
+import { laneLabel } from '../../lib/vocabulary';
 import type { DiagnosisAction } from './diagnosisActions';
 import {
   copyAction,
@@ -210,7 +211,7 @@ const REGISTRY: DiagnosisEntry[] = [
     matches: ({ run }) =>
       getFailedStage(run.failure) === 'source' &&
       EXPIRED_LOGIN_PATTERN.test(errorText(run)),
-    title: () => 'LinkedIn login has expired.',
+    title: () => `${laneLabel('linkedin')} login has expired.`,
     action: () => runAction('Run again'),
     secondaryAction: ({ run }) => {
       const match = EXPIRED_LOGIN_PATTERN.exec(errorText(run));
@@ -237,7 +238,8 @@ const REGISTRY: DiagnosisEntry[] = [
     // comment (`app/features/runs/soft_errors.ts`) for why that used to be
     // unreliable.
     matches: ({ softErrors }) => softErrors?.breakerOpen ?? false,
-    title: () => 'LinkedIn is soft-blocking us — the throttle breaker is open.',
+    title: () =>
+      `${laneLabel('linkedin')} is soft-blocking us — the throttle breaker is open.`,
     action: ({ events }) =>
       runAction('Run again', { disabled: true, retryAt: readBreakerRetryAt(events) }),
     secondaryAction: showFullLog,

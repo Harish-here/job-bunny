@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Design System &amp; Triage Job-Details Overhaul — Mid-fi Mockup</title>
+<!--
+  Standalone design artifact rendered from docs/product/ui-design-system/ux-notes.md.
+  Not application code — no build step, no framework, no external requests.
+  The real app uses Geist (UI) / Nunito (headings); this mockup substitutes the
+  system font stack below (dossier §1f, documented exception) so it renders
+  identically offline. Under ~1500 lines total, so S10–S12 stay in this file
+  rather than splitting per dossier §12's size rule.
+-->
+<style>
+:root{
+  /* ---- §1a colour tokens, light ---- */
+  --background:#faf8fd; --foreground:#3d2c55; --card:#ffffff; --popover:#ffffff;
+  --muted:#f1ecf8; --secondary:#f1ecf8; --muted-foreground:#6e5b87; --accent:#efe8fa;
+  --border:#e4dbf0; --input:#e4dbf0; --primary:#7b5ea7; --ring:#7b5ea7;
+  --primary-hover:#5e4590; --primary-foreground:#ffffff;
+  --success:#4caf6e; --success-strong:#26703f;
+  --destructive:#d64545; --destructive-strong:#c62c2c;
+  --attention:#ff8a3d; --attention-strong:#a04a06;
+  --amber:#c98a2e;
+  --sidebar:#f3eefb; --sidebar-accent:#e7def7; --sidebar-border:#ded2f0;
+  /* ---- §1d radii ---- */
+  --radius:16px; --radius-sm:9.6px; --radius-md:12.8px; --radius-lg:16px; --radius-xl:22.4px; --radius-4xl:41.6px;
+  /* ---- §1f declared exceptions: fonts ---- */
+  --font-sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-heading:ui-rounded,system-ui,sans-serif;
+  --hop:150ms cubic-bezier(0.34,1.56,0.64,1);
+}
+.dark, .dark-scope{
+  --background:#1a1523; --foreground:#e6ddf5; --card:#241d30; --popover:#241d30;
+  --muted:#2e2540; --secondary:#2e2540; --muted-foreground:#a695c2; --accent:#342a47;
+  --border:#362c4a; --input:#3f3355; --primary:#b79ce0; --ring:#b79ce0;
+  --primary-hover:#c9b4ea; --primary-foreground:#1a1523;
+  --success:#6fcb8e; --success-strong:#6fcb8e;
+  --destructive:#f08a8a; --destructive-strong:#f08a8a;
+  --attention:#ff9e5e; --attention-strong:#ff9e5e;
+  --amber:#e1a856;
+  --sidebar:#201a2c; --sidebar-accent:#2e2540; --sidebar-border:#362c4a;
+}
+.dark-scope{ background:var(--background); color:var(--foreground); border-radius:16px; padding:16px }
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:var(--font-sans);background:var(--background);color:var(--foreground);font-size:14px;line-height:1.5}
+h1,h2,h3,p,ul,ol{margin:0}
+a{color:var(--primary)}
+:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);border-color:var(--ring)}
+button{font:inherit;color:inherit;cursor:pointer;transition:transform var(--hop)}
+button:active{transform:translateY(1px)}
+@media (prefers-reduced-motion: reduce){*{animation-duration:1ms !important;transition-duration:1ms !important}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.icon{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;display:inline-block;vertical-align:middle;flex-shrink:0}
+.icon-3{width:12px;height:12px}
+.icon-3-5{width:14px;height:14px}
+
+/* ---- §1b type scale ---- */
+.text-micro{font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.04em;font-weight:500;font-family:var(--font-sans)}
+.text-xs{font-size:12px;line-height:16px}
+.text-sm{font-size:14px;line-height:20px}
+.text-base{font-size:16px;line-height:24px;font-family:var(--font-heading);font-weight:500}
+.text-lg{font-size:18px;line-height:28px;font-family:var(--font-heading);font-weight:600}
+.text-2xl{font-size:24px;line-height:32px;font-family:var(--font-heading);font-weight:600}
+.tabular-nums{font-variant-numeric:tabular-nums}
+.muted{color:var(--muted-foreground)}
+.font-medium{font-weight:500}
+.font-semibold{font-weight:600}
+
+/* ---- header strip ---- */
+.header-strip{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;flex-wrap:wrap;gap:24px;align-items:center;font-size:12px}
+.header-strip .field{display:flex;gap:6px;align-items:baseline}
+.header-strip .k{color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.05em;font-size:10px}
+.header-strip .v{font-weight:500}
+.header-strip .toggle-note{width:100%;color:var(--muted-foreground)}
+.header-strip .split-link{width:100%}
+
+/* ---- frames ---- */
+.frame{margin:24px;border-radius:16px;overflow:hidden;background:var(--background);box-shadow:0 0 0 1px var(--border)}
+.frame-title{background:var(--sidebar);padding:8px 12px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.frame-title h2{font-size:14px;font-weight:600;font-family:var(--font-heading)}
+.frame-title p{font-size:12px;color:var(--muted-foreground);margin-top:2px}
+.frame-body{padding:24px}
+.dark-scope .frame-body, .dark-scope{background:var(--background)}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;background:var(--card);border:1px solid var(--border);padding:0 8px;height:20px;border-radius:41.6px;color:var(--muted-foreground);flex-shrink:0}
+
+/* ---- buttons ---- */
+.btn{height:32px;padding:0 10px;border-radius:16px;font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-sans);border:1px solid transparent;white-space:nowrap}
+.btn-default{background:var(--primary);color:var(--primary-foreground)}
+.btn-default[aria-pressed="true"]{background:var(--primary-hover)}
+.btn-outline{background:var(--background);border-color:var(--border);color:var(--foreground)}
+.btn-outline:hover{background:var(--muted)}
+.btn-outline[aria-pressed="true"]{background:var(--accent);border-color:var(--primary)}
+.btn-ghost{background:transparent;color:var(--foreground);border-color:transparent}
+.btn-ghost:hover{background:var(--muted)}
+.btn-sm{height:28px;padding:0 10px;gap:4px;font-size:12.8px;border-radius:12.8px}
+.btn-xs{height:24px;padding:0 8px;gap:4px;font-size:12px;border-radius:9.6px}
+kbd{font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.04em;font-weight:500;background:var(--muted);color:var(--muted-foreground);border-radius:9.6px;padding:0 4px;margin-left:2px}
+
+/* ---- inputs ---- */
+input,select,textarea{height:32px;padding:0 10px;font-size:14px;border-radius:16px;border:1px solid var(--input);background:var(--card);color:var(--foreground);font-family:var(--font-sans);width:100%}
+textarea{height:auto;padding:10px;resize:vertical}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;font-weight:500}
+.save-state{color:var(--muted-foreground)}
+.save-state.err{color:var(--destructive-strong);font-size:12px}
+input[aria-invalid="true"]{border-color:var(--destructive)}
+
+/* ---- badges / chips ---- */
+.badge{height:20px;padding:2px 8px;font-size:12px;font-weight:500;border-radius:41.6px;display:inline-flex;align-items:center;gap:4px;background:var(--muted);color:var(--muted-foreground)}
+.badge.on-primary{background:var(--accent);color:var(--primary)}
+.reason-chip{height:20px;padding:2px 8px;border-radius:41.6px;font-size:12px;display:inline-flex;align-items:center;gap:4px;background:color-mix(in srgb, var(--success) 10%, transparent);color:var(--success-strong)}
+.flag-block{border-left:2px solid var(--destructive);padding-left:12px;display:flex;flex-direction:column;gap:8px}
+.flag-item{font-size:14px;color:var(--destructive-strong);display:flex;gap:6px;align-items:flex-start}
+
+/* ---- cards ---- */
+.card{background:var(--card);border-radius:22.4px;box-shadow:0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);padding:16px;font-size:14px;display:flex;flex-direction:column;gap:16px}
+.card[data-size="sm"]{padding:12px;gap:12px}
+.card-title{font-family:var(--font-heading);font-size:16px;line-height:22px;font-weight:500}
+.card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.card-desc{font-size:12px;color:var(--muted-foreground)}
+
+/* ---- callouts ---- */
+.callout{display:inline-flex;width:19px;height:19px;border-radius:41.6px;background:var(--primary);color:var(--primary-foreground);font-size:10px;font-weight:600;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0}
+.callout:hover{filter:brightness(1.1)}
+
+/* ---- score block ---- */
+.match-score{text-align:right;flex-shrink:0}
+.match-score .hero{display:flex;align-items:baseline;gap:2px;justify-content:flex-end}
+.score-meter{display:flex;align-items:center;gap:3px;margin-top:4px;justify-content:flex-end}
+.score-meter .bar{width:12px;height:3px;border-radius:2px;background:var(--border)}
+.score-meter .bar.filled{background:var(--foreground)}
+.score-meter .band-word{margin-left:4px;color:var(--muted-foreground)}
+
+/* ---- triage shell ---- */
+.triage-shell{display:flex;gap:24px;align-items:flex-start}
+.list-pane{width:360px;flex-shrink:0;background:var(--card);border-radius:22.4px;box-shadow:0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);display:flex;flex-direction:column;max-height:760px}
+.list-pane-controls{padding:12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--border)}
+.list-pane-controls .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.job-rows{overflow-y:auto;flex:1}
+.job-row{display:flex;gap:8px;padding:8px 12px;align-items:flex-start;border-left:2px solid transparent}
+.job-row:hover{background:var(--muted)}
+.job-row.selected{background:var(--accent);border-left-color:var(--primary)}
+.job-row-pip{width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.job-row-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.job-row-line1{display:flex;justify-content:space-between;gap:8px}
+.job-row-body .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list-pagination{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--border)}
+.list-pagination .sp{margin-left:auto;display:flex;gap:4px}
+.pane-centre{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:32px;color:var(--muted-foreground)}
+.skel{background:var(--muted);border-radius:12.8px}
+@media (prefers-reduced-motion:no-preference){.skel{animation:pulse 1.5s ease-in-out infinite}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* ---- detail pane ---- */
+.detail-pane{flex:1;min-width:0;background:var(--card);border-radius:22.4px;box-shadow:0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);display:flex;flex-direction:column;max-height:760px;overflow:hidden}
+.detail-pane.standalone{max-width:720px;margin:0 auto;flex:none;width:100%}
+.verdict-header{padding:16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.vh-row1{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.vh-row1 h1{flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.provenance-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--muted-foreground)}
+.provenance-line a{display:inline-flex;align-items:center;gap:4px;color:var(--foreground);text-decoration:none}
+.provenance-line a:hover{text-decoration:underline}
+.lane-label{display:inline-flex;align-items:center;gap:4px}
+.pane-body{padding:16px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;flex:1}
+.zone-eyebrow{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.signals{display:flex;flex-direction:column;gap:16px}
+.reason-chips{display:flex;flex-wrap:wrap;gap:8px}
+.elig-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.elig-cell .v{font-size:14px;font-weight:500;margin-top:2px}
+.skills-wrap{display:flex;flex-wrap:wrap;gap:8px}
+.jd-clamp-wrap{position:relative}
+.jd-body{max-width:68ch;font-size:14px;line-height:20px;white-space:pre-wrap;max-height:240px;overflow:hidden}
+.jd-body.expanded{max-height:none}
+.jd-fade{position:absolute;bottom:0;left:0;right:0;height:48px;background:linear-gradient(to bottom, transparent, var(--card))}
+.tracking-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.segmented{display:flex;gap:8px}
+.decide-bar{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--border);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.archived-strip{background:var(--muted);color:var(--muted-foreground);font-size:12px;padding:8px 16px;border-bottom:1px solid var(--border)}
+
+/* ---- annotations ---- */
+.annotations{padding:20px;background:var(--card);margin:24px;border-radius:16px;box-shadow:0 0 0 1px var(--border)}
+.annotation-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.annotation-row:last-child{border-bottom:0}
+.annotation-text{font-size:12px}
+.annotation-text b{display:block;margin-bottom:2px}
+
+footer.foot{padding:20px;text-align:center;font-size:12px;color:var(--muted-foreground)}
+
+/* ---- S10–S12 system reference ---- */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;border-bottom:1px solid var(--border);padding:4px 8px 4px 0;font-weight:500;color:var(--muted-foreground)}
+.tbl td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border);vertical-align:middle;font-size:12px}
+.tbl tr:last-child td{border-bottom:0}
+.token-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.token-card{display:flex;gap:8px;align-items:center;border-radius:16px;padding:8px;background:var(--card);box-shadow:0 0 0 1px var(--border)}
+.swatch{width:32px;height:32px;border-radius:9.6px;flex-shrink:0;box-shadow:0 0 0 1px var(--border)}
+.token-card .meta{min-width:0}
+.token-card .meta .name{font-size:12px;font-weight:500}
+.token-card .meta .hex{font-size:11px;color:var(--muted-foreground)}
+.type-ramp-row{display:flex;align-items:baseline;gap:16px;padding:8px 0;border-bottom:1px solid var(--border)}
+.type-ramp-row:last-child{border-bottom:0}
+.type-ramp-row .meta{width:220px;flex-shrink:0;font-size:12px;color:var(--muted-foreground)}
+.sketch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.sketch-frame{border-radius:16px;box-shadow:0 0 0 1px var(--border);padding:12px;min-height:200px;display:flex;flex-direction:column;gap:8px;background:var(--card)}
+.sketch-frame .sketch-title{font-size:12px;font-weight:600}
+.legend-row{display:flex;align-items:center;gap:8px;padding:6px 0}
+.greyscale-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.greyscale-pair .g{filter:grayscale(1)}
+.dark-token-preview{background:#1a1523;color:#e6ddf5;border-radius:16px;padding:16px}
+</style>
+</head>
+<body>
+
+<!-- ============== inline icon sprite (lucide-equivalent, 24x24 viewBox, stroke currentColor) ============== -->
+<svg style="display:none" aria-hidden="true">
+<defs>
+<symbol id="icon-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+<symbol id="icon-alert-triangle" viewBox="0 0 24 24"><path d="M10.3 3.9L2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.2"/><circle cx="12" cy="16.3" r=".6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-star" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+<symbol id="icon-send" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></symbol>
+<symbol id="icon-chevrons-right" viewBox="0 0 24 24"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></symbol>
+<symbol id="icon-minus" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+<symbol id="icon-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></symbol>
+<symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="icon-chevron-up" viewBox="0 0 24 24"><path d="M18 15l-6-6-6 6"/></symbol>
+<symbol id="icon-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+<symbol id="icon-arrow-up" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></symbol>
+<symbol id="icon-arrow-down" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></symbol>
+<symbol id="icon-circle-slash" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="5.5" y1="18.5" x2="18.5" y2="5.5"/></symbol>
+<symbol id="icon-check-circle-2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-4.5"/></symbol>
+<symbol id="icon-linkedin" viewBox="0 0 24 24"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="1.6"/></symbol>
+<symbol id="icon-building-2" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></symbol>
+</defs>
+</svg>
+
+<!-- ============== header strip ============== -->
+<header class="header-strip">
+  <div class="field"><span class="k">Feature</span><span class="v">UI Design System &amp; Triage Job-Details Overhaul</span></div>
+  <div class="field"><span class="k">Slug</span><span class="v">ui-design-system</span></div>
+  <div class="field"><span class="k">Date</span><span class="v">2026-08-25</span></div>
+  <div class="field"><span class="k">Spec</span><span class="v">docs/product/ui-design-system/spec.md</span></div>
+  <div class="field" style="margin-left:auto">
+    <button class="btn btn-outline btn-sm" data-qa="mode-toggle" onclick="document.documentElement.classList.toggle('dark'); this.textContent = document.documentElement.classList.contains('dark') ? 'Switch to light' : 'Switch to dark';">Switch to dark</button>
+  </div>
+  <p class="toggle-note">Review instrument only — no theme toggle ships (R30). Frame S9 stays permanently dark regardless of this toggle (dossier §7).</p>
+</header>
+
+<!-- ======================================================================= -->
+<!-- S1 — Triage, default, job selected (the flagship) -->
+<!-- ======================================================================= -->
+<section class="frame" id="s1" data-qa="triage-default">
+  <div class="frame-title">
+    <div><h2>S1 — Triage — default, job selected</h2><p>The flagship · JTBD-5, R17–R23 (dossier §5)</p></div>
+    <span class="chip">triage-default</span>
+  </div>
+  <div class="frame-body">
+    <div class="triage-shell" data-qa="triage-shell">
+
+      <!-- ---- list pane ---- -->
+      <aside class="list-pane" data-qa="job-list">
+        <div class="list-pane-controls">
+          <div class="row">
+            <span class="badge on-primary">14 undecided</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-xs btn-outline">Date <svg class="icon icon-3"><use href="#icon-arrow-down"></use></svg></button>
+              <button class="btn btn-xs btn-outline" aria-pressed="true">Score <svg class="icon icon-3"><use href="#icon-arrow-up"></use></svg></button>
+            </div>
+          </div>
+          <input type="text" placeholder="/ Search by company">
+          <button class="btn btn-xs btn-outline" style="align-self:flex-start">Filter</button>
+        </div>
+        <div class="job-rows">
+          <div class="job-row selected" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Not decided"><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm font-medium title">Senior Platform Engineer</span><span class="text-xs tabular-nums muted">74 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">Acme Corp · Bengaluru · Greenhouse</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Lead"><svg class="icon icon-3" style="color:var(--primary)" fill="currentColor"><use href="#icon-star"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm font-semibold title">Staff Backend Engineer</span><span class="text-xs tabular-nums muted">81 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">Northwind Labs · Remote · LinkedIn</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Applied"><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-send"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm font-medium title">Engineering Manager, Platform</span><span class="text-xs tabular-nums muted">58 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">DeltaWorks · Bengaluru · Keka</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Tech Round"><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-chevrons-right"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm title">Backend Engineer II</span><span class="text-xs tabular-nums muted">45 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">Solstice Systems · Remote · Greenhouse</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Not decided"><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm font-medium title">Site Reliability Engineer</span><span class="text-xs tabular-nums muted">69 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">Vertex Cloud · Hybrid, Bengaluru · LinkedIn</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Passed"><svg class="icon icon-3" style="color:var(--destructive)"><use href="#icon-minus"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm title">Platform Engineer</span><span class="text-xs tabular-nums muted">39 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">Ridgeline Data · Bengaluru · Keka</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Offer"><svg class="icon icon-3" style="color:var(--success-strong)"><use href="#icon-chevrons-right"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm font-semibold title">Senior SRE</span><span class="text-xs tabular-nums muted">88 <span style="font-size:10px">/100</span></span></div>
+              <div class="text-xs muted">Anchorpoint · Remote · Greenhouse</div>
+            </div>
+          </div>
+          <div class="job-row" data-qa="job-row">
+            <span class="job-row-pip" data-qa="job-row-pip" aria-label="Not decided"><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg></span>
+            <div class="job-row-body">
+              <div class="job-row-line1"><span class="text-sm title">Infrastructure Engineer</span><span class="text-xs tabular-nums muted">—</span></div>
+              <div class="text-xs muted">Cobalt Systems · Bengaluru · LinkedIn</div>
+            </div>
+          </div>
+        </div>
+        <div class="list-pagination text-xs tabular-nums muted">1–8 of 23<span class="sp"><button class="btn btn-xs btn-ghost" disabled>Prev</button><button class="btn btn-xs btn-ghost">Next</button></span></div>
+      </aside>
+
+      <!-- ---- detail pane ---- -->
+      <div class="detail-pane" data-qa="detail-pane">
+        <div class="verdict-header" data-qa="verdict-header">
+          <div class="vh-row1">
+            <h1 class="text-lg">Senior Platform Engineer</h1>
+            <div class="match-score" data-qa="match-score" aria-label="Match score 74 out of 100, Good">
+              <div class="text-micro muted">MATCH</div>
+              <div class="hero"><span class="text-2xl tabular-nums">74</span><span class="text-xs muted">/100</span></div>
+              <div class="score-meter" data-qa="score-meter">
+                <span class="bar filled"></span><span class="bar filled"></span><span class="bar filled"></span><span class="bar"></span>
+                <span class="text-micro band-word">Good</span>
+              </div>
+            </div>
+          </div>
+          <div class="text-sm provenance-line" data-qa="provenance-line">
+            <a href="#" title="Acme Corp careers page">Acme Corp <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+            <span>·</span>
+            <span class="lane-label" data-qa="lane-label"><svg class="icon icon-3"><use href="#icon-building-2"></use></svg> Greenhouse</span>
+            <span>·</span>
+            <span class="tabular-nums" title="2026-08-24T21:00:00Z">Found 6h ago</span>
+          </div>
+        </div>
+
+        <div class="pane-body">
+          <section class="signals" data-qa="signals">
+            <div>
+              <h3 class="text-micro zone-eyebrow">Why it matches · 4</h3>
+              <div class="reason-chips" data-qa="match-reasons">
+                <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>8 of 10 core skills</span>
+                <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Remote-first</span>
+                <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Seniority match</span>
+                <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Bengaluru, your primary location</span>
+              </div>
+            </div>
+            <div>
+              <h3 class="text-micro zone-eyebrow">Review flags · 1 <a href="#c3" class="callout" id="c3-src" aria-label="callout 3">3</a> <a href="#c4" class="callout" id="c4-src" aria-label="callout 4">4</a></h3>
+              <div class="flag-block" data-qa="review-flags">
+                <div class="flag-item"><svg class="icon icon-3-5"><use href="#icon-alert-triangle"></use></svg>Posted 28 days ago — may be stale</div>
+              </div>
+            </div>
+          </section>
+
+          <div class="card" data-size="sm" data-qa="eligibility">
+            <div class="text-micro muted" style="display:flex;justify-content:space-between">Eligibility <a href="#c5" class="callout" id="c5-src" aria-label="callout 5">5</a></div>
+            <div class="elig-grid">
+              <div class="elig-cell"><div class="text-micro muted">LOCATION</div><div class="v">Bengaluru</div></div>
+              <div class="elig-cell"><div class="text-micro muted">WORK TYPE</div><div class="v">Hybrid</div></div>
+              <div class="elig-cell"><div class="text-micro muted">SENIORITY</div><div class="v">Senior</div></div>
+              <div class="elig-cell"><div class="text-micro muted">TIMEZONE</div><div class="v">IST</div></div>
+            </div>
+          </div>
+
+          <div data-qa="skills">
+            <h3 class="text-micro zone-eyebrow">Skills asked for · 12</h3>
+            <div class="skills-wrap">
+              <span class="badge">Kubernetes</span><span class="badge">Go</span><span class="badge">PostgreSQL</span>
+              <span class="badge">Terraform</span><span class="badge">AWS</span><span class="badge">gRPC</span>
+              <span class="badge">CI/CD</span><span class="badge">System design</span>
+            </div>
+            <button class="btn btn-ghost btn-xs" data-qa="skills-more" aria-expanded="false" style="margin-top:8px">+4 more <a href="#c10" class="callout" id="c10-src" aria-label="callout 10">10</a></button>
+          </div>
+
+          <div class="card" data-qa="jd">
+            <div class="card-header">
+              <h2 class="card-title">Job description</h2>
+              <a href="#" class="text-xs" style="display:inline-flex;align-items:center;gap:4px">Open original <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+            </div>
+            <div class="jd-clamp-wrap">
+              <div class="jd-body text-sm">We're looking for a Senior Platform Engineer to own the reliability and developer experience of our core infrastructure. You'll work closely with product engineering teams to build paved-road tooling, reduce toil, and keep our services fast and boring.
+
+What you'll do
+— Design and operate the CI/CD pipelines that ship code to production multiple times a day
+— Own the Kubernetes platform: cluster upgrades, autoscaling, cost, and incident response
+— Partner with product teams on service-level objectives and capacity planning
+— Improve observability — tracing, metrics, and alerting that actually get acted on
+
+What we're looking for
+— 6+ years building and operating production infrastructure at scale
+— Deep hands-on experience with Kubernetes, Terraform, and at least one major cloud provider
+— Comfortable being the person paged at 2am, and comfortable making sure it happens less often
+— Strong written communication — most of our collaboration happens async
+
+Nice to have
+— Experience with gRPC service meshes
+— Prior on-call ownership for a platform used by 50+ engineers</div>
+              <div class="jd-fade"></div>
+            </div>
+            <button class="btn btn-ghost btn-sm" data-qa="jd-toggle" aria-expanded="false">Show full description <svg class="icon icon-3"><use href="#icon-chevron-down"></use></svg> <a href="#c6" class="callout" id="c6-src" aria-label="callout 6">6</a> <a href="#c7" class="callout" id="c7-src" aria-label="callout 7">7</a></button>
+          </div>
+
+          <div class="card" data-qa="tracking">
+            <div><h2 class="card-title">Tracking</h2><p class="card-desc">Fill this in after you decide.</p></div>
+            <div class="tracking-grid">
+              <div class="field"><label>Status</label><select data-qa="tracking-status"><option>— none —</option><option>Lead</option><option>Applied</option><option>Recruiter Screen</option><option>Tech Round</option><option>Onsite</option><option>Offer</option><option>Rejected</option><option>Passed</option></select><span class="text-micro save-state">Saved</span></div>
+              <div class="field"><label>Date applied</label><input type="text" placeholder="—"></div>
+              <div class="field"><label>Comp range</label><input type="text" placeholder="e.g. ₹28–34L"></div>
+              <div class="field"><label>Contact</label><input type="text" placeholder="Name, email"></div>
+              <div class="field"><label>Next action</label><input type="text" placeholder="e.g. Follow up"></div>
+              <div class="field"><label>Next action date</label><input type="text" placeholder="—"></div>
+              <div class="field" style="grid-column:1 / -1"><label>Notes</label><textarea rows="2" placeholder="Up to 5000 characters"></textarea></div>
+            </div>
+            <div>
+              <label class="text-xs font-medium" style="display:block;margin-bottom:6px">Excitement</label>
+              <div class="segmented" data-qa="tracking-excitement">
+                <button class="btn btn-outline btn-sm" aria-pressed="false">Vera level</button>
+                <button class="btn btn-outline btn-sm" aria-pressed="true">Kandipa podu</button>
+                <button class="btn btn-outline btn-sm" aria-pressed="false">Try panalam</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="decide-bar" data-qa="decide-bar">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-default" data-qa="decide-apply" aria-pressed="false"><svg class="icon"><use href="#icon-check"></use></svg>Apply<kbd>a</kbd></button>
+            <button class="btn btn-outline" data-qa="decide-lead" aria-pressed="false"><svg class="icon"><use href="#icon-star"></use></svg>Lead<kbd>s</kbd></button>
+            <button class="btn btn-outline" data-qa="decide-pass" aria-pressed="false"><svg class="icon"><use href="#icon-circle-slash"></use></svg>Pass<kbd>x</kbd></button>
+            <a href="#c11" class="callout" id="c11-src" aria-label="callout 11" style="align-self:center">11</a>
+            <a href="#c8" class="callout" id="c8-src" aria-label="callout 8" style="align-self:center">8</a>
+          </div>
+          <span class="badge" data-qa="decide-status-badge">Not decided</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S2 — Triage, loading -->
+<!-- ======================================================================= -->
+<section class="frame" id="s2" data-qa="triage-loading">
+  <div class="frame-title">
+    <div><h2>S2 — Triage — loading, both panes</h2><p>Shape-matched skeletons — Doherty, no spinner (dossier §5, five states)</p></div>
+    <span class="chip">triage-loading</span>
+  </div>
+  <div class="frame-body">
+    <div class="triage-shell">
+      <aside class="list-pane">
+        <div style="padding:12px" data-qa="list-skeleton">
+          <div class="skel" style="height:32px;margin-bottom:12px"></div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:8px 12px"><div class="skel" style="height:20px;width:70%"></div><div class="skel" style="height:16px;width:50%"></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:8px 12px"><div class="skel" style="height:20px;width:70%"></div><div class="skel" style="height:16px;width:50%"></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:8px 12px"><div class="skel" style="height:20px;width:70%"></div><div class="skel" style="height:16px;width:50%"></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:8px 12px"><div class="skel" style="height:20px;width:70%"></div><div class="skel" style="height:16px;width:50%"></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:8px 12px"><div class="skel" style="height:20px;width:70%"></div><div class="skel" style="height:16px;width:50%"></div></div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:8px 12px"><div class="skel" style="height:20px;width:70%"></div><div class="skel" style="height:16px;width:50%"></div></div>
+        </div>
+      </aside>
+      <div class="detail-pane">
+        <div style="padding:16px;display:flex;flex-direction:column;gap:16px">
+          <div class="skel" style="height:28px;width:60%"></div>
+          <div class="skel" style="height:32px;width:40%;align-self:flex-end"></div>
+          <div style="display:flex;gap:8px">
+            <div class="skel" style="height:20px;width:20%"></div>
+            <div class="skel" style="height:20px;width:16%"></div>
+            <div class="skel" style="height:20px;width:24%"></div>
+            <div class="skel" style="height:20px;width:18%"></div>
+          </div>
+          <div class="elig-grid">
+            <div class="skel" style="height:32px"></div><div class="skel" style="height:32px"></div>
+            <div class="skel" style="height:32px"></div><div class="skel" style="height:32px"></div>
+          </div>
+          <div class="skel" style="height:20px"></div>
+          <div class="skel" style="height:20px"></div>
+          <div class="skel" style="height:20px"></div>
+          <div class="skel" style="height:20px"></div>
+          <div class="skel" style="height:20px"></div>
+          <div class="skel" style="height:20px;width:70%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S3 — Triage, empty (board clear) -->
+<!-- ======================================================================= -->
+<section class="frame" id="s3" data-qa="triage-empty">
+  <div class="frame-title">
+    <div><h2>S3 — Triage — empty, board clear</h2><p>Completion is the absence of work (dossier §3)</p></div>
+    <span class="chip">triage-empty</span>
+  </div>
+  <div class="frame-body">
+    <div class="triage-shell">
+      <aside class="list-pane">
+        <div class="pane-centre" data-qa="list-empty">
+          <svg class="icon" style="width:28px;height:28px;color:var(--muted-foreground)"><use href="#icon-check-circle-2"></use></svg>
+          <p class="text-sm font-medium">Nothing left to decide.</p>
+          <p class="text-xs muted">Your last run added 11 jobs; you've decided on all of them.</p>
+          <a href="#" class="text-xs">View the tracker →</a>
+        </div>
+      </aside>
+      <div class="detail-pane">
+        <div class="pane-centre">
+          <p class="text-sm muted">Select a job to decide on it.</p>
+          <p class="text-xs muted"><kbd>j</kbd> / <kbd>k</kbd> move · <kbd>a</kbd> / <kbd>s</kbd> / <kbd>x</kbd> decide · <kbd>/</kbd> search</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S4 — Triage, error -->
+<!-- ======================================================================= -->
+<section class="frame" id="s4" data-qa="triage-error">
+  <div class="frame-title">
+    <div><h2>S4 — Triage — error, list fetch failed</h2><p>Every error state carries a Try again — no dead ends (dossier §10)</p></div>
+    <span class="chip">triage-error</span>
+  </div>
+  <div class="frame-body">
+    <div class="triage-shell">
+      <aside class="list-pane">
+        <div class="pane-centre" data-qa="list-error">
+          <svg class="icon" style="width:24px;height:24px;color:var(--destructive-strong)"><use href="#icon-alert-triangle"></use></svg>
+          <p class="text-sm font-medium">Couldn't load your board.</p>
+          <button class="btn btn-outline btn-sm">Try again</button>
+        </div>
+      </aside>
+      <div class="detail-pane">
+        <div class="pane-centre">
+          <svg class="icon" style="width:24px;height:24px;color:var(--destructive-strong)"><use href="#icon-alert-triangle"></use></svg>
+          <p class="text-sm font-medium">Couldn't load this job.</p>
+          <button class="btn btn-outline btn-sm">Try again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S5 — Detail, JD expanded -->
+<!-- ======================================================================= -->
+<section class="frame" id="s5" data-qa="detail-jd-expanded">
+  <div class="frame-title">
+    <div><h2>S5 — Detail — JD expanded</h2><p>Session-sticky expansion, not per-job <a href="#c7" class="callout" aria-label="callout 7">7</a> — R21, concern (b)</p></div>
+    <span class="chip">detail-jd-expanded</span>
+  </div>
+  <div class="frame-body">
+    <div class="detail-pane standalone">
+      <div class="verdict-header">
+        <div class="vh-row1">
+          <h1 class="text-lg">Senior Platform Engineer</h1>
+          <div class="match-score" aria-label="Match score 74 out of 100, Good">
+            <div class="text-micro muted">MATCH</div>
+            <div class="hero"><span class="text-2xl tabular-nums">74</span><span class="text-xs muted">/100</span></div>
+            <div class="score-meter"><span class="bar filled"></span><span class="bar filled"></span><span class="bar filled"></span><span class="bar"></span><span class="text-micro band-word">Good</span></div>
+          </div>
+        </div>
+        <div class="text-sm provenance-line">
+          <a href="#">Acme Corp <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+          <span>·</span><span class="lane-label"><svg class="icon icon-3"><use href="#icon-building-2"></use></svg> Greenhouse</span>
+          <span>·</span><span class="tabular-nums">Found 6h ago</span>
+        </div>
+      </div>
+      <div class="pane-body">
+        <div class="card">
+          <div class="card-header"><h2 class="card-title">Job description</h2><a href="#" class="text-xs" style="display:inline-flex;align-items:center;gap:4px">Open original <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a></div>
+          <div class="jd-body expanded text-sm">We're looking for a Senior Platform Engineer to own the reliability and developer experience of our core infrastructure. You'll work closely with product engineering teams to build paved-road tooling, reduce toil, and keep our services fast and boring.
+
+What you'll do
+— Design and operate the CI/CD pipelines that ship code to production multiple times a day
+— Own the Kubernetes platform: cluster upgrades, autoscaling, cost, and incident response
+— Partner with product teams on service-level objectives and capacity planning
+— Improve observability — tracing, metrics, and alerting that actually get acted on
+
+What we're looking for
+— 6+ years building and operating production infrastructure at scale
+— Deep hands-on experience with Kubernetes, Terraform, and at least one major cloud provider
+— Comfortable being the person paged at 2am, and comfortable making sure it happens less often
+— Strong written communication — most of our collaboration happens async
+
+Nice to have
+— Experience with gRPC service meshes
+— Prior on-call ownership for a platform used by 50+ engineers
+
+Compensation and benefits
+— Base + equity, reviewed annually
+— Remote-first, optional Bengaluru hub for onsite weeks
+— Learning budget and a real on-call rotation with a sane escalation policy</div>
+          <button class="btn btn-ghost btn-sm" aria-expanded="true">Show less <svg class="icon icon-3"><use href="#icon-chevron-up"></use></svg></button>
+        </div>
+      </div>
+      <div class="decide-bar">
+        <div style="display:flex;gap:8px"><button class="btn btn-default"><svg class="icon"><use href="#icon-check"></use></svg>Apply<kbd>a</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-star"></use></svg>Lead<kbd>s</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-circle-slash"></use></svg>Pass<kbd>x</kbd></button></div>
+        <span class="badge">Not decided</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S6 — Detail, archived job -->
+<!-- ======================================================================= -->
+<section class="frame" id="s6" data-qa="detail-archived">
+  <div class="frame-title">
+    <div><h2>S6 — Detail — archived job</h2><p>No Restore button — no endpoint to call <a href="#c13" class="callout" id="c13-src" aria-label="callout 13">13</a></p></div>
+    <span class="chip">detail-archived</span>
+  </div>
+  <div class="frame-body">
+    <div class="detail-pane standalone">
+      <div class="archived-strip" data-qa="archived-strip">Archived — this job is out of the queue.</div>
+      <div class="verdict-header">
+        <div class="vh-row1">
+          <h1 class="text-lg">Platform Engineer</h1>
+          <div class="match-score" aria-label="Match score 39 out of 100, Weak">
+            <div class="text-micro muted">MATCH</div>
+            <div class="hero"><span class="text-2xl tabular-nums">39</span><span class="text-xs muted">/100</span></div>
+            <div class="score-meter"><span class="bar filled"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="text-micro band-word">Weak</span></div>
+          </div>
+        </div>
+        <div class="text-sm provenance-line">
+          <a href="#">Ridgeline Data <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+          <span>·</span><span class="lane-label"><svg class="icon icon-3"><use href="#icon-building-2"></use></svg> Keka</span>
+          <span>·</span><span class="tabular-nums">Found 19d ago</span>
+        </div>
+      </div>
+      <div class="pane-body">
+        <div class="card" data-size="sm">
+          <div class="text-micro muted">Eligibility</div>
+          <div class="elig-grid">
+            <div class="elig-cell"><div class="text-micro muted">LOCATION</div><div class="v">Bengaluru</div></div>
+            <div class="elig-cell"><div class="text-micro muted">WORK TYPE</div><div class="v">On-site</div></div>
+            <div class="elig-cell"><div class="text-micro muted">SENIORITY</div><div class="v">Mid</div></div>
+            <div class="elig-cell"><div class="text-micro muted">TIMEZONE</div><div class="v">IST</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="decide-bar">
+        <div style="display:flex;gap:8px"><button class="btn btn-default"><svg class="icon"><use href="#icon-check"></use></svg>Apply<kbd>a</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-star"></use></svg>Lead<kbd>s</kbd></button><button class="btn btn-outline" aria-pressed="true"><svg class="icon"><use href="#icon-circle-slash"></use></svg>Pass<kbd>x</kbd></button></div>
+        <span class="badge">Passed</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S7 — Detail, sparse job -->
+<!-- ======================================================================= -->
+<section class="frame" id="s7" data-qa="detail-sparse">
+  <div class="frame-title">
+    <div><h2>S7 — Detail — sparse job</h2><p>Empty-within-populated: no skills, no reasons, no flags, no description</p></div>
+    <span class="chip">detail-sparse</span>
+  </div>
+  <div class="frame-body">
+    <div class="detail-pane standalone">
+      <div class="verdict-header">
+        <div class="vh-row1">
+          <h1 class="text-lg">Backend Engineer (Contract)</h1>
+          <div class="match-score" aria-label="Match score 51 out of 100, Fair">
+            <div class="text-micro muted">MATCH</div>
+            <div class="hero"><span class="text-2xl tabular-nums">51</span><span class="text-xs muted">/100</span></div>
+            <div class="score-meter"><span class="bar filled"></span><span class="bar filled"></span><span class="bar"></span><span class="bar"></span><span class="text-micro band-word">Fair</span></div>
+          </div>
+        </div>
+        <div class="text-sm provenance-line">
+          <a href="#">Nimbus Works <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+          <span>·</span><span class="lane-label"><svg class="icon icon-3"><use href="#icon-building-2"></use></svg> Greenhouse</span>
+          <span>·</span><span class="tabular-nums">Found 2h ago</span>
+        </div>
+      </div>
+      <div class="pane-body">
+        <section class="signals">
+          <div><h3 class="text-micro zone-eyebrow">Why it matches</h3><p class="text-sm muted">No match reasons recorded.</p></div>
+        </section>
+        <div class="card" data-size="sm">
+          <div class="text-micro muted">Eligibility</div>
+          <div class="elig-grid">
+            <div class="elig-cell"><div class="text-micro muted">LOCATION</div><div class="v">Remote</div></div>
+            <div class="elig-cell"><div class="text-micro muted">WORK TYPE</div><div class="v muted">—</div></div>
+            <div class="elig-cell"><div class="text-micro muted">SENIORITY</div><div class="v muted">—</div></div>
+            <div class="elig-cell"><div class="text-micro muted">TIMEZONE</div><div class="v muted">—</div></div>
+          </div>
+        </div>
+        <div>
+          <h3 class="text-micro zone-eyebrow">Skills asked for · 0</h3>
+          <p class="text-sm muted">No skills extracted.</p>
+        </div>
+        <div class="card">
+          <div class="card-header"><h2 class="card-title">Job description</h2><a href="#" class="text-xs" style="display:inline-flex;align-items:center;gap:4px">Open original <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a></div>
+          <p class="text-sm muted">No description captured for this job.</p>
+        </div>
+      </div>
+      <div class="decide-bar">
+        <div style="display:flex;gap:8px"><button class="btn btn-default"><svg class="icon"><use href="#icon-check"></use></svg>Apply<kbd>a</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-star"></use></svg>Lead<kbd>s</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-circle-slash"></use></svg>Pass<kbd>x</kbd></button></div>
+        <span class="badge">Not decided</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S8 — Detail, success -->
+<!-- ======================================================================= -->
+<section class="frame" id="s8" data-qa="detail-decided">
+  <div class="frame-title">
+    <div><h2>S8 — Detail — success, decision recorded</h2><p>Optimistic &lt;400ms flip, no toast <a href="#c12" class="callout" id="c12-src" aria-label="callout 12">12</a> — tracking saving / saved / error</p></div>
+    <span class="chip">detail-decided</span>
+  </div>
+  <div class="frame-body">
+    <div class="detail-pane standalone">
+      <div class="verdict-header">
+        <div class="vh-row1">
+          <h1 class="text-lg">Staff Backend Engineer</h1>
+          <div class="match-score" aria-label="Match score 81 out of 100, Good">
+            <div class="text-micro muted">MATCH</div>
+            <div class="hero"><span class="text-2xl tabular-nums">81</span><span class="text-xs muted">/100</span></div>
+            <div class="score-meter"><span class="bar filled"></span><span class="bar filled"></span><span class="bar filled"></span><span class="bar"></span><span class="text-micro band-word">Good</span></div>
+          </div>
+        </div>
+        <div class="text-sm provenance-line">
+          <a href="#">Northwind Labs <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+          <span>·</span><span class="lane-label"><svg class="icon icon-3"><use href="#icon-linkedin"></use></svg> LinkedIn</span>
+          <span>·</span><span class="tabular-nums">Found 1d ago</span>
+        </div>
+      </div>
+      <div class="pane-body">
+        <div class="card">
+          <div><h2 class="card-title">Tracking</h2><p class="card-desc">Fill this in after you decide.</p></div>
+          <div class="tracking-grid">
+            <div class="field"><label>Status</label><select><option>Applied</option></select><span class="text-micro save-state">Saved</span></div>
+            <div class="field"><label>Date applied</label><input type="text" value="2026-08-25"><span class="text-micro save-state">Saving…</span></div>
+            <div class="field"><label>Comp range</label><input type="text" aria-invalid="true" value="₹34–40L"><span class="save-state err">Couldn't save — try again. Your value is kept.</span></div>
+            <div class="field"><label>Contact</label><input type="text" placeholder="Name, email"></div>
+          </div>
+        </div>
+      </div>
+      <div class="decide-bar">
+        <div style="display:flex;gap:8px"><button class="btn btn-default" aria-pressed="true"><svg class="icon"><use href="#icon-check"></use></svg>Apply<kbd>a</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-star"></use></svg>Lead<kbd>s</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-circle-slash"></use></svg>Pass<kbd>x</kbd></button></div>
+        <span class="badge on-primary">Applied</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S9 — Dark twin of S1, permanently dark -->
+<!-- ======================================================================= -->
+<section class="frame" id="s9" data-qa="triage-dark">
+  <div class="frame-title">
+    <div><h2>S9 — Dark twin of S1, permanently dark</h2><p>Renders dark regardless of the header toggle — G8, concern (f) (dossier §7)</p></div>
+    <span class="chip">triage-dark</span>
+  </div>
+  <div class="frame-body">
+    <div class="dark-scope">
+      <div class="triage-shell">
+        <aside class="list-pane">
+          <div class="list-pane-controls">
+            <div class="row">
+              <span class="badge on-primary">14 undecided</span>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-xs btn-outline">Date <svg class="icon icon-3"><use href="#icon-arrow-down"></use></svg></button>
+                <button class="btn btn-xs btn-outline" aria-pressed="true">Score <svg class="icon icon-3"><use href="#icon-arrow-up"></use></svg></button>
+              </div>
+            </div>
+            <input type="text" placeholder="/ Search by company">
+            <button class="btn btn-xs btn-outline" style="align-self:flex-start">Filter</button>
+          </div>
+          <div class="job-rows">
+            <div class="job-row selected">
+              <span class="job-row-pip" aria-label="Not decided"><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg></span>
+              <div class="job-row-body"><div class="job-row-line1"><span class="text-sm font-medium title">Senior Platform Engineer</span><span class="text-xs tabular-nums muted">74 <span style="font-size:10px">/100</span></span></div><div class="text-xs muted">Acme Corp · Bengaluru · Greenhouse</div></div>
+            </div>
+            <div class="job-row">
+              <span class="job-row-pip" aria-label="Lead"><svg class="icon icon-3" style="color:var(--primary)" fill="currentColor"><use href="#icon-star"></use></svg></span>
+              <div class="job-row-body"><div class="job-row-line1"><span class="text-sm font-semibold title">Staff Backend Engineer</span><span class="text-xs tabular-nums muted">81 <span style="font-size:10px">/100</span></span></div><div class="text-xs muted">Northwind Labs · Remote · LinkedIn</div></div>
+            </div>
+            <div class="job-row">
+              <span class="job-row-pip" aria-label="Applied"><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-send"></use></svg></span>
+              <div class="job-row-body"><div class="job-row-line1"><span class="text-sm font-medium title">Engineering Manager, Platform</span><span class="text-xs tabular-nums muted">58 <span style="font-size:10px">/100</span></span></div><div class="text-xs muted">DeltaWorks · Bengaluru · Keka</div></div>
+            </div>
+            <div class="job-row">
+              <span class="job-row-pip" aria-label="Passed"><svg class="icon icon-3" style="color:var(--destructive)"><use href="#icon-minus"></use></svg></span>
+              <div class="job-row-body"><div class="job-row-line1"><span class="text-sm title">Platform Engineer</span><span class="text-xs tabular-nums muted">39 <span style="font-size:10px">/100</span></span></div><div class="text-xs muted">Ridgeline Data · Bengaluru · Keka</div></div>
+            </div>
+          </div>
+          <div class="list-pagination text-xs tabular-nums muted">1–4 of 23<span class="sp"><button class="btn btn-xs btn-ghost" disabled>Prev</button><button class="btn btn-xs btn-ghost">Next</button></span></div>
+        </aside>
+        <div class="detail-pane">
+          <div class="verdict-header">
+            <div class="vh-row1">
+              <h1 class="text-lg">Senior Platform Engineer</h1>
+              <div class="match-score" aria-label="Match score 74 out of 100, Good">
+                <div class="text-micro muted">MATCH</div>
+                <div class="hero"><span class="text-2xl tabular-nums">74</span><span class="text-xs muted">/100</span></div>
+                <div class="score-meter"><span class="bar filled"></span><span class="bar filled"></span><span class="bar filled"></span><span class="bar"></span><span class="text-micro band-word">Good</span></div>
+              </div>
+            </div>
+            <div class="text-sm provenance-line">
+              <a href="#">Acme Corp <svg class="icon icon-3"><use href="#icon-external-link"></use></svg></a>
+              <span>·</span><span class="lane-label"><svg class="icon icon-3"><use href="#icon-building-2"></use></svg> Greenhouse</span>
+              <span>·</span><span class="tabular-nums">Found 6h ago</span>
+            </div>
+          </div>
+          <div class="pane-body">
+            <section class="signals">
+              <div>
+                <h3 class="text-micro zone-eyebrow">Why it matches · 4</h3>
+                <div class="reason-chips">
+                  <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>8 of 10 core skills</span>
+                  <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Remote-first</span>
+                  <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Seniority match</span>
+                  <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Bengaluru, your primary location</span>
+                </div>
+              </div>
+              <div>
+                <h3 class="text-micro zone-eyebrow">Review flags · 1</h3>
+                <div class="flag-block"><div class="flag-item"><svg class="icon icon-3-5"><use href="#icon-alert-triangle"></use></svg>Posted 28 days ago — may be stale</div></div>
+              </div>
+            </section>
+            <div class="card" data-size="sm">
+              <div class="text-micro muted">Eligibility</div>
+              <div class="elig-grid">
+                <div class="elig-cell"><div class="text-micro muted">LOCATION</div><div class="v">Bengaluru</div></div>
+                <div class="elig-cell"><div class="text-micro muted">WORK TYPE</div><div class="v">Hybrid</div></div>
+                <div class="elig-cell"><div class="text-micro muted">SENIORITY</div><div class="v">Senior</div></div>
+                <div class="elig-cell"><div class="text-micro muted">TIMEZONE</div><div class="v">IST</div></div>
+              </div>
+            </div>
+            <div>
+              <h3 class="text-micro zone-eyebrow">Skills asked for · 12</h3>
+              <div class="skills-wrap"><span class="badge">Kubernetes</span><span class="badge">Go</span><span class="badge">PostgreSQL</span><span class="badge">Terraform</span></div>
+              <button class="btn btn-ghost btn-xs" style="margin-top:8px">+8 more</button>
+            </div>
+          </div>
+          <div class="decide-bar">
+            <div style="display:flex;gap:8px"><button class="btn btn-default"><svg class="icon"><use href="#icon-check"></use></svg>Apply<kbd>a</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-star"></use></svg>Lead<kbd>s</kbd></button><button class="btn btn-outline"><svg class="icon"><use href="#icon-circle-slash"></use></svg>Pass<kbd>x</kbd></button></div>
+            <span class="badge">Not decided</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S10 — Design system reference -->
+<!-- ======================================================================= -->
+<section class="frame" id="s10" data-qa="system-reference">
+  <div class="frame-title">
+    <div><h2>S10 — Design system reference</h2><p>Colour ×2 modes, type ramp, spacing/radius, voice, glossary — R1–R7</p></div>
+    <span class="chip">system-reference</span>
+  </div>
+  <div class="frame-body" style="display:flex;flex-direction:column;gap:24px">
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Colour — light <a href="#c1" class="callout" id="c1-src" aria-label="callout 1">1</a></h3>
+      <div class="token-grid" data-qa="token-table-light">
+        <div class="token-card"><span class="swatch" style="background:#faf8fd"></span><div class="meta"><div class="name">--background</div><div class="hex">#faf8fd — page</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#3d2c55"></span><div class="meta"><div class="name">--foreground</div><div class="hex">#3d2c55 — body text</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#ffffff"></span><div class="meta"><div class="name">--card / --popover</div><div class="hex">#ffffff — cards, panes</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#f1ecf8"></span><div class="meta"><div class="name">--muted / --secondary</div><div class="hex">#f1ecf8 — inputs, chips</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#6e5b87"></span><div class="meta"><div class="name">--muted-foreground</div><div class="hex">#6e5b87 — meta, labels</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#efe8fa"></span><div class="meta"><div class="name">--accent</div><div class="hex">#efe8fa — selected row</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#e4dbf0"></span><div class="meta"><div class="name">--border</div><div class="hex">#e4dbf0 — 1px rules</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#e4dbf0"></span><div class="meta"><div class="name">--input</div><div class="hex">#e4dbf0 — input border</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#7b5ea7"></span><div class="meta"><div class="name">--primary / --ring</div><div class="hex">#7b5ea7 — the one solid action</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#5e4590"></span><div class="meta"><div class="name">--primary-hover</div><div class="hex">#5e4590</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#ffffff"></span><div class="meta"><div class="name">--primary-foreground</div><div class="hex">#ffffff</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#4caf6e"></span><div class="meta"><div class="name">--success (fill only)</div><div class="hex">#4caf6e</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#26703f"></span><div class="meta"><div class="name">--success-strong (text)</div><div class="hex">#26703f</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#d64545"></span><div class="meta"><div class="name">--destructive (fill only)</div><div class="hex">#d64545</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#c62c2c"></span><div class="meta"><div class="name">--destructive-strong (text)</div><div class="hex">#c62c2c</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#ff8a3d"></span><div class="meta"><div class="name">--attention (fill only)</div><div class="hex">#ff8a3d</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#a04a06"></span><div class="meta"><div class="name">--attention-strong (text)</div><div class="hex">#a04a06</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#c98a2e"></span><div class="meta"><div class="name">--amber (fill only, no -strong)</div><div class="hex">#c98a2e</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#f3eefb"></span><div class="meta"><div class="name">--sidebar</div><div class="hex">#f3eefb</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#e7def7"></span><div class="meta"><div class="name">--sidebar-accent</div><div class="hex">#e7def7</div></div></div>
+        <div class="token-card"><span class="swatch" style="background:#ded2f0"></span><div class="meta"><div class="name">--sidebar-border</div><div class="hex">#ded2f0</div></div></div>
+      </div>
+    </div>
+
+    <div class="dark-token-preview">
+      <h3 class="text-base" style="margin-bottom:8px;font-family:var(--font-heading)">Colour — dark</h3>
+      <div class="token-grid" data-qa="token-table-dark">
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#1a1523"></span><div class="meta"><div class="name" style="color:#e6ddf5">--background</div><div class="hex" style="color:#a695c2">#1a1523</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#e6ddf5"></span><div class="meta"><div class="name" style="color:#e6ddf5">--foreground</div><div class="hex" style="color:#a695c2">#e6ddf5</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#241d30"></span><div class="meta"><div class="name" style="color:#e6ddf5">--card / --popover</div><div class="hex" style="color:#a695c2">#241d30</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#2e2540"></span><div class="meta"><div class="name" style="color:#e6ddf5">--muted / --secondary</div><div class="hex" style="color:#a695c2">#2e2540</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#a695c2"></span><div class="meta"><div class="name" style="color:#e6ddf5">--muted-foreground</div><div class="hex" style="color:#a695c2">#a695c2</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#342a47"></span><div class="meta"><div class="name" style="color:#e6ddf5">--accent</div><div class="hex" style="color:#a695c2">#342a47</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#362c4a"></span><div class="meta"><div class="name" style="color:#e6ddf5">--border</div><div class="hex" style="color:#a695c2">#362c4a</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#3f3355"></span><div class="meta"><div class="name" style="color:#e6ddf5">--input</div><div class="hex" style="color:#a695c2">#3f3355</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#b79ce0"></span><div class="meta"><div class="name" style="color:#e6ddf5">--primary / --ring</div><div class="hex" style="color:#a695c2">#b79ce0</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#c9b4ea"></span><div class="meta"><div class="name" style="color:#e6ddf5">--primary-hover</div><div class="hex" style="color:#a695c2">#c9b4ea</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#1a1523"></span><div class="meta"><div class="name" style="color:#e6ddf5">--primary-foreground</div><div class="hex" style="color:#a695c2">#1a1523</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#6fcb8e"></span><div class="meta"><div class="name" style="color:#e6ddf5">--success / -strong (alias)</div><div class="hex" style="color:#a695c2">#6fcb8e</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#f08a8a"></span><div class="meta"><div class="name" style="color:#e6ddf5">--destructive / -strong (alias)</div><div class="hex" style="color:#a695c2">#f08a8a</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#ff9e5e"></span><div class="meta"><div class="name" style="color:#e6ddf5">--attention / -strong (alias)</div><div class="hex" style="color:#a695c2">#ff9e5e</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#e1a856"></span><div class="meta"><div class="name" style="color:#e6ddf5">--amber</div><div class="hex" style="color:#a695c2">#e1a856</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#201a2c"></span><div class="meta"><div class="name" style="color:#e6ddf5">--sidebar</div><div class="hex" style="color:#a695c2">#201a2c</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#2e2540"></span><div class="meta"><div class="name" style="color:#e6ddf5">--sidebar-accent</div><div class="hex" style="color:#a695c2">#2e2540</div></div></div>
+        <div class="token-card" style="background:#241d30;box-shadow:0 0 0 1px #362c4a"><span class="swatch" style="background:#362c4a"></span><div class="meta"><div class="name" style="color:#e6ddf5">--sidebar-border</div><div class="hex" style="color:#a695c2">#362c4a</div></div></div>
+      </div>
+    </div>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Contrast pairs, both modes (WCAG 2.1, ≥4.5:1)</h3>
+      <table class="tbl">
+        <thead><tr><th>Pair</th><th>Light</th><th>Dark</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>foreground on card</td><td class="tabular-nums">12.4:1</td><td class="tabular-nums">12.5:1</td><td>pass</td></tr>
+          <tr><td>muted-foreground on card</td><td class="tabular-nums">5.90:1</td><td class="tabular-nums">6.6:1</td><td>pass</td></tr>
+          <tr><td>primary on card</td><td class="tabular-nums">5.27:1</td><td class="tabular-nums">6.87:1</td><td>pass</td></tr>
+          <tr><td>success-strong on card</td><td class="tabular-nums">5.98:1</td><td class="tabular-nums">8.31:1</td><td>pass</td></tr>
+          <tr><td>destructive-strong on card</td><td class="tabular-nums">5.49:1</td><td class="tabular-nums">6.76:1</td><td>pass</td></tr>
+          <tr><td>attention-strong on card</td><td class="tabular-nums">6.04:1</td><td class="tabular-nums">5.9:1</td><td>pass</td></tr>
+          <tr><td>success (plain) on card</td><td class="tabular-nums">2.76:1</td><td>—</td><td style="color:var(--destructive-strong)">FAIL — fill only</td></tr>
+          <tr><td>destructive (plain) on card</td><td class="tabular-nums">4.35:1</td><td>—</td><td style="color:var(--destructive-strong)">FAIL — fill only</td></tr>
+          <tr><td>attention (plain) on card</td><td class="tabular-nums">2.34:1</td><td>—</td><td style="color:var(--destructive-strong)">FAIL — fill only</td></tr>
+          <tr><td>amber (plain) on card</td><td class="tabular-nums">2.92:1</td><td>—</td><td style="color:var(--destructive-strong)">FAIL — no -strong sibling</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Type ramp <a href="#c2" class="callout" id="c2-src" aria-label="callout 2">2</a></h3>
+      <div data-qa="type-ramp">
+        <div class="type-ramp-row"><div class="meta">--text-micro · 11/16 · uppercase · 500</div><div class="text-micro">Zone eyebrows, kbd hints, scope badges</div></div>
+        <div class="type-ramp-row"><div class="meta">--text-xs · 12/16 · 400·500</div><div class="text-xs">Meta, badges, chips, helper text</div></div>
+        <div class="type-ramp-row"><div class="meta">--text-sm · 14/20 · 400·500</div><div class="text-sm">Body — 66% of all uses, rows, inputs, JD</div></div>
+        <div class="type-ramp-row"><div class="meta">--text-base · 16/24 · 500 · heading</div><div class="text-base">Card titles</div></div>
+        <div class="type-ramp-row"><div class="meta">--text-lg · 18/28 · 600 · heading</div><div class="text-lg">Page + pane titles</div></div>
+        <div class="type-ramp-row"><div class="meta">--text-2xl · 24/32 · 600 · heading</div><div class="text-2xl">74</div></div>
+      </div>
+    </div>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Spacing (4px grid) &amp; radii</h3>
+      <table class="tbl">
+        <thead><tr><th>Utility</th><th>Literal</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr><td>gap-1 / p-1</td><td class="tabular-nums">4px</td><td>icon↔text, kbd padding</td></tr>
+          <tr><td>gap-1.5</td><td class="tabular-nums">6px</td><td>button internals, label↔control</td></tr>
+          <tr><td>gap-2 / p-2</td><td class="tabular-nums">8px</td><td>chip rows, badge padding</td></tr>
+          <tr><td>p-2.5</td><td class="tabular-nums">10px</td><td>input/button horizontal padding</td></tr>
+          <tr><td>gap-3 / p-3</td><td class="tabular-nums">12px</td><td>card-sm padding, eligibility grid</td></tr>
+          <tr><td>gap-4 / p-4</td><td class="tabular-nums">16px</td><td>card default padding, pane rhythm</td></tr>
+          <tr><td>p-5</td><td class="tabular-nums">20px</td><td>dialog content</td></tr>
+          <tr><td>gap-6 / p-6</td><td class="tabular-nums">24px</td><td>page padding, two-pane column gap</td></tr>
+          <tr><td>radius-xl</td><td class="tabular-nums">22.4px</td><td>cards</td></tr>
+          <tr><td>radius-4xl</td><td class="tabular-nums">41.6px</td><td>badges, chips</td></tr>
+          <tr><td>radius-lg</td><td class="tabular-nums">16px</td><td>buttons, inputs, selects</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Voice rules (R6)</h3>
+      <ol class="text-sm" data-qa="voice-rules" style="padding-left:18px;display:flex;flex-direction:column;gap:4px">
+        <li>Short plain words. "Use", not "utilise". "Now", not "at this time."</li>
+        <li>Active voice. "The filter dropped 189 jobs", not "189 jobs were dropped."</li>
+        <li>Imperative verb + object on buttons. One verb per button. Never "Submit", never "OK".</li>
+        <li>Sentence case everywhere — buttons, headings, labels, nav. Exception: reserved proper nouns (LinkedIn, Greenhouse, Keka, Notion) and the frozen status strings.</li>
+        <li>Lead with the main point. The number first, the caveat second.</li>
+        <li>One reserved term per concept — the glossary is the authority.</li>
+      </ol>
+    </div>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Glossary (R7)</h3>
+      <table class="tbl" data-qa="glossary">
+        <thead><tr><th>Concept</th><th>Reserved word(s)</th><th>Banned synonyms</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Pipeline stages</td><td>reconcile · farm · source · compress · structure · assemble · filter · dedup · rank · sync</td><td>"step", "phase", "task"</td><td>frozen</td></tr>
+          <tr><td>Lanes</td><td>LinkedIn · Greenhouse · Keka</td><td>raw lowercase, "source", "scraper", "provider"</td><td>display labels</td></tr>
+          <tr><td>A pipeline execution</td><td>Run</td><td>"job", "execution", "sync", "crawl"</td><td>—</td></tr>
+          <tr><td>A posting on the board</td><td>Job</td><td>"posting", "listing", "role"</td><td>—</td></tr>
+          <tr><td>Config scope</td><td>Profile</td><td>"account", "user", "workspace"</td><td>—</td></tr>
+          <tr><td>Tracking statuses</td><td>Lead · Applied · Recruiter Screen · Tech Round · Onsite · Offer · Rejected · Passed</td><td>"Saved" (→ Lead), "Skipped"/"Dismissed" (→ Passed)</td><td>frozen</td></tr>
+          <tr><td>Excitement</td><td>Vera level · Kandipa podu · Try panalam</td><td>any English "normalisation"</td><td>frozen, reserved</td></tr>
+          <tr><td>Triage actions</td><td>Apply · Lead · Pass</td><td>"Save" (→ Lead), "Skip" (→ Pass), "Dismiss", "Reject"</td><td>R11</td></tr>
+          <tr><td>Form commit</td><td>Save</td><td>"Submit", "Apply", "Confirm"</td><td>—</td></tr>
+          <tr><td>The ranking number</td><td>Match score</td><td>"rank", "rating", "fit", "relevance"</td><td>R18</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S11 — "Every screen adopts" strip -->
+<!-- ======================================================================= -->
+<section class="frame" id="s11" data-qa="adopt-strip">
+  <div class="frame-title">
+    <div><h2>S11 — "Every screen adopts" (R13)</h2><p>Type + words only, no layout change</p></div>
+    <span class="chip">adopt-strip</span>
+  </div>
+  <div class="frame-body">
+    <div class="sketch-grid">
+      <div class="sketch-frame">
+        <div class="sketch-title">Runs</div>
+        <div class="text-micro muted">STAGE · DURATION</div>
+        <div class="text-sm font-medium">Ran with warnings</div>
+        <div class="text-xs muted tabular-nums">04:12</div>
+        <div class="text-sm">Failed at <b>structure</b></div>
+        <div class="text-xs muted tabular-nums">01:47</div>
+      </div>
+      <div class="sketch-frame">
+        <div class="sketch-title">Tracker</div>
+        <div class="text-xs" style="display:flex;align-items:center;gap:6px"><svg class="icon icon-3" style="color:var(--primary)" fill="currentColor"><use href="#icon-star"></use></svg>Lead</div>
+        <div class="text-xs" style="display:flex;align-items:center;gap:6px"><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-send"></use></svg>Applied</div>
+        <div class="text-xs" style="display:flex;align-items:center;gap:6px"><svg class="icon icon-3" style="color:var(--destructive)"><use href="#icon-minus"></use></svg>Rejected</div>
+        <div class="text-micro muted">Excitement: Kandipa podu</div>
+      </div>
+      <div class="sketch-frame">
+        <div class="sketch-title">Settings</div>
+        <div class="text-micro muted">RUNS</div>
+        <div class="text-sm">Where jobs come from</div>
+        <div class="text-sm">Schedule</div>
+        <div style="margin-top:auto"><button class="btn btn-default btn-sm">Save changes</button></div>
+      </div>
+      <div class="sketch-frame">
+        <div class="sketch-title">Operate</div>
+        <div class="badge">Daemon · running</div>
+        <div class="badge">Session · signed in</div>
+        <div class="text-xs">Lanes: LinkedIn · Greenhouse · Keka</div>
+      </div>
+    </div>
+    <p class="text-xs muted" style="margin-top:16px">If you can tell a design system shipped on any of these four screens, R13 over-reached. (Success metric 6.)</p>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- S12 — Non-colour status legend + greyscale proof -->
+<!-- ======================================================================= -->
+<section class="frame" id="s12" data-qa="status-legend">
+  <div class="frame-title">
+    <div><h2>S12 — Non-colour status legend + greyscale proof</h2><p>R15, R22, AC 10</p></div>
+    <span class="chip">status-legend</span>
+  </div>
+  <div class="frame-body" style="display:flex;flex-direction:column;gap:24px">
+    <table class="tbl">
+      <thead><tr><th>State</th><th>Glyph</th><th>Hue (on top)</th><th>aria-label</th></tr></thead>
+      <tbody>
+        <tr><td>Undecided</td><td><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg></td><td>muted-foreground/40</td><td>"Not decided"</td></tr>
+        <tr><td>Lead</td><td><svg class="icon icon-3" style="color:var(--primary)" fill="currentColor"><use href="#icon-star"></use></svg></td><td>primary</td><td>"Lead"</td></tr>
+        <tr><td>Applied</td><td><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-send"></use></svg></td><td>primary</td><td>"Applied"</td></tr>
+        <tr><td>In play — Recruiter Screen · Tech Round · Onsite · Offer</td><td><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-chevrons-right"></use></svg></td><td>primary / success on Offer</td><td>the status word</td></tr>
+        <tr><td>Closed — Passed · Rejected</td><td><svg class="icon icon-3" style="color:var(--destructive)"><use href="#icon-minus"></use></svg></td><td>destructive</td><td>the status word</td></tr>
+      </tbody>
+    </table>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Greyscale proof — signals block, coloured vs grayscale(1)</h3>
+      <div class="greyscale-pair">
+        <div class="signals">
+          <div>
+            <h3 class="text-micro">Why it matches · 4</h3>
+            <div class="reason-chips" style="margin-top:8px">
+              <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>8 of 10 core skills</span>
+              <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Remote-first</span>
+            </div>
+          </div>
+          <div>
+            <h3 class="text-micro">Review flags · 1</h3>
+            <div class="flag-block" style="margin-top:8px"><div class="flag-item"><svg class="icon icon-3-5"><use href="#icon-alert-triangle"></use></svg>Posted 28 days ago — may be stale</div></div>
+          </div>
+        </div>
+        <div class="signals g">
+          <div>
+            <h3 class="text-micro">Why it matches · 4</h3>
+            <div class="reason-chips" style="margin-top:8px">
+              <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>8 of 10 core skills</span>
+              <span class="reason-chip"><svg class="icon icon-3"><use href="#icon-check"></use></svg>Remote-first</span>
+            </div>
+          </div>
+          <div>
+            <h3 class="text-micro">Review flags · 1</h3>
+            <div class="flag-block" style="margin-top:8px"><div class="flag-item"><svg class="icon icon-3-5"><use href="#icon-alert-triangle"></use></svg>Posted 28 days ago — may be stale</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h3 class="text-base" style="margin-bottom:8px">Greyscale proof — status pips, coloured vs grayscale(1)</h3>
+      <div class="greyscale-pair">
+        <div style="display:flex;gap:16px;align-items:center">
+          <span class="legend-row"><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg><span class="text-xs">Undecided</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--primary)" fill="currentColor"><use href="#icon-star"></use></svg><span class="text-xs">Lead</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-send"></use></svg><span class="text-xs">Applied</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--success-strong)"><use href="#icon-chevrons-right"></use></svg><span class="text-xs">Offer</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--destructive)"><use href="#icon-minus"></use></svg><span class="text-xs">Passed</span></span>
+        </div>
+        <div class="g" style="display:flex;gap:16px;align-items:center">
+          <span class="legend-row"><svg class="icon icon-3" style="color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)"><use href="#icon-circle"></use></svg><span class="text-xs">Undecided</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--primary)" fill="currentColor"><use href="#icon-star"></use></svg><span class="text-xs">Lead</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--primary)"><use href="#icon-send"></use></svg><span class="text-xs">Applied</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--success-strong)"><use href="#icon-chevrons-right"></use></svg><span class="text-xs">Offer</span></span>
+          <span class="legend-row"><svg class="icon icon-3" style="color:var(--destructive)"><use href="#icon-minus"></use></svg><span class="text-xs">Passed</span></span>
+        </div>
+      </div>
+      <p class="text-xs muted" style="margin-top:8px">Shape (glyph) and rhythm survive removal of hue entirely — AC 10 by construction, not by inspection. <a href="#c9" class="callout" aria-label="callout 9">9</a></p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<!-- Annotation panel — dossier §11, C1–C13 -->
+<!-- ======================================================================= -->
+<div class="annotations">
+  <h2 class="text-lg" style="margin-bottom:8px">Numbered callouts — decision + rationale (dossier §11)</h2>
+  <p class="text-xs muted" style="margin-bottom:8px">C1 and C2 are pinned on the colour and type-ramp tables in S10 above; C3–C13 are pinned on S1, S6, S8 and S12.</p>
+  <div class="annotation-row" id="c1"><span class="callout">1</span><div class="annotation-text"><b>Plain semantic hues are fill-only on light; `-strong` siblings are the text colours; `--amber` is fill-only permanently (no `-strong` sibling exists)</b>R2's contrast pass computed it: amber 2.92:1, success 2.76:1, destructive 4.35:1 on white. A real gap in the shipped token set, found by designing dark mode's counterpart.</div></div>
+  <div class="annotation-row" id="c2"><span class="callout">2</span><div class="annotation-text"><b>Adopt Tailwind's de-facto ramp verbatim as the named scale; do not impose the 1.2 ratio research recommends</b>A ratio change re-flows 279 sites for zero user benefit; R13 is already the spec's largest blast radius. Value is in named and bounded, not in the ratio.</div></div>
+  <div class="annotation-row" id="c3"><span class="callout">3</span><div class="annotation-text"><b>Reasons vs flags separated by container + icon + rhythm, hue last</b>R15 forbids the green/red answer. Three non-hue cues survive greyscale — AC 10 by construction. See S12's greyscale proof.</div></div>
+  <div class="annotation-row" id="c4"><span class="callout">4</span><div class="annotation-text"><b>Reasons first, flags heavier</b>The exception, not the order, should pull the eye. Applies the shipped "state = weight, not hue" rule to the screen that broke it.</div></div>
+  <div class="annotation-row" id="c5"><span class="callout">5</span><div class="annotation-text"><b>Eligibility as a labelled grid, not chips</b>§10 asks for separable facts; chips at this density are mutually ambiguous and reproduce today's defect in a rounder shape.</div></div>
+  <div class="annotation-row" id="c6"><span class="callout">6</span><div class="annotation-text"><b>JD clamped to 12 lines / 68ch, falsifier recorded</b>Butterick 45–90ch; 6–7s scan + 14.6s requirements read. Hypothesis — spec weakness 4.</div></div>
+  <div class="annotation-row" id="c7"><span class="callout">7</span><div class="annotation-text"><b>JD expansion is session-sticky, not per-job</b>Tesler's Law — the system holds "how much do I read today", instead of re-asking 11 times. See S5.</div></div>
+  <div class="annotation-row" id="c8"><span class="callout">8</span><div class="annotation-text"><b>Decide bar sticky at the pane's bottom</b>Fitts's Law — a fixed large target that never moves as the JD expands. Today's bar scrolls away the moment the JD opens.</div></div>
+  <div class="annotation-row" id="c9"><span class="callout">9</span><div class="annotation-text"><b>The 6px status dot is replaced by a 12px lucide glyph, not augmented</b>Concern (d): a 6px dot has no shape budget. Five glyphs, Miller-safe, greyscale-legible, zero extra width. See the job-row pips.</div></div>
+  <div class="annotation-row" id="c10"><span class="callout">10</span><div class="annotation-text"><b>Skills capped at 8 + "+n more"</b>Miller — a 25-badge wall isn't scannable and it buried the JD.</div></div>
+  <div class="annotation-row" id="c11"><span class="callout">11</span><div class="annotation-text"><b>The only solid fill on the screen is the Apply button</b>Von Restorff — one distinct element per screen. Everything else is tint, rule or outline.</div></div>
+  <div class="annotation-row" id="c12"><span class="callout">12</span><div class="annotation-text"><b>No toast, no undo, no confirm on a decision</b>Doherty is met by the optimistic &lt;400ms badge flip. R27: decisions are already reversible in place.</div></div>
+  <div class="annotation-row" id="c13"><span class="callout">13</span><div class="annotation-text"><b>The archived strip has no Restore action</b>The board's only job write is the tracking PATCH and `archived` isn't in it. A control with no endpoint is a dead end (AC 14).</div></div>
+</div>
+
+<footer class="foot">Standalone mid-fi mockup — docs/product/ui-design-system/mockup.html — rendered from ux-notes.md, not imported by any application code. All twelve frames (S1–S12) and the full callout annotation panel live in this single file.</footer>
+
+</body>
+</html>

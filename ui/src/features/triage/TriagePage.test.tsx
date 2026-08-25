@@ -190,7 +190,9 @@ describe('TriagePage', () => {
       expect(screen.getAllByText(/couldn't load jobs/i).length).toBeGreaterThan(0);
     });
     expect(screen.queryByText(/no jobs match/i)).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /retry/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /try again/i }).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('shows a detail-pane error with Retry when the list loads but the detail request fails', async () => {
@@ -205,12 +207,12 @@ describe('TriagePage', () => {
     await waitFor(() => {
       expect(screen.getByText(/couldn't load this job/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
     expect(screen.queryByText('Select a job to see details.')).not.toBeInTheDocument();
 
     // Flip the detail route to succeed, then retry — proves detailQuery.refetch wiring.
     opts.detailError = false;
-    await userEvent.click(screen.getByRole('button', { name: /retry/i }));
+    await userEvent.click(screen.getByRole('button', { name: /try again/i }));
 
     await waitFor(() => {
       expect(screen.getByText('Senior Engineer JD text body.')).toBeInTheDocument();

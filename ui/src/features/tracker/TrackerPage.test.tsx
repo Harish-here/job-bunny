@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { BoardJobRow } from '../../lib/api/types';
 import { TrackerPage } from './TrackerPage';
@@ -152,12 +152,19 @@ describe('TrackerPage', () => {
     expect(screen.getByText('Closed (0)')).toBeInTheDocument();
   });
 
-  it('shows an overdue row in the due strip', async () => {
+  it('shows an overdue row in the due strip, with a lucide Zap icon (never the raw glyph)', async () => {
     stubFetch();
     renderPage();
 
-    const badges = await screen.findAllByText(/⚡ Acme/);
+    const dueStrip = await screen.findByTestId('due-strip');
+    const badges = within(dueStrip).getAllByText(/Acme/);
     expect(badges).toHaveLength(1);
-    expect(badges[0]).toHaveTextContent('follow up');
+    const [badge] = badges;
+    expect(badge).toBeDefined();
+    expect(badge).toHaveTextContent('follow up');
+    // Escaped, not a literal glyph in source — the whole-tree banned-glyph
+    // scan (`bannedSynonyms.test.ts`) would otherwise flag this very line.
+    expect(badge?.textContent).not.toContain('\u26A1');
+    expect(dueStrip.querySelector('svg')).not.toBeNull();
   });
 });

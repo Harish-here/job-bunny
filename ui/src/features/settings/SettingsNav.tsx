@@ -72,8 +72,8 @@ export interface SettingsNavProps {
 /**
  * The Settings sections nav column (blueprint.md:915-925, step 27;
  * mockup-fragment.html's `settings-nav`). Roving tabindex per ux-notes §14:
- * only the currently-focused link is `tabIndex={0}`; ↑/↓ move focus between
- * links (wrapping); Enter activates the focused link via the browser's own
+ * only the currently-focused link is `tabIndex={0}`; up/down arrow keys move
+ * focus between links (wrapping); Enter activates the focused link via the browser's own
  * native button-click behaviour. Rendered as `<button>`, not `<a>`
  * (`Sidebar.tsx`'s own precedent for hash-routed nav items, matching
  * biome's `lint/a11y/useValidAnchor` — this is client-side routing, never a
@@ -103,7 +103,7 @@ export function SettingsNav({ section, navigate }: SettingsNavProps) {
     >
       {GROUPS.map((group) => (
         <div key={group.dataQa} data-qa={group.dataQa} className="flex flex-col gap-1">
-          <div className="px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="px-2 text-micro font-medium uppercase tracking-[0.04em] text-muted-foreground">
             {group.label}
           </div>
           <ul className="flex flex-col gap-1">

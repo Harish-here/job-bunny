@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -6,12 +7,8 @@ import { ApiError } from '../../lib/api/client';
 import type { ListQuery } from '../../lib/api/types';
 import { useJob, useJobs, useMeta } from '../board/useBoardData';
 import { useTrackingMutation } from '../board/useTracking';
-import { JdText } from '../job/JdText';
-import { JobFacts } from '../job/JobFacts';
-import { JobHeader } from '../job/JobHeader';
-import { TrackingPanel } from '../job/TrackingPanel';
 import { ErrorRetry } from '../shared/ErrorRetry';
-import { DecideBar } from './DecideBar';
+import { DetailPane } from './DetailPane';
 import { DECIDE_STATUS, type DecideAction, nextUndecided } from './decide';
 import { FilterPopover } from './FilterPopover';
 import { JobList } from './JobList';
@@ -36,6 +33,7 @@ function isNoLocalDb(error: unknown): boolean {
 export function TriagePage({ profile }: { profile: string }) {
   const [query, setQuery] = useState<ListQuery>(DEFAULT_QUERY);
   const [companyDraft, setCompanyDraft] = useState('');
+  const [jdExpanded, setJdExpanded] = useState(false);
 
   const metaQuery = useMeta(profile);
   const jobsQuery = useJobs(profile, query);
@@ -64,6 +62,15 @@ export function TriagePage({ profile }: { profile: string }) {
 
   function patchFilters(patch: Partial<ListQuery>): void {
     setQuery((q) => ({ ...q, ...patch, offset: 0 }));
+  }
+
+  // Only company/status/excitement drive JobList's "no matches" vs. "board
+  // is empty" copy — date range and archived toggle aren't in scope here.
+  const hasActiveFilters = Boolean(query.company || query.status || query.excitement);
+
+  function clearFilters(): void {
+    setCompanyDraft('');
+    patchFilters({ company: undefined, status: undefined, excitement: undefined });
   }
 
   function setOffset(offset: number): void {
@@ -123,7 +130,13 @@ export function TriagePage({ profile }: { profile: string }) {
               className="hop"
               onClick={() => toggleSort('date_found')}
             >
-              Date {query.sort !== 'score' && (query.order === 'asc' ? '↑' : '↓')}
+              Date{' '}
+              {query.sort !== 'score' &&
+                (query.order === 'asc' ? (
+                  <ArrowUp className="size-3" />
+                ) : (
+                  <ArrowDown className="size-3" />
+                ))}
             </Button>
             <Button
               type="button"
@@ -132,7 +145,13 @@ export function TriagePage({ profile }: { profile: string }) {
               className="hop"
               onClick={() => toggleSort('score')}
             >
-              Score {query.sort === 'score' && (query.order === 'asc' ? '↑' : '↓')}
+              Score{' '}
+              {query.sort === 'score' &&
+                (query.order === 'asc' ? (
+                  <ArrowUp className="size-3" />
+                ) : (
+                  <ArrowDown className="size-3" />
+                ))}
             </Button>
           </div>
         </div>
@@ -145,17 +164,24 @@ export function TriagePage({ profile }: { profile: string }) {
           ) : isError ? (
             <ErrorRetry
               padded
+              qa="list-error"
               message="Couldn't load jobs — the board server may be unreachable."
               onRetry={() => jobsQuery.refetch()}
             />
           ) : jobsQuery.isPending ? (
-            <div className="flex flex-col gap-2 p-3">
+            <div className="flex flex-col gap-2 p-3" data-qa="list-skeleton">
               {SKELETON_ROW_KEYS.map((key) => (
                 <Skeleton key={key} className="h-10 w-full" />
               ))}
             </div>
           ) : (
-            <JobList rows={rows} selectedId={selectedId} onSelect={select} />
+            <JobList
+              rows={rows}
+              selectedId={selectedId}
+              onSelect={select}
+              filtered={hasActiveFilters}
+              onClearFilters={clearFilters}
+            />
           )}
         </div>
 
@@ -202,13 +228,13 @@ export function TriagePage({ profile }: { profile: string }) {
             onRetry={() => detailQuery.refetch()}
           />
         ) : detail ? (
-          <div className="flex flex-col gap-6">
-            <JobHeader job={detail} />
-            <DecideBar job={detail} onDecide={decide} />
-            <JobFacts job={detail} />
-            <JdText jd={detail.jd} />
-            <TrackingPanel profile={profile} job={detail} />
-          </div>
+          <DetailPane
+            profile={profile}
+            detail={detail}
+            onDecide={decide}
+            jdExpanded={jdExpanded}
+            onToggleJdExpanded={() => setJdExpanded((v) => !v)}
+          />
         ) : (
           <div className="text-muted-foreground">
             {rows.length === 0 ? 'No job selected.' : 'Select a job to see details.'}
