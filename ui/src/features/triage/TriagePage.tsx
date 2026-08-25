@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -6,12 +7,8 @@ import { ApiError } from '../../lib/api/client';
 import type { ListQuery } from '../../lib/api/types';
 import { useJob, useJobs, useMeta } from '../board/useBoardData';
 import { useTrackingMutation } from '../board/useTracking';
-import { JdText } from '../job/JdText';
-import { JobFacts } from '../job/JobFacts';
-import { JobHeader } from '../job/JobHeader';
-import { TrackingPanel } from '../job/TrackingPanel';
 import { ErrorRetry } from '../shared/ErrorRetry';
-import { DecideBar } from './DecideBar';
+import { DetailPane } from './DetailPane';
 import { DECIDE_STATUS, type DecideAction, nextUndecided } from './decide';
 import { FilterPopover } from './FilterPopover';
 import { JobList } from './JobList';
@@ -124,7 +121,13 @@ export function TriagePage({ profile }: { profile: string }) {
               className="hop"
               onClick={() => toggleSort('date_found')}
             >
-              Date {query.sort !== 'score' && (query.order === 'asc' ? '↑' : '↓')}
+              Date{' '}
+              {query.sort !== 'score' &&
+                (query.order === 'asc' ? (
+                  <ArrowUp className="size-3" />
+                ) : (
+                  <ArrowDown className="size-3" />
+                ))}
             </Button>
             <Button
               type="button"
@@ -133,7 +136,13 @@ export function TriagePage({ profile }: { profile: string }) {
               className="hop"
               onClick={() => toggleSort('score')}
             >
-              Score {query.sort === 'score' && (query.order === 'asc' ? '↑' : '↓')}
+              Score{' '}
+              {query.sort === 'score' &&
+                (query.order === 'asc' ? (
+                  <ArrowUp className="size-3" />
+                ) : (
+                  <ArrowDown className="size-3" />
+                ))}
             </Button>
           </div>
         </div>
@@ -150,7 +159,7 @@ export function TriagePage({ profile }: { profile: string }) {
               onRetry={() => jobsQuery.refetch()}
             />
           ) : jobsQuery.isPending ? (
-            <div className="flex flex-col gap-2 p-3">
+            <div className="flex flex-col gap-2 p-3" data-qa="list-skeleton">
               {SKELETON_ROW_KEYS.map((key) => (
                 <Skeleton key={key} className="h-10 w-full" />
               ))}
@@ -203,18 +212,13 @@ export function TriagePage({ profile }: { profile: string }) {
             onRetry={() => detailQuery.refetch()}
           />
         ) : detail ? (
-          <div className="flex flex-col gap-6">
-            <JobHeader job={detail} />
-            <DecideBar job={detail} onDecide={decide} />
-            <JobFacts job={detail} />
-            <JdText
-              jd={detail.jd}
-              url={detail.url}
-              expanded={jdExpanded}
-              onToggleExpanded={() => setJdExpanded((v) => !v)}
-            />
-            <TrackingPanel profile={profile} job={detail} />
-          </div>
+          <DetailPane
+            profile={profile}
+            detail={detail}
+            onDecide={decide}
+            jdExpanded={jdExpanded}
+            onToggleJdExpanded={() => setJdExpanded((v) => !v)}
+          />
         ) : (
           <div className="text-muted-foreground">
             {rows.length === 0 ? 'No job selected.' : 'Select a job to see details.'}

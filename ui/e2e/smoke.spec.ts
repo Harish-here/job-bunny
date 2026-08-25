@@ -36,7 +36,7 @@ test.beforeEach(async ({ page }) => {
 test('board loads', async ({ page }) => {
   await page.goto('/#/triage');
   const rows = page.getByTestId('job-row');
-  await expect(rows).toHaveCount(10);
+  await expect(rows).toHaveCount(11);
 
   const first = rows.first();
   await expect(first).toHaveAttribute('data-job-id', 'rajni-e2e-1');
@@ -59,7 +59,7 @@ test('sidebar branding', async ({ page }) => {
 test('filter narrows', async ({ page }) => {
   await page.goto('/#/triage');
   const rows = page.getByTestId('job-row');
-  await expect(rows).toHaveCount(10);
+  await expect(rows).toHaveCount(11);
 
   const search = page.getByLabel('Search company');
   await search.fill('AlphaCo');
@@ -67,7 +67,7 @@ test('filter narrows', async ({ page }) => {
   await expect(rows.first()).toHaveAttribute('data-job-id', 'rajni-e2e-1');
 
   await search.fill('');
-  await expect(rows).toHaveCount(10);
+  await expect(rows).toHaveCount(11);
 });
 
 test('keyboard selection', async ({ page }) => {

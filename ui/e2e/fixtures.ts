@@ -148,4 +148,22 @@ export const FIXTURE_JOBS: JD[] = [
     hoursAgo: 9,
     score: 50,
   }),
+  // The sparse fixture (S7 `detail-sparse`) — built via `JDSchema.parse`
+  // directly, bypassing `makeJd()`, since `content`/`structured`/
+  // `evaluation` must all be omitted to match the mockup's
+  // empty-within-populated frame (score: null, matchReasons: [],
+  // skills: [], workType/seniority/timezone: null, jd.content: undefined).
+  // `hoursAgo: 10` keeps it oldest, appended last, so no other fixture's
+  // relative order shifts.
+  JDSchema.parse({
+    identity: {
+      id: 'rajni-e2e-11',
+      lane: 'greenhouse',
+      url: 'https://example.com/jobs/rajni-e2e-11',
+      company: 'Nimbus Works',
+      title: 'Backend Engineer (Contract)',
+      scrapedAt: scrapedAt(10),
+      location: 'Remote',
+    },
+  }),
 ];
