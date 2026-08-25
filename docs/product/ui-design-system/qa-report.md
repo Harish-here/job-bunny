@@ -1,6 +1,9 @@
 # QA Report — UI Design System & Triage Job-Details Overhaul
 
-**Verdict: RED — 10 open bugs (0 critical · 1 major · 9 minor). No PR opened.**
+**Round 1 verdict: RED — 10 bugs.  Round 2 verdict: RED — 1 open bug (minor). No PR opened.**
+
+> Round 1 findings are preserved below for the record; **all 10 are verified fixed** in `d8fa393`.
+> Round 2 opened one new minor finding — a residual of round 1's bug 8. See §10.
 
 ---
 
@@ -97,23 +100,23 @@ dist/assets/index-ir17qpWE.js                               703.36 kB │ gzip: 
 
 | AC | Criterion | Verdict | Evidence |
 |---|---|---|---|
-| 1 | Colour: every text pair ≥ 4.5:1 both modes; check **automated**, failing pair = **build failure** | **DRIFTED** | Ratios independently recomputed by me from `index.css` (WCAG relative-luminance): **every text pair passes in both modes** (light 5.25–12.43:1; dark 5.95–13.63:1); `reference.md`'s table is accurate. But **no code computes a contrast ratio** — `tokens.test.ts` only pins hex strings. → **Bug 8** |
+| 1 | Colour: every text pair ≥ 4.5:1 both modes; check **automated**, failing pair = **build failure** | **DRIFTED (round 2)** — automation now exists (16 assertions, 8 pairs × 2 modes) but omits one listed pass-pair that renders on 20 elements of the triage screen; see **R2-1** | Ratios independently recomputed by me from `index.css` (WCAG relative-luminance): **every text pair passes in both modes** (light 5.25–12.43:1; dark 5.95–13.63:1); `reference.md`'s table is accurate. But **no code computes a contrast ratio** — `tokens.test.ts` only pins hex strings. → **Bug 8** |
 | 2 | Type scale as tokens; no `text-[Npx]` anywhere; every step used | **DELIVERED** | `grep -rn 'text-\[' ui/src` → 1 hit, `text-[0.8rem]` in vendored `button.tsx` (rem, not `Npx`, pre-existing). All five `text-[10px]`/`text-[9px]` eliminated. Live measurement across all 7 routes: **only 11/12/14/16/18/24px, zero off-scale** (`sweep-report.md` Part 3) |
 | 3 | Voice rules documented; every new/changed button label imperative + sentence case | **DELIVERED** | New labels: Apply · Lead · Pass · Try again · Show full description · Show less · Clear filters · View the tracker → — all imperative, sentence case. `reference.md` §Voice |
 | 4 | Exactly one word per concept; banned synonym fails the build | **DELIVERED** (with note) | `bannedSynonyms.test.ts` walks the whole `ui/src` tree and asserts no match against 3 precise patterns. Note: the scan runs under `ui:check`, not `npm run check` — the repo's own architecture puts `ui/` outside the root gate, so the AC's literal wording is unimplementable; CI runs both |
 | 5 | `tokens.test.ts` pins every token in the reference doc, both modes; no new dependency | **DELIVERED** | +71 lines pinning `--text-micro`, the 6-step ramp, and 30+ reserved words against `reference.md`; `git diff origin/main...HEAD -- ui/package.json` is **empty** |
-| 6 | All eight screens import type tokens **and the vocabulary module**; full e2e green; no layout change outside triage/`#/job/:id` | **DRIFTED** | Type tokens: **all 8** (live-measured). Vocabulary module: **4 of 8** — only triage, job, settings import `lib/vocabulary`; tracker, runs, analytics, Operate, onboarding do not. e2e green (127/127); no non-triage layout change observed across 7 route screenshots. → **Bug 9** |
+| 6 | All eight screens import type tokens **and the vocabulary module**; full e2e green; no layout change outside triage/`#/job/:id` | **DELIVERED (round 2, under orchestrator ruling)** | Type tokens: **all 8** (live-measured). Vocabulary module: **4 of 8** — only triage, job, settings import `lib/vocabulary`; tracker, runs, analytics, Operate, onboarding do not. e2e green (127/127); no non-triage layout change observed across 7 route screenshots. → **Bug 9** |
 | 7 | Pane order: score+scale → reasons/flags distinct → eligibility → lane → JD disclosed → tracking last | **DELIVERED** | Script-extracted DOM order matches the mockup **exactly** (`style-diff.md`): `verdict-header → match-score → score-meter → provenance-line → lane-label → signals → match-reasons → eligibility → skills → jd → jd-toggle → tracking → decide-bar`. Reasons = green rounded chips + check icon, wrapped horizontally; flags = 2px red left rule + triangle icon, stacked vertically — distinct by container shape, icon and rhythm, not hue (`stub-detail-pane.png`) |
 | 8 | Buttons read "Pass"/"Lead"; badge uses the button's word; `a`/`x`/`s` work; hints match | **DELIVERED** | Live: clicked Pass → badge flipped to `Passed`, `aria-pressed=true`; buttons render `Apply a` / `Lead s` / `Pass x`. Keys pinned by `smoke.spec.ts:73-83` + `:86-97` (both green) |
 | 9 | No raw lane identifier in any user-visible string | **DELIVERED** | Live snapshots show `LinkedIn` / `Greenhouse` throughout list and pane. `laneLabel()` maps all three |
 | 10 | No state distinguishable by hue alone | **DELIVERED** | `StatusPip` renders 5 distinct lucide shapes + `aria-label` (`Circle`/`Star`/`Send`/`Minus`/`ChevronsRight`); score carries band word + bar meter + weight; flags vs reasons differ by container. Verified in `qa-S1-app.png` |
-| 11 | No raw unicode glyph used as an icon in `ui/src/**` | **DRIFTED** | Triage glyphs replaced with lucide and gated by `/[✓✗☆↑↓]/`. But `⚡` (U+26A1) still renders as an icon at `tracker/DueStrip.tsx:29`, uncovered by the pattern. → **Bug 10** |
+| 11 | No raw unicode glyph used as an icon in `ui/src/**` | **DELIVERED (round 2)** | Triage glyphs replaced with lucide and gated by `/[✓✗☆↑↓]/`. But `⚡` (U+26A1) still renders as an icon at `tracker/DueStrip.tsx:29`, uncovered by the pattern. → **Bug 10** |
 | 12 | `#/job/:id` renders correctly, same field ordering as the triage pane | **DELIVERED** (with note) | Renders clean, zero console errors (`screen-job.png`). Right-column zone order matches triage (`signals → eligibility → skills → tracking`); JD sits in the left column, so absolute DOM order differs — forced by the pre-existing 2-column grid that R33 (Won't) protects, and reasoned explicitly in blueprint §3. Not filed as a bug; see Notes |
 | 13 | Detail pane uses shared `Card`; no triage action uses `variant="destructive"` | **DELIVERED** | `DetailPane.tsx` wraps in `<Card>`; `decide-pass` is `variant="outline"`. `grep destructive ui/src/features/triage/DecideBar.tsx` → no hit |
 | 14 | Board still `127.0.0.1`-only; no new route, request field or DB column; only job write stays the tracking PATCH | **DELIVERED** | `git diff origin/main...HEAD -- src/ test/` is **empty**. Live: the only PATCH observed was `/api/profiles/rajni/jobs/:id/tracking` |
 | 15 | `npm run check` + `npm run ui:check` pass; no file over the 400-line cap | **DELIVERED** | Both green (§2). Cap test green inside gate 1; independent `wc -l` sweep of `ui/src` found zero impl file > 400 and zero test file > 800 |
 
-**AC totals: 11 delivered · 4 drifted · 0 missing · 0 untested.**
+**AC totals — round 1: 11 delivered · 4 drifted.  Round 2: 14 delivered · 1 drifted (AC 1) · 0 missing · 0 untested.**
 
 ### 3.2 MoSCoW Musts (all 20)
 
@@ -129,18 +132,18 @@ dist/assets/index-ir17qpWE.js                               703.36 kB │ gzip: 
 | R9 Vitest source-scan gate | delivered | whole-tree walk, 3 narrow dry-run-verified patterns |
 | R11 Pass/Lead relabel | delivered | live-verified button + badge |
 | R12 shortcut hints correct, keys unchanged | delivered | `useTriageKeyboard.ts` untouched; hints `a`/`s`/`x` render; e2e green |
-| R13 eight screens adopt tokens + vocabulary | **drifted** | tokens yes (all 8, live-measured); vocabulary module 4 of 8 → **Bug 9** |
+| R13 eight screens adopt tokens + vocabulary | **delivered (round 2, ruling)** | tokens yes (all 8, live-measured); vocabulary module 4 of 8 → **Bug 9** |
 | R14 five off-scale values eliminated | delivered | zero `text-[Npx]` remain |
 | R15 state never colour-alone | delivered | shape + icon + text cues verified in screenshots |
 | R17 pane ordered by decision | delivered | DOM order matches mockup exactly |
 | R18 score labelled + scaled | delivered | `MATCH / 95/100 / ▮▮▮▮ STRONG` |
-| R19 reasons vs flags visually distinct | **untested end-to-end** | Correct when rendered (stubbed evidence), but **no fixture produces `reviewFlags`** → **Bug 1** |
+| R19 reasons vs flags visually distinct | **delivered (round 2)** | Correct when rendered (stubbed evidence), but **no fixture produces `reviewFlags`** → **Bug 1** |
 | R20 lane surfaced by display name | delivered | `LinkedIn` / `Greenhouse` in pane and rows |
 | R21 JD measure-capped + disclosed | delivered | live: clamp + fade + `Show full description` ⇄ `Show less`, session-sticky across job selection |
 | R24 `#/job/:id` verified | delivered | renders clean; see AC 12 note |
 | R25 existing e2e selectors keep passing | delivered | 127/127 e2e green |
 
-**Must totals: 18 delivered · 1 drifted · 1 untested-end-to-end · 0 missing.**
+**Must totals — round 1: 18 delivered · 1 drifted · 1 untested.  Round 2: 20 delivered · 0 drifted · 0 untested.**
 
 ---
 
@@ -181,7 +184,7 @@ All four were proven to render **correctly** under API stubbing (`stub-detail-pa
 
 ---
 
-## 5. Bug List
+## 5. Bug List — ROUND 1 (all 10 CLOSED in `d8fa393`, re-verified in §10)
 
 > Zero critical. One major. Nine minor. **No bug has been deferred** — deferral is the user's call
 > alone and no user was available.
@@ -347,7 +350,7 @@ what was found, not what exists. What was **not** or **could not** be tested:
 
 ## 8. Verdict
 
-**RED — 10 open bugs (0 critical · 1 major · 9 minor). No PR opened.**
+**Round 1: RED — 10 open bugs. Superseded by §10's round-2 verdict.**
 
 All four gates are green and the flagship is genuinely well built: the detail pane's DOM order matches
 the mockup exactly, every computed font-size, weight, line-height, padding and radius matched on the
@@ -383,3 +386,144 @@ user respectively.
 fixture DB re-seeded to canonical state via `ui/e2e/seed.ts` (11 jobs; tracking on `rajni-e2e-2/3/4`
 only); `.env` intact at 636 bytes mode 600 with no `.env.local-bak` remaining; `git status --porcelain`
 clean. No application code was read-modified — this report is the only file written.
+
+---
+
+# 10. ROUND 2 — Scoped Re-verification (`d8fa393`)
+
+**Scope:** the 10 round-1 bugs, plus the full gate suite (never gates alone), plus an exploratory walk
+**varied** from round 1 and aimed at the fixes themselves.
+
+| Item | Value |
+|---|---|
+| HEAD verified | `d8fa3932902f85b13d3bc9f08e76128810883891` (matches expected) |
+| Delta from round 1 | 22 files, +903/−67 (incl. this report's round-1 text) |
+| Fixture | 12 jobs (was 11) — `rajni-e2e-12` archived; `rajni-e2e-6` gains 2 review flags, `excitement: 'Vera level'`, 10 skills |
+| Environment restored | board server stopped · fixture DB re-seeded (12 jobs, `rajni-e2e-12` archived, tracking on `-2/-3/-4` only) · `.env` intact 636 B mode 600 · `git status --porcelain` clean |
+
+## 10.1 Gate Results — round 2 (all four PASS)
+
+| Gate | Result | Counts |
+|---|---|---|
+| `npm run check` | **PASS** | `tests 2114 · pass 2114 · fail 0` (typecheck + lint + boundaries 494 modules + test) |
+| `npm run ui:check` | **PASS** | `Test Files 131 passed · Tests 1153 passed` (**+20** vs round 1's 1133 — the new WCAG assertions) · 28 pre-existing biome warnings |
+| `npm run ui:build` | **PASS** | 2118 modules, `dist/assets/index-Cc9WpSiQ.js` |
+| `npm run ui:e2e` | **PASS** | `shared-docs 53 passed` + `default 82 passed` = **135 passed, 0 failed, 0 skipped** (**+8** vs round 1's 127) |
+
+`.env` restoration re-verified: present, 636 bytes, mode `600`, no `.env.local-bak`. The known
+`SkillsSection.test.tsx` flake did not fire.
+
+**All 8 new e2e ids confirmed to have actually run** (not merely a green total):
+
+```
+✓  71 [default] › e2e/triage-redesign.spec.ts:276:1 › e2e-signals-flags (440ms)
+✓  73 [default] › e2e/triage-redesign.spec.ts:307:1 › e2e-archived-strip (702ms)
+✓  75 [default] › e2e/triage-redesign.spec.ts:337:1 › e2e-skills-more (397ms)
+✓  77 [default] › e2e/triage-redesign.spec.ts:363:1 › e2e-tracking-excitement (365ms)
+✓  79 [default] › e2e/triage-redesign.spec.ts:378:1 › e2e-list-empty (1.1s)
+✓  80 [default] › e2e/triage-redesign.spec.ts:394:1 › e2e-list-empty-true (200ms)
+✓  81 [default] › e2e/triage-redesign.spec.ts:419:1 › e2e-list-error (1.6s)
+✓  82 [default] › e2e/triage-redesign.spec.ts:454:1 › e2e-dark-mode (195ms)
+```
+
+## 10.2 Round-1 bug re-verification — 10 of 10 CLOSED
+
+| # | Sev | Fix | Re-verification evidence | Verdict |
+|---|---|---|---|---|
+| 1 | major | `rajni-e2e-6` gains 2 soft-fail verdicts → `reviewFlags`; `e2e-signals-flags` | **Live**: pane shows `WHY IT MATCHES · 2` (green chips, `flex-wrap`, Check icons) above `REVIEW FLAGS · 2` (2px red left rule, `flex-col`, AlertTriangle icons). The e2e asserts both zones' classes *and* per-entry icon counts — not mere existence. `r2-S1-flags.png` | **CLOSED** |
+| 2 | minor | 12th archived fixture + excitement + 10 skills; 3 new e2e | **Live**: `skills-more` 8→10 badges with `+2 more` ⇄ `Show less`; `tracking-excitement` renders `Excitement / Vera level` with **0 interactive controls** (pins the read-only deviation) and is **absent** on a job without excitement; `archived-strip` reachable via the real "Show archived" filter | **CLOSED** |
+| 3 | minor | `e2e-list-empty`, `-true`, `e2e-list-error`, `e2e-dark-mode`; `ErrorRetry` gained an optional `qa` prop | All four pass. `e2e-list-error` un-routes and clicks retry, asserting **recovery**, not just the error. `e2e-dark-mode` asserts `html.dark` **and** the computed pane background byte-matches dark `--card` | **CLOSED** |
+| 4 | minor | `Eligibility` eyebrow added | **Measured**: `[data-qa="eligibility"]` innerText = `"ELIGIBILITY\nLOCATION\nBengaluru\n…"`. Treatment matches the mockup (whose `.text-micro` itself carries `text-transform:uppercase; letter-spacing:.04em; font-weight:500`) | **CLOSED** |
+| 5 | minor | `justify-between` on the decide-bar root | **Measured**: `justifyContent: space-between`; bar `x 592 w 840`, badge `x 1329.8 w 86.2` → **16.0 px** from the bar's right edge, 410.8 px of gap after Pass. Badge is right-aligned as the mockup specifies | **CLOSED** |
+| 6 | minor | `SKILLS ASKED FOR · 0` eyebrow on the empty branch | **Measured**: sparse job innerText = `"SKILLS ASKED FOR · 0\n\nNo skills extracted."` | **CLOSED** |
+| 7 | minor | `ArchivedStrip` hoisted to a fragment sibling before `verdict-header` | **Measured live**: pane order = `archived-strip > verdict-header > match-score > …`; `strip.y 40 < header.y 88`. Also pinned by `e2e-archived-strip`'s own DOM-index assertion | **CLOSED** |
+| 8 | minor | Dependency-free WCAG 2.1 helper + `it.each` over 8 pairs × 2 modes in `tokens.test.ts`; `reference.md` numbers corrected | 16 assertions + 2 sanity tests (21:1 white-on-black, 1:1 identical) now run in `ui:check`. Corrected table matches my independent recomputation exactly on all 8 enforced rows | **CLOSED** — but see **R2-1** |
+| 9 | minor | Orchestrator ruling + `runs` adopts `laneLabel()` | `runDiagnosis.ts` and `DiagnosisPanel.tsx` now import `laneLabel`; 6 real import sites across triage, job, settings, runs. Live: `#/runs` leaks no raw lane id | **CLOSED under ruling** |
+| 10 | minor | lucide `Zap` + `⚡` added to the banned glyph class | **Live**: `#/tracker` contains no raw `⚡`; the due badge renders `Cognivue — prep sys design (Yesterday)` with 1 lucide `<svg>`. Gate now enforces `/[✓✗☆↑↓⚡]/` tree-wide | **CLOSED** |
+
+**Orchestrator ruling recorded (bug 9, AC 6 / R13).** Vocabulary adoption applies only to screens that
+render a reserved concept. Under that ruling: triage, job, settings and runs render one and all four
+import the module; tracker, analytics, Operate, onboarding and shell render none and need no import.
+AC 6 and R13 are recorded **delivered** on that basis. This is a scope ruling relayed through the
+orchestrator, not a user approval, and it is recorded here rather than silently absorbed.
+
+## 10.3 Exploratory pass — varied from round 1
+
+Round 1 probed bad routes, rapid row/decide clicks and oversized inputs. Round 2 deliberately walked
+different ground, concentrated on the changed surfaces (defect clustering):
+
+| Probe | Result |
+|---|---|
+| Decide (`Lead`) on an **archived** job | Write succeeds, badge → `Lead`, `archived-strip` persists. No crash |
+| `skills-more` state across a job switch | Expands 8→10; **stays expanded** when switching away and back (React reuses the `SkillsList` instance). Consistent with the JD's deliberate session-sticky disclosure; expanded is a superset view, so not user-hostile. Not a defect — see Notes |
+| Excitement badge on a job **without** excitement | Correctly absent (count 0), no empty shell |
+| Filter to zero **while a job is selected**, then clear | `list-empty` shows the filtered copy; the detail pane correctly unmounts (count 0); `Clear filters` restores all 11 rows |
+| 4× rapid "Show archived" toggling | No crash, no duplicate rows, list settles correctly |
+| Dark × review-flags × skills-more together | `html.dark`; pane bg `rgb(36,29,48)` = dark `--card`; flag text `rgb(240,138,138)` = dark `--destructive-strong` (6.73:1); reason text `rgb(111,203,142)` = dark `--success-strong` (8.20:1); the 2px left rule survives dark, so the **shape** cue is not light-mode-only |
+| Console / page errors across the whole walk | **none** |
+
+## 10.4 Bug List — ROUND 2
+
+### Bug R2-1 — the new contrast gate omits the most-rendered muted-text pair; `reference.md` overstates its own coverage — **minor** — route-to: `ui`
+
+- **Clause:** AC 1 — "**Every** foreground/background token pair **used for text** … the check is
+  automated and listed pair by pair." Also R4 — `reference.md` is "machine-checked … so it cannot drift."
+- **Repro:**
+  - `CONTRAST_PAIRS` in `ui/src/lib/tokens.test.ts` enforces **8** pairs. `muted-foreground` on
+    `background` is **not** among them.
+  - `reference.md`'s contrast table lists **9** rows marked `pass`, including
+    `muted-foreground on background`, under prose that claims the helper "asserts ≥ 4.5:1 in both modes
+    for **every row below marked `pass`**". That claim is false for that row.
+  - That row's published numbers are also wrong in **both** modes: table says `5.60:1 / 6.63:1`;
+    recomputed from `index.css` they are **5.67:1 / 6.55:1**.
+- **Evidence that the pair is real, not a technicality:** an in-page scan of `#/triage` found
+  **20 text elements** currently rendering `--muted-foreground` (`rgb(110,91,135)`) on `--background`
+  (`rgb(250,248,253)`) — the entire job list's score column and every company·location·lane meta line.
+  It is the most-rendered muted pairing on the flagship screen, and it is the one pair the new
+  automated check skips.
+- **Not an accessibility failure:** both computed ratios clear AA comfortably. This is an
+  enforcement-coverage and document-accuracy defect, not a contrast defect.
+- **Fix shape:** add `['muted-foreground', 'background', …]` to `CONTRAST_PAIRS` and correct the two
+  numbers in `reference.md` — or drop the row from the table if the pair is judged out of scope. One line
+  plus two numbers either way.
+
+## 10.5 Deferred
+
+**None.** Deferral is the user's decision alone, relayed through the orchestrator. This run was
+unattended; no such approval exists or may be assumed on the user's behalf.
+
+## 10.6 Residual Risk — round 2
+
+Carrying forward round-1 items 1, 4, 5 and 7 (all still open), plus:
+
+1. **The contrast gate's pair list is hand-maintained, and this round proves it can miss.** The helper is
+   correct; its input list is a hand-written array with no cross-check against `reference.md`'s table.
+   R2-1 is one instance; nothing prevents the next added token from being listed-but-unenforced the same
+   way. The document and the array should be derived from one source, not maintained in parallel.
+2. **`runs`' `laneLabel()` call sites did not render live.** Bug 9's fix touches the `expired-login` and
+   `throttle-breaker` diagnosis strings, which require a *failed run* to display; the fixture has zero
+   runs. Verified by source read and unit coverage, not by a live render.
+3. **The archived state has exactly one fixture and one path to reach it.** `rajni-e2e-12` is reachable
+   only through the FilterPopover's "Show archived" toggle, which is exclusive (archived-only, not
+   archived-plus-active). Archived behaviour in a *mixed* list is untested and unreachable by design.
+4. **Round 1's auto-advance finding is unchanged and unmitigated.** A fast second decide click still
+   retargets onto the auto-advanced neighbour. Accepted deviation, behaving as ruled — but the fixture
+   grew this round, so the neighbour a mis-click lands on has changed.
+5. **Everything green here is still only "no known defects."** Two rounds of testing have found 11
+   defects; that is evidence the surface yields defects under scrutiny, not evidence the next round
+   would find none.
+
+## 10.7 Round 2 Verdict
+
+**RED — 1 open bug (minor: R2-1). No PR opened.**
+
+All 10 round-1 bugs are verified fixed, most of them well beyond the letter of the finding — the new
+e2e tests assert behaviour and layout rather than mere existence, and the fixture was extended without
+disturbing a single existing count assertion. All four gates are green with 20 more unit tests and 8
+more e2e tests than round 1, and the exploratory walk over the changed surfaces produced zero console
+errors and no new defects. The single open item is a residual of bug 8's own fix: the automated
+contrast check the fix introduced omits the one pair that renders on 20 elements of the flagship
+screen, while the canonical reference document claims that pair is enforced and publishes two wrong
+numbers for it.
+
+Green requires zero open bugs. Routing belongs to the orchestrator; deferral belongs to the user.
