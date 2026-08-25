@@ -3,6 +3,59 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [3.3.0] — 2026-08-25
+
+### Added
+- **UI design system as code** (PR #112): the board's tokens are now the
+  single authority — a named rem type ramp in `ui/src/index.css` (`@theme
+  inline`; `--text-micro` 0.6875rem/1rem is the one new step, the five
+  off-scale `text-[Npx]` escapes are gone), dual-mode colour tokens, and a
+  machine-checked reference document
+  (`docs/product/ui-design-system/reference.md`): `ui/src/lib/tokens.test.ts`
+  parses its contrast table and asserts every published ratio against a WCAG
+  computation from the real hex values (≥ 4.5:1 for text pairs, both modes).
+- **Vocabulary module** (`ui/src/lib/vocabulary/`): canonical triage-action
+  labels (Apply · Lead · Pass), lane display labels (LinkedIn · Greenhouse ·
+  Keka), and a Vitest whole-tree source scan that fails `ui:check` when a
+  banned synonym or raw unicode glyph appears as a user-visible string.
+  Re-exports `src/core/tracking/vocab.ts` at runtime (dependency-free; added
+  to CLAUDE.md's ui→core seam list). Six voice rules + a glossary of reserved
+  words live in the reference doc.
+- **Triage job-details pane rebuilt** (`ui/src/features/triage/DetailPane.tsx`
+  + `ui/src/features/job/{MatchScore,JobSignals,EligibilityGrid,SkillsList,
+  ArchivedStrip}.tsx`): verdict header with a labelled `MATCH n /100` score,
+  band word and 4-segment meter; provenance line surfaces the job's lane and
+  found-time; "Why it matches" vs "Review flags" split by container + icon
+  (never hue alone, greyscale-proven); labelled eligibility grid; skills with
+  `+N more`; JD clamped to 12 lines with session-sticky expansion; tracking
+  as a card; sticky decide bar with keyboard hints. Job rows get a 12px status
+  glyph (shape + `aria-label`, not a hue-only dot) and the lane label.
+  `#/job/:id` shares the same zones. `JobFacts.tsx` removed.
+- 17 new Playwright specs (`ui/e2e/triage-redesign.spec.ts`) pinning every
+  mockup state (default, loading, empty, error, JD expanded, archived, sparse,
+  decided, dark mode, signals/flags, skills-more, excitement); the rajni e2e
+  fixture grows to 12 jobs (a sparse job and an archived job).
+
+### Changed
+- Decide bar labels `Skip`/`Save` → `Pass`/`Lead` (stored status strings
+  unchanged, Notion byte-exact); `Retry` → `Try again`; `↑`/`↓`/`⚡` glyphs →
+  lucide icons; runs' failed-run diagnosis titles use `laneLabel()`; the
+  triage empty state no longer fabricates a count and distinguishes
+  filtered-empty from decided-empty.
+- Product artifacts under `docs/product/ui-design-system/` (spec, ux-notes,
+  mockup, blueprint, qa-report); `personas.md` v1.4 adds JTBD-5 (the triage
+  decide loop).
+
+### Notes
+- Design rulings recorded in the PR body: auto-advance to the next undecided
+  job after a decision is kept; excitement stays read-only in the pane (no
+  PATCH field, no new routes); dark mode follows the OS preference (no
+  toggle); Operate's "Skip next" is a distinct reserved phrase, not a banned
+  synonym.
+- Local dev: `ui:e2e`'s operate-secrets test assumes no repo-root `.env` —
+  move it aside for a local run (`env-guard` restores it). No schema change,
+  no daemon restart needed.
+
 ## [3.2.0] — 2026-08-25
 
 ### Added
