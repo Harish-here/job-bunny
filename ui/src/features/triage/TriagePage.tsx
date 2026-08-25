@@ -64,6 +64,15 @@ export function TriagePage({ profile }: { profile: string }) {
     setQuery((q) => ({ ...q, ...patch, offset: 0 }));
   }
 
+  // Only company/status/excitement drive JobList's "no matches" vs. "board
+  // is empty" copy — date range and archived toggle aren't in scope here.
+  const hasActiveFilters = Boolean(query.company || query.status || query.excitement);
+
+  function clearFilters(): void {
+    setCompanyDraft('');
+    patchFilters({ company: undefined, status: undefined, excitement: undefined });
+  }
+
   function setOffset(offset: number): void {
     setQuery((q) => ({ ...q, offset }));
   }
@@ -165,7 +174,13 @@ export function TriagePage({ profile }: { profile: string }) {
               ))}
             </div>
           ) : (
-            <JobList rows={rows} selectedId={selectedId} onSelect={select} />
+            <JobList
+              rows={rows}
+              selectedId={selectedId}
+              onSelect={select}
+              filtered={hasActiveFilters}
+              onClearFilters={clearFilters}
+            />
           )}
         </div>
 

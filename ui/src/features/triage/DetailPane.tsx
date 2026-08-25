@@ -36,7 +36,7 @@ export function DetailPane({
   onToggleJdExpanded: () => void;
 }) {
   return (
-    <Card data-qa="detail-pane">
+    <Card className="overflow-visible" data-qa="detail-pane">
       <JobHeader job={detail} />
       <JobSignals matchReasons={detail.matchReasons} reviewFlags={detail.reviewFlags} />
       <EligibilityGrid

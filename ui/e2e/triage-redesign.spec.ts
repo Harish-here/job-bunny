@@ -70,6 +70,28 @@ test('e2e-jd-expand', async ({ page }) => {
   );
 });
 
+// Fix-round finding: DecideBar must stay sticky-bottom (D8/Fitts) even once
+// the JD is expanded and the detail pane scrolls. Action-based checks (a
+// bare visibility assert) don't catch a clipped/non-sticky element — the
+// repo's own Playwright auto-scroll lesson — so this drives a real wheel
+// gesture over the scroll container and asserts viewport membership after.
+test('e2e-decide-bar-sticky', async ({ page }) => {
+  await page.goto('/#/triage');
+
+  const row1 = page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-1"]');
+  await row1.click();
+
+  const toggle = page.locator('[data-qa="jd-toggle"]');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  const decideBar = page.locator('[data-qa="decide-bar"]');
+  await page.locator('[data-qa="detail-pane"]').hover();
+  await page.mouse.wheel(0, 2000);
+
+  await expect(decideBar).toBeInViewport();
+});
+
 test('e2e-decide-labels', async ({ page }) => {
   await page.goto('/#/triage');
 

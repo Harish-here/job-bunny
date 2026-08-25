@@ -99,19 +99,15 @@ const DARK: Array<[string, string]> = [
   ['--sidebar-ring', '#b79ce0'],
 ];
 
+// Only --text-micro is an override — it's the one real change to the ramp
+// (see reference.md's Type ramp section). The other five steps (xs/sm/base/
+// lg/2xl) are deliberately NOT redeclared here: Tailwind v4's shipped rem
+// defaults already match them exactly, and hard-pinning them in px would
+// break the browser's default-font-size scaling (an app-wide a11y
+// regression) for zero visual gain.
 const TYPE: Array<[string, string]> = [
-  ['--text-micro', '11px'],
-  ['--text-micro--line-height', '16px'],
-  ['--text-xs', '12px'],
-  ['--text-xs--line-height', '16px'],
-  ['--text-sm', '14px'],
-  ['--text-sm--line-height', '20px'],
-  ['--text-base', '16px'],
-  ['--text-base--line-height', '24px'],
-  ['--text-lg', '18px'],
-  ['--text-lg--line-height', '28px'],
-  ['--text-2xl', '24px'],
-  ['--text-2xl--line-height', '32px'],
+  ['--text-micro', '0.6875rem'],
+  ['--text-micro--line-height', '1rem'],
 ];
 
 describe('Lapin design tokens (ui/src/index.css)', () => {
@@ -162,12 +158,12 @@ const referencePath = fileURLToPath(
 const referenceMd = readFileSync(referencePath, 'utf8');
 
 const TEXT_RAMP: Array<[string, string]> = [
-  ['--text-micro', '11px'],
-  ['--text-xs', '12px'],
-  ['--text-sm', '14px'],
-  ['--text-base', '16px'],
-  ['--text-lg', '18px'],
-  ['--text-2xl', '24px'],
+  ['--text-micro', '0.6875rem'],
+  ['--text-xs', '0.75rem'],
+  ['--text-sm', '0.875rem'],
+  ['--text-base', '1rem'],
+  ['--text-lg', '1.125rem'],
+  ['--text-2xl', '1.5rem'],
 ];
 
 const RESERVED_WORDS: string[] = [

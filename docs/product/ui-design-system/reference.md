@@ -97,17 +97,23 @@ Computed pair by pair, both modes. Source: `ux-notes.md` §1a.
 
 | Token | Size / line-height | Weight | Used for |
 |---|---|---|---|
-| `--text-micro` | 11px / 16px, `uppercase`, `tracking-[0.04em]` | 500 | zone eyebrows, kbd hints, scope badges, meter labels |
-| `--text-xs` | 12px / 16px | 400 · 500 | meta, badges, chips, helper |
-| `--text-sm` | 14px / 20px | 400 · 500 | body — 66% of all uses, rows, inputs, JD |
-| `--text-base` | 16px / 24px (`leading-snug` → 22px on headings) | 500 | card titles |
-| `--text-lg` | 18px / 28px | 600 | page + pane titles |
-| `--text-2xl` | 24px / 32px | 600 | the one hero number per screen |
+| `--text-micro` | 0.6875rem / 1rem, `uppercase`, `tracking-[0.04em]` | 500 | zone eyebrows, kbd hints, scope badges, meter labels |
+| `--text-xs` | 0.75rem / 1rem | 400 · 500 | meta, badges, chips, helper |
+| `--text-sm` | 0.875rem / 1.25rem | 400 · 500 | body — 66% of all uses, rows, inputs, JD |
+| `--text-base` | 1rem / 1.5rem (`leading-snug` → 1.375rem on headings) | 500 | card titles |
+| `--text-lg` | 1.125rem / 1.75rem | 600 | page + pane titles |
+| `--text-2xl` | 1.5rem / 2rem | 600 | the one hero number per screen |
 
-**`--text-micro` at 11px, not 10px, is the one real change** — it absorbs all five off-scale escapes
-(`text-[10px]` ×4, `text-[9px]` ×1) into one named step. The other five steps pin the existing
-de-facto ramp verbatim (Tailwind's shipped defaults, ~1.13–1.33 ratio — deliberately NOT the 1.2
-ratio industry research recommends; see Callout C2 in `ux-notes.md` §11 for the trade this makes).
+All six steps are expressed in `rem`, not `px` — this is the one thing that changed about the ramp
+mid-epic (a fix-round finding): an earlier draft of `ui/src/index.css`'s `@theme` block redeclared
+the whole scale in hard `px`, which silently breaks the browser's default-font-size scaling for
+every string in the app. Only `--text-micro` is a genuine override (0.6875rem, i.e. 11px at the
+16px root — not 10px) — it absorbs all five off-scale escapes (`text-[10px]` ×4, `text-[9px]` ×1)
+into one named step. The other five steps are **not redeclared in CSS at all**; they pin the
+existing de-facto ramp verbatim by relying on Tailwind's own shipped `rem` defaults (~1.13–1.33
+ratio — deliberately NOT the 1.2 ratio industry research recommends; see Callout C2 in
+`ux-notes.md` §11 for the trade this makes). The table above documents their values for reference;
+`ui/src/index.css` itself only declares `--text-micro`.
 
 **Tabular numerals (R5):** `font-variant-numeric: tabular-nums` on the match score (both list and
 pane), every date, every count, and the funnel/analytics columns.
