@@ -72,27 +72,29 @@ tokens are already aliases of their base (shown above), so this rule is a no-op 
 
 ## Contrast pairs (WCAG 2.1, normal text ≥ 4.5:1)
 
-QA round 1 bug 8: this table's numbers are now machine-computed and machine-enforced — a small,
-dependency-free relative-luminance/contrast-ratio helper in `ui/src/lib/tokens.test.ts` reads each hex
-pair straight from `ui/src/index.css` and asserts ≥ 4.5:1 in both modes for every row below marked
-`pass`; a value that regresses below 4.5:1 is a build failure, not a note (AC 1). Source of the numbers
-themselves: that helper, both modes.
+QA round 1 bug 8 / round 2 bug R2-1: this table is the single source of truth for which pairs are
+enforced. `ui/src/lib/tokens.test.ts` parses this table (not a hand-maintained duplicate list), reads
+each hex pair straight from `ui/src/index.css`, and for every row marked `pass` asserts both (a) the
+computed ratio clears ≥ 4.5:1 in the matching mode(s) and (b) the published number here equals the
+computed one to 2 decimals — so a stale or invented number here fails the build, not just a stale
+enforcement list. Rows marked FAIL are checked for numeric accuracy only, not the ≥ 4.5:1 threshold.
+Source of the numbers themselves: that same helper, both modes.
 
 | Pair | Light | Dark | Verdict |
 |---|---|---|---|
 | `foreground` on `card` | 12.43:1 | 12.39:1 | pass |
 | `muted-foreground` on `card` | 5.98:1 | 5.95:1 | pass |
-| `muted-foreground` on `background` | 5.60:1 | 6.63:1 | pass |
+| `muted-foreground` on `background` | 5.67:1 | 6.55:1 | pass |
 | `primary` on `card` | 5.25:1 | 6.84:1 | pass |
 | `success-strong` on `card` | 6.05:1 | 8.20:1 | pass |
 | `destructive-strong` on `card` | 5.53:1 | 6.73:1 | pass |
 | `attention-strong` on `card` | 6.04:1 | 7.97:1 | pass |
 | `foreground` on `background` | 11.78:1 | 13.63:1 | pass |
 | `primary-foreground` on `primary` | 5.25:1 | 7.52:1 | pass |
-| `success` (plain) on `card` | 2.76:1 | — | **FAIL — fill only** |
-| `destructive` (plain) on `card` | 4.35:1 | — | **FAIL — fill only** |
-| `attention` (plain) on `card` | 2.34:1 | — | **FAIL — fill only** |
-| `amber` (plain) on `card` | 2.92:1 | — | **FAIL — and it has no `-strong` sibling** |
+| `success` (plain) on `card` | 2.74:1 | — | **FAIL — fill only** |
+| `destructive` (plain) on `card` | 4.38:1 | — | **FAIL — fill only** |
+| `attention` (plain) on `card` | 2.35:1 | — | **FAIL — fill only** |
+| `amber` (plain) on `card` | 2.93:1 | — | **FAIL — and it has no `-strong` sibling** |
 
 ---
 
