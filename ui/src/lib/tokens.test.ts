@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { EXCITEMENT_OPTIONS, STATUS_OPTIONS } from '../../../src/core/tracking/vocab.ts';
 
 const cssPath = fileURLToPath(new URL('../index.css', import.meta.url));
 const css = readFileSync(cssPath, 'utf8');
@@ -153,4 +154,58 @@ describe('Lapin design tokens (ui/src/index.css)', () => {
     expect(css).toContain('prefers-reduced-motion: reduce');
     expect(css).toContain('transition-duration: 1ms !important;');
   });
+});
+
+const referencePath = fileURLToPath(
+  new URL('../../../docs/product/ui-design-system/reference.md', import.meta.url),
+);
+const referenceMd = readFileSync(referencePath, 'utf8');
+
+const TEXT_RAMP: Array<[string, string]> = [
+  ['--text-micro', '11px'],
+  ['--text-xs', '12px'],
+  ['--text-sm', '14px'],
+  ['--text-base', '16px'],
+  ['--text-lg', '18px'],
+  ['--text-2xl', '24px'],
+];
+
+const RESERVED_WORDS: string[] = [
+  'reconcile',
+  'farm',
+  'source',
+  'compress',
+  'structure',
+  'assemble',
+  'filter',
+  'dedup',
+  'rank',
+  'sync',
+  'LinkedIn',
+  'Greenhouse',
+  'Keka',
+  'Run',
+  'Job',
+  'Profile',
+  ...STATUS_OPTIONS,
+  ...EXCITEMENT_OPTIONS,
+  'Apply',
+  'Lead',
+  'Pass',
+  'Save',
+  'Match score',
+];
+
+describe('Design system reference document (docs/product/ui-design-system/reference.md)', () => {
+  it.each(TEXT_RAMP)('documents %s at %s', (name, px) => {
+    expect(referenceMd).toContain(name);
+    expect(referenceMd).toContain(px);
+  });
+
+  it.each(RESERVED_WORDS.map((w) => [w] as const))(
+    'documents the reserved word %s',
+    (word) => {
+      expect(referenceMd).toContain(word);
+    },
+  );
 });
