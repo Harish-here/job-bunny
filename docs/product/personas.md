@@ -3,11 +3,13 @@
 Job Bunny is a single-user, local-first tool. There is exactly one persona, and they wear two
 hats. Every product decision resolves against this one person.
 
-Status: v1.3, derived 2026-08-10 during the `run-experience-overhaul` spec and confirmed in that
+Status: v1.4, derived 2026-08-10 during the `run-experience-overhaul` spec and confirmed in that
 spec's interview round 1; extended 2026-08-13 during the `pipeline-stability-hardening` spec,
 which closed the open discovery-channel question; extended again 2026-08-17 during the
-`settings-overhaul` spec, which named a **third hat** and added **JTBD-4**. Derived from repo recon
-+ the orchestrator's grounding, then corrected against the user's own answers. Refine this file on
+`settings-overhaul` spec, which named a **third hat** and added **JTBD-4**; extended again
+2026-08-25 during the `ui-design-system` spec, which added **JTBD-5** — the first job that belongs
+squarely to the job-seeker hat rather than to the machine. Derived from repo recon + the
+orchestrator's grounding, then corrected against the user's own answers. Refine this file on
 every product run — it is not frozen.
 
 ---
@@ -80,6 +82,17 @@ first two do not cover, because it is the only one worn when nothing is wrong.)*
   little, too much, or the wrong things ranked first — I want to find and change the rule or
   limit responsible without opening a file, so I can correct the machine's aim in a few minutes
   rather than losing an evening to it.
+- **JTBD-5 (job-seeker hat, added 2026-08-25, `ui-design-system`):** When a run has put new jobs on
+  my board, I want to decide apply / lead / pass on each one in seconds — without reading every
+  posting in full — so triage costs me minutes rather than an evening, and the good ones don't get
+  buried under the mediocre ones.
+  - **Why this was missing until now.** JTBD-1 stops one step short: it covers *"did this run produce
+    anything worth my attention"* — a question about a **batch**, answered on the runs page in
+    seconds. JTBD-5 is what happens next, job by job. The first three epics were all about the
+    machine; this is the first job about the **leads**, and it is the one the tool exists for.
+  - **Standing design consequence:** triage is the highest-frequency screen for the primary hat.
+    Density and ranking beat friendliness there, and anything that costs a second per job costs that
+    second on every job in every batch, every day.
 
 ### Frustrations (evidenced)
 
@@ -142,6 +155,18 @@ first two do not cover, because it is the only one worn when nothing is wrong.)*
   in this product. Anything justified by "a new user would need this" is justified by nobody. Setup
   surfaces earn their place only as *repair and completeness* aids for the profiles that already
   exist — never as first-run tutorials.
+
+- **Closed 2026-08-25 (`ui-design-system`, Q1): the user reads the board in both colour schemes.**
+  The SPA follows the OS setting — `ui/src/main.tsx:8-11` toggles the `.dark` class from
+  `matchMedia('(prefers-color-scheme: dark)')`, with no in-app control. Standing design consequence:
+  **dark mode is a live user-facing surface, not dead code.** Every design pass must cover it, every
+  colour token must exist in both blocks, and contrast must be verified in both. This had gone
+  unnoticed through three prior epics, every one of whose mockups is light-only — so the evening
+  surface has never been designed against.
+- **Closed 2026-08-25 (`ui-design-system`, Q5): the excitement vocabulary is reserved, not drift.**
+  `Vera level` / `Kandipa podu` / `Try panalam` (`src/core/tracking/vocab.ts:31`) are deliberate
+  product vocabulary in the user's own idiom, and they are byte-exact to Notion. They are recorded in
+  the glossary as reserved terms; they are never "normalised" to neutral English.
 
 ### Still open (?)
 
