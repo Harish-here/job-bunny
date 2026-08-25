@@ -14,6 +14,7 @@ function extractBlock(selector: string): string {
 
 const rootBlock = extractBlock(':root');
 const darkBlock = extractBlock('\\.dark');
+const themeBlock = extractBlock('@theme inline');
 
 const LIGHT: Array<[string, string]> = [
   ['--background', '#faf8fd'],
@@ -97,6 +98,21 @@ const DARK: Array<[string, string]> = [
   ['--sidebar-ring', '#b79ce0'],
 ];
 
+const TYPE: Array<[string, string]> = [
+  ['--text-micro', '11px'],
+  ['--text-micro--line-height', '16px'],
+  ['--text-xs', '12px'],
+  ['--text-xs--line-height', '16px'],
+  ['--text-sm', '14px'],
+  ['--text-sm--line-height', '20px'],
+  ['--text-base', '16px'],
+  ['--text-base--line-height', '24px'],
+  ['--text-lg', '18px'],
+  ['--text-lg--line-height', '28px'],
+  ['--text-2xl', '24px'],
+  ['--text-2xl--line-height', '32px'],
+];
+
 describe('Lapin design tokens (ui/src/index.css)', () => {
   it('imports the Nunito variable font', () => {
     expect(css).toContain('@import "@fontsource-variable/nunito";');
@@ -116,6 +132,10 @@ describe('Lapin design tokens (ui/src/index.css)', () => {
 
   it.each(DARK)('sets .dark token %s to %s', (name, value) => {
     expect(darkBlock).toContain(`${name}: ${value};`);
+  });
+
+  it.each(TYPE)('sets @theme inline token %s to %s', (name, value) => {
+    expect(themeBlock).toContain(`${name}: ${value};`);
   });
 
   it('sets the base radius to 1rem', () => {
