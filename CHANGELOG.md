@@ -3,6 +3,51 @@
 Versions follow the v0 LinkedIn-lane code semver (`0.x.y`); the forward-looking
 feature→version map lives in the [Notion roadmap](https://app.notion.com/p/381cbef64ec281d1b3a5ebd4f3d0fd1e).
 
+## [3.2.0] — 2026-08-25
+
+### Added
+- **Settings reorganized around user intent** (PR #109): a 12-section IA
+  (`ui/src/features/settings/sections/`) replaces the old per-file layout.
+  The timezone rule, previously split silently across `filter.json`
+  (pass/fail) and `profile.json` (ranking score), is now one "Where you'll
+  work" intent with a conflict notice and one-click fixes when the two
+  disagree. Fetching gets Safe/Normal/Fast pacing presets. Save-time
+  cross-field validation (`src/core/config/validators.ts`/`schema.ts`)
+  blocks configs that would fail at pipeline wire time (e.g. jitter
+  min > max), backed by a sticky save bar and dirty-nav guard. Per-section
+  JSON escape hatches are gone, replaced by one consolidated Raw config
+  section, plus a cheap `RulePreviewStrip` previewing filter-rule impact
+  against the most recent run.
+- **Hub replaced by the Operate page** (`ui/src/features/operate/`): Daemon
+  (start/stop/pause-all/skip-next), Scheduled runs, Setup & health, and
+  Secrets, with live daemon control from the board instead of read-only
+  status.
+- **New board write-surface endpoints**: `POST /api/daemon/start`,
+  `PUT /api/daemon/autostart` (`src/cli/wire/board_daemon_control.ts`,
+  `board_autostart_control.ts`), and the read-only
+  `POST /api/profiles/:name/preview/filter`
+  (`src/cli/wire/board_preview.ts`), reusing `src/core/filter`/`src/core/rank`
+  directly rather than re-implementing their semantics.
+- **Unattended feature-pipeline orchestrator prompt**
+  (`docs/prompts/unattended-feature-pipeline.md`, PR #108): a reusable prompt
+  for driving PM → blueprint → SDD execution → QA → live verification → PR
+  in one unattended session, with blocker protocol and decision-ledger rules.
+
+### Changed
+- `CLAUDE.md`'s board write-surface line now documents daemon process
+  control, darwin autostart, and the read-only filter preview.
+- e2e suite (`ui/e2e/`) split into a serial `shared-docs` project and a
+  parallel `default` project to remove a fixture-race flake; covers all 12
+  settings sections, Operate, and the save/validation model (117 tests
+  across 18 spec files).
+
+### Notes
+- No schema migration in this release.
+- After upgrading: rebuild the board SPA (`npm run ui:build`) and restart
+  the daemon so it picks up the new write-surface modules.
+- Live-verified against the `harish` profile (run #56, passed, 0 error
+  events).
+
 ## [3.1.0] — 2026-08-17
 
 ### Added
