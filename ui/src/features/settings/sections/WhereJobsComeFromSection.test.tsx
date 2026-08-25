@@ -61,9 +61,9 @@ describe('WhereJobsComeFromSection', () => {
     renderSection();
 
     await waitFor(() =>
-      expect(screen.getByRole('checkbox', { name: 'linkedin' })).toBeChecked(),
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
     );
-    expect(screen.getByRole('checkbox', { name: 'greenhouse' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Greenhouse' })).not.toBeChecked();
     expect(screen.getByDisplayValue('Staff Frontend Engineer')).toBeInTheDocument();
   });
 
@@ -73,11 +73,11 @@ describe('WhereJobsComeFromSection', () => {
     renderSection();
 
     await waitFor(() =>
-      expect(screen.getByRole('checkbox', { name: 'linkedin' })).toBeChecked(),
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
     );
     expect(screen.queryByTestId('save-bar')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('checkbox', { name: 'greenhouse' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Greenhouse' }));
     expect(await screen.findByTestId('save-bar')).toBeInTheDocument();
   });
 
@@ -88,9 +88,9 @@ describe('WhereJobsComeFromSection', () => {
     renderSection();
 
     await waitFor(() =>
-      expect(screen.getByRole('checkbox', { name: 'linkedin' })).toBeChecked(),
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
     );
-    await user.click(screen.getByRole('checkbox', { name: 'greenhouse' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Greenhouse' }));
     await user.click(await screen.findByTestId('save-button'));
 
     await waitFor(() =>

@@ -178,7 +178,7 @@ function HealthGroup({
   if (findings.length === 0) return null;
   return (
     <div data-qa={`health-group-${groupId}`} className="flex flex-col gap-1">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+      <p className="text-micro uppercase tracking-[0.04em] font-medium text-muted-foreground">
         {GROUP_LABEL[groupId]} ({findings.length})
       </p>
       <table className="w-full">

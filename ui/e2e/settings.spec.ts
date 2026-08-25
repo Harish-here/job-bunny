@@ -62,7 +62,7 @@ test('settings: where jobs come from section round-trips a lane toggle through t
     await page.goto('/#/settings/where-jobs-come-from');
     await expect(section(page)).toHaveAttribute('data-section', 'where-jobs-come-from');
 
-    const keka = section(page).getByRole('checkbox', { name: 'keka', exact: true });
+    const keka = section(page).getByRole('checkbox', { name: 'Keka', exact: true });
     await expect(keka).not.toBeChecked();
     await keka.check();
     await saveSection(page);
@@ -72,7 +72,7 @@ test('settings: where jobs come from section round-trips a lane toggle through t
 
     await page.reload();
     await expect(
-      section(page).getByRole('checkbox', { name: 'keka', exact: true }),
+      section(page).getByRole('checkbox', { name: 'Keka', exact: true }),
     ).toBeChecked();
   } finally {
     await putConfigText(page, 'profile.json', original);

@@ -11,7 +11,7 @@ describe('ErrorRetry', () => {
 
     expect(screen.getByText('Something broke')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

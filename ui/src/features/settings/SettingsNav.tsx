@@ -103,7 +103,7 @@ export function SettingsNav({ section, navigate }: SettingsNavProps) {
     >
       {GROUPS.map((group) => (
         <div key={group.dataQa} data-qa={group.dataQa} className="flex flex-col gap-1">
-          <div className="px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="px-2 text-micro font-medium uppercase tracking-[0.04em] text-muted-foreground">
             {group.label}
           </div>
           <ul className="flex flex-col gap-1">

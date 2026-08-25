@@ -243,7 +243,7 @@ test('landing: error — GET runs 500s, thin-run shows an inline error+retry whi
   // The runs query's default `retry: 1` backs off before settling into its
   // error state — a generous timeout avoids a flake in slower CI runs.
   await expect(card).toContainText("Couldn't load your last run.", { timeout: 10_000 });
-  await expect(card.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Try again' })).toBeVisible();
 
   // No crash: all 4 cap rows are present with their real config-derived
   // values; binding badges are simply absent (a fail-soft skip, since

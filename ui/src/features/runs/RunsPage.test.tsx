@@ -102,7 +102,9 @@ describe('RunsPage', () => {
     await waitFor(() => {
       expect(screen.getAllByText(/couldn't load runs/i).length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByRole('button', { name: /retry/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /try again/i }).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('renders the live run header for an in-flight run', async () => {

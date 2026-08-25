@@ -16,7 +16,7 @@ export const ErrorRetry = ({
     <div className={`flex flex-col items-start gap-2 text-sm ${padded ? 'p-4' : ''}`}>
       <span className="text-destructive">{message}</span>
       <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
-        Retry
+        Try again
       </Button>
     </div>
   );

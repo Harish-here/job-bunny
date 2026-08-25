@@ -163,7 +163,7 @@ function RetryChip({ action }: { action: DiagnosisAction }) {
   return (
     <span
       data-testid="diagnosis-retry-chip"
-      className="rounded-full bg-amber/10 px-2 py-0.5 font-mono text-[10px] text-amber"
+      className="rounded-full bg-amber/10 px-2 py-0.5 font-mono text-micro text-amber"
     >
       {text}
     </span>
