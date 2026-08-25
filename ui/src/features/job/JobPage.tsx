@@ -1,4 +1,5 @@
 import { ArrowLeft } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { ApiError } from '../../lib/api/client';
@@ -34,6 +35,7 @@ function isNotFound(error: unknown): boolean {
  * tracking form on the right. */
 export function JobPage({ profile, id }: { profile: string; id: string }) {
   const jobQuery = useJob(profile, id);
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="flex h-full flex-col">
@@ -63,7 +65,12 @@ export function JobPage({ profile, id }: { profile: string; id: string }) {
           <div className="grid grid-cols-[1fr_360px] gap-6">
             <div className="flex w-full max-w-[72ch] flex-col gap-4">
               <JobHeader job={jobQuery.data} />
-              <JdText jd={jobQuery.data.jd} />
+              <JdText
+                jd={jobQuery.data.jd}
+                url={jobQuery.data.url}
+                expanded={expanded}
+                onToggleExpanded={() => setExpanded((v) => !v)}
+              />
             </div>
             <div className="flex flex-col gap-4">
               <JobFacts job={jobQuery.data} />

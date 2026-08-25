@@ -36,6 +36,7 @@ function isNoLocalDb(error: unknown): boolean {
 export function TriagePage({ profile }: { profile: string }) {
   const [query, setQuery] = useState<ListQuery>(DEFAULT_QUERY);
   const [companyDraft, setCompanyDraft] = useState('');
+  const [jdExpanded, setJdExpanded] = useState(false);
 
   const metaQuery = useMeta(profile);
   const jobsQuery = useJobs(profile, query);
@@ -206,7 +207,12 @@ export function TriagePage({ profile }: { profile: string }) {
             <JobHeader job={detail} />
             <DecideBar job={detail} onDecide={decide} />
             <JobFacts job={detail} />
-            <JdText jd={detail.jd} />
+            <JdText
+              jd={detail.jd}
+              url={detail.url}
+              expanded={jdExpanded}
+              onToggleExpanded={() => setJdExpanded((v) => !v)}
+            />
             <TrackingPanel profile={profile} job={detail} />
           </div>
         ) : (
