@@ -6,9 +6,11 @@ import { ApiError } from '../../lib/api/client';
 import { navigate } from '../../lib/router';
 import { rememberSelection } from '../../lib/selection-memo';
 import { useJob } from '../board/useBoardData';
+import { EligibilityGrid } from './EligibilityGrid';
 import { JdText } from './JdText';
-import { JobFacts } from './JobFacts';
 import { JobHeader } from './JobHeader';
+import { JobSignals } from './JobSignals';
+import { SkillsList } from './SkillsList';
 import { TrackingPanel } from './TrackingPanel';
 
 const SKELETON_LINE_KEYS = ['s1', 's2', 's3'];
@@ -31,8 +33,8 @@ function isNotFound(error: unknown): boolean {
 }
 
 /** Full-page job detail (T10) — the same shared components as the triage
- * detail pane (T6/T8), laid out two-column: JD prose on the left, facts +
- * tracking form on the right. */
+ * detail pane (T6/T8), laid out two-column: JD prose on the left, signals +
+ * eligibility + skills + tracking form on the right. */
 export function JobPage({ profile, id }: { profile: string; id: string }) {
   const jobQuery = useJob(profile, id);
   const [expanded, setExpanded] = useState(false);
@@ -73,7 +75,17 @@ export function JobPage({ profile, id }: { profile: string; id: string }) {
               />
             </div>
             <div className="flex flex-col gap-4">
-              <JobFacts job={jobQuery.data} />
+              <JobSignals
+                matchReasons={jobQuery.data.matchReasons}
+                reviewFlags={jobQuery.data.reviewFlags}
+              />
+              <EligibilityGrid
+                locationCity={jobQuery.data.locationCity}
+                workType={jobQuery.data.workType}
+                seniority={jobQuery.data.seniority}
+                timezone={jobQuery.data.timezone}
+              />
+              <SkillsList skills={jobQuery.data.skills} />
               <TrackingPanel profile={profile} job={jobQuery.data} />
             </div>
           </div>

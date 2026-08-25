@@ -1,5 +1,13 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
+import { Badge } from '../../components/ui/badge';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import {
   Select,
@@ -8,7 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select';
-import { Separator } from '../../components/ui/separator';
 import { Textarea } from '../../components/ui/textarea';
 import type { BoardJobRow, TrackingPatchBody, TrackingRow } from '../../lib/api/types';
 import { useMeta } from '../board/useBoardData';
@@ -78,15 +85,17 @@ export function TrackingPanel({ profile, job }: { profile: string; job: BoardJob
   }
 
   return (
-    <details data-qa="tracking" open className="rounded-lg border border-border bg-card">
-      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-2 text-sm font-medium">
-        <span>Tracking</span>
-        {mutation.isPending && (
-          <span className="text-xs font-normal text-muted-foreground">Saving…</span>
-        )}
-      </summary>
-      <Separator />
-      <div className="flex flex-col gap-3 p-4">
+    <Card data-qa="tracking">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle>Tracking</CardTitle>
+          {mutation.isPending && (
+            <span className="text-xs font-normal text-muted-foreground">Saving…</span>
+          )}
+        </div>
+        <CardDescription>Fill this in after you decide.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
         <Field label="Status">
           <Select
             value={tracking?.status ?? CLEAR}
@@ -168,7 +177,14 @@ export function TrackingPanel({ profile, job }: { profile: string; job: BoardJob
             onBlur={(e) => commit('notes', e.target.value)}
           />
         </Field>
-      </div>
-    </details>
+
+        {job.excitement && (
+          <div className="mt-3 flex items-center gap-2" data-qa="tracking-excitement">
+            <span className="text-xs font-medium text-muted-foreground">Excitement</span>
+            <Badge variant="secondary">{job.excitement}</Badge>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

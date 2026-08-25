@@ -203,6 +203,35 @@ test('e2e-triage-sparse', async ({ page }) => {
 // Blueprint step 20 (task 7) — pins S2/`triage-loading`: the list-pane
 // skeleton renders while the jobs-list fetch is in flight, then is replaced
 // by real rows once it resolves.
+// Blueprint step 21 (task 8) — pins the `JobPage.tsx` zone swap: `JobFacts`
+// is replaced by `JobSignals` -> `EligibilityGrid` -> `SkillsList` in the
+// right column, in that order (matching the triage pane's zone ordering,
+// AC 12). Note: unlike the triage pane's single-column `DetailPane`,
+// `JobPage` is a two-column layout (JD prose left; signals/eligibility/
+// skills/tracking right) settled by task 5's forced `JdText` call-site fix
+// (out of this task's scope) — so `jd` (left column) DOM-precedes the
+// right-column zones here, the reverse of `e2e-triage-default`'s
+// single-stream ordering. What IS invariant, and what this test pins, is
+// the relative order that carried over from the triage pane: `signals` <
+// `eligibility` < `skills`, with `verdict-header` first (both columns'
+// first element).
+test('e2e-job-page-order', async ({ page }) => {
+  await page.goto('/#/job/rajni-e2e-1');
+
+  const zoneIds = ['verdict-header', 'jd', 'signals', 'eligibility', 'skills'];
+  for (const id of zoneIds) {
+    await expect(page.locator(`[data-qa="${id}"]`)).toBeVisible();
+  }
+
+  const positions = await page.evaluate((ids: string[]) => {
+    const all = Array.from(document.querySelectorAll('[data-qa]'));
+    return ids.map((id) => all.findIndex((n) => n.getAttribute('data-qa') === id));
+  }, zoneIds);
+  for (let i = 1; i < positions.length; i++) {
+    expect(positions[i]).toBeGreaterThan(positions[i - 1] as number);
+  }
+});
+
 test('e2e-triage-loading', async ({ page }) => {
   await page.route('**/api/profiles/rajni/jobs*', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 300));
