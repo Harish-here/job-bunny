@@ -2,9 +2,10 @@ import type { BoardJobRow } from '../../lib/api/types';
 
 /**
  * Triage's decide mapping (spec decision, not the vocab's own authority —
- * see CLAUDE.md's tracking vocab, `src/core/tracking/vocab.ts` — these
- * three values are byte-exact against `STATUS_OPTIONS`). Apply → `Applied`,
- * Skip → `Passed`, Save → `Lead`.
+ * see the status vocabulary's source of truth at `ui/src/lib/vocabulary`
+ * (backed by `src/core/tracking/vocab.ts`) — these three values are
+ * byte-exact against `STATUS_OPTIONS`). Apply → `Applied`, Skip → `Passed`,
+ * Save → `Lead`.
  */
 export const DECIDE_STATUS = {
   apply: 'Applied',
