@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { navigate } from '../../../lib/router';
 import { cn } from '../../../lib/utils';
+import { laneLabel } from '../../../lib/vocabulary';
 import type { DiagnosisAction } from '../diagnosisActions';
 import { formatRetryIn } from '../diagnosisActions';
 import type { DiagnosisKind, DiagnosisVerdict } from '../runDiagnosis';
@@ -80,7 +81,7 @@ const KIND_TINT: Record<DiagnosisKind, { bg: string; fg: string }> = {
 const EVIDENCE_TEXT: Record<Exclude<DiagnosisKind, 'fallback'>, string> = {
   stall: 'The stage stopped reporting progress before finishing.',
   'total-outage': 'Every lane attempted in this stage failed — no partial result.',
-  'expired-login': 'Every attempted LinkedIn search URL came back as an empty job shell.',
+  'expired-login': `Every attempted ${laneLabel('linkedin')} search URL came back as an empty job shell.`,
   'zero-yield-healthy':
     'The pipeline ran end to end; nothing scraped passed your filter.',
   'breaker-open':

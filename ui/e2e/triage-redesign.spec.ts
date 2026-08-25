@@ -267,3 +267,201 @@ test('e2e-triage-loading', async ({ page }) => {
   await expect(page.locator('[data-testid="job-row"]').first()).toBeVisible();
   await expect(page.locator('[data-qa="list-skeleton"]')).toHaveCount(0);
 });
+
+// QA round 1 bug 1 (major) — `rajni-e2e-6` (`fixtures.ts`) carries 2
+// soft-fail verdicts, projected by `reviewFlags()` into REVIEW FLAGS.
+// Pins R19/AC 7: reasons and flags are visually distinct kinds of thing —
+// reasons wrap horizontally as rounded chips, flags stack vertically behind
+// a left rule, and each carries its own icon.
+test('e2e-signals-flags', async ({ page }) => {
+  await page.goto('/#/triage');
+
+  const row6 = page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-6"]');
+  await row6.click();
+  await expect(row6).toHaveAttribute('aria-selected', 'true');
+
+  const signals = page.locator('[data-qa="signals"]');
+  const reasons = signals.locator('[data-qa="match-reasons"]');
+  const flags = signals.locator('[data-qa="review-flags"]');
+  await expect(reasons).toBeVisible();
+  await expect(flags).toBeVisible();
+
+  await expect(signals).toContainText('WHY IT MATCHES · 2');
+  await expect(signals).toContainText('REVIEW FLAGS · 2');
+
+  // Distinct containers: reasons wrap horizontally, flags stack vertically
+  // behind a coloured left rule — never the same shape.
+  await expect(reasons).toHaveClass(/flex-wrap/);
+  await expect(flags).toHaveClass(/flex-col/);
+  await expect(flags).toHaveClass(/border-l-2/);
+
+  // Each zone carries its own icon per entry (Check vs AlertTriangle).
+  await expect(reasons.locator('svg')).toHaveCount(2);
+  await expect(flags.locator('svg')).toHaveCount(2);
+});
+
+// QA round 1 bug 2 (S6 `detail-archived`) — `rajni-e2e-12` (`fixtures.ts` +
+// `seed.ts`'s `markArchived`) is hidden by every default query; reachable
+// only via the FilterPopover's "Show archived" toggle. Also pins bug 7: the
+// strip precedes verdict-header in document order.
+test('e2e-archived-strip', async ({ page }) => {
+  await page.goto('/#/triage');
+
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByLabel('Show archived').check();
+  await page.keyboard.press('Escape');
+
+  const row12 = page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-12"]');
+  await expect(row12).toBeVisible();
+  await row12.click();
+  await expect(row12).toHaveAttribute('aria-selected', 'true');
+
+  const strip = page.locator('[data-qa="archived-strip"]');
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText('Archived — this job is out of the queue.');
+
+  const pane = page.locator('[data-qa="detail-pane"]');
+  const [stripIndex, headerIndex] = await pane.evaluate((el) => {
+    const all = Array.from(el.querySelectorAll('[data-qa]'));
+    return [
+      all.findIndex((n) => n.getAttribute('data-qa') === 'archived-strip'),
+      all.findIndex((n) => n.getAttribute('data-qa') === 'verdict-header'),
+    ];
+  });
+  expect(stripIndex).toBeGreaterThanOrEqual(0);
+  expect(stripIndex).toBeLessThan(headerIndex);
+});
+
+// QA round 1 bug 2 (`skills-more`) — `rajni-e2e-6` carries 10 skills, above
+// the 8-visible cap.
+test('e2e-skills-more', async ({ page }) => {
+  await page.goto('/#/triage');
+
+  const row6 = page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-6"]');
+  await row6.click();
+
+  const skills = page.locator('[data-qa="skills"]');
+  await expect(skills).toContainText('SKILLS ASKED FOR · 10');
+
+  const badges = skills.locator('[data-slot="badge"]');
+  await expect(badges).toHaveCount(8);
+
+  const more = page.locator('[data-qa="skills-more"]');
+  await expect(more).toBeVisible();
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(more).toContainText('+2 more');
+
+  await more.click();
+
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  await expect(badges).toHaveCount(10);
+});
+
+// QA round 1 bug 2 (`tracking-excitement`) — `rajni-e2e-6` carries an
+// excitement level; the badge is read-only (accepted deviation, no
+// segmented control, no write path).
+test('e2e-tracking-excitement', async ({ page }) => {
+  await page.goto('/#/triage');
+
+  const row6 = page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-6"]');
+  await row6.click();
+
+  const excitement = page.locator('[data-qa="tracking-excitement"]');
+  await expect(excitement).toBeVisible();
+  await expect(excitement).toContainText('Excitement');
+  await expect(excitement).toContainText('Vera level');
+  await expect(excitement.locator('select, input, button')).toHaveCount(0);
+});
+
+// QA round 1 bug 3 (S3 `triage-empty`) — the filtered-empty copy, reached
+// by driving the company search to a term matching nothing.
+test('e2e-list-empty', async ({ page }) => {
+  await page.goto('/#/triage');
+
+  const search = page.getByLabel('Search company');
+  await search.fill('zzz-no-such-company-zzz');
+
+  const empty = page.locator('[data-qa="list-empty"]');
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText('No jobs match these filters.');
+
+  await page.locator('[data-qa="clear-filters"]').click();
+  await expect(page.locator('[data-testid="job-row"]').first()).toBeVisible();
+});
+
+// The true-empty variant (no filter active, the board itself has zero
+// jobs) — cheap via a route stub, so pinned alongside the filtered case.
+test('e2e-list-empty-true', async ({ page }) => {
+  await page.route('**/api/profiles/rajni/jobs*', async (route) => {
+    const url = new URL(route.request().url());
+    if (!url.pathname.endsWith('/jobs')) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ rows: [], total: 0 }),
+    });
+  });
+
+  await page.goto('/#/triage');
+
+  const empty = page.locator('[data-qa="list-empty"]');
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText('Nothing left to decide.');
+  await expect(page.getByText('View the tracker →')).toBeVisible();
+});
+
+// QA round 1 bug 3 (S4 `triage-error`) — the jobs-list fetch failing
+// renders `list-error` with a working "Try again" that recovers once the
+// underlying request succeeds again.
+test('e2e-list-error', async ({ page }) => {
+  await page.route('**/api/profiles/rajni/jobs*', async (route) => {
+    const url = new URL(route.request().url());
+    if (!url.pathname.endsWith('/jobs')) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'server_error', message: 'boom' } }),
+    });
+  });
+
+  await page.goto('/#/triage');
+
+  const error = page.locator('[data-qa="list-error"]');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText("Couldn't load jobs");
+
+  const retry = error.getByRole('button', { name: 'Try again' });
+  await expect(retry).toBeVisible();
+
+  await page.unroute('**/api/profiles/rajni/jobs*');
+  await retry.click();
+
+  await expect(page.locator('[data-testid="job-row"]').first()).toBeVisible();
+  await expect(error).toHaveCount(0);
+});
+
+// QA round 1 bug 3 (S9, dark twin of S1) — `page.emulateMedia` before
+// navigation so `main.tsx`'s `matchMedia('(prefers-color-scheme: dark)')`
+// already reports dark on first paint; asserts both the `html.dark` class
+// and that the pane's rendered background is the dark `--card` token
+// (`#241d30` -> `rgb(36, 29, 48)`, pinned byte-exact in `tokens.test.ts`).
+test('e2e-dark-mode', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/#/triage');
+
+  await expect(page.locator('html')).toHaveClass(/dark/);
+
+  const row1 = page.locator('[data-testid="job-row"][data-job-id="rajni-e2e-1"]');
+  await row1.click();
+
+  const pane = page.locator('[data-qa="detail-pane"]');
+  await expect(pane).toBeVisible();
+  const background = await pane.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(background).toBe('rgb(36, 29, 48)');
+});

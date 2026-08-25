@@ -164,6 +164,7 @@ export function TriagePage({ profile }: { profile: string }) {
           ) : isError ? (
             <ErrorRetry
               padded
+              qa="list-error"
               message="Couldn't load jobs — the board server may be unreachable."
               onRetry={() => jobsQuery.refetch()}
             />

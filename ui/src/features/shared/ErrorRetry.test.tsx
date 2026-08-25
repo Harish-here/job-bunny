@@ -15,4 +15,14 @@ describe('ErrorRetry', () => {
 
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('renders no data-qa attribute when qa is omitted, and the given one when passed', () => {
+    const { container: bare } = render(<ErrorRetry message="oops" onRetry={() => {}} />);
+    expect(bare.querySelector('[data-qa]')).toBeNull();
+
+    const { container: tagged } = render(
+      <ErrorRetry message="oops" onRetry={() => {}} qa="list-error" />,
+    );
+    expect(tagged.querySelector('[data-qa="list-error"]')).not.toBeNull();
+  });
 });

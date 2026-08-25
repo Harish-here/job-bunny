@@ -1,3 +1,4 @@
+import { Zap } from 'lucide-react';
 import { formatDate } from '../../../../src/core/datetime/index.ts';
 import type { BoardJobRow } from '../../lib/api/types';
 
@@ -26,7 +27,8 @@ export function DueStrip({
           onClick={() => onFocusCard(row.id)}
         >
           <span className="inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl bg-attention px-2 py-0.5 text-xs font-medium whitespace-nowrap text-attention-foreground">
-            ⚡ {row.company} — {row.tracking?.nextAction} (
+            <Zap aria-hidden="true" className="size-3 shrink-0" /> {row.company} —{' '}
+            {row.tracking?.nextAction} (
             {formatDate(row.tracking?.nextActionDate ?? '', now)})
           </span>
         </button>

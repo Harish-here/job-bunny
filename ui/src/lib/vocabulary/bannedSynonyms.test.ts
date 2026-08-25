@@ -36,7 +36,7 @@ describe('BANNED_SYNONYMS pattern precision (in-memory fixtures)', () => {
   });
 
   it('glyph pattern matches each banned unicode glyph', () => {
-    for (const glyph of ['✓', '✗', '☆', '↑', '↓']) {
+    for (const glyph of ['✓', '✗', '☆', '↑', '↓', '⚡']) {
       expect(glyphPattern?.pattern.test(glyph)).toBe(true);
     }
   });
@@ -64,9 +64,11 @@ describe('BANNED_SYNONYMS whole-tree scan', () => {
     // fixture-precision test) necessarily contain the literal banned
     // strings/glyphs as pattern-precision examples — they are the one
     // legitimate, deliberate exception, not a case that needs an
-    // allowlist elsewhere. Excluded by exact relative path, not a broad
-    // "skip all .test.ts" carve-out, so no other test file is shielded
-    // from a real violation.
+    // allowlist elsewhere. Excluded by exact basename match (`entry.name`,
+    // not a relative/full path), not a broad "skip all .test.ts"
+    // carve-out, so no other test file — even one with the same basename
+    // in a different directory — is shielded from a real violation except
+    // by literal coincidence with these two exact filenames.
     const selfExempt = new Set(['bannedSynonyms.ts', 'bannedSynonyms.test.ts']);
     const files: string[] = [];
     const walk = (dir: string) => {

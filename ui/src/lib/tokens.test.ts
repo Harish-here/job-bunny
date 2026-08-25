@@ -152,6 +152,97 @@ describe('Lapin design tokens (ui/src/index.css)', () => {
   });
 });
 
+// ---- Contrast ratios (QA round 1 bug 8, AC 1) --------------------------
+// AC 1: "the check is automated and listed pair by pair. A pair that
+// fails is a build failure, not a note." Before this, `reference.md`'s
+// contrast table was a hand-computed note nothing enforced — the hex pins
+// above catch a colour *change* but never a contrast *violation* as such.
+// This is a small, dependency-free WCAG 2.1 relative-luminance/contrast-
+// ratio implementation (the formula itself, not a library) — no new
+// runtime dependency, matching AC 5's own constraint.
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [0, 2, 4].map((i) => Number.parseInt(h.slice(i, i + 2), 16)) as [
+    number,
+    number,
+    number,
+  ];
+}
+
+function srgbChannelToLinear(channel: number): number {
+  const c = channel / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex);
+  return (
+    0.2126 * srgbChannelToLinear(r) +
+    0.7152 * srgbChannelToLinear(g) +
+    0.0722 * srgbChannelToLinear(b)
+  );
+}
+
+/** WCAG 2.1 contrast ratio between two sRGB hex colours, order-independent. */
+function contrastRatio(hexA: string, hexB: string): number {
+  const la = relativeLuminance(hexA);
+  const lb = relativeLuminance(hexB);
+  const [lighter, darker] = la > lb ? [la, lb] : [lb, la];
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function readVar(block: string, name: string): string {
+  const match = block.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6});`));
+  if (!match?.[1]) throw new Error(`token not found: ${name}`);
+  return match[1];
+}
+
+const WCAG_AA_NORMAL_TEXT = 4.5;
+
+/** The pairs reference.md's Contrast pairs table lists (QA round 1 bug 8) —
+ * every real text/background combination the app renders, both modes. */
+const CONTRAST_PAIRS: Array<[string, string, string]> = [
+  ['foreground', 'card', 'foreground on card'],
+  ['muted-foreground', 'card', 'muted-foreground on card'],
+  ['primary', 'card', 'primary on card'],
+  ['success-strong', 'card', 'success-strong on card'],
+  ['destructive-strong', 'card', 'destructive-strong on card'],
+  ['attention-strong', 'card', 'attention-strong on card'],
+  ['foreground', 'background', 'foreground on background'],
+  ['primary-foreground', 'primary', 'primary-foreground on primary'],
+];
+
+describe('Contrast ratios (AC 1 — automated, WCAG 2.1, normal text >= 4.5:1)', () => {
+  it('sanity: white on black is 21:1', () => {
+    expect(contrastRatio('#ffffff', '#000000')).toBeCloseTo(21, 1);
+  });
+
+  it('sanity: identical colours are 1:1', () => {
+    expect(contrastRatio('#7b5ea7', '#7b5ea7')).toBeCloseTo(1, 5);
+  });
+
+  it.each(CONTRAST_PAIRS)('light: %s on %s clears 4.5:1', (fg, bg, label) => {
+    const ratio = contrastRatio(
+      readVar(rootBlock, `--${fg}`),
+      readVar(rootBlock, `--${bg}`),
+    );
+    expect(ratio, `${label} (light) = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+      WCAG_AA_NORMAL_TEXT,
+    );
+  });
+
+  it.each(CONTRAST_PAIRS)('dark: %s on %s clears 4.5:1', (fg, bg, label) => {
+    const ratio = contrastRatio(
+      readVar(darkBlock, `--${fg}`),
+      readVar(darkBlock, `--${bg}`),
+    );
+    expect(ratio, `${label} (dark) = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+      WCAG_AA_NORMAL_TEXT,
+    );
+  });
+});
+
 const referencePath = fileURLToPath(
   new URL('../../../docs/product/ui-design-system/reference.md', import.meta.url),
 );

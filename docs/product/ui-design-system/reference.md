@@ -72,17 +72,23 @@ tokens are already aliases of their base (shown above), so this rule is a no-op 
 
 ## Contrast pairs (WCAG 2.1, normal text ≥ 4.5:1)
 
-Computed pair by pair, both modes. Source: `ux-notes.md` §1a.
+QA round 1 bug 8: this table's numbers are now machine-computed and machine-enforced — a small,
+dependency-free relative-luminance/contrast-ratio helper in `ui/src/lib/tokens.test.ts` reads each hex
+pair straight from `ui/src/index.css` and asserts ≥ 4.5:1 in both modes for every row below marked
+`pass`; a value that regresses below 4.5:1 is a build failure, not a note (AC 1). Source of the numbers
+themselves: that helper, both modes.
 
 | Pair | Light | Dark | Verdict |
 |---|---|---|---|
-| `foreground` on `card` | 12.4:1 | 12.5:1 | pass |
-| `muted-foreground` on `card` | 5.90:1 | 6.6:1 (on `background`) | pass |
+| `foreground` on `card` | 12.43:1 | 12.39:1 | pass |
+| `muted-foreground` on `card` | 5.98:1 | 5.95:1 | pass |
 | `muted-foreground` on `background` | 5.60:1 | 6.63:1 | pass |
-| `primary` on `card` | 5.27:1 | 6.87:1 | pass |
-| `success-strong` on `card` | 5.98:1 | 8.31:1 | pass |
-| `destructive-strong` on `card` | 5.49:1 | 6.76:1 | pass |
-| `attention-strong` on `card` | 6.04:1 | 5.9:1 | pass |
+| `primary` on `card` | 5.25:1 | 6.84:1 | pass |
+| `success-strong` on `card` | 6.05:1 | 8.20:1 | pass |
+| `destructive-strong` on `card` | 5.53:1 | 6.73:1 | pass |
+| `attention-strong` on `card` | 6.04:1 | 7.97:1 | pass |
+| `foreground` on `background` | 11.78:1 | 13.63:1 | pass |
+| `primary-foreground` on `primary` | 5.25:1 | 7.52:1 | pass |
 | `success` (plain) on `card` | 2.76:1 | — | **FAIL — fill only** |
 | `destructive` (plain) on `card` | 4.35:1 | — | **FAIL — fill only** |
 | `attention` (plain) on `card` | 2.34:1 | — | **FAIL — fill only** |
@@ -173,6 +179,11 @@ Frozen sets are **mirrored, never renamed** (R32; Notion select strings are byte
 synonyms are kept small and precise — a noisy gate is a deleted gate. Source: `ux-notes.md` §2; the
 banned-synonym column is the human-readable mirror of
 `ui/src/lib/vocabulary/bannedSynonyms.ts` (task 2) — the two must list the same reserved words.
+
+**Adoption rule (QA round 1 bug 9):** every screen that renders one of the reserved concepts above — a
+lane name, a tracking status, or a triage action label — sources it from `ui/src/lib/vocabulary`, never
+a hardcoded copy. A screen that renders none of these concepts needs no import from it; a contrived
+import with nothing to use it for is not the goal.
 
 | Concept | Reserved word(s) | Banned synonyms | Status |
 |---|---|---|---|

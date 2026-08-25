@@ -57,5 +57,9 @@ export const BANNED_SYNONYMS: ReadonlyArray<{ pattern: RegExp; reason: string }>
     pattern: />\s*Save\s*\(/,
     reason: '"Save (…)" as a decide-action label — use "Lead" (R11)',
   },
-  { pattern: /[✓✗☆↑↓]/, reason: 'raw unicode glyph — use a lucide icon (R16)' },
+  // QA round 1 bug 10: `⚡` (U+26A1 HIGH VOLTAGE SIGN) added — it stood in
+  // for a lucide `Zap` icon at `tracker/DueStrip.tsx:29`, uncovered by the
+  // original 5-glyph set (AC 11's scope is all of `ui/src/**`, not just
+  // triage).
+  { pattern: /[✓✗☆↑↓⚡]/, reason: 'raw unicode glyph — use a lucide icon (R16)' },
 ];

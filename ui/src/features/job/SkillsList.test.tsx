@@ -43,10 +43,11 @@ describe('SkillsList — 12 skills', () => {
 });
 
 describe('SkillsList — 0 skills', () => {
-  it('renders the muted-line fallback, no badges, no toggle button', () => {
+  it('renders the "SKILLS ASKED FOR · 0" eyebrow, the muted-line fallback, no badges, no toggle button', () => {
     const { container } = render(<SkillsList skills={[]} />);
 
     expect(container.querySelector('[data-qa="skills"]')).not.toBeNull();
+    expect(screen.getByText('SKILLS ASKED FOR · 0')).toBeInTheDocument();
     expect(screen.getByText('No skills extracted.')).toBeInTheDocument();
     expect(container.querySelectorAll('[data-slot="badge"]')).toHaveLength(0);
     expect(container.querySelector('[data-qa="skills-more"]')).toBeNull();

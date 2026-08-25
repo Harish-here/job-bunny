@@ -15,6 +15,7 @@ describe('EligibilityGrid — all populated', () => {
 
     const card = container.querySelector('[data-qa="eligibility"]');
     expect(card).not.toBeNull();
+    expect(screen.getByText('Eligibility')).toBeInTheDocument();
     for (const label of ['LOCATION', 'WORK TYPE', 'SENIORITY', 'TIMEZONE']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
@@ -37,6 +38,7 @@ describe('EligibilityGrid — all null', () => {
       />,
     );
 
+    expect(screen.getByText('Eligibility')).toBeInTheDocument();
     for (const label of ['LOCATION', 'WORK TYPE', 'SENIORITY', 'TIMEZONE']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

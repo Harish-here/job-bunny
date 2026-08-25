@@ -66,6 +66,21 @@ describe('JobHeader — archived', () => {
     const { container } = render(<JobHeader job={makeRow({ archived: true })} />);
     expect(container.querySelector('[data-qa="archived-strip"]')).not.toBeNull();
   });
+
+  // QA round 1 bug 7: blueprint §3 orders the pane "ArchivedStrip
+  // (conditional) → JobHeader (verdict-header…)" — archived-strip must
+  // precede verdict-header in document order, as a sibling, not a child.
+  it('renders archived-strip BEFORE verdict-header, as a sibling', () => {
+    const { container } = render(<JobHeader job={makeRow({ archived: true })} />);
+    const strip = container.querySelector('[data-qa="archived-strip"]');
+    const header = container.querySelector('[data-qa="verdict-header"]');
+    expect(strip).not.toBeNull();
+    expect(header).not.toBeNull();
+    expect(strip?.compareDocumentPosition(header as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(header?.contains(strip)).toBe(false);
+  });
 });
 
 describe('JobHeader — lane label for every lane resolves to Building2, never raw', () => {
