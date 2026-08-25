@@ -1,9 +1,15 @@
 # QA Report — UI Design System & Triage Job-Details Overhaul
 
-**Round 1 verdict: RED — 10 bugs.  Round 2 verdict: RED — 1 open bug (minor). No PR opened.**
+**FINAL VERDICT (round 3): GREEN — zero open bugs.**
 
-> Round 1 findings are preserved below for the record; **all 10 are verified fixed** in `d8fa393`.
-> Round 2 opened one new minor finding — a residual of round 1's bug 8. See §10.
+| Round | HEAD | Result |
+|---|---|---|
+| 1 | `52792df` | RED — 10 bugs (1 major, 9 minor) |
+| 2 | `d8fa393` | RED — all 10 closed; 1 new minor (R2-1, a residual of bug 8's fix) |
+| 3 | `aebdaa0` | **GREEN — R2-1 closed; zero open bugs** |
+
+> Round 1 and 2 findings are preserved below for the record. All 11 are verified fixed.
+> See §10 (round 2) and §11 (round 3).
 
 ---
 
@@ -100,7 +106,7 @@ dist/assets/index-ir17qpWE.js                               703.36 kB │ gzip: 
 
 | AC | Criterion | Verdict | Evidence |
 |---|---|---|---|
-| 1 | Colour: every text pair ≥ 4.5:1 both modes; check **automated**, failing pair = **build failure** | **DRIFTED (round 2)** — automation now exists (16 assertions, 8 pairs × 2 modes) but omits one listed pass-pair that renders on 20 elements of the triage screen; see **R2-1** | Ratios independently recomputed by me from `index.css` (WCAG relative-luminance): **every text pair passes in both modes** (light 5.25–12.43:1; dark 5.95–13.63:1); `reference.md`'s table is accurate. But **no code computes a contrast ratio** — `tokens.test.ts` only pins hex strings. → **Bug 8** |
+| 1 | Colour: every text pair ≥ 4.5:1 both modes; check **automated**, failing pair = **build failure** | **DELIVERED (round 3)** — `tokens.test.ts` now parses `reference.md`'s table itself (single source), asserting each published number equals the WCAG computation to 2 dp and that every `pass` row clears 4.5:1 in both modes; 34 assertions. **Proven to bite** by mutation (§11.3) | Ratios independently recomputed by me from `index.css` (WCAG relative-luminance): **every text pair passes in both modes** (light 5.25–12.43:1; dark 5.95–13.63:1); `reference.md`'s table is accurate. But **no code computes a contrast ratio** — `tokens.test.ts` only pins hex strings. → **Bug 8** |
 | 2 | Type scale as tokens; no `text-[Npx]` anywhere; every step used | **DELIVERED** | `grep -rn 'text-\[' ui/src` → 1 hit, `text-[0.8rem]` in vendored `button.tsx` (rem, not `Npx`, pre-existing). All five `text-[10px]`/`text-[9px]` eliminated. Live measurement across all 7 routes: **only 11/12/14/16/18/24px, zero off-scale** (`sweep-report.md` Part 3) |
 | 3 | Voice rules documented; every new/changed button label imperative + sentence case | **DELIVERED** | New labels: Apply · Lead · Pass · Try again · Show full description · Show less · Clear filters · View the tracker → — all imperative, sentence case. `reference.md` §Voice |
 | 4 | Exactly one word per concept; banned synonym fails the build | **DELIVERED** (with note) | `bannedSynonyms.test.ts` walks the whole `ui/src` tree and asserts no match against 3 precise patterns. Note: the scan runs under `ui:check`, not `npm run check` — the repo's own architecture puts `ui/` outside the root gate, so the AC's literal wording is unimplementable; CI runs both |
@@ -116,7 +122,7 @@ dist/assets/index-ir17qpWE.js                               703.36 kB │ gzip: 
 | 14 | Board still `127.0.0.1`-only; no new route, request field or DB column; only job write stays the tracking PATCH | **DELIVERED** | `git diff origin/main...HEAD -- src/ test/` is **empty**. Live: the only PATCH observed was `/api/profiles/rajni/jobs/:id/tracking` |
 | 15 | `npm run check` + `npm run ui:check` pass; no file over the 400-line cap | **DELIVERED** | Both green (§2). Cap test green inside gate 1; independent `wc -l` sweep of `ui/src` found zero impl file > 400 and zero test file > 800 |
 
-**AC totals — round 1: 11 delivered · 4 drifted.  Round 2: 14 delivered · 1 drifted (AC 1) · 0 missing · 0 untested.**
+**AC totals — round 1: 11 delivered · 4 drifted.  Round 2: 14 delivered · 1 drifted.  Round 3 (final): 15 delivered · 0 drifted · 0 missing · 0 untested.**
 
 ### 3.2 MoSCoW Musts (all 20)
 
@@ -527,3 +533,140 @@ screen, while the canonical reference document claims that pair is enforced and 
 numbers for it.
 
 Green requires zero open bugs. Routing belongs to the orchestrator; deferral belongs to the user.
+
+---
+
+# 11. ROUND 3 — Final Scoped Verification (`aebdaa0`)
+
+**Scope:** bug R2-1, plus the full gate suite (never gates alone). The commit touches
+`ui/src/lib/tokens.test.ts` and `docs/product/ui-design-system/reference.md` **only** — verified via
+`git show --name-only`, zero application code — so the regression surface is the gate suite itself.
+
+## 11.1 Gate Results — round 3 (all four PASS)
+
+| Gate | Result | Counts |
+|---|---|---|
+| `npm run check` | **PASS** | `tests 2114 · pass 2113 · fail 0 · skipped 1` (see §11.4) |
+| `npm run ui:check` | **PASS** | `Test Files 131 passed · Tests 1169 passed` (**+16** vs round 2's 1153) · 28 pre-existing biome warnings |
+| `npm run ui:build` | **PASS** | 2118 modules · `dist/assets/index-Cc9WpSiQ.js` · built in 384ms |
+| `npm run ui:e2e` | **PASS** | `shared-docs 53` + `default 82` = **135 passed, 0 failed, 0 skipped** |
+
+`.env` restoration verified: present, 636 bytes, mode `600`, no `.env.local-bak` remaining.
+
+## 11.2 R2-1 fix — verified three independent ways
+
+**(a) Every documented number independently recomputed.** I re-parsed `reference.md`'s table and
+recomputed all **13** rows from `ui/src/index.css` with my own WCAG relative-luminance implementation,
+without reference to the repo's helper: **13 rows parsed, 0 mismatches.** The previously-wrong values
+are all corrected — `muted-foreground on background` now reads `5.67 / 6.55` (was `5.60 / 6.63`), and
+the four fill-only rows now read `2.74 / 4.38 / 2.35 / 2.93` (were `2.76 / 4.35 / 2.34 / 2.92`). Every
+one of the 9 `pass` rows clears 4.5:1 in both modes.
+
+**(b) The tests demonstrably executed** — not merely a green total. `vitest --reporter=verbose` on
+`tokens.test.ts` (156 tests passed) lists **34 contrast assertions**: 2 sanity (21:1 white-on-black,
+1:1 identical), 1 non-empty-parse guard, 9 `REQUIRED_PASS_PAIRS` row-existence guards, 13 light-ratio
+tests (all rows incl. the four FAIL rows) and 9 dark-ratio tests. Three of them name the pair R2-1 was
+about:
+
+```
+✓ reference.md documents muted-foreground on background as a pass row
+✓ 'muted-foreground on background': light ratio matches reference.md and clears threshold if pass
+✓ 'muted-foreground on background': dark ratio matches reference.md and clears threshold if pass
+```
+
+**(c) The design cannot pass vacuously.** `parseContrastTable` **throws** if the table header is
+absent; a `found at least one contrast row` test guards a zero-row parse; and the names-only
+`REQUIRED_PASS_PAIRS` list catches any of the 9 pass rows being deleted from the doc. Both directions
+are asserted — the published number must *equal* the computed one (`.toBe`, 2 dp), and `pass` rows must
+additionally clear 4.5:1. FAIL rows are still numerically pinned, so the fill-only figures cannot drift
+either.
+
+## 11.3 Mutation proof — the gate actually bites
+
+AC 1 requires that "a pair that fails is a **build failure**, not a note." Reading the test is not
+evidence of that; making it fail is. Two mutations were applied to `reference.md` (inside this report's
+own write boundary), each run against `tokens.test.ts` and then reverted:
+
+**Mutation A — publish a wrong number** (`5.67:1` → `5.99:1`):
+
+```
+× 'muted-foreground on background': light ratio matches reference.md and clears threshold if pass
+AssertionError: muted-foreground on background (light) computed 5.67:1 vs published 5.99:1:
+  expected 5.67 to be 5.99 // Object.is equality
+Tests  1 failed | 155 passed (156)
+```
+
+**Mutation B — delete the row from the table entirely:**
+
+```
+× reference.md documents muted-foreground on background as a pass row
+AssertionError: missing pass row: `muted-foreground` on `background`: expected undefined to be defined
+Tests  1 failed | 153 passed (154)
+```
+
+`reference.md` was restored via `git checkout --` after each and confirmed **byte-identical** to the
+committed version (`diff -q`), with `git status --porcelain` clean. Both the stale-number path and the
+silent-deletion path are now genuine build failures.
+
+## 11.4 The one skipped test — investigated, not waved through
+
+`npm run check` reports `pass 2113 · skipped 1` this round, where rounds 1 and 2 reported
+`pass 2114 · skipped 0`. Since a changed count is exactly what a regression looks like, it was run down
+rather than accepted:
+
+- The test is `migrations.test.ts` › *"a real profiles/rajni fixture db (copied to a temp path) upgrades
+  v6 -> LATEST_SCHEMA_VERSION without data loss"*.
+- Its skip is **declared and opportunistic by design**: `skip: existsSync(RAJNI_FIXTURE_DB) ? false : …`,
+  with the file's own comment stating it "runs wherever the file happens to be present, and skips
+  cleanly everywhere else (a fresh checkout, CI), rather than depending on undeclared local state."
+- Re-run directly on this HEAD it **passes**: `node --test src/adapters/db/sqlite/store/migrations.test.ts`
+  → `tests 19 · pass 19 · fail 0 · skipped 0`, with the test itself reported `✔`.
+- `fail 0` in every case. Cause is the gitignored fixture DB's momentary absence during the gate run
+  (this session re-seeds it between rounds), not the commit under test — which touches no `src/` code
+  at all.
+
+**Verdict: not a regression.** Recorded here rather than omitted, because a silently-changed test count
+is precisely the kind of thing a green tick hides.
+
+## 11.5 Bug List — ROUND 3
+
+**None.** R2-1 is **CLOSED**. Zero open bugs across all three rounds.
+
+## 11.6 Deferred
+
+**None.** No bug was deferred in any round. Deferral is the user's decision alone, relayed through the
+orchestrator; all three rounds ran unattended, so no such approval exists or was assumed.
+
+## 11.7 Residual Risk — final
+
+Green means **"no known defects," never "no defects."** Three rounds found 11. That the third round
+found none is weak evidence about the fourth. What remains untested or unverifiable:
+
+1. **R2-1's own root cause is closed, but the class it belonged to is only narrowed.** The contrast
+   table is now the single source and cannot drift — but the same parallel-maintenance shape still
+   exists elsewhere: `RESERVED_WORDS` and `TEXT_RAMP` in `tokens.test.ts` are hand-written lists checked
+   *against* `reference.md`, not derived *from* it. A reserved word dropped from both at once passes.
+2. **The four FAIL rows are guarded by numeric pinning only.** A row whose markdown *formatting* changed
+   would fall out of the regex and stop being checked; `REQUIRED_PASS_PAIRS` guards the 9 `pass` rows
+   against exactly this, but the fill-only rows have no such name-level guard. No AA implication —
+   they are documented as never used for text.
+3. **Contrast is verified at the token level, not the rendered level.** Both my check and the repo's read
+   hex pairs from `index.css`. Neither catches a component that composes a text colour over an
+   *unexpected* background, or opacity-modified utilities (`bg-success/10`) whose effective contrast
+   differs from the token pair.
+4. **Carried forward, still open:** spec §15's named riskiest assumption (R13's 281-file sweep, verified
+   by screenshot and bounded-type-ramp extraction across 7 routes, not by per-screen pixel diff against
+   the pre-change UI); `runs`' `laneLabel()` call sites never rendered live (they need a failed run; the
+   fixture has none); archived state reachable only via an exclusive filter, so mixed-list archived
+   behaviour is untestable by design; and round 1's auto-advance retargeting, an accepted deviation
+   behaving as ruled.
+5. **Nothing here shows the feature serves the user.** A complete matrix is not evidence that the
+   rebuilt triage pane shortens the decide loop. Spec §14 declined the instrumentation and §15 weakness 5
+   concedes it: metric 3 stays observed, not measured, at n=1.
+
+## 11.8 Final Verdict
+
+**GREEN — zero open bugs.** All 15 acceptance criteria delivered, all 20 MoSCoW Musts delivered, all 48
+mockup ids and all 12 frames accounted for, all four gates green, 135 e2e specs passing, and the three
+accepted-deviation rulings recorded rather than absorbed. PR opened; **merging remains the user's
+decision.**
