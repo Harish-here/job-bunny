@@ -173,25 +173,52 @@ const RAW_PACING_PAIRS: Array<{
   },
 ];
 
+function capitalizeFirst(label: string): string {
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function lowercaseFirst(label: string): string {
+  return label.charAt(0).toLowerCase() + label.slice(1);
+}
+
+export interface PacingPairErrors {
+  /** Full sentence per field, for `ValidationSummary` — B12 fix (QA
+   * settings-overhaul, round 2): the max field now gets ITS OWN sentence
+   * ("Maximum jitter (...) is below minimum jitter (...)"), not a copy of
+   * the min field's. Previously both entries of a failing pair carried the
+   * identical min-phrased sentence, which rendered as the same sentence
+   * twice under "2 problems to fix" — mockup S8 gives each field its own. */
+  summary: Record<string, string>;
+  /** Short form per field, for the inline `FieldError` under each raw
+   * input — B12 fix: mockup S8's own inline text ("Above maximum jitter
+   * (12000 ms).") is short, not the full summary sentence repeated under
+   * the field it's already sitting beside. */
+  inline: Record<string, string>;
+}
+
 // B3 fix (QA settings-overhaul): the copy is ux-notes §11's own named case,
 // verbatim for the jitter pair ("Minimum jitter (15000 ms) is above
 // maximum jitter (12000 ms). The run would fail to start.") — it names
 // BOTH fields, their values, and the CONSEQUENCE, because the consequence
-// is what happens at 07:00 while the user is asleep. Both entries of a
-// failing pair carry the identical sentence (not two half-sentences) so
-// either summary link explains the whole problem on its own.
-export function validatePacingPairs(state: FetchingState): Record<string, string> {
-  const errors: Record<string, string> = {};
+// is what happens at 07:00 while the user is asleep.
+export function validatePacingPairs(state: FetchingState): PacingPairErrors {
+  const summary: Record<string, string> = {};
+  const inline: Record<string, string> = {};
   for (const pair of RAW_PACING_PAIRS) {
     const minValue = state[pair.minKey];
     const maxValue = state[pair.maxKey];
     if (minValue > maxValue) {
-      const message =
+      const minKey = `fetching.${pair.minKey}`;
+      const maxKey = `fetching.${pair.maxKey}`;
+      summary[minKey] =
         `${pair.minLabel} (${minValue} ms) is above ${pair.maxLabel} (${maxValue} ms). ` +
         'The run would fail to start.';
-      errors[`fetching.${pair.minKey}`] = message;
-      errors[`fetching.${pair.maxKey}`] = message;
+      summary[maxKey] =
+        `${capitalizeFirst(pair.maxLabel)} (${maxValue} ms) is below ` +
+        `${lowercaseFirst(pair.minLabel)} (${minValue} ms). The run would fail to start.`;
+      inline[minKey] = `Above ${pair.maxLabel} (${maxValue} ms).`;
+      inline[maxKey] = `Below ${lowercaseFirst(pair.minLabel)} (${minValue} ms).`;
     }
   }
-  return errors;
+  return { summary, inline };
 }

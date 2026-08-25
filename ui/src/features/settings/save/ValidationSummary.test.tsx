@@ -38,6 +38,40 @@ describe('ValidationSummary — presence', () => {
   });
 });
 
+// B12/B13 (QA settings-overhaul, round 2): mockup S8's own
+// `.validation-summary` is left-edge-only (no border on the other three
+// sides), `--destructive-8` tint, 16px padding, 8px gap, and a
+// `--foreground`/700 title (never destructive-coloured) — while the link
+// text is `--destructive-strong` (B13's ruling), not the mockup's own
+// plain `--destructive` (which the ruling found itself non-conformant,
+// 4.38:1 on white).
+describe('ValidationSummary — styling (B12/B13)', () => {
+  it('carries the mockup S8 container classes: left-only border, destructive tint, 16px padding, 8px gap', () => {
+    render(<ValidationSummary errors={{ a: 'bad' }} attempt={1} />);
+    const summary = screen.getByTestId('validation-summary');
+    expect(summary.className).toContain('border-0');
+    expect(summary.className).toContain('border-l-2');
+    expect(summary.className).toContain('border-l-destructive');
+    expect(summary.className).toContain('bg-destructive/8');
+    expect(summary.className).toContain('p-4');
+    expect(summary.className).toContain('gap-2');
+  });
+
+  it('the title is foreground/bold, never destructive-coloured', () => {
+    render(<ValidationSummary errors={{ a: 'bad' }} attempt={1} />);
+    const title = screen.getByText('1 problem to fix');
+    expect(title.className).toContain('text-foreground');
+    expect(title.className).toContain('font-bold');
+    expect(title.className).not.toContain('text-destructive');
+  });
+
+  it('the link text uses --destructive-strong (B13), not plain --destructive', () => {
+    render(<ValidationSummary errors={{ a: 'bad' }} attempt={1} />);
+    const link = screen.getByRole('link', { name: 'bad' });
+    expect(link.className).toContain('text-destructive-strong');
+  });
+});
+
 describe('ValidationSummary — link focus (B2)', () => {
   it('clicking a link focuses the REAL input carrying that exact id, not the anchor', async () => {
     render(

@@ -42,15 +42,20 @@ describe('CHECK_TO_DESTINATION', () => {
   // B6 (QA settings-overhaul): these two are unambiguously "a secret is
   // missing/invalid" findings — the only page that can set a secret is
   // Operate's card-secrets, not Delivery (DeliverySection.tsx renders no
-  // secret value or input at all).
-  it('maps env-tokens and telegram-bot-token to Operate, not delivery', () => {
+  // secret value or input at all). Round 2: since `SetupHealthCard` only
+  // ever renders ON Operate, a bare `navigate()` to `{name:'setup'}` is a
+  // same-page no-op — `focusSelector` carries the actual remedy (scroll
+  // `card-secrets` into view, focus its first action button).
+  it('maps env-tokens and telegram-bot-token to Operate/card-secrets, not delivery', () => {
     expect(CHECK_TO_DESTINATION['env-tokens']).toEqual({
       kind: 'settings-link',
       route: { name: 'setup' },
+      focusSelector: '[data-qa="card-secrets"] button',
     });
     expect(CHECK_TO_DESTINATION['telegram-bot-token']).toEqual({
       kind: 'settings-link',
       route: { name: 'setup' },
+      focusSelector: '[data-qa="card-secrets"] button',
     });
   });
 

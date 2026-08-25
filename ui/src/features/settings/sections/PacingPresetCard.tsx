@@ -83,6 +83,14 @@ export function PacingPresetCard({
         className={cn(
           'flex flex-col items-start gap-1.5 rounded-lg border border-border bg-card p-3 text-left text-sm',
           'data-[state=checked]:ring-2 data-[state=checked]:ring-primary',
+          // B8 fix (QA settings-overhaul, round 2): mockup.html:163
+          // (`.preset-card.attention{border-left:2px solid var(--attention)}`)
+          // applies to the Fast card UNCONDITIONALLY — the class is static
+          // markup, never toggled by `setPreset()` — so this stays regardless
+          // of `isCurrent`/selection state. `border-l-attention` (per-side
+          // color), not `border-attention` (all-sides color): the mockup's
+          // other three edges stay the base `--border`.
+          isFast && 'border-l-2 border-l-attention',
         )}
       >
         <span className="flex items-center gap-1.5 font-medium">
@@ -94,7 +102,10 @@ export function PacingPresetCard({
         </span>
         {isFast && (
           <>
-            <Alert data-qa="pacing-fast-warning" className="mt-1">
+            <Alert
+              data-qa="pacing-fast-warning"
+              className="mt-1 border-l-2 border-l-attention bg-attention/10"
+            >
               <AlertTriangle className="text-attention" />
               <AlertDescription>{FAST_WARNING_COPY}</AlertDescription>
             </Alert>

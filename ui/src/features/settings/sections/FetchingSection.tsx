@@ -41,11 +41,14 @@ import {
   type CapFieldDef,
   EMPTY_STATE,
   type FetchingState,
+  type PacingPairErrors,
   parseFetchingState,
   validatePacingPairs,
   validateState,
 } from './fetching.state';
 import { PacingAdvancedDisclosure, PacingPresetCard } from './PacingPresetCard';
+
+const EMPTY_PACING_ERRORS: PacingPairErrors = { summary: {}, inline: {} };
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object'
@@ -123,7 +126,7 @@ export function FetchingSection({ profile }: { profile: string }) {
   // see `validatePacingPairs`'s own doc comment) and cleared the instant
   // the draft changes again, so a stale post-submit error never survives
   // past the edit that was meant to fix it.
-  const [pacingErrors, setPacingErrors] = useState<Record<string, string>>({});
+  const [pacingErrors, setPacingErrors] = useState<PacingPairErrors>(EMPTY_PACING_ERRORS);
 
   const initialized = useRef<string | null>(null);
   useEffect(() => {
@@ -157,7 +160,7 @@ export function FetchingSection({ profile }: { profile: string }) {
   // comment for why this can't live as that card's local state instead.
   function applyRanges(next: FetchingState) {
     setState(next);
-    setPacingErrors({});
+    setPacingErrors(EMPTY_PACING_ERRORS);
     const nextPreset = presetFromRanges(
       next.jitterMinMs,
       next.jitterMaxMs,
@@ -181,11 +184,11 @@ export function FetchingSection({ profile }: { profile: string }) {
 
   function handleSave(value: FetchingState): Promise<boolean> {
     const crossFieldErrors = validatePacingPairs(value);
-    if (Object.keys(crossFieldErrors).length > 0) {
+    if (Object.keys(crossFieldErrors.summary).length > 0) {
       setPacingErrors(crossFieldErrors);
       return Promise.resolve(false);
     }
-    setPacingErrors({});
+    setPacingErrors(EMPTY_PACING_ERRORS);
     return docForm.save((cfg) => {
       const settings = asRecord(cfg.settings);
       const source = asRecord(settings.source);
@@ -226,7 +229,7 @@ export function FetchingSection({ profile }: { profile: string }) {
     isDirty: saveState.isDirty,
     save: saveState.save,
     discard: () => {
-      setPacingErrors({});
+      setPacingErrors(EMPTY_PACING_ERRORS);
       setState(saveState.discard());
     },
   });
@@ -241,7 +244,7 @@ export function FetchingSection({ profile }: { profile: string }) {
     return ok;
   }
 
-  const allErrors = { ...saveState.errors, ...pacingErrors };
+  const allErrors = { ...saveState.errors, ...pacingErrors.summary };
 
   return (
     <DocFormGate
@@ -335,10 +338,10 @@ export function FetchingSection({ profile }: { profile: string }) {
               interUrlDelayMaxMs={state.interUrlDelayMaxMs}
               onFieldChange={updateRawField}
               errors={{
-                jitterMinMs: pacingErrors['fetching.jitterMinMs'],
-                jitterMaxMs: pacingErrors['fetching.jitterMaxMs'],
-                interUrlDelayMinMs: pacingErrors['fetching.interUrlDelayMinMs'],
-                interUrlDelayMaxMs: pacingErrors['fetching.interUrlDelayMaxMs'],
+                jitterMinMs: pacingErrors.inline['fetching.jitterMinMs'],
+                jitterMaxMs: pacingErrors.inline['fetching.jitterMaxMs'],
+                interUrlDelayMinMs: pacingErrors.inline['fetching.interUrlDelayMinMs'],
+                interUrlDelayMaxMs: pacingErrors.inline['fetching.interUrlDelayMaxMs'],
               }}
             />
           </CardContent>
@@ -355,7 +358,7 @@ export function FetchingSection({ profile }: { profile: string }) {
           successMessage={saveState.successMessage}
           onSave={handleSaveClick}
           onDiscard={() => {
-            setPacingErrors({});
+            setPacingErrors(EMPTY_PACING_ERRORS);
             setState(saveState.discard());
           }}
         />

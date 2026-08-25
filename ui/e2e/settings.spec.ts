@@ -215,6 +215,44 @@ test('settings: raw config section round-trips raw filter.json text through the 
   }
 });
 
+// B9/B14 (QA settings-overhaul, round 2): the raw-config skeleton was a
+// fixed 320px (`h-80`) box against a loaded textarea that renders at
+// 2186px on this fixture — a ~1600px layout shift the instant the doc
+// resolves. The fix sizes the skeleton to the available column height
+// (`min-h-[70vh]`) instead of a content-length guess (exact match isn't
+// achievable — `field-sizing: content` depends on the doc's own text).
+// This is a regression guard for that specific fix, not a claim that the
+// shift is fully eliminated: it fails if the skeleton ever regresses back
+// to a small fixed height. Also closes B14 — `raw-editor-skeleton` had no
+// e2e owner (unit-pinned only, the same coverage shape B1 shipped
+// through).
+test('settings: raw config skeleton fills most of the available column height while loading, then resolves to the real editor', async ({
+  page,
+}) => {
+  let releaseRoute: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    releaseRoute = resolve;
+  });
+  await page.route('**/api/profiles/rajni/config/profile.json', async (route) => {
+    await gate;
+    await route.continue();
+  });
+
+  await page.goto('/#/settings/raw-config');
+  const skeleton = page.getByTestId('raw-editor-skeleton');
+  await expect(skeleton).toBeVisible();
+
+  // Well above the old fixed 320px (`h-80`) — a regression back to that
+  // (or anything similarly small) fails this bound.
+  const box = await skeleton.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThan(400);
+  expect(await page.locator('[data-qa="raw-editor"]').count()).toBe(0);
+
+  releaseRoute?.();
+  await expect(skeleton).not.toBeVisible();
+  await expect(page.locator('[data-qa="raw-editor"]')).toBeVisible();
+});
+
 test("settings: invalid JSON in the raw config editor is rejected inline with SaveBar's validation summary", async ({
   page,
 }) => {

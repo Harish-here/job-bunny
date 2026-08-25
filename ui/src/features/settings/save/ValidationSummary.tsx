@@ -43,16 +43,26 @@ export function ValidationSummary({ errors, attempt }: ValidationSummaryProps) {
   if (entries.length === 0) return null;
 
   return (
+    // B12 fix (QA settings-overhaul, round 2): matches mockup S8's
+    // `.validation-summary` exactly (mockup.html:175) — left-edge-only
+    // border, `--destructive-8` tint, 16px padding, 8px gap. Not the
+    // vendored `destructive` variant (`bg-card text-destructive` on all
+    // sides): `variant="default"` plus explicit overrides, so the TITLE
+    // stays `--foreground`/700 (mockup: plain `<b>`, no destructive
+    // colour) while only the LINKS carry destructive text — and per B13's
+    // ruling, `--destructive-strong` (5.53:1 on white), not the mockup's
+    // own plain `--destructive` (4.38:1 on white, 3.74:1 on the mockup's
+    // own tint — both fail 4.5:1).
     <Alert
       ref={ref}
       tabIndex={-1}
-      variant="destructive"
       role="alert"
       aria-live="assertive"
       data-qa="validation-summary"
       data-testid="validation-summary"
+      className="gap-2 rounded-lg border-0 border-l-2 border-l-destructive bg-destructive/8 p-4"
     >
-      <AlertTitle>
+      <AlertTitle className="font-bold text-foreground">
         {entries.length} {entries.length === 1 ? 'problem' : 'problems'} to fix
       </AlertTitle>
       <ul className="list-disc pl-4 text-sm">
@@ -64,7 +74,7 @@ export function ValidationSummary({ errors, attempt }: ValidationSummaryProps) {
           >
             <a
               href={`#${field}`}
-              className="underline"
+              className="text-destructive-strong underline"
               onClick={(event) => {
                 event.preventDefault();
                 document.getElementById(field)?.focus();

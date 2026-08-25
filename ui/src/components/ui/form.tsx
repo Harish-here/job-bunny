@@ -100,7 +100,13 @@ function FieldError({ className, children, ...props }: React.ComponentProps<'p'>
       id={errorId}
       role="alert"
       data-slot="field-error"
-      className={cn('text-sm text-destructive', className)}
+      // B13 fix (QA settings-overhaul, round 2): plain `text-destructive`
+      // at this size/weight fails 4.5:1 against a plain white background
+      // (4.38:1, computed) — the same failure B7 already fixed for
+      // `daemon-state`. `--destructive-strong` (5.53:1 on white) is the
+      // token B7 introduced for exactly this; `--destructive` itself stays
+      // reserved for borders/tints (see ux-notes §14's amended pairing).
+      className={cn('text-sm text-destructive-strong', className)}
       {...props}
     >
       {children}

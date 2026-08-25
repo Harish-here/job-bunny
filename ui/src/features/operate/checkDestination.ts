@@ -2,7 +2,7 @@ import type { Route } from '../../lib/router';
 import type { DoctorFinding } from './operate.api';
 
 export type CheckDestination =
-  | { kind: 'settings-link'; route: Route }
+  | { kind: 'settings-link'; route: Route; focusSelector?: string }
   | { kind: 'cli-command'; command: string };
 
 /**
@@ -32,6 +32,11 @@ export type CheckDestination =
  *     itself documents that it renders no secret value or input at all.
  *     Pointing these at `{section:'delivery'}` (the old routing) sent the
  *     user to a page with no token field to fix the finding with.
+ *     Round 2 (B6 re-review): `SetupHealthCard` renders ONLY on Operate,
+ *     so this control's own page IS the destination — a bare `navigate()`
+ *     call is a no-op (no `hashchange` fires) and the control was dead.
+ *     `focusSelector` below carries the same-page remedy: scroll
+ *     `card-secrets` into view and focus its first row's action button.
  *   - persona-filters (`filter-parses`) -> `roles-companies`.
  *   - search-urls (`empty-lanes`, `linkedin-inventory-freshness`) ->
  *     `where-jobs-come-from`.
@@ -79,6 +84,7 @@ export const CHECK_TO_DESTINATION: Record<string, CheckDestination> = {
   'env-tokens': {
     kind: 'settings-link',
     route: { name: 'setup' },
+    focusSelector: '[data-qa="card-secrets"] button',
   },
   'notion-db-reachable': {
     kind: 'settings-link',
@@ -87,6 +93,7 @@ export const CHECK_TO_DESTINATION: Record<string, CheckDestination> = {
   'telegram-bot-token': {
     kind: 'settings-link',
     route: { name: 'setup' },
+    focusSelector: '[data-qa="card-secrets"] button',
   },
   'daemon-liveness': { kind: 'cli-command', command: 'jobbunny serve start' },
   'claude-cli-on-path': { kind: 'settings-link', route: { name: 'runs' } },

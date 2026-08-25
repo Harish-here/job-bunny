@@ -87,14 +87,30 @@ function CopyCommandButton({ command }: { command: string }) {
  * nothing but still carries the `data-qa` cell — a stable id even when
  * empty is preferable to a cell that sometimes doesn't exist.
  *
- * `'setup'` (B6, QA settings-overhaul) is the Operate route itself — this
- * card's own page — used by findings whose only fix is `card-secrets`,
- * also on Operate; labelled the same as the sidebar names that page
- * (`Sidebar.tsx`'s `NAV_ITEMS`), not "Settings". */
-function destinationLabel(route: Route): string {
-  if (route.name === 'settings') return 'Settings';
-  if (route.name === 'setup') return 'Operate';
+ * A destination carrying `focusSelector` (B6, QA settings-overhaul round
+ * 2) names a fix that lives on THIS same page (`card-secrets`, also on
+ * Operate) rather than a different Settings section — labelled "Secrets"
+ * so the control names the actual card it moves you to, not the page
+ * you're already reading. */
+function destinationLabel(destination: {
+  kind: 'settings-link';
+  route: Route;
+  focusSelector?: string;
+}): string {
+  if (destination.focusSelector) return 'Secrets';
+  if (destination.route.name === 'settings') return 'Settings';
   return 'View runs';
+}
+
+/** Scrolls a same-page target into view and focuses it — the remedy for a
+ * `focusSelector` destination, whose `route` is a no-op `navigate()` (no
+ * `hashchange` fires when the hash doesn't change). `null` when the
+ * element genuinely isn't on the page (e.g. this component rendered in
+ * isolation in a test) — a silent no-op, not a throw. */
+function scrollAndFocus(selector: string): void {
+  const el = document.querySelector<HTMLElement>(selector);
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el?.focus();
 }
 
 function DestinationCell({
@@ -111,9 +127,12 @@ function DestinationCell({
           type="button"
           variant="link"
           size="sm"
-          onClick={() => navigate(destination.route)}
+          onClick={() => {
+            navigate(destination.route);
+            if (destination.focusSelector) scrollAndFocus(destination.focusSelector);
+          }}
         >
-          {destinationLabel(destination.route)}
+          {destinationLabel(destination)}
         </Button>
       )}
       {destination?.kind === 'cli-command' && (

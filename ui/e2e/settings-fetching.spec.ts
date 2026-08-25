@@ -124,6 +124,20 @@ test('settings: fetching section blocks Save on an inverted jitter range (R13) a
     await expect(summary).toContainText('Minimum jitter (15000 ms)');
     await expect(summary).toContainText('maximum jitter (12000 ms)');
     await expect(summary).toContainText('The run would fail to start.');
+    // B12 (QA settings-overhaul, round 2): the max field gets its OWN
+    // summary sentence (not the min field's sentence repeated) — this
+    // failing pair renders TWO distinct list items, "2 problems to fix".
+    await expect(summary).toContainText('2 problems to fix');
+    await expect(summary).toContainText('Maximum jitter (12000 ms)');
+    await expect(summary).toContainText('is below minimum jitter (15000 ms)');
+    // ...and the inline field errors are the SHORT form, not the summary
+    // sentence repeated under the field it's already sitting beside.
+    await expect(jitterMin.locator('[data-slot="field-error"]')).toHaveText(
+      'Above maximum jitter (12000 ms).',
+    );
+    await expect(jitterMax.locator('[data-slot="field-error"]')).toHaveText(
+      'Below minimum jitter (15000 ms).',
+    );
     await expect(section(page).locator('[data-qa="save-bar"]')).toBeVisible();
     await expect(
       section(page).getByRole('button', { name: 'Save changes' }),

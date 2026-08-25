@@ -124,4 +124,31 @@ describe('PacingPresetCard', () => {
 
     expect(onValueChange).toHaveBeenCalledWith('fast');
   });
+
+  // B8 (QA settings-overhaul, round 2): mockup.html:163/166 give the Fast
+  // card a left-edge-only `--attention` accent and the warning box an
+  // `--attention-10` tint + left border — both present regardless of
+  // selection (the mockup's `attention` class is static markup, never
+  // toggled by preset selection). Asserted via class presence (Tailwind
+  // isn't compiled in this jsdom test env, so computed-style assertions
+  // belong at e2e/visual level, not here) and specifically the per-side
+  // `-l-` utilities, not the all-sides `border-attention`/`bg-attention`
+  // forms, which would mispaint the card's other three edges.
+  it('the Fast card and its warning box carry the left-edge attention accent; Safe/Normal do not', () => {
+    render(<Harness initial="normal" currentPreset="normal" />);
+    const fastCard = document.querySelector('[data-qa="pacing-preset-fast"]');
+    const safeCard = document.querySelector('[data-qa="pacing-preset-safe"]');
+    const normalCard = document.querySelector('[data-qa="pacing-preset-normal"]');
+    const warning = document.querySelector('[data-qa="pacing-fast-warning"]');
+
+    expect(fastCard?.className).toContain('border-l-2');
+    expect(fastCard?.className).toContain('border-l-attention');
+    expect(fastCard?.className).not.toContain('border-attention');
+    expect(safeCard?.className).not.toContain('border-l-attention');
+    expect(normalCard?.className).not.toContain('border-l-attention');
+
+    expect(warning?.className).toContain('border-l-2');
+    expect(warning?.className).toContain('border-l-attention');
+    expect(warning?.className).toContain('bg-attention/10');
+  });
 });

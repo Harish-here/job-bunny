@@ -395,6 +395,28 @@ test('daemon: the schedule-vs-daemon banner renders when stopped + an enabled sc
   await expect(card.getByRole('alert')).toHaveCount(0);
 });
 
+// B14 (QA settings-overhaul, round 2): `scheduled-runs-empty` (the B5 fix's
+// §12 Empty state) was unit-pinned only — the same coverage shape that let
+// B1 ship through 3,000+ green tests. Stubs zero scheduled profiles the
+// same way `stubDaemon(page, { state, profiles })` already does elsewhere
+// in this file — an empty `profiles: []` array is exactly what
+// `ScheduledRunsCard.tsx`'s own empty-state branch checks for.
+test('operate-schedule: an empty profiles[] renders scheduled-runs-empty with a working link to Settings → Schedule', async ({
+  page,
+}) => {
+  await stubDaemon(page, { state: 'running', profiles: [] });
+  await page.goto('/#/setup');
+  const card = page.locator('[data-qa="card-scheduled-runs"]');
+  const empty = card.locator('[data-qa="scheduled-runs-empty"]');
+  await expect(empty).toContainText(
+    'No scheduled runs — enable a schedule in Settings → Schedule.',
+  );
+  await expect(card.locator('[data-qa^="schedule-row-"]')).toHaveCount(0);
+
+  await empty.getByRole('link', { name: 'Settings → Schedule' }).click();
+  await expect(page).toHaveURL(/#\/settings\/schedule$/);
+});
+
 // --- Scheduled runs (blueprint step 33's e2e half) ---------------------
 
 async function fetchRajniProfileConfigText(page: Page): Promise<string> {
@@ -644,6 +666,37 @@ test('operate-health: a warn finding with a settings-link destination renders in
   // (`lib/router.ts`) — the URL is the observable proof `navigate()` fired
   // with `{name:'settings', section:'delivery'}`.
   await expect(page).toHaveURL(/#\/settings\/delivery/);
+});
+
+// B6 (QA settings-overhaul, round 2): the missing-secret row's destination
+// used to point at `{name:'setup'}` with a bare `navigate()` — a no-op on
+// the page it's already rendered on. Real Operate page, both cards
+// mounted for real (not the component test's synthetic stand-in DOM) —
+// proves the actual `card-secrets` scrolls into view and its first row's
+// action button receives focus.
+test('operate-health: a missing-secret finding is labelled Secrets and scrolls+focuses card-secrets', async ({
+  page,
+}) => {
+  await stubDoctor(page, 'warn', [
+    {
+      check: 'env-tokens',
+      status: 'warn',
+      detail: 'NOTION_TOKEN is not set; TELEGRAM_BOT_TOKEN is not set',
+    },
+  ]);
+  await page.goto('/#/setup');
+  const healthCard = page.locator('[data-qa="card-setup-health"]');
+  const group = healthCard.locator('[data-qa="health-group-needs-action"]');
+  const row = group.locator('[data-qa="health-row-env-tokens"]');
+  await expect(row).toBeVisible();
+
+  const secretsCard = page.locator('[data-qa="card-secrets"]');
+  const firstSecretButton = secretsCard.getByRole('button', { name: 'Set' }).first();
+
+  await row.getByRole('button', { name: 'Secrets' }).click();
+  await expect(page).toHaveURL(/#\/setup/);
+  await expect(firstSecretButton).toBeInViewport();
+  await expect(firstSecretButton).toBeFocused();
 });
 
 test('operate-health: Set up a new profile navigates to the onboarding wizard', async ({

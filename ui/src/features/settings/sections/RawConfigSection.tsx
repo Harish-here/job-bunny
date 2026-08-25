@@ -256,13 +256,21 @@ export function RawConfigSection({ profile }: { profile: string }) {
             {selectedDoc}
           </label>
           {query.isLoading ? (
-            // B9 fix (QA settings-overhaul): sized to match the loaded
-            // `Textarea` (same `rows={14}` box) so resolving the doc
-            // doesn't shift the page — ux-notes §12's S5 row ("textarea
-            // skeleton at same height, no layout shift").
+            // B9 fix (QA settings-overhaul, round 2): the loaded `Textarea`
+            // uses `field-sizing: content` (see `textarea.tsx`), so its
+            // real height is driven by the doc's own text length/wrap —
+            // unknowable before the doc has loaded, and a small fixed
+            // height (previously `h-80`, 320px) undersold it by ~1600px
+            // against this fixture's own `filter.json` (2186px). An exact
+            // match isn't achievable for that reason (round-2 QA's own
+            // note). Explicit design call: size the skeleton to the
+            // available COLUMN height instead of a content-length guess —
+            // `min-h-[70vh]` fills most of a typical viewport's visible
+            // area (the same order of magnitude as a loaded doc commonly
+            // renders at) rather than a box a fraction of that height.
             <Skeleton
               data-testid="raw-editor-skeleton"
-              className="h-80 w-full rounded-lg"
+              className="min-h-[70vh] w-full rounded-lg"
             />
           ) : query.isError ? (
             <p className="text-sm text-destructive">

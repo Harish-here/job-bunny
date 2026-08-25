@@ -106,9 +106,12 @@ describe('SetupHealthCard', () => {
     expect(window.location.hash).toBe('#/settings/delivery');
   });
 
-  // B6 (QA settings-overhaul): the missing-secret row must retarget to
-  // Operate (card-secrets), not to Delivery, which has no token field.
-  it('routes a missing-secret finding to Operate, labelled "Operate"', async () => {
+  // B6 (QA settings-overhaul, round 2): the missing-secret row must
+  // retarget to `card-secrets` (Operate), not to Delivery (no token
+  // field) and not to a same-page link that does nothing — the control
+  // scrolls the Secrets card into view and moves focus to its first row's
+  // action button.
+  it('routes a missing-secret finding to card-secrets, labelled "Secrets", and scrolls+focuses it', async () => {
     stubDoctor([
       {
         check: 'env-tokens',
@@ -118,15 +121,36 @@ describe('SetupHealthCard', () => {
     ]);
     renderCard();
 
+    // A stand-in for the real page's SecretsCard, present in the DOM the
+    // same way it is on the real Operate page (a `card-secrets` container
+    // whose first descendant button is the first row's "Set" action) —
+    // this component test renders SetupHealthCard in isolation, so the
+    // sibling card it targets has to be stubbed here.
+    const secretsCard = document.createElement('div');
+    secretsCard.setAttribute('data-qa', 'card-secrets');
+    const setButton = document.createElement('button');
+    setButton.textContent = 'Set';
+    secretsCard.appendChild(setButton);
+    document.body.appendChild(secretsCard);
+    // The button, not the card, is the actual `scrollAndFocus` target
+    // (`[data-qa="card-secrets"] button` matches the descendant button).
+    const scrollSpy = vi.fn();
+    setButton.scrollIntoView = scrollSpy;
+    const focusSpy = vi.spyOn(setButton, 'focus');
+
     await screen.findByText(/NOTION_TOKEN is not set/);
     const group = document.querySelector('[data-qa="health-group-needs-action"]');
     expect(group).not.toBeNull();
 
     window.location.hash = '';
     await userEvent.click(
-      within(group as HTMLElement).getByRole('button', { name: 'Operate' }),
+      within(group as HTMLElement).getByRole('button', { name: 'Secrets' }),
     );
     expect(window.location.hash).toBe('#/setup');
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    expect(focusSpy).toHaveBeenCalled();
+
+    secretsCard.remove();
   });
 
   it('shows an error state with a retry control when the doctor request fails', async () => {

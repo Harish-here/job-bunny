@@ -31,6 +31,7 @@ import {
   CardHeader,
   CardTitle,
 } from '../../../components/ui/card';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { ChipInput } from '../ChipInput';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
@@ -59,6 +60,48 @@ function validateRolesCompaniesEditorState(): Record<string, string> {
 function isRulesEmpty(title: RolesCompaniesEditorState['title']): boolean {
   return TITLE_RULE_KEYS.every(
     (key) => title[key].match.length === 0 && title[key].reject.length === 0,
+  );
+}
+
+// B9 fix (QA settings-overhaul, round 2): this screen still rendered the
+// bare `DocFormGate` default "Loading…" line — mirrors the three real
+// `Card`s below (`roles-rules-card`, `roles-prefs-card`,
+// `companies-avoid-card`) field-for-field, same posture as
+// `WhereYouWorkSection.tsx`'s own `WhereYouWorkSkeleton`.
+function RolesCompaniesSkeleton() {
+  return (
+    <div data-testid="roles-companies-skeleton" className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-72" />
+          <Skeleton className="h-3 w-56" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <Skeleton className="h-10 w-full" />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-80" />
+          <Skeleton className="h-3 w-64" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-9 w-full" />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-3 w-40" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-9 w-full" />
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -151,12 +194,14 @@ export function RolesCompaniesSection({ profile }: { profile: string }) {
       isLoading={filterForm.isLoading}
       loadError={filterForm.loadError}
       parseError={filterForm.parseError}
+      loadingFallback={<RolesCompaniesSkeleton />}
     >
       <DocFormGate
         doc="profile.json"
         isLoading={profileForm.isLoading}
         loadError={profileForm.loadError}
         parseError={profileForm.parseError}
+        loadingFallback={<RolesCompaniesSkeleton />}
       >
         <div className="flex flex-col gap-4">
           <ValidationSummary errors={saveState.errors} attempt={attempt} />

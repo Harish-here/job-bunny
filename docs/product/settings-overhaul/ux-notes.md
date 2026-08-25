@@ -535,8 +535,10 @@ One model, identical in all eleven editable sections. Memorability over local op
 - **Contrast.** `--muted-foreground #6e5b87` on `#faf8fd` and on `#ffffff` clears 4.5:1 for body text.
   `--attention #ff8a3d` and `--amber #c98a2e` are used for **icons, 1–2px borders and tints only**,
   never as text colour on background at body size — they do not clear 4.5:1 and this is a hard rule
-  for the render. `--destructive #d64545` is used as text only at `text-xs`+ weight 500 against
-  `#ffffff`.
+  for the render. `--destructive #d64545` itself fails 4.5:1 as text (4.38:1 on `#ffffff`) — B13
+  (QA settings-overhaul, round 2) found this pairing internally non-conformant and ruled it out;
+  `--destructive-strong #c62c2c` (5.53:1 on `#ffffff`) is the sanctioned pairing for destructive
+  TEXT at `text-xs`+ weight 500, and `--destructive` stays reserved for borders/tints only.
 - **Never colour alone.** Every status carries a word: `Running`, `Stopped`, `Signed in`, `Unknown`,
   `Open until 21:40`, `Closed`. The whole design is legible in greyscale — that is the acceptance
   test.
