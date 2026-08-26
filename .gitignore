@@ -37,6 +37,7 @@ structure_passthrough.json
 # <repo>/chrome/ here; must never be committed. .chrome-debug/ above stays
 # too — legacy installs keep that directory until they run migrate-home.
 chrome/
+chrome.*/
 
 # Pipeline orchestration lock (local only)
 .jobbunny-run.lock
