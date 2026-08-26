@@ -2,12 +2,12 @@
  * "Where jobs come from" section (blueprint.md:790-797, step 17's component
  * half) — merges TWO pieces of existing UI into one section: the lane
  * checkboxes that used to live on the old per-profile section
- * (profile.json's `lanes` field) and the search-URL row editor that lives on
- * `SearchUrlsSection.tsx` (search_urls.md, plain markdown text — not JSON,
- * so it round-trips via `configDocQuery`/`useConfigMutation` directly, same
- * seam `SearchUrlsSection.tsx` already uses, never `useDocForm`). The old
- * per-profile section is now deleted (task 23); `SearchUrlsSection.tsx`
- * itself stays UNCHANGED and unmounted-but-not-deleted — see
+ * (profile.json's `lanes` field) and the search-URL row editor that used to
+ * be its own standalone section (search_urls.md, plain markdown text — not
+ * JSON, so it round-trips via `configDocQuery`/`useConfigMutation` directly,
+ * same seam that standalone section already used, never `useDocForm`). The
+ * old per-profile section is now deleted (task 23); the standalone row
+ * editor has since been folded in here and removed as dead code — see
  * task-17-brief's TASK section.
  *
  * Spans TWO documents like `WhereYouWorkSection.tsx` (task 11) does, so this
@@ -62,7 +62,7 @@ interface WhereJobsComeFromState {
 
 const EMPTY_STATE: WhereJobsComeFromState = { lanes: [], rows: [] };
 
-// Lifted UNCHANGED from `SearchUrlsSection.tsx`'s own `validateRow`.
+// Lifted UNCHANGED from the former standalone row editor's own `validateRow`.
 function validateRow(row: SearchUrlRow): string | undefined {
   const url = row.url.trim();
   if (url === '') return undefined;
@@ -153,7 +153,7 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
     setState((prev) => ({ ...prev, rows: prev.rows.filter((_, i) => i !== index) }));
   }
 
-  // Mirrors `SearchUrlsSection.tsx`'s own `handleSave`: swallow the
+  // Mirrors the former standalone row editor's own `handleSave`: swallow the
   // rejection here (`mutation.error` already carries it for the render
   // below) so `useSectionSaveState`'s `Promise.all` never rejects.
   async function saveSearchUrls(text: string): Promise<boolean> {
