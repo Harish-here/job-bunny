@@ -12,10 +12,6 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { classifyLinkedInSearchUrl } from '../../../../../src/core/linkedin_url/index.ts';
-import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
-import { laneLabel } from '../../../lib/vocabulary';
-import { ErrorRetry } from '../../shared/ErrorRetry';
 import { configDocQuery } from '../config.queries';
 import { DocFormGate } from '../DocFormGate';
 import { SaveBar } from '../save/SaveBar';
@@ -24,20 +20,19 @@ import { useSectionSaveState } from '../save/useSectionSaveState';
 import { ValidationSummary } from '../save/ValidationSummary';
 import { useConfigMutation } from '../useConfigMutation';
 import { useDocForm } from '../useDocForm';
-import { SearchUrlsCard, SearchUrlsSkeleton } from './SearchUrlsCard';
+import { LANES, LanesCard } from './LanesCard';
+import { SearchUrlsCard } from './SearchUrlsCard';
 import { classifyRowsForDisplay } from './searchUrlRow.classify';
 import type { SearchUrlRow } from './searchUrls.model';
 import { parseSearchUrlRows, serializeSearchUrlRows } from './searchUrls.model';
 import {
   buildRefiledRows,
   buildSearchUrlsSuccessMessage,
-  mergeServerRefusal,
   reseedRowsFromText,
+  splitSearchUrlsSaveError,
 } from './searchUrlsSave';
 import { validateSearchUrlRows } from './searchUrlsValidate';
-
-// Lifted UNCHANGED from the old (now-deleted) per-profile section's lane list.
-const LANES = ['linkedin', 'greenhouse', 'keka'] as const;
+import { useSearchUrlRowEditing } from './useSearchUrlRowEditing';
 
 // Lifted UNCHANGED from the old (now-deleted) per-profile section's array-coercion helper.
 function asStringArray(value: unknown): string[] {
@@ -135,57 +130,10 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
     setState((prev) => ({ ...prev, rows: prev.rows.filter((_, i) => i !== index) }));
   }
 
-  // classifyAndRewrite (below) rewrites `row.url` to its OWN cleaned form
-  // on success, per Contract — so re-classifying that already-clean value
-  // a moment later (`classifyRowsForDisplay`, task 19) always finds zero
-  // removedParams and reports `'clean'`, never `'cleaned'`: the "what got
-  // removed" signal is otherwise lost the instant the rewrite lands. This
-  // keeps it, keyed by the SAME `page|cleanedUrl` classifyRowsForDisplay
-  // itself dedupes on (not by row index, which shifts under add/remove) —
-  // a stale entry is simply never looked up again once a row's url moves
-  // on to a different key.
-  const recentlyCleaned = useRef<Map<string, string[]>>(new Map());
-
-  // Shared by `onBlurUrl` and a detected paste (`onChangeUrl`'s `isPaste`
-  // branch): classify + rewrite to the cleaned URL and resolved page on
-  // success; on a refusal, leave the URL exactly as given (typed or
-  // pasted) and just mark the row touched, per Contract.
-  function classifyAndRewrite(index: number, url: string) {
-    try {
-      const classification = classifyLinkedInSearchUrl(url);
-      if (classification.removedParams.length > 0) {
-        recentlyCleaned.current.set(
-          `${classification.page}|${classification.cleanedUrl}`,
-          classification.removedParams,
-        );
-      }
-      updateRow(index, {
-        url: classification.cleanedUrl,
-        page: classification.page,
-        touched: true,
-      });
-    } catch {
-      updateRow(index, { url, touched: true });
-    }
-  }
-
-  function onBlurUrl(index: number) {
-    const row = state.rows[index];
-    if (!row) return;
-    classifyAndRewrite(index, row.url);
-  }
-
-  // `isPaste` (from `SearchUrlRow`'s own `InputEvent.inputType ===
-  // 'insertFromPaste'` gate) runs the same classify-and-rewrite immediately
-  // — using the pasted value directly, never a stale `state` read — rather
-  // than waiting for blur; an ordinary keystroke just updates the raw url.
-  function onChangeUrl(index: number, url: string, isPaste?: boolean) {
-    if (isPaste) {
-      classifyAndRewrite(index, url);
-      return;
-    }
-    updateRow(index, { url });
-  }
+  // B7/B8 fixes (QA search-link-intake) live in this hook — see its own
+  // doc comment. Extracted purely to keep this orchestrator under its
+  // file-size cap.
+  const rowEditing = useSearchUrlRowEditing(state.rows, updateRow);
 
   function onChangeLabel(index: number, label: string) {
     updateRow(index, { label });
@@ -243,7 +191,7 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
         // Every reseeded row is server-normalized already — no stale
         // "cleaned" notes should carry over onto whatever these keys
         // happen to collide with next.
-        recentlyCleaned.current.clear();
+        rowEditing.clearRecentlyCleaned();
       }
       return ok;
     },
@@ -269,23 +217,29 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
   // `mergeServerRefusal` below, never this plain-text line.
   const serverError = profileForm.serverError ?? null;
 
-  // Defense-in-depth backstop only: in normal operation `validateRow`
-  // already blocks Save with identical text before any PUT is attempted.
-  const validationErrors = searchUrlsMutation.error
-    ? mergeServerRefusal(saveState.errors, state.rows, searchUrlsMutation.error.message)
-    : saveState.errors;
+  // B3 fix (QA search-link-intake): `splitSearchUrlsSaveError`
+  // (searchUrlsSave.ts) is the one place deciding "row error vs general
+  // error" — a row-level FieldError/ValidationSummary entry only when the
+  // server's message names one of the CURRENT rows' urls (a genuine R4
+  // refusal); every other failure (5xx, network, or a 422 naming no
+  // current row) becomes `searchUrlsGeneralError` instead, never
+  // mis-blamed on a fine link. Covers both Save and Re-file, since both
+  // PUT through this same mutation.
+  const { validationErrors, generalError: searchUrlsGeneralError } =
+    splitSearchUrlsSaveError(saveState.errors, state.rows, searchUrlsMutation.error);
 
   const successMessage = searchUrlsMutation.data?.report
     ? buildSearchUrlsSuccessMessage(searchUrlsMutation.data.report)
     : saveState.successMessage;
 
-  // Re-surfaces the "cleaned" note `recentlyCleaned` captured above — see
-  // its own doc comment for why `classifyRowsForDisplay` alone can't.
+  // Re-surfaces the "cleaned" note `rowEditing`'s own `recentlyCleaned` map
+  // captured — see `useSearchUrlRowEditing`'s doc comment for why
+  // `classifyRowsForDisplay` alone can't.
   const displayStates = classifyRowsForDisplay(state.rows).map((d, i) => {
     if (d.kind !== 'clean') return d;
     const row = state.rows[i];
     if (!row) return d;
-    const removedParams = recentlyCleaned.current.get(`${d.page}|${row.url}`);
+    const removedParams = rowEditing.getRecentlyCleaned(i, d.page, row.url);
     return removedParams && removedParams.length > 0
       ? { kind: 'cleaned' as const, page: d.page, label: d.label, removedParams }
       : d;
@@ -301,7 +255,16 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
   // merge) — but `lanes` is left out of both updates. Folding `state.lanes`
   // into `savedState` here would silently mark an unsaved lane toggle as
   // "saved" (isDirty/SaveBar both vanish) for a change Re-file never wrote.
+  //
+  // B2 fix (QA search-link-intake): guarded by `saveState.isDirty` — the
+  // button that triggers this is already disabled while dirty
+  // (`SearchUrlsCard`'s own `isDirty` prop), this is a defense-in-depth
+  // backstop so Re-file can never commit an unsaved edit even if invoked
+  // another way. B4 fix: wrapped in try/catch — a failed PUT (422/network)
+  // now surfaces through `searchUrlsMutation.error` (the same B3 general-
+  // /row-error split above) instead of an unhandled rejection.
   async function onRefile() {
+    if (saveState.isDirty) return;
     setIsRefiling(true);
     try {
       const refiledRows = buildRefiledRows(state.rows, displayStates);
@@ -314,6 +277,10 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
       setRefileSuccessMessage(
         `Re-filed ${misfiledCount} link${misfiledCount === 1 ? '' : 's'}.`,
       );
+    } catch {
+      // Swallowed here — `searchUrlsMutation.error` (already set by
+      // react-query before this rejection propagates) drives the B3
+      // general-save-error alert below.
     } finally {
       setIsRefiling(false);
     }
@@ -326,70 +293,59 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
       loadError={profileForm.loadError}
       parseError={profileForm.parseError}
     >
-      <DocFormGate
-        doc="search_urls.md"
-        isLoading={searchUrlsQuery.isPending}
-        loadError={searchUrlsQuery.error}
-        parseError={false}
-        loadingFallback={<SearchUrlsSkeleton />}
-        errorFallback={
-          <ErrorRetry
-            message="Couldn't load search links."
-            onRetry={() => searchUrlsQuery.refetch()}
-            qa="search-urls-load-error"
-            padded
-          />
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <ValidationSummary errors={validationErrors} attempt={attempt} />
+      {/* B6 fix (QA search-link-intake): `search_urls.md`'s loading/error
+          state is no longer a SECOND `DocFormGate` wrapping this whole
+          subtree — that hid the Lanes card and the Search URLs card's own
+          title/helper during a load. `SearchUrlsCard` now owns its own
+          loading/error branch internally (`isLoading`/`loadError`/
+          `onRetryLoad`), so the Lanes card and this card's chrome stay
+          mounted the whole time, matching the mockup's S1 Loading view. */}
+      <div className="flex flex-col gap-4">
+        <ValidationSummary errors={validationErrors} attempt={attempt} />
 
-          <Card data-qa="where-jobs-lanes-card">
-            <CardHeader>
-              <CardTitle>Lanes</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
-              {LANES.map((lane) => (
-                <label key={lane} className="flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={state.lanes.includes(lane)}
-                    onChange={() => toggleLane(lane)}
-                  />
-                  {laneLabel(lane)}
-                </label>
-              ))}
-            </CardContent>
-          </Card>
+        <LanesCard lanes={state.lanes} onToggle={toggleLane} />
 
-          <SearchUrlsCard
-            rows={state.rows}
-            displayStates={displayStates}
-            misfiledCount={misfiledCount}
-            onRefile={onRefile}
-            isRefiling={isRefiling}
-            onChangeUrl={onChangeUrl}
-            onChangeLabel={onChangeLabel}
-            onBlurUrl={onBlurUrl}
-            onRemove={removeRow}
-            onRemoveNow={onRemoveNow}
-            onAddRow={addRow}
-          />
+        <SearchUrlsCard
+          rows={state.rows}
+          displayStates={displayStates}
+          misfiledCount={misfiledCount}
+          onRefile={onRefile}
+          isRefiling={isRefiling}
+          isDirty={saveState.isDirty}
+          onChangeUrl={rowEditing.onChangeUrl}
+          onChangeLabel={onChangeLabel}
+          onBlurUrl={rowEditing.onBlurUrl}
+          onRemove={removeRow}
+          onRemoveNow={onRemoveNow}
+          onAddRow={addRow}
+          isLoading={searchUrlsQuery.isPending}
+          loadError={searchUrlsQuery.error}
+          onRetryLoad={() => searchUrlsQuery.refetch()}
+        />
 
-          {serverError && (
-            <p data-testid="settings-error" className="text-sm text-destructive">
-              {serverError}
-            </p>
-          )}
+        {searchUrlsGeneralError && (
+          <p
+            data-qa="search-urls-save-error"
+            data-testid="search-urls-save-error"
+            className="text-sm text-destructive"
+          >
+            {searchUrlsGeneralError}
+          </p>
+        )}
 
-          <SaveBar
-            isDirty={saveState.isDirty}
-            successMessage={refileSuccessMessage ?? successMessage}
-            onSave={handleSaveClick}
-            onDiscard={() => setState(saveState.discard())}
-          />
-        </div>
-      </DocFormGate>
+        {serverError && (
+          <p data-testid="settings-error" className="text-sm text-destructive">
+            {serverError}
+          </p>
+        )}
+
+        <SaveBar
+          isDirty={saveState.isDirty}
+          successMessage={refileSuccessMessage ?? successMessage}
+          onSave={handleSaveClick}
+          onDiscard={() => setState(saveState.discard())}
+        />
+      </div>
     </DocFormGate>
   );
 }

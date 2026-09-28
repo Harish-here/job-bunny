@@ -172,9 +172,39 @@ describe('WhereJobsComeFromSection', () => {
     expect(configApi.putConfigDoc).not.toHaveBeenCalled();
   });
 
-  it('Re-file does not clear a dirty lane toggle or touch profile.json', async () => {
+  it('B2: Re-file is disabled with a helper hint while the section is dirty, and never PUTs', async () => {
     // A misfiled row (stored page disagrees with what the URL classifies
     // as) so the Re-file button renders at all.
+    const MISFILED_ROWS = [
+      {
+        page: 'linkedin__jobs-search-results',
+        label: 'Staff Frontend Engineer',
+        url: 'https://www.linkedin.com/jobs/search/?keywords=staff',
+        touched: true,
+      },
+    ];
+    stubDocs({}, serializeSearchUrlRows(MISFILED_ROWS));
+    const user = userEvent.setup();
+    renderSection();
+
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
+    );
+    // Dirty the lanes card only — never clicking the section Save button.
+    await user.click(screen.getByRole('checkbox', { name: 'Greenhouse' }));
+    expect(await screen.findByTestId('save-bar')).toBeInTheDocument();
+
+    const refileButton = await screen.findByRole('button', { name: 'Re-file 1 link' });
+    expect(refileButton).toBeDisabled();
+    expect(
+      screen.getByText('Save or discard your changes first, then re-file.'),
+    ).toBeInTheDocument();
+
+    await user.click(refileButton);
+    expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+  });
+
+  it('B2: once clean, Re-file PUTs search_urls.md alone (re-seeding rows, never touching profile.json)', async () => {
     const MISFILED_ROWS = [
       {
         page: 'linkedin__jobs-search-results',
@@ -200,11 +230,10 @@ describe('WhereJobsComeFromSection', () => {
     await waitFor(() =>
       expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
     );
-    // Dirty the lanes card only — never clicking the section Save button.
-    await user.click(screen.getByRole('checkbox', { name: 'Greenhouse' }));
-    expect(await screen.findByTestId('save-bar')).toBeInTheDocument();
+    const refileButton = await screen.findByRole('button', { name: 'Re-file 1 link' });
+    expect(refileButton).not.toBeDisabled();
 
-    await user.click(await screen.findByRole('button', { name: 'Re-file 1 link' }));
+    await user.click(refileButton);
 
     await waitFor(() =>
       expect(configApi.putConfigDoc).toHaveBeenCalledWith(
@@ -218,8 +247,9 @@ describe('WhereJobsComeFromSection', () => {
         .mocked(configApi.putConfigDoc)
         .mock.calls.some(([, doc]) => doc === 'profile.json'),
     ).toBe(false);
-    // The unsaved lane toggle must still show as dirty after Re-file.
-    expect(screen.getByTestId('save-bar')).toBeInTheDocument();
+    expect(await screen.findByTestId('save-success-line')).toHaveTextContent(
+      'Re-filed 1 link.',
+    );
   });
 
   it('a label-only row with an empty URL never blocks Save', async () => {
@@ -255,5 +285,53 @@ describe('WhereJobsComeFromSection', () => {
         expect.any(String),
       ),
     );
+  });
+
+  it('B3: a non-URL-matching save failure (5xx/network) shows a general save-error alert, never a row error', async () => {
+    stubDocs({}, '');
+    vi.mocked(configApi.putConfigDoc).mockImplementation((_p, doc) => {
+      if (doc === 'search_urls.md')
+        return Promise.reject(new Error('database is locked'));
+      return Promise.resolve({ text: 'ok' });
+    });
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.type(
+      await screen.findByLabelText('Search URL'),
+      'https://www.linkedin.com/jobs/search/?keywords=frontend',
+    );
+    await user.type(screen.getByLabelText('Label'), 'Frontend Roles');
+    await user.click(await screen.findByTestId('save-button'));
+
+    expect(await screen.findByTestId('search-urls-save-error')).toHaveTextContent(
+      "Couldn't save search links. Check your connection and try again.",
+    );
+    expect(screen.queryByTestId('validation-summary')).not.toBeInTheDocument();
+  });
+
+  it('B3/B4: a failed Re-file (network error) surfaces the same general save-error alert, no unhandled rejection', async () => {
+    const MISFILED_ROWS = [
+      {
+        page: 'linkedin__jobs-search-results',
+        label: 'Staff Frontend Engineer',
+        url: 'https://www.linkedin.com/jobs/search/?keywords=staff',
+        touched: true,
+      },
+    ];
+    stubDocs({}, serializeSearchUrlRows(MISFILED_ROWS));
+    vi.mocked(configApi.putConfigDoc).mockRejectedValue(new Error('Failed to fetch'));
+    const user = userEvent.setup();
+    renderSection();
+
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
+    );
+    await user.click(await screen.findByRole('button', { name: 'Re-file 1 link' }));
+
+    expect(await screen.findByTestId('search-urls-save-error')).toHaveTextContent(
+      "Couldn't save search links. Check your connection and try again.",
+    );
+    expect(screen.queryByTestId('validation-summary')).not.toBeInTheDocument();
   });
 });

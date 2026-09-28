@@ -71,6 +71,52 @@ export function mergeServerRefusal(
   return { ...clientErrors, [key]: buildValidationSummaryRefusalMessage(label) };
 }
 
+/** B3 (QA search-link-intake): the ONLY condition under which a failed
+ * search-urls save routes through `mergeServerRefusal` into a row-level
+ * FieldError/ValidationSummary entry — `serverMessage` (the wire-format
+ * `refused: <url> — ...` string) must name a URL that matches one of the
+ * CURRENT rows. Every other failure (a 5xx, a network error, or a 422 that
+ * doesn't name a current row — e.g. rows changed since the request was
+ * sent) is a general save error instead; the caller renders that as a
+ * plain alert, never a row error. Shared by both the Save and Re-file
+ * paths, since both PUT through the same mutation. */
+export function matchesRowRefusal(rows: SearchUrlRow[], serverMessage: string): boolean {
+  return rows.some((row) => row.url !== '' && serverMessage.includes(row.url));
+}
+
+export interface SearchUrlsSaveErrorSplit {
+  validationErrors: Record<string, string>;
+  /** Non-null exactly when `error` is set and `matchesRowRefusal` is
+   * false — the caller renders this as a plain, general save-error alert
+   * (never routed through `ValidationSummary`). */
+  generalError: string | null;
+}
+
+const GENERAL_SAVE_ERROR_MESSAGE =
+  "Couldn't save search links. Check your connection and try again.";
+
+/** B3 orchestration (QA search-link-intake): the one place that decides
+ * "row error vs general error" for a failed search-urls save/re-file —
+ * extracted out of `WhereJobsComeFromSection.tsx` for the same file-size
+ * reason as every other helper in this file. `error` is `searchUrlsMutation
+ * .error` (or `null` when nothing has failed); `clientErrors` is
+ * `saveState.errors`, passed through unchanged whenever there's no
+ * server-side refusal to merge in. */
+export function splitSearchUrlsSaveError(
+  clientErrors: Record<string, string>,
+  rows: SearchUrlRow[],
+  error: Error | null,
+): SearchUrlsSaveErrorSplit {
+  if (error === null) return { validationErrors: clientErrors, generalError: null };
+  if (matchesRowRefusal(rows, error.message)) {
+    return {
+      validationErrors: mergeServerRefusal(clientErrors, rows, error.message),
+      generalError: null,
+    };
+  }
+  return { validationErrors: clientErrors, generalError: GENERAL_SAVE_ERROR_MESSAGE };
+}
+
 /** R13 Re-file (spec R13): rewrites every `misfiled` row's `page` to its
  * classification's own `page` — and `url` to `cleanedUrl` too, when the
  * row is ALSO dirty. Every OTHER row (including `duplicate`/`clean`/

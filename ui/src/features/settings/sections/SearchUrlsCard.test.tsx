@@ -21,12 +21,16 @@ function baseProps(overrides = {}) {
     misfiledCount: 0,
     onRefile: vi.fn(),
     isRefiling: false,
+    isDirty: false,
     onChangeUrl: vi.fn(),
     onChangeLabel: vi.fn(),
     onBlurUrl: vi.fn(),
     onRemove: vi.fn(),
     onRemoveNow: vi.fn(),
     onAddRow: vi.fn(),
+    isLoading: false,
+    loadError: null as Error | null,
+    onRetryLoad: vi.fn(),
     ...overrides,
   };
 }
@@ -114,6 +118,78 @@ describe('SearchUrlsCard', () => {
     ];
     render(<SearchUrlsCard {...baseProps({ rows, displayStates })} />);
     expect(document.querySelector('[data-qa="search-urls-empty"]')).toBeNull();
+  });
+
+  it('B5: empty-state copy shows even for a single blank auto-added row (not counted as content)', () => {
+    const rows = [makeRow({ url: '', label: '', touched: false })];
+    render(
+      <SearchUrlsCard
+        {...baseProps({ rows, displayStates: [{ kind: 'unclassified' }] })}
+      />,
+    );
+    expect(document.querySelector('[data-qa="search-urls-empty"]')).not.toBeNull();
+  });
+
+  it('B5: empty-state copy is absent once any row has a non-blank url', () => {
+    const rows = [makeRow({ url: '', label: '', touched: false }), makeRow()];
+    const displayStates: RowDisplay[] = [
+      { kind: 'unclassified' },
+      { kind: 'clean', page: 'linkedin__jobs-search', label: 'Comcast SRE' },
+    ];
+    render(<SearchUrlsCard {...baseProps({ rows, displayStates })} />);
+    expect(document.querySelector('[data-qa="search-urls-empty"]')).toBeNull();
+  });
+
+  it('B2: the refile button is disabled with a helper hint while isDirty is true, and no hint when clean', () => {
+    const { rerender } = render(
+      <SearchUrlsCard {...baseProps({ misfiledCount: 1, isDirty: true })} />,
+    );
+    expect(
+      document.querySelector('[data-qa="search-urls-refile-button"]'),
+    ).toBeDisabled();
+    expect(
+      screen.getByText('Save or discard your changes first, then re-file.'),
+    ).toBeInTheDocument();
+
+    rerender(<SearchUrlsCard {...baseProps({ misfiledCount: 1, isDirty: false })} />);
+    expect(
+      document.querySelector('[data-qa="search-urls-refile-button"]'),
+    ).not.toBeDisabled();
+    expect(
+      screen.queryByText('Save or discard your changes first, then re-file.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('B2: clicking a disabled (dirty) refile button never fires onRefile', () => {
+    const onRefile = vi.fn();
+    render(
+      <SearchUrlsCard {...baseProps({ misfiledCount: 1, isDirty: true, onRefile })} />,
+    );
+    fireEvent.click(
+      document.querySelector('[data-qa="search-urls-refile-button"]') as HTMLElement,
+    );
+    expect(onRefile).not.toHaveBeenCalled();
+  });
+
+  it('B6: shows skeleton rows (not the row list/empty copy/add button) while isLoading, keeping the card title', () => {
+    render(<SearchUrlsCard {...baseProps({ isLoading: true })} />);
+    expect(screen.getByText('Search URLs')).toBeInTheDocument();
+    expect(document.querySelector('[data-qa="search-urls-skeleton"]')).not.toBeNull();
+    expect(document.querySelector('[data-qa="search-urls-empty"]')).toBeNull();
+    expect(screen.queryByText('Add another search URL')).not.toBeInTheDocument();
+  });
+
+  it('B6: shows a load-error alert with a working retry, keeping the card title', () => {
+    const onRetryLoad = vi.fn();
+    render(
+      <SearchUrlsCard {...baseProps({ loadError: new Error('boom'), onRetryLoad })} />,
+    );
+    expect(screen.getByText('Search URLs')).toBeInTheDocument();
+    const alert = document.querySelector('[data-qa="search-urls-load-error"]');
+    expect(alert).not.toBeNull();
+    expect(alert?.textContent).toContain("Couldn't load search links.");
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(onRetryLoad).toHaveBeenCalledTimes(1);
   });
 
   it('"Add another search URL" button fires onAddRow', () => {
