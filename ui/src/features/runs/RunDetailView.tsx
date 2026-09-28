@@ -6,6 +6,7 @@ import {
 } from '../../../../src/core/datetime/index.ts';
 import { Badge } from '../../components/ui/badge';
 import type { RunDetail, RunEventRow, SoftErrorSummary } from '../../lib/api/types';
+import { BadLinksPanel } from './detail/BadLinksPanel';
 import { DiagnosisPanel } from './detail/DiagnosisPanel';
 import { EvidenceSection } from './detail/EvidenceSection';
 import { FunnelTable } from './detail/FunnelTable';
@@ -18,6 +19,7 @@ import {
   getFailedStage,
   getFailureError,
   getFunnelStages,
+  getLinkSoftErrors,
   newMatchCount,
 } from './runResult';
 
@@ -190,6 +192,12 @@ function OutcomeHeader({
  * outcome kind. `kind === 'unrecorded'` short-circuits to the dashed S7
  * card ALONE — no outcome header, no other panel — per A6's live-path
  * amendment: "the absence is the disclosure."
+ *
+ * Task 27 (R11/S2) adds a 6th, independent conditional — `BadLinksPanel`,
+ * gated purely on `getLinkSoftErrors(run.result).length > 0`, sibling to
+ * (never nested inside) the diagnosis gate. BE only ever populates
+ * `linkSoftErrors` on a `'passed'`-outcome result, so it and the
+ * `DIAGNOSIS_KINDS` destructive/attention panels never co-render.
  */
 export function RunDetailView({
   run,
@@ -236,6 +244,12 @@ export function RunDetailView({
           >
             Covered slots: {(run.catchupSlots ?? []).join(', ')}
           </p>
+        )}
+
+        {getLinkSoftErrors(run.result).length > 0 && (
+          <div data-testid="rundetail-bad-links-panel">
+            <BadLinksPanel links={getLinkSoftErrors(run.result)} />
+          </div>
         )}
 
         {DIAGNOSIS_KINDS.has(kind) && (
