@@ -16,6 +16,7 @@
  * `writeConfigDoc`/`createProfile` (config tables) — nothing else.
  */
 import { z } from 'zod';
+import type { SearchUrlsSaveReport } from '../../../core/config/search_urls/index.ts';
 import type { BoardProfile, BoardSource } from '../../../ports/board.ts';
 import type { ConfigDocKey } from '../../../ports/config_store.ts';
 import type { BoardRequest, BoardResponse, RouteDef } from '../../shared/index.ts';
@@ -43,6 +44,7 @@ const CreateProfileBodySchema = z.strictObject({
 
 export interface ConfigGetResponse {
   text: string;
+  report?: SearchUrlsSaveReport;
 }
 export interface CreateProfileResponse {
   profile: BoardProfile;
@@ -108,15 +110,17 @@ function putHandler(source: BoardSource) {
     await assertProfileExists(source, name);
     const parsedBody = parseOrThrow(PutConfigBodySchema, req.body);
     try {
-      await source.writeConfigDoc(name, doc, parsedBody.text);
+      // Echo back what was ACTUALLY stored, not the raw request body —
+      // `search_urls.md` normalizes on write (spec R3), so the two can
+      // legitimately differ; a raw-body echo would silently lie to the
+      // caller about the stored bytes.
+      const result = await source.writeConfigDoc(name, doc, parsedBody.text);
+      const body: ConfigGetResponse = { text: result.text, report: result.report };
+      return { status: 200, body };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new HttpError(422, 'validation', message);
     }
-    // Echo back what was just stored — cheaper than a second read, and
-    // guaranteed byte-identical since `writeText` never re-serializes.
-    const body: ConfigGetResponse = { text: parsedBody.text };
-    return { status: 200, body };
   };
 }
 

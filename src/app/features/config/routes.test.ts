@@ -5,6 +5,10 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import {
+  buildSearchUrlsSaveReport,
+  normalizeSearchUrlsDoc,
+} from '../../../core/config/search_urls/index.ts';
 import type { BoardProfile, BoardSource, DaemonStatus } from '../../../ports/board.ts';
 import type { ConfigDocKey } from '../../../ports/config_store.ts';
 import type { BoardRequest } from '../../shared/index.ts';
@@ -67,6 +71,17 @@ function fakeSource(opts: FakeSourceOptions = {}): BoardSource & {
     writeConfigDoc: async (name, doc, rawText) => {
       writeCalls.push({ name, doc, rawText });
       if (opts.writeThrows) throw opts.writeThrows;
+      // Real shape (task 7's list): `search_urls.md` routes through the
+      // actual normalize/report pipeline — same one `search_urls_save.ts`
+      // calls — so the fake's return value and the doc stored for a later
+      // GET are both the ACTUAL normalized text, not a raw echo. Every
+      // other doc stays a byte-identical echo with no `report`.
+      if (doc === 'search_urls.md') {
+        const normalized = normalizeSearchUrlsDoc(rawText);
+        const report = buildSearchUrlsSaveReport(normalized);
+        docs.set(doc, normalized.text);
+        return { text: normalized.text, report };
+      }
       docs.set(doc, rawText);
       return { text: rawText };
     },
@@ -158,7 +173,7 @@ test('get: doc not present for a real profile returns 200 with an empty draft, n
 
 // --- PUT /api/profiles/:name/config/:doc ---
 
-test('put: happy path writes and echoes back { text }', async () => {
+test('put: happy path writes and echoes back { text } (report undefined for non-search_urls docs, dropped by JSON.stringify on the wire)', async () => {
   const source = fakeSource();
   const route = findRoute(source, 'PUT', '/api/profiles/:name/config/:doc');
   const res = await route.handler(
@@ -168,10 +183,102 @@ test('put: happy path writes and echoes back { text }', async () => {
     }),
   );
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { text: '{"locations":[]}' });
+  assert.deepEqual(res.body, { text: '{"locations":[]}', report: undefined });
   assert.deepEqual(source.writeCalls, [
     { name: 'rajni', doc: 'filter.json', rawText: '{"locations":[]}' },
   ]);
+});
+
+// AC5: a real misfiled+dirty search_urls.md save — a row filed under the
+// WRONG page heading AND carrying an ephemeral query param — must (a) come
+// back from PUT byte-identical to what a subsequent GET returns, and (b)
+// carry a report whose total/refiled/cleaned/merged match what actually
+// changed. Fixture mirrors ui/e2e/seed_misfiled_search_url.ts's rajni
+// misfile shape, plus a `start` param to also exercise "cleaned".
+const MISFILED_DIRTY_DOC =
+  '# Search URLs\n\n## linkedin\n### linkedin__jobs-search\n' +
+  '<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->\n' +
+  '  • Acme DevOps - https://www.linkedin.com/jobs/search-results/?keywords=devops&location=Remote&start=25\n';
+
+test('put: search_urls.md save response text is byte-identical to a subsequent GET', async () => {
+  const source = fakeSource({ docs: { 'search_urls.md': MISFILED_DIRTY_DOC } });
+  const putRoute = findRoute(source, 'PUT', '/api/profiles/:name/config/:doc');
+  const getRoute = findRoute(source, 'GET', '/api/profiles/:name/config/:doc');
+  const putRes = await putRoute.handler(
+    req({
+      params: { name: 'rajni', doc: 'search_urls.md' },
+      body: { text: MISFILED_DIRTY_DOC },
+    }),
+  );
+  const getRes = await getRoute.handler(
+    req({ params: { name: 'rajni', doc: 'search_urls.md' } }),
+  );
+  assert.equal(putRes.status, 200);
+  assert.equal(
+    (putRes.body as { text: string }).text,
+    (getRes.body as { text: string }).text,
+  );
+  // Not a no-op save — the raw input actually got refiled+cleaned, so a
+  // byte-identical-to-the-raw-input assertion here would be vacuous.
+  assert.notEqual((putRes.body as { text: string }).text, MISFILED_DIRTY_DOC);
+});
+
+test('put: search_urls.md save report.total/refiled/cleaned/merged match what changed', async () => {
+  const source = fakeSource({ docs: { 'search_urls.md': MISFILED_DIRTY_DOC } });
+  const route = findRoute(source, 'PUT', '/api/profiles/:name/config/:doc');
+  const res = await route.handler(
+    req({
+      params: { name: 'rajni', doc: 'search_urls.md' },
+      body: { text: MISFILED_DIRTY_DOC },
+    }),
+  );
+  assert.equal(res.status, 200);
+  const body = res.body as {
+    text: string;
+    report?: { total: number; refiled: number; cleaned: number; merged: number };
+  };
+  assert.ok(body.report);
+  assert.deepEqual(
+    {
+      total: body.report.total,
+      refiled: body.report.refiled,
+      cleaned: body.report.cleaned,
+      merged: body.report.merged,
+    },
+    { total: 1, refiled: 1, cleaned: 1, merged: 0 },
+  );
+});
+
+test('put: a no-op search_urls.md save (already well-formed, no changes) returns report with all-zero change counts', async () => {
+  // Derived from the real normalizer rather than hand-typed, so it's
+  // guaranteed to be the canonical (self-fixed-point) serialization —
+  // running it back through the same normalizer must be a true no-op.
+  const wellFormed = normalizeSearchUrlsDoc(
+    '# Search URLs\n\n## linkedin\n### linkedin__jobs-search-results\n' +
+      '<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search-results.json -->\n' +
+      '  • Acme DevOps - https://www.linkedin.com/jobs/search-results/?keywords=devops&location=Remote\n',
+  ).text;
+  const source = fakeSource({ docs: { 'search_urls.md': wellFormed } });
+  const route = findRoute(source, 'PUT', '/api/profiles/:name/config/:doc');
+  const res = await route.handler(
+    req({ params: { name: 'rajni', doc: 'search_urls.md' }, body: { text: wellFormed } }),
+  );
+  assert.equal(res.status, 200);
+  assert.equal((res.body as { text: string }).text, wellFormed);
+  const report = (
+    res.body as {
+      report: { total: number; refiled: number; cleaned: number; merged: number };
+    }
+  ).report;
+  assert.deepEqual(
+    {
+      total: report.total,
+      refiled: report.refiled,
+      cleaned: report.cleaned,
+      merged: report.merged,
+    },
+    { total: 1, refiled: 0, cleaned: 0, merged: 0 },
+  );
 });
 
 test('put: bad body shape (missing text) is a 400 validation', async () => {
