@@ -15,7 +15,7 @@ import { configDocQuery } from '../config.queries';
 import { useConfigMutation } from '../useConfigMutation';
 import type { SearchUrlRow } from './searchUrls.model';
 import {
-  isSlugCovered,
+  isPageCovered,
   parseSearchUrlRows,
   serializeSearchUrlRows,
 } from './searchUrls.model';
@@ -69,7 +69,10 @@ export function SearchUrlsSection({ profile }: { profile: string }) {
   }
 
   function addRow() {
-    setRows((prev) => [...prev, { slug: DEFAULT_SLUG, label: '', url: '' }]);
+    setRows((prev) => [
+      ...prev,
+      { page: DEFAULT_SLUG, label: '', url: '', touched: false },
+    ]);
   }
 
   function removeRow(index: number) {
@@ -128,10 +131,10 @@ export function SearchUrlsSection({ profile }: { profile: string }) {
                   <span aria-hidden="true">×</span>
                 </Button>
               </div>
-              {row.url.trim() !== '' && !isSlugCovered(row.slug) && (
+              {row.url.trim() !== '' && !isPageCovered(row.page) && (
                 <p className="text-sm text-attention-strong">{COVERAGE_MESSAGE}</p>
               )}
-              <Badge variant="outline">{row.slug}</Badge>
+              <Badge variant="outline">{row.page}</Badge>
             </div>
           );
         })}

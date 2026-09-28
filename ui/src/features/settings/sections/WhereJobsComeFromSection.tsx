@@ -33,7 +33,7 @@ import { useConfigMutation } from '../useConfigMutation';
 import { useDocForm } from '../useDocForm';
 import type { SearchUrlRow } from './searchUrls.model';
 import {
-  isSlugCovered,
+  isPageCovered,
   parseSearchUrlRows,
   serializeSearchUrlRows,
 } from './searchUrls.model';
@@ -145,7 +145,7 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
   function addRow() {
     setState((prev) => ({
       ...prev,
-      rows: [...prev.rows, { slug: DEFAULT_SLUG, label: '', url: '' }],
+      rows: [...prev.rows, { page: DEFAULT_SLUG, label: '', url: '', touched: false }],
     }));
   }
 
@@ -287,12 +287,12 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
                           <span aria-hidden="true">×</span>
                         </Button>
                       </div>
-                      {row.url.trim() !== '' && !isSlugCovered(row.slug) && (
+                      {row.url.trim() !== '' && !isPageCovered(row.page) && (
                         <p className="text-sm text-attention-strong">
                           {COVERAGE_MESSAGE}
                         </p>
                       )}
-                      <Badge variant="outline">{row.slug}</Badge>
+                      <Badge variant="outline">{row.page}</Badge>
                     </div>
                   );
                 })}

@@ -3,15 +3,16 @@
  * time. No I/O — SearchUrlsSection owns reading/writing via configDocQuery
  * and useConfigMutation directly (see task-10-brief's Global constraints). */
 export interface SearchUrlRow {
-  slug: string;
+  page: string;
   label: string;
   url: string;
+  touched: boolean;
 }
 
-const COVERED_SLUGS = new Set(['linkedin__jobs-search', 'linkedin__jobs-search-results']);
+const COVERED_PAGES = new Set(['linkedin__jobs-search', 'linkedin__jobs-search-results']);
 
-export function isSlugCovered(slug: string): boolean {
-  return COVERED_SLUGS.has(slug);
+export function isPageCovered(page: string): boolean {
+  return COVERED_PAGES.has(page);
 }
 
 const SEED_HEADER =
@@ -23,22 +24,23 @@ const SEED_HEADER =
 
 export function parseSearchUrlRows(text: string): SearchUrlRow[] {
   const rows: SearchUrlRow[] = [];
-  let currentSlug: string | null = null;
+  let currentPage: string | null = null;
 
   for (const raw of text.split('\n')) {
     const line = raw.trim();
-    const slugMatch = line.match(/^###\s+(.+)$/);
-    if (slugMatch?.[1]) {
-      currentSlug = slugMatch[1].trim();
+    const pageMatch = line.match(/^###\s+(.+)$/);
+    if (pageMatch?.[1]) {
+      currentPage = pageMatch[1].trim();
       continue;
     }
-    if (currentSlug === null) continue;
+    if (currentPage === null) continue;
     const bulletMatch = line.match(/^[•*-]\s+(.+?)\s+-\s+(\S+)$/);
     if (bulletMatch?.[1] && bulletMatch[2]) {
       rows.push({
-        slug: currentSlug,
+        page: currentPage,
         label: bulletMatch[1].trim(),
         url: bulletMatch[2].trim(),
+        touched: true,
       });
     }
   }
@@ -47,23 +49,23 @@ export function parseSearchUrlRows(text: string): SearchUrlRow[] {
 
 export function serializeSearchUrlRows(rows: SearchUrlRow[]): string {
   const order: string[] = [];
-  const bySlug = new Map<string, SearchUrlRow[]>();
+  const byPage = new Map<string, SearchUrlRow[]>();
   for (const row of rows) {
-    if (!bySlug.has(row.slug)) {
-      bySlug.set(row.slug, []);
-      order.push(row.slug);
+    if (!byPage.has(row.page)) {
+      byPage.set(row.page, []);
+      order.push(row.page);
     }
-    bySlug.get(row.slug)?.push(row);
+    byPage.get(row.page)?.push(row);
   }
 
   const lines = [SEED_HEADER, '', '## linkedin'];
-  for (const slug of order) {
-    lines.push(`### ${slug}`);
+  for (const page of order) {
+    lines.push(`### ${page}`);
     lines.push(
-      `<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${slug}.json -->`,
+      `<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->`,
     );
     lines.push('');
-    for (const row of bySlug.get(slug) ?? []) {
+    for (const row of byPage.get(page) ?? []) {
       lines.push(`  • ${row.label} - ${row.url}`);
     }
   }

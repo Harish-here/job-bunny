@@ -20,9 +20,10 @@ const BASE_PROFILE_JSON = {
 
 const EXISTING_ROWS = [
   {
-    slug: 'linkedin__jobs-search',
+    page: 'linkedin__jobs-search',
     label: 'Staff Frontend Engineer',
     url: 'https://www.linkedin.com/jobs/search/?keywords=staff',
+    touched: true,
   },
 ];
 
@@ -144,9 +145,10 @@ describe('WhereJobsComeFromSection', () => {
     expect(text).toEqual(
       serializeSearchUrlRows([
         {
-          slug: 'linkedin__jobs-search',
+          page: 'linkedin__jobs-search',
           label: 'Frontend Roles',
           url: 'https://www.linkedin.com/jobs/search/?keywords=frontend',
+          touched: false,
         },
       ]),
     );

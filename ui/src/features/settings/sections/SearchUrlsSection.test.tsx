@@ -14,9 +14,10 @@ vi.mock('../config.api', () => ({
 
 const EXISTING_ROWS = [
   {
-    slug: 'linkedin__jobs-search',
+    page: 'linkedin__jobs-search',
     label: 'Staff Frontend Engineer',
     url: 'https://www.linkedin.com/jobs/search/?keywords=staff',
+    touched: true,
   },
 ];
 
@@ -80,9 +81,10 @@ describe('SearchUrlsSection', () => {
     expect(text).toEqual(
       serializeSearchUrlRows([
         {
-          slug: 'linkedin__jobs-search',
+          page: 'linkedin__jobs-search',
           label: 'Frontend Roles',
           url: 'https://www.linkedin.com/jobs/search/?keywords=frontend',
+          touched: false,
         },
       ]),
     );
