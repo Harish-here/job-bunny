@@ -27,6 +27,7 @@ export interface FarmingLane {
     dropped: DroppedRecord[];
     companiesSeen: string[];
     skipped?: { reason: string };
+    linkSoftErrors?: { url: string; reason: string }[];
   }>;
 }
 
