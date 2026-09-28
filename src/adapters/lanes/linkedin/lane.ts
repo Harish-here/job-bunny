@@ -15,7 +15,13 @@ import {
   todayIso,
   type UrlStat,
 } from './evidence.ts';
-import { runHalfOpenProbe, runUrlGroups, type UrlRunnerState } from './fire/index.ts';
+import {
+  type CanaryEvaluation,
+  evaluateAllFailedCanary,
+  runHalfOpenProbe,
+  runUrlGroups,
+  type UrlRunnerState,
+} from './fire/index.ts';
 import type { Inventory } from './inventory.ts';
 import {
   DEFAULT_INTER_URL_DELAY_MAX_MS,
@@ -126,6 +132,7 @@ export class LinkedInLane implements FarmingLane {
     dropped: DroppedRecord[];
     companiesSeen: string[];
     skipped?: { reason: string };
+    linkSoftErrors?: { url: string; reason: string }[];
   }> {
     // Breaker read comes before ANY other work (spec §4.5 step 1): an open
     // breaker must leave zero footprint on the blocked session, and
@@ -232,6 +239,11 @@ export class LinkedInLane implements FarmingLane {
       shellJdFailures: 0,
     };
 
+    // Hoisted above the try/finally so it's still readable after
+    // `handle.close()` runs — the canary's outcome must survive past the
+    // finally block that closes the browser handle it needed.
+    let canaryOutcome: CanaryEvaluation = { confirmedHealthy: false };
+
     try {
       if (phase === 'half-open' && this.breaker && breakerState) {
         // Orchestrates the whole D8 probe (run it, then act on its
@@ -286,6 +298,20 @@ export class LinkedInLane implements FarmingLane {
         },
         ctx,
       );
+
+      // R6/R7 (spec §8 Q7): when every attempted url this fire failed,
+      // re-probe one url already known-good today before concluding it's
+      // a genuine outage — still inside the try, ahead of handle.close(),
+      // since the canary needs the still-open browser handle.
+      canaryOutcome = await evaluateAllFailedCanary(
+        state,
+        this.urls,
+        this.inventories,
+        this.filterCfg,
+        () => this.interUrlPause(ctx),
+        handle,
+        ctx,
+      );
     } finally {
       await handle.close();
     }
@@ -322,7 +348,8 @@ export class LinkedInLane implements FarmingLane {
     // see memory/extract-flaky root-cause notes). buildAllUrlsFailedMessage
     // reports the observed evidence and lets it point at distinct
     // candidate causes instead of asserting one guessed cause.
-    if (attemptedUrls > 0 && failedUrls === attemptedUrls) {
+    const allAttemptedFailed = attemptedUrls > 0 && failedUrls === attemptedUrls;
+    if (allAttemptedFailed && !canaryOutcome.confirmedHealthy) {
       throw new Error(
         buildAllUrlsFailedMessage(attemptedUrls, stats, state.shellJdFailures),
       );
@@ -361,6 +388,11 @@ export class LinkedInLane implements FarmingLane {
       });
     }
 
-    return { jobs: captureStore.all(), dropped, companiesSeen: [...companiesSeen] };
+    return {
+      jobs: captureStore.all(),
+      dropped,
+      companiesSeen: [...companiesSeen],
+      linkSoftErrors: canaryOutcome.linkSoftErrors,
+    };
   }
 }
