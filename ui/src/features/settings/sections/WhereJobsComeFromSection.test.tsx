@@ -114,16 +114,16 @@ describe('WhereJobsComeFromSection', () => {
   });
 
   it('editing a search-URL row is reflected live and round-trips on save', async () => {
+    // An empty search_urls.md auto-adds one row (ux-notes C12) — no manual
+    // "Add another search URL" click needed; this exercises that
+    // auto-added row directly.
     stubDocs({}, '');
     vi.mocked(configApi.putConfigDoc).mockResolvedValue({ text: 'ok' });
     const user = userEvent.setup();
     renderSection();
 
-    await user.click(
-      await screen.findByRole('button', { name: 'Add another search URL' }),
-    );
     await user.type(
-      screen.getByLabelText('Search URL'),
+      await screen.findByLabelText('Search URL'),
       'https://www.linkedin.com/jobs/search/?keywords=frontend',
     );
     await user.type(screen.getByLabelText('Label'), 'Frontend Roles');
@@ -142,13 +142,16 @@ describe('WhereJobsComeFromSection', () => {
       .mocked(configApi.putConfigDoc)
       .mock.calls.find(([, doc]) => doc === 'search_urls.md');
     const [, , text] = searchUrlsCall as [string, string, string];
+    // Moving focus from the URL field to the Label field blurs the URL
+    // input, running the classify-and-rewrite path — `touched` flips to
+    // `true` and `page` resolves from `''` to the classified page.
     expect(text).toEqual(
       serializeSearchUrlRows([
         {
           page: 'linkedin__jobs-search',
           label: 'Frontend Roles',
           url: 'https://www.linkedin.com/jobs/search/?keywords=frontend',
-          touched: false,
+          touched: true,
         },
       ]),
     );
@@ -159,13 +162,48 @@ describe('WhereJobsComeFromSection', () => {
     const user = userEvent.setup();
     renderSection();
 
-    await user.click(
-      await screen.findByRole('button', { name: 'Add another search URL' }),
+    await user.type(
+      await screen.findByLabelText('Search URL'),
+      'https://example.com/jobs',
     );
-    await user.type(screen.getByLabelText('Search URL'), 'https://example.com/jobs');
     await user.type(screen.getByLabelText('Label'), 'Not LinkedIn');
 
     expect(await screen.findByTestId('validation-summary')).toBeInTheDocument();
     expect(configApi.putConfigDoc).not.toHaveBeenCalled();
+  });
+
+  it('a label-only row with an empty URL never blocks Save', async () => {
+    stubDocs();
+    vi.mocked(configApi.putConfigDoc).mockResolvedValue({ text: 'ok' });
+    const user = userEvent.setup();
+    renderSection();
+
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Add another search URL' }),
+    );
+    const labelInputs = screen.getAllByLabelText('Label');
+    const newLabelInput = labelInputs[labelInputs.length - 1];
+    if (!newLabelInput) throw new Error('expected a newly-added Label input');
+    await user.type(newLabelInput, 'Foo');
+
+    // No entry in saveState.errors for the label-only row, so no summary —
+    // `validateRow`'s first line short-circuits on an empty URL before the
+    // label-required check, regardless of whether the label is filled in.
+    expect(screen.queryByTestId('validation-summary')).not.toBeInTheDocument();
+
+    await user.click(await screen.findByTestId('save-button'));
+
+    // Save proceeds, unblocked — searchUrlsMutation.mutateAsync (routed
+    // through putConfigDoc) is still called.
+    await waitFor(() =>
+      expect(configApi.putConfigDoc).toHaveBeenCalledWith(
+        'rajni',
+        'search_urls.md',
+        expect.any(String),
+      ),
+    );
   });
 });

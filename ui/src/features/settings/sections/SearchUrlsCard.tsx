@@ -35,7 +35,7 @@ interface SearchUrlsCardProps {
   misfiledCount: number;
   onRefile: () => void;
   isRefiling: boolean;
-  onChangeUrl: (index: number, url: string) => void;
+  onChangeUrl: (index: number, url: string, isPaste?: boolean) => void;
   onChangeLabel: (index: number, label: string) => void;
   onBlurUrl: (index: number) => void;
   onRemove: (index: number) => void;
@@ -105,11 +105,17 @@ export function SearchUrlsCard({
               row={row}
               display={displayStates[index] ?? { kind: 'unclassified' }}
               index={index}
-              onChangeUrl={(url) => onChangeUrl(index, url)}
+              onChangeUrl={(url, isPaste) =>
+                isPaste ? onChangeUrl(index, url, true) : onChangeUrl(index, url)
+              }
               onChangeLabel={(label) => onChangeLabel(index, label)}
               onBlurUrl={() => onBlurUrl(index)}
               onRemove={() => onRemove(index)}
               onRemoveNow={() => onRemoveNow(index)}
+              // ux-notes C12: the sole auto-added empty row gets initial
+              // focus — recomputed on every render but only observable at
+              // mount, since `autoFocus` itself only acts then.
+              autoFocusUrl={index === 0 && rows.length === 1 && rows[0]?.url === ''}
             />
           ))}
         </div>

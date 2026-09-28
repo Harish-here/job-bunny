@@ -28,11 +28,23 @@ interface SearchUrlRowProps {
   row: SearchUrlRowModel;
   display: RowDisplay;
   index: number;
-  onChangeUrl: (url: string) => void;
+  /** `isPaste` is `true` only when the change came from a native paste
+   * (`InputEvent.inputType === 'insertFromPaste'`) — the parent
+   * (task 23) uses it to run the same classify-and-rewrite logic
+   * `onBlurUrl` runs, immediately rather than waiting for blur. Omitted
+   * (not merely `false`) on every ordinary keystroke, so callers relying
+   * on the old single-arg call shape are unaffected. */
+  onChangeUrl: (url: string, isPaste?: boolean) => void;
   onChangeLabel: (label: string) => void;
   onBlurUrl: () => void;
   onRemove: () => void;
   onRemoveNow: () => void;
+  /** Plain `autoFocus` (not an imperative ref) — ux-notes C12's
+   * empty-state auto-add focuses the sole auto-added row's URL input on
+   * mount. Only ever `true` for a freshly-mounted single empty row;
+   * `autoFocus` only fires at mount, so this never yanks focus back on a
+   * later re-render. */
+  autoFocusUrl?: boolean;
 }
 
 // LINKEDIN_SEARCH_URL_LABELS is keyed by the two recognized page slugs, but
@@ -74,6 +86,7 @@ export function SearchUrlRow({
   onBlurUrl,
   onRemove,
   onRemoveNow,
+  autoFocusUrl,
 }: SearchUrlRowProps) {
   const isRefused = display.kind === 'refused';
   const removeLabel = row.label.trim() ? `Remove ${row.label}` : 'Remove row';
@@ -92,7 +105,17 @@ export function SearchUrlRow({
             <Input
               data-qa={`search-url-input-${index}`}
               value={row.url}
-              onChange={(e) => onChangeUrl(e.target.value)}
+              autoFocus={autoFocusUrl}
+              onChange={(e) => {
+                const value = e.target.value;
+                const isPaste =
+                  (e.nativeEvent as InputEvent).inputType === 'insertFromPaste';
+                if (isPaste) {
+                  onChangeUrl(value, true);
+                } else {
+                  onChangeUrl(value);
+                }
+              }}
               onBlur={onBlurUrl}
             />
           </FieldControl>
