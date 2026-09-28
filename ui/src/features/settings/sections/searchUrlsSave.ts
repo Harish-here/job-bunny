@@ -5,8 +5,12 @@
  * file-size cap. No React, no fetch: task 23's orchestrator is the only
  * caller.
  */
+import { classifyLinkedInSearchUrl } from '../../../../../src/core/linkedin_url/index.ts';
 import type { SearchUrlsSaveReport } from '../../../lib/api/types';
-import { buildValidationSummaryRefusalMessage } from './searchUrlRow.classify';
+import {
+  buildValidationSummaryRefusalMessage,
+  type RowDisplay,
+} from './searchUrlRow.classify';
 import { parseSearchUrlRows, type SearchUrlRow } from './searchUrls.model';
 
 /** Thin wrapper around `parseSearchUrlRows`. Every row parsed from a
@@ -65,4 +69,28 @@ export function mergeServerRefusal(
   const key = index === -1 ? 'search-urls.server' : `where-jobs-search-urls.${index}`;
   const label = matchedRow?.label ?? ''; // buildValidationSummaryRefusalMessage's own '' → 'This link' fallback covers the no-match case too
   return { ...clientErrors, [key]: buildValidationSummaryRefusalMessage(label) };
+}
+
+/** R13 Re-file (spec R13): rewrites every `misfiled` row's `page` to its
+ * classification's own `page` — and `url` to `cleanedUrl` too, when the
+ * row is ALSO dirty. Every OTHER row (including `duplicate`/`clean`/
+ * `cleaned`/`refused`/`unclassified`) passes through unchanged; the
+ * caller is responsible for PUTting the result and reseeding from the
+ * mutation's OWN resolved response (never this function's return) — a
+ * re-file can itself trigger a merge, the same PUT-echo fix class as a
+ * normal save. */
+export function buildRefiledRows(
+  rows: SearchUrlRow[],
+  displayStates: RowDisplay[],
+): SearchUrlRow[] {
+  return rows.map((row, i) => {
+    const display = displayStates[i];
+    if (display?.kind !== 'misfiled') return row;
+    try {
+      const classification = classifyLinkedInSearchUrl(row.url);
+      return { ...row, page: classification.page, url: classification.cleanedUrl };
+    } catch {
+      return { ...row, page: display.page };
+    }
+  });
 }

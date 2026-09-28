@@ -96,6 +96,12 @@ describe('SearchUrlsCard', () => {
     ).toBeDisabled();
   });
 
+  it('swaps the refile button label to "Re-filing…" while isRefiling is true', () => {
+    render(<SearchUrlsCard {...baseProps({ misfiledCount: 2, isRefiling: true })} />);
+    expect(screen.getByText('Re-filing…')).toBeInTheDocument();
+    expect(screen.queryByText('Re-file 2 links')).not.toBeInTheDocument();
+  });
+
   it('empty-state copy appears only when rows.length === 0', () => {
     render(<SearchUrlsCard {...baseProps({ rows: [], displayStates: [] })} />);
     expect(document.querySelector('[data-qa="search-urls-empty"]')).not.toBeNull();

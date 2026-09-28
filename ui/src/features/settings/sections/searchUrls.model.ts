@@ -1,7 +1,7 @@
 /** Pure parse/serialize pair for search_urls.md, mirroring the grammar
  * src/adapters/lanes/linkedin/search_urls.ts's parseSearchUrls uses at run
- * time. No I/O — SearchUrlsSection owns reading/writing via configDocQuery
- * and useConfigMutation directly (see task-10-brief's Global constraints). */
+ * time. No I/O — WhereJobsComeFromSection owns reading/writing via
+ * configDocQuery and useConfigMutation directly. */
 export interface SearchUrlRow {
   page: string;
   label: string;

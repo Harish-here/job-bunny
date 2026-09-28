@@ -15,6 +15,7 @@ export function DocFormGate({
   loadError,
   parseError,
   loadingFallback,
+  errorFallback,
   children,
 }: {
   doc: string;
@@ -33,13 +34,20 @@ export function DocFormGate({
    * unchanged.
    */
   loadingFallback?: ReactNode;
+  /** Rendered instead of the default "Couldn't load {doc}" line when
+   * loadError is set. Mirrors loadingFallback's own precedent. */
+  errorFallback?: ReactNode;
   children: ReactNode;
 }) {
   if (loadError) {
     return (
-      <p data-testid="settings-load-error" className="text-sm text-destructive">
-        Couldn't load {doc}: {loadError.message}
-      </p>
+      <>
+        {errorFallback ?? (
+          <p data-testid="settings-load-error" className="text-sm text-destructive">
+            Couldn't load {doc}: {loadError.message}
+          </p>
+        )}
+      </>
     );
   }
   if (isLoading) {

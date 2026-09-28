@@ -25,9 +25,32 @@
  */
 import { Button } from '../../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
+import { Skeleton } from '../../../components/ui/skeleton';
 import { SearchUrlRow } from './SearchUrlRow';
 import type { RowDisplay } from './searchUrlRow.classify';
 import type { SearchUrlRow as SearchUrlRowModel } from './searchUrls.model';
+
+/** DocFormGate's `loadingFallback` for the `search_urls.md` gate (task 24) —
+ * field-shaped skeleton rows matching the mockup fragment's loading state
+ * (two row-cards, each a wide + fixed-width field skeleton plus a badge
+ * skeleton), rather than a bare "Loading…" line under-representing the
+ * card's real loaded height (same B9 rationale DocFormGate's own doc
+ * comment states). */
+export function SearchUrlsSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" data-qa="search-urls-skeleton">
+      {[0, 1].map((i) => (
+        <div key={i} className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <Skeleton className="h-9 flex-1" />
+            <Skeleton className="h-9 w-48" />
+          </div>
+          <Skeleton className="h-5 w-24 rounded-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface SearchUrlsCardProps {
   rows: SearchUrlRowModel[];
@@ -92,7 +115,7 @@ export function SearchUrlsCard({
               onClick={onRefile}
               data-qa="search-urls-refile-button"
             >
-              {refileButtonText(misfiledCount)}
+              {isRefiling ? 'Re-filing…' : refileButtonText(misfiledCount)}
             </Button>
           </div>
         )}

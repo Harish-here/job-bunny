@@ -17,6 +17,11 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIELD_ERROR_COPY } from '../src/features/settings/sections/searchUrlRow.classify.ts';
 import { pinProfile } from './run-fixtures';
+import {
+  DUPLICATE_MISFILED_URL,
+  seedDuplicateMisfiledSearchUrl,
+} from './seed_duplicate_misfiled_search_url.ts';
+import { seedMisfiledSearchUrl } from './seed_misfiled_search_url.ts';
 
 test.beforeEach(async ({ page }) => {
   await pinProfile(page);
@@ -188,6 +193,163 @@ test('search-url-intake: an empty card auto-adds and focuses one row', async ({
     await expect(section(page).locator('[data-qa^="search-url-row"]')).toHaveCount(1);
     const input = section(page).locator('[data-qa="search-url-input-0"]');
     await expect(input).toBeFocused();
+  } finally {
+    await putConfigText(page, 'search_urls.md', original);
+  }
+});
+
+// Task 24 (S1 Loading/Error + R13 misfile/Re-file). `releaseRoute` idiom
+// mirrors `settings.spec.ts:229-238`'s own gated-GET pattern — gates only
+// the GET so the section's own PUTs (unused by these two read-path tests)
+// are never touched.
+test('search-url-intake: the card shows a skeleton while search_urls.md is loading, then resolves', async ({
+  page,
+}) => {
+  let releaseRoute: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    releaseRoute = resolve;
+  });
+  await page.route('**/api/profiles/rajni/config/search_urls.md', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    await gate;
+    await route.continue();
+  });
+
+  await page.goto('/#/settings/where-jobs-come-from');
+
+  const skeleton = section(page).locator('[data-qa="search-urls-skeleton"]');
+  await expect(skeleton).toBeVisible();
+  await expect(section(page).locator('[data-qa="search-urls-card"]')).toHaveCount(0);
+
+  releaseRoute?.();
+  await expect(skeleton).not.toBeVisible();
+  await expect(section(page).locator('[data-qa="search-urls-card"]')).toBeVisible();
+});
+
+test("search-url-intake: a failed load shows the Couldn't-load alert with a working Retry", async ({
+  page,
+}) => {
+  await page.route('**/api/profiles/rajni/config/search_urls.md', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'server_error', message: 'boom' } }),
+    });
+  });
+
+  await page.goto('/#/settings/where-jobs-come-from');
+
+  const alert = section(page).locator('[data-qa="search-urls-load-error"]');
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("Couldn't load search links.");
+
+  const retry = alert.getByRole('button', { name: 'Try again' });
+  await expect(retry).toBeVisible();
+
+  await page.unroute('**/api/profiles/rajni/config/search_urls.md');
+  await retry.click();
+
+  await expect(section(page).locator('[data-qa="search-urls-card"]')).toBeVisible();
+  await expect(alert).toHaveCount(0);
+});
+
+test('search-url-intake: a misfiled link is flagged on load and Re-file fixes it in one click', async ({
+  page,
+}) => {
+  const original = await fetchConfigText(page, 'search_urls.md');
+  try {
+    await seedMisfiledSearchUrl();
+
+    // Gates only the Re-file PUT (the GET that loads the seeded doc runs
+    // unblocked) so the transient "Re-filing…" button label is observable
+    // deterministically rather than racing a real, possibly-instant PUT
+    // round trip.
+    let releasePut: (() => void) | undefined;
+    const putGate = new Promise<void>((resolve) => {
+      releasePut = resolve;
+    });
+    await page.route('**/api/profiles/rajni/config/search_urls.md', async (route) => {
+      if (route.request().method() !== 'PUT') {
+        await route.continue();
+        return;
+      }
+      await putGate;
+      await route.continue();
+    });
+
+    await page.goto('/#/settings/where-jobs-come-from');
+
+    const notice = section(page).locator('[data-qa="search-urls-misfile-notice"]');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('1 link is filed under the wrong page type');
+
+    const button = section(page).locator('[data-qa="search-urls-refile-button"]');
+    await expect(button).toHaveText('Re-file 1 link');
+
+    await button.click();
+    await expect(button).toHaveText('Re-filing…');
+
+    releasePut?.();
+    await expect(notice).toHaveCount(0);
+
+    const saved = await fetchConfigText(page, 'search_urls.md');
+    const headingIndex = saved.indexOf('### linkedin__jobs-search-results');
+    const bulletIndex = saved.indexOf('Acme DevOps');
+    expect(headingIndex).toBeGreaterThan(-1);
+    expect(bulletIndex).toBeGreaterThan(headingIndex);
+  } finally {
+    await putConfigText(page, 'search_urls.md', original);
+  }
+});
+
+// Deviation from the brief's literal "misfile notice count 2": the sole
+// achievable construction for "two rows collapse into one on Re-file" is
+// ONE misfiled row plus one ALREADY-correctly-filed row sharing its
+// `page|cleanedUrl` key — `classifyRowsForDisplay`'s own precedence rule
+// (searchUrlRow.classify.ts's own doc comment: "duplicate" wins over
+// "misfiled" for every row after the first with a given key) makes two
+// SIMULTANEOUSLY-misfiled rows sharing one key impossible: the second
+// such row always classifies as `duplicate`, not `misfiled`, however it's
+// arranged. Verified directly against `classifyRowsForDisplay` +
+// `normalizeSearchUrlsDoc` before writing this test. Every OTHER literal
+// assertion below (singular "Re-file 1 link"/"Re-filed 1 link.", exactly
+// one row remaining, one server-side bullet) is unchanged from the brief
+// and independently confirms the merge-on-Refile behavior end to end.
+//
+// Seeded via a direct-write helper (`seedDuplicateMisfiledSearchUrl`),
+// never `putConfigText`: an ordinary PUT always normalizes+merges
+// search_urls.md server-side (spec R9/R10), which would merge these two
+// rows down to one before the test ever navigates.
+test('search-url-intake: a re-file that merges duplicates shows one row without a reload', async ({
+  page,
+}) => {
+  const original = await fetchConfigText(page, 'search_urls.md');
+  try {
+    await seedDuplicateMisfiledSearchUrl();
+    await page.goto('/#/settings/where-jobs-come-from');
+
+    const notice = section(page).locator('[data-qa="search-urls-misfile-notice"]');
+    await expect(notice).toBeVisible();
+    const button = section(page).locator('[data-qa="search-urls-refile-button"]');
+    await expect(button).toHaveText('Re-file 1 link');
+
+    await button.click();
+
+    // Before any reload: the PUT-echo reseed alone collapses the two rows
+    // into one.
+    await expect(section(page).locator('[data-qa^="search-url-row"]')).toHaveCount(1);
+    await expect(page.getByTestId('save-success-line')).toHaveText('Re-filed 1 link.');
+
+    const saved = await fetchConfigText(page, 'search_urls.md');
+    const occurrences = saved.split(DUPLICATE_MISFILED_URL).length - 1;
+    expect(occurrences).toBe(1);
   } finally {
     await putConfigText(page, 'search_urls.md', original);
   }

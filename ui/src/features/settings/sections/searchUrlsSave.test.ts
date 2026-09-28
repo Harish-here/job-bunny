@@ -1,11 +1,90 @@
 import { describe, expect, it } from 'vitest';
+import type { RowDisplay } from './searchUrlRow.classify';
 import { buildValidationSummaryRefusalMessage } from './searchUrlRow.classify';
 import type { SearchUrlRow } from './searchUrls.model';
 import {
+  buildRefiledRows,
   buildSearchUrlsSuccessMessage,
   mergeServerRefusal,
   reseedRowsFromText,
 } from './searchUrlsSave';
+
+function row(overrides: Partial<SearchUrlRow> = {}): SearchUrlRow {
+  return { page: '', label: '', url: '', touched: true, ...overrides };
+}
+
+describe('buildRefiledRows', () => {
+  it('rewrites a misfiled row to its classification page and cleaned url', () => {
+    const rows = [
+      row({
+        page: 'linkedin__jobs-search',
+        label: 'A',
+        url: 'https://www.linkedin.com/jobs/search-results/?keywords=sre&currentJobId=1',
+      }),
+    ];
+    const displayStates: RowDisplay[] = [
+      {
+        kind: 'misfiled',
+        page: 'linkedin__jobs-search-results',
+        label: 'A',
+        storedPage: 'linkedin__jobs-search',
+      },
+    ];
+    const refiled = buildRefiledRows(rows, displayStates);
+    expect(refiled).toEqual([
+      {
+        page: 'linkedin__jobs-search-results',
+        label: 'A',
+        url: 'https://www.linkedin.com/jobs/search-results/?keywords=sre',
+        touched: true,
+      },
+    ]);
+  });
+
+  it('leaves every non-misfiled row unchanged', () => {
+    const rows = [
+      row({ page: 'linkedin__jobs-search', label: 'A', url: 'https://a.example' }),
+      row({ page: 'linkedin__jobs-search', label: 'B', url: 'https://b.example' }),
+    ];
+    const displayStates: RowDisplay[] = [
+      { kind: 'clean', page: 'linkedin__jobs-search', label: 'A' },
+      {
+        kind: 'duplicate',
+        page: 'linkedin__jobs-search',
+        label: 'B',
+        mergesIntoLabel: 'A',
+      },
+    ];
+    expect(buildRefiledRows(rows, displayStates)).toEqual(rows);
+  });
+
+  it('falls back to the display page alone when the url no longer classifies', () => {
+    const rows = [
+      row({
+        page: 'linkedin__jobs-search',
+        label: 'A',
+        url: 'https://not-linkedin.example',
+      }),
+    ];
+    const displayStates: RowDisplay[] = [
+      {
+        kind: 'misfiled',
+        page: 'linkedin__jobs-search-results',
+        label: 'A',
+        storedPage: 'linkedin__jobs-search',
+      },
+    ];
+    const refiled = buildRefiledRows(rows, displayStates);
+    expect(refiled).toEqual([
+      {
+        page: 'linkedin__jobs-search-results',
+        label: 'A',
+        url: 'https://not-linkedin.example',
+        touched: true,
+      },
+    ]);
+  });
+});
 
 describe('reseedRowsFromText', () => {
   it('groups rows correctly on a two-heading doc and marks every row touched', () => {

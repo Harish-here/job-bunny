@@ -27,12 +27,11 @@ export function buildValidationSummaryRefusalMessage(label: string): string {
 }
 
 /** ux-notes.md C4's own text: "It replaces the old host error and keeps
- * the protocol error." — lifted UNCHANGED from the pre-existing
- * `SearchUrlsSection.tsx`/`WhereJobsComeFromSection.tsx` `PROTOCOL_MESSAGE`
- * constant. Distinct from FIELD_ERROR_COPY: shown only when the URL
- * doesn't even parse as an absolute URL, or isn't `https:` — a narrower,
- * earlier check than "is this recognized as a LinkedIn jobs link", run
- * BEFORE calling classifyLinkedInSearchUrl. */
+ * the protocol error." — lifted UNCHANGED from `WhereJobsComeFromSection.tsx`'s
+ * own `PROTOCOL_MESSAGE` constant. Distinct from FIELD_ERROR_COPY: shown
+ * only when the URL doesn't even parse as an absolute URL, or isn't
+ * `https:` — a narrower, earlier check than "is this recognized as a
+ * LinkedIn jobs link", run BEFORE calling classifyLinkedInSearchUrl. */
 export const PROTOCOL_MESSAGE = 'Enter a LinkedIn URL starting with https://';
 
 export type RowDisplay =
