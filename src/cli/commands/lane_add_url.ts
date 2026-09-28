@@ -28,6 +28,7 @@ import { constants } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { classifyLinkedInSearchUrl } from '../../core/linkedin_url/index.ts';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
@@ -37,21 +38,6 @@ import { wireConfigStore } from '../wire/index.ts';
 const PACKAGE_PAGE_INVENTORY_DIR = fileURLToPath(
   new URL('../../adapters/lanes/linkedin/page_inventory/', import.meta.url),
 );
-
-// Ephemeral params that change per click/session/alert — stripped so the same search dedups.
-// "start" is a pagination offset, not a filter — always reset to beginning.
-const EPHEMERAL = [
-  'currentJobId',
-  'referralSearchId',
-  'origin',
-  'originToLandingJobPostings',
-  'savedSearchId',
-  'alertAction',
-  'trackingId',
-  'refId',
-  'eBP',
-  'start',
-];
 
 export interface LaneAddUrlOptions {
   profile: string;
@@ -88,16 +74,11 @@ function defaultFsDeps(): Omit<LaneAddUrlDeps, 'configStore'> {
   };
 }
 
-/** Strips ephemeral per-click/session/alert query params, plus an
- * absolute `f_TPR` anchor (`a<epoch>-`, a per-alert "posted after this
- * exact moment" stamp that goes stale on a recurring search). A relative
- * window (`r<seconds>`, e.g. `r86400`) is a real filter and stays. */
+/** Thin delegate to `core/linkedin_url` (spec R5) — that module owns the
+ * canonical ephemeral-param/`f_TPR`-anchor stripping logic; this wrapper
+ * only exists so callers/tests keep the existing exact signature. */
 export function stripEphemerals(rawUrl: string): URL {
-  const u = new URL(rawUrl);
-  for (const p of EPHEMERAL) u.searchParams.delete(p);
-  const tpr = u.searchParams.get('f_TPR');
-  if (tpr && /^a\d+/.test(tpr)) u.searchParams.delete('f_TPR');
-  return u;
+  return new URL(classifyLinkedInSearchUrl(rawUrl).cleanedUrl);
 }
 
 export interface ResolvedPage {
@@ -105,25 +86,13 @@ export interface ResolvedPage {
   page: string;
 }
 
-/** Maps a stripped URL onto the `channel`/`page` node it belongs under in
- * `search_urls.md`. Throws loudly for anything with no known mapping —
- * a silent fallback would mean the URL is filed under the wrong
- * inventory (or none) and quietly never gets extracted. */
+/** Thin delegate to `core/linkedin_url` (spec R5) — that module owns the
+ * canonical channel/page-type mapping (and throws
+ * `UnrecognizedLinkedInSearchUrlError` for anything unmapped); this
+ * wrapper only exists so callers/tests keep the existing exact
+ * signature. */
 export function resolvePage(u: URL): ResolvedPage {
-  if (u.hostname.endsWith('linkedin.com')) {
-    if (
-      /^\/jobs\/search\/?$/.test(u.pathname) ||
-      u.pathname.startsWith('/jobs/collections/')
-    ) {
-      return { channel: 'linkedin', page: 'linkedin__jobs-search' };
-    }
-    if (/^\/jobs\/search-results\/?$/.test(u.pathname)) {
-      return { channel: 'linkedin', page: 'linkedin__jobs-search-results' };
-    }
-  }
-  throw new Error(
-    `No page-type mapping for ${u.hostname}${u.pathname} — add one in resolvePage().`,
-  );
+  return { channel: 'linkedin', page: classifyLinkedInSearchUrl(u.toString()).page };
 }
 
 export async function laneAddUrlCommand(
@@ -137,9 +106,9 @@ export async function laneAddUrlCommand(
       deps.configStore ?? ((name) => wireConfigStore(name, { root: fsDeps.root })),
   };
 
-  const u = stripEphemerals(opts.url);
-  const { channel, page } = resolvePage(u);
-  const cleanUrl = u.toString();
+  const classification = classifyLinkedInSearchUrl(opts.url);
+  const channel = 'linkedin';
+  const { page, cleanedUrl: cleanUrl } = classification;
   const line = `  • ${opts.label || 'unlabeled'} - ${cleanUrl}`;
 
   const profileDir = path.join(resolved.root, 'profiles', opts.profile);
@@ -179,7 +148,9 @@ export async function laneAddUrlCommand(
     store.close();
   }
 
-  resolved.write(`[lane add-url] stripped ${EPHEMERAL.join(', ')}`);
+  resolved.write(
+    `[lane add-url] stripped ${classification.removedParams.join(', ') || '(nothing)'}`,
+  );
   resolved.write(`[lane add-url] appended under ${channel} / ${page}: ${cleanUrl}`);
 
   const inventoryPath = path.join(PACKAGE_PAGE_INVENTORY_DIR, `${page}.json`);
