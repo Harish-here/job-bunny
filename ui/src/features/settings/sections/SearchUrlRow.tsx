@@ -105,6 +105,7 @@ export function SearchUrlRow({
             <Input
               data-qa={`search-url-input-${index}`}
               value={row.url}
+              placeholder="Paste a LinkedIn jobs search link…"
               autoFocus={autoFocusUrl}
               onChange={(e) => {
                 const value = e.target.value;

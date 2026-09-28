@@ -163,6 +163,12 @@ describe('SearchUrlRow', () => {
     expect(props.onBlurUrl).toHaveBeenCalledTimes(1);
   });
 
+  it('B10: the URL input carries the mockup placeholder', () => {
+    renderRow(makeRow({ url: '', touched: false }), { kind: 'unclassified' });
+    const input = document.querySelector('[data-qa="search-url-input-0"]');
+    expect(input?.getAttribute('placeholder')).toBe('Paste a LinkedIn jobs search link…');
+  });
+
   it('onRemoveNow fires on the duplicate row link click', () => {
     const { props } = renderRow(makeRow({ label: 'SRE Remote' }), {
       kind: 'duplicate',
