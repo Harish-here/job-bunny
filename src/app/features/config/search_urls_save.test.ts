@@ -52,7 +52,7 @@ test('misfiled+dirty input rebuilds text, reports counts, and writes once', asyn
   assert.equal(result.report.merged, 0);
   assert.equal(result.report.total, 1);
   assert.equal(result.report.changes.length, 2);
-  assert.equal(result.text, result.text); // rebuilt doc is returned
+  assert.notEqual(result.text, input); // rebuilt doc is returned, not the raw input
   assert.ok(result.text.includes('https://www.linkedin.com/jobs/search/?keywords=data'));
   assert.ok(!result.text.includes('currentJobId'));
 

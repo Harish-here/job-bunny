@@ -21,6 +21,24 @@ function doc(page: string, body: string): string {
   );
 }
 
+// B11 fixtures use the REAL SEED_HEADER text (byte-identical to the module's own
+// constant) so the header itself never spuriously shows up as a preserved "note" —
+// keeping the assertions below about note placement unambiguous.
+const SEED_HEADER =
+  '# Search URLs\n\n' +
+  'Hierarchical: Channel → page → labeled URLs. One page-type = one inventory ' +
+  'in `src/adapters/lanes/linkedin/page_inventory/<page>.json`; many URLs may live ' +
+  'beneath it.\n' +
+  'Add URLs with `/add-url` (strips ephemeral params). Format: `  • <label> - <url>`';
+
+function seedDoc(page: string, body: string): string {
+  return (
+    `${SEED_HEADER}\n\n## linkedin\n### ${page}\n` +
+    `<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->\n\n` +
+    body
+  );
+}
+
 test('(a) canonical two-space-indented input is parsed', () => {
   const input = doc(
     'linkedin__jobs-search',
@@ -162,6 +180,48 @@ test('(i) an already-well-formed doc round-trips byte-identical, changes: []', (
     '  • Engineer roles - https://www.linkedin.com/jobs/search/?keywords=engineer&currentJobId=1\n',
   );
   const first = normalizeSearchUrlsDoc(dirty);
+  const second = normalizeSearchUrlsDoc(first.text);
+  assert.equal(second.text, first.text);
+  assert.deepEqual(second.changes, []);
+});
+
+test('B11: a prose note survives under its own section, not dropped', () => {
+  const input = seedDoc(
+    'linkedin__jobs-search',
+    'A note about why this search exists.\n' +
+      '  • Engineer roles - https://www.linkedin.com/jobs/search/?keywords=engineer\n',
+  );
+  const result = normalizeSearchUrlsDoc(input);
+  assert.deepEqual(result.changes, []);
+  assert.equal(result.total, 1);
+  assert.ok(result.text.includes('A note about why this search exists.'));
+  const headingIdx = result.text.indexOf('### linkedin__jobs-search');
+  const noteIdx = result.text.indexOf('A note about why this search exists.');
+  const bulletIdx = result.text.indexOf('Engineer roles');
+  assert.ok(headingIdx < noteIdx && noteIdx < bulletIdx, 'note stays under its section');
+});
+
+test('B11: a commented-out link survives verbatim', () => {
+  const input = seedDoc(
+    'linkedin__jobs-search',
+    '<!-- • old link - https://www.linkedin.com/jobs/search/?keywords=old -->\n' +
+      '  • Engineer roles - https://www.linkedin.com/jobs/search/?keywords=engineer\n',
+  );
+  const result = normalizeSearchUrlsDoc(input);
+  assert.ok(
+    result.text.includes(
+      '<!-- • old link - https://www.linkedin.com/jobs/search/?keywords=old -->',
+    ),
+  );
+});
+
+test('B11: report stays empty (idempotent round trip) once a note has been preserved', () => {
+  const input = seedDoc(
+    'linkedin__jobs-search',
+    'A note.\n' +
+      '  • Engineer roles - https://www.linkedin.com/jobs/search/?keywords=engineer\n',
+  );
+  const first = normalizeSearchUrlsDoc(input);
   const second = normalizeSearchUrlsDoc(first.text);
   assert.equal(second.text, first.text);
   assert.deepEqual(second.changes, []);

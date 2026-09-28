@@ -54,24 +54,72 @@ export interface ParsedRow {
 // URL group captures `\S+` (not `https?:\/\/\S+`) so a scheme-less/malformed
 // URL is captured as a row rather than silently vanishing.
 const BULLET_RE = /^[•*-]\s+(.+?)\s+-\s+(\S+)$/;
+const HEADING_RE = /^###\s+(.+)$/;
+const INVENTORY_COMMENT_RE = /^<!--\s*inventory:/;
+const CHANNEL_HEADING = '## linkedin';
 
-export function parseRows(md: string): ParsedRow[] {
+interface ParsedDoc {
+  rows: ParsedRow[];
+  topNotes: string[];
+  // Keyed by the ORIGINAL heading text a note appeared under (insertion order
+  // preserved) — B11: re-filed bullets move to their reclassified section, but a
+  // note stays put; it was never "attached" to any one bullet.
+  sectionNotes: Map<string, string[]>;
+}
+
+// B11: everything that isn't a bullet, a blank line, or a structural line the
+// normalizer regenerates itself (the SEED_HEADER block, the `## linkedin` channel
+// heading, a `### <page>` heading, or its auto-generated inventory comment) is a
+// user note — prose or a commented-out line such as `<!-- • old link -->` — kept
+// verbatim and reattached to the section it was found under.
+function parseDoc(md: string): ParsedDoc {
   const rows: ParsedRow[] = [];
-  let currentPage: string | null = null;
-  const headingRe = /^###\s+(.+)$/;
+  const topNotes: string[] = [];
+  const sectionNotes = new Map<string, string[]>();
+  const headerLines = new Set(SEED_HEADER.split('\n'));
+  let currentSection: string | null = null;
+  let seenChannelHeading = false;
+
   for (const raw of md.split('\n')) {
-    const line = raw.trim(); // MUST trim first — bullet rows are indented `  • `
-    const h = headingRe.exec(line);
-    if (h?.[1]) {
-      currentPage = h[1].trim();
+    const line = raw.trim(); // MUST trim first — bullet/heading rows are indented
+    if (line === '') continue; // blank lines are template structure, never a note
+
+    if (!seenChannelHeading) {
+      if (line === CHANNEL_HEADING) {
+        seenChannelHeading = true;
+      } else if (!headerLines.has(line)) {
+        topNotes.push(raw); // ahead of the channel heading, not part of the header
+      }
       continue;
     }
+
+    const h = HEADING_RE.exec(line);
+    if (h?.[1]) {
+      currentSection = h[1].trim();
+      continue;
+    }
+    if (INVENTORY_COMMENT_RE.test(line)) continue; // regenerated per-section
+
     const m = BULLET_RE.exec(line);
     if (m?.[1] && m?.[2]) {
-      rows.push({ label: m[1].trim(), url: m[2].trim(), originalPage: currentPage });
+      rows.push({ label: m[1].trim(), url: m[2].trim(), originalPage: currentSection });
+      continue;
+    }
+
+    if (currentSection === null) {
+      topNotes.push(raw);
+    } else {
+      const notes = sectionNotes.get(currentSection) ?? [];
+      notes.push(raw);
+      sectionNotes.set(currentSection, notes);
     }
   }
-  return rows;
+
+  return { rows, topNotes, sectionNotes };
+}
+
+export function parseRows(md: string): ParsedRow[] {
+  return parseDoc(md).rows;
 }
 
 // Also covers "label present, URL empty" — both are the same underlying shape:
@@ -149,15 +197,59 @@ function classifyAndGroup(rows: ParsedRow[]): ClassifyAndGroupResult {
   return { order, byPage, changes };
 }
 
-function serialize(order: string[], byPage: Map<string, ParsedRow[]>): string {
-  const lines = [SEED_HEADER, '', '## linkedin'];
+interface OutputSection {
+  heading: string;
+  rows: ParsedRow[];
+  notes: string[];
+  knownPage: boolean;
+}
+
+// B11: a section whose bullets all got re-filed elsewhere (or that never had any)
+// can still carry notes the user wrote under it — those are never dropped, even
+// though the re-filed bullets themselves don't carry the note along.
+function buildSections(
+  order: string[],
+  byPage: Map<string, ParsedRow[]>,
+  sectionNotes: Map<string, string[]>,
+): OutputSection[] {
+  const sections: OutputSection[] = [];
+  const consumed = new Set<string>();
   for (const page of order) {
-    lines.push(`### ${page}`);
-    lines.push(
-      `<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->`,
-    );
+    consumed.add(page);
+    sections.push({
+      heading: page,
+      rows: byPage.get(page) ?? [],
+      notes: sectionNotes.get(page) ?? [],
+      knownPage: true,
+    });
+  }
+  for (const [heading, notes] of sectionNotes) {
+    if (consumed.has(heading)) continue;
+    sections.push({
+      heading,
+      rows: [],
+      notes,
+      knownPage: heading in LINKEDIN_SEARCH_URL_LABELS,
+    });
+  }
+  return sections;
+}
+
+function serialize(topNotes: string[], sections: OutputSection[]): string {
+  const lines = [SEED_HEADER, ''];
+  for (const note of topNotes) lines.push(note);
+  if (topNotes.length > 0) lines.push('');
+  lines.push(CHANNEL_HEADING);
+  for (const section of sections) {
+    lines.push(`### ${section.heading}`);
+    if (section.knownPage) {
+      lines.push(
+        `<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${section.heading}.json -->`,
+      );
+    }
     lines.push('');
-    for (const row of byPage.get(page) ?? []) lines.push(`  • ${row.label} - ${row.url}`);
+    for (const note of section.notes) lines.push(note);
+    for (const row of section.rows) lines.push(`  • ${row.label} - ${row.url}`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -210,9 +302,10 @@ export function resolveSearchUrlLabels(rawMarkdown: string): Map<string, string>
 
 export function normalizeSearchUrlsDoc(rawText: string): NormalizeSearchUrlsResult {
   assertNoUnparsedBulletLine(rawText);
-  const rows = parseRows(rawText);
+  const { rows, topNotes, sectionNotes } = parseDoc(rawText);
   const { order, byPage, changes } = classifyAndGroup(rows);
-  const text = serialize(order, byPage);
+  const sections = buildSections(order, byPage, sectionNotes);
+  const text = serialize(topNotes, sections);
   let total = 0;
   for (const pageRows of byPage.values()) total += pageRows.length;
   return { text, changes, total };

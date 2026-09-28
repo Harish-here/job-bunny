@@ -145,7 +145,9 @@ test('B12: rejects a non-http(s) scheme on an otherwise valid host', () => {
 });
 
 test('B12: still accepts a genuine linkedin.com subdomain', () => {
-  const result = classifyLinkedInSearchUrl('https://linkedin.com/jobs/search/?keywords=x');
+  const result = classifyLinkedInSearchUrl(
+    'https://linkedin.com/jobs/search/?keywords=x',
+  );
   assert.equal(result.page, 'linkedin__jobs-search');
 });
 
