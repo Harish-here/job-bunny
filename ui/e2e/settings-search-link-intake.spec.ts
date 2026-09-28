@@ -16,6 +16,7 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 import { FIELD_ERROR_COPY } from '../src/features/settings/sections/searchUrlRow.classify.ts';
+import { serializeSearchUrlRows } from '../src/features/settings/sections/searchUrls.model.ts';
 import { pinProfile } from './run-fixtures';
 import {
   DUPLICATE_MISFILED_URL,
@@ -220,13 +221,21 @@ test('search-url-intake: the card shows a skeleton while search_urls.md is loadi
 
   await page.goto('/#/settings/where-jobs-come-from');
 
+  // B6 fix (QA search-link-intake): the mockup's S1 Loading view keeps the
+  // Search URLs card's own title/helper AND the sibling Lanes card visible
+  // — only the row-list region swaps for skeleton rows, never the whole
+  // section for a bare, unframed skeleton.
+  const card = section(page).locator('[data-qa="search-urls-card"]');
   const skeleton = section(page).locator('[data-qa="search-urls-skeleton"]');
+  await expect(card).toBeVisible();
   await expect(skeleton).toBeVisible();
-  await expect(section(page).locator('[data-qa="search-urls-card"]')).toHaveCount(0);
+  await expect(card.getByText('Search URLs')).toBeVisible();
+  await expect(card.locator('[data-qa="search-urls-helper"]')).toBeVisible();
+  await expect(section(page).locator('[data-qa="where-jobs-lanes-card"]')).toBeVisible();
 
   releaseRoute?.();
   await expect(skeleton).not.toBeVisible();
-  await expect(section(page).locator('[data-qa="search-urls-card"]')).toBeVisible();
+  await expect(card).toBeVisible();
 });
 
 test("search-url-intake: a failed load shows the Couldn't-load alert with a working Retry", async ({
@@ -350,6 +359,97 @@ test('search-url-intake: a re-file that merges duplicates shows one row without 
     const saved = await fetchConfigText(page, 'search_urls.md');
     const occurrences = saved.split(DUPLICATE_MISFILED_URL).length - 1;
     expect(occurrences).toBe(1);
+  } finally {
+    await putConfigText(page, 'search_urls.md', original);
+  }
+});
+
+// B13 (QA search-link-intake): pins the three mockup/ux row states the QA
+// round found untested — typing, real-paste-classifies, and Discard.
+
+test('search-url-intake: typing (not yet blurred) shows no badge and no error', async ({
+  page,
+}) => {
+  const original = await fetchConfigText(page, 'search_urls.md');
+  try {
+    await putConfigText(page, 'search_urls.md', EMPTY_DOC);
+    await page.goto('/#/settings/where-jobs-come-from');
+
+    const row = section(page).locator('[data-qa="search-url-row-0"]');
+    const urlInput = row.locator('[data-qa="search-url-input-0"]');
+    await urlInput.fill('https://www.linkedin.com/jobs/search/?keywords=sre');
+
+    await expect(row.locator('[data-qa="search-url-page-type-badge-0"]')).toHaveCount(0);
+    await expect(row.locator('[data-qa="search-url-error-0"]')).toHaveCount(0);
+    await expect(urlInput).toBeFocused();
+  } finally {
+    await putConfigText(page, 'search_urls.md', original);
+  }
+});
+
+test('search-url-intake: a real paste classifies immediately, badge and cleaned note appearing while still focused', async ({
+  page,
+  context,
+}) => {
+  const original = await fetchConfigText(page, 'search_urls.md');
+  try {
+    await putConfigText(page, 'search_urls.md', EMPTY_DOC);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/#/settings/where-jobs-come-from');
+
+    const row = section(page).locator('[data-qa="search-url-row-0"]');
+    const urlInput = row.locator('[data-qa="search-url-input-0"]');
+    await urlInput.click();
+    await page.evaluate(
+      (text) => navigator.clipboard.writeText(text),
+      'https://www.linkedin.com/jobs/search/?keywords=sre&currentJobId=1',
+    );
+    await urlInput.press('ControlOrMeta+V');
+
+    // Classified and cleaned WHILE the field is still focused — no blur.
+    await expect(urlInput).toBeFocused();
+    await expect(row.locator('[data-qa="search-url-page-type-badge-0"]')).toHaveText(
+      'Jobs search',
+    );
+    await expect(row.locator('[data-qa="search-url-row-note-0"]')).toContainText(
+      'Cleaned',
+    );
+  } finally {
+    await putConfigText(page, 'search_urls.md', original);
+  }
+});
+
+test('search-url-intake: Discard reverts an unsaved row removal', async ({ page }) => {
+  const original = await fetchConfigText(page, 'search_urls.md');
+  try {
+    const SEEDED_ROWS = [
+      {
+        page: 'linkedin__jobs-search' as const,
+        label: 'Comcast SRE',
+        url: 'https://www.linkedin.com/jobs/search/?keywords=sre',
+        touched: true,
+      },
+    ];
+    await putConfigText(page, 'search_urls.md', serializeSearchUrlRows(SEEDED_ROWS));
+    await page.goto('/#/settings/where-jobs-come-from');
+
+    const rows = section(page).locator('[data-qa^="search-url-row"]');
+    await expect(rows).toHaveCount(1);
+    await expect(section(page).locator('[data-qa="search-url-input-0"]')).toHaveValue(
+      'https://www.linkedin.com/jobs/search/?keywords=sre',
+    );
+
+    await section(page).locator('[data-qa="search-url-remove-0"]').click();
+    await expect(rows).toHaveCount(0);
+    await expect(page.getByTestId('save-bar')).toBeVisible();
+
+    await page.getByTestId('discard-button').click();
+
+    await expect(rows).toHaveCount(1);
+    await expect(section(page).locator('[data-qa="search-url-input-0"]')).toHaveValue(
+      'https://www.linkedin.com/jobs/search/?keywords=sre',
+    );
+    await expect(page.getByTestId('save-bar')).toHaveCount(0);
   } finally {
     await putConfigText(page, 'search_urls.md', original);
   }

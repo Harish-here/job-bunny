@@ -7,6 +7,7 @@
 
 import { expect, test } from '@playwright/test';
 import {
+  DAEMON_SETTLE_TIMEOUT_MS,
   type FunnelStage,
   makeRow,
   mountSingleRun,
@@ -14,6 +15,10 @@ import {
   type RunDetailFixture,
   type RunListRow,
   stage,
+  stubEvents,
+  stubIntents,
+  stubRunsList,
+  stubSoftErrors,
 } from './run-fixtures';
 
 test.beforeEach(async ({ page }) => {
@@ -121,5 +126,121 @@ test('run detail: a failed total-outage run shows the existing destructive panel
   await page.goto('/#/runs');
 
   await expect(page.getByTestId('diagnosis-panel')).toBeVisible();
+  await expect(page.getByTestId('rundetail-bad-links-panel')).toHaveCount(0);
+});
+
+// B13 (QA search-link-intake) below — two mockup/ux states the QA round
+// found untested: Copy links (real clipboard write) and S2's run-detail
+// loading/error states showing no bad-links panel.
+
+test('run detail: "Copy links" writes the newline-joined full URLs to the clipboard and flips its label', async ({
+  page,
+  context,
+}) => {
+  const row: RunListRow = {
+    ...makeRow({ id: 504, status: 'passed' }),
+    softErrors: { total: 0, groups: [], breakerOpen: false },
+  };
+  const detail: RunDetailFixture = {
+    ...row,
+    result: {
+      stages: PRODUCED_STAGES,
+      linkSoftErrors: [
+        {
+          url: 'https://www.linkedin.com/jobs/search/?keywords=sre&location=Remote',
+          reason: 'results list never loaded',
+          label: 'Comcast SRE',
+        },
+      ],
+    },
+    failure: null,
+    syncDryrun: null,
+  };
+  await mountSingleRun(page, { row, detail });
+  // Chromium denies `clipboard-write` by default in a fresh Playwright
+  // context (same grant `operate.spec.ts`/`shell.spec.ts` already use for
+  // this exact reason). The spy wraps (never replaces) the real
+  // `writeText` — same idiom as `operate.spec.ts:613-623` — rather than
+  // reading the clipboard back, which those two files' own doc comments
+  // note is the flakier path.
+  await context.grantPermissions(['clipboard-write'], {
+    origin: 'http://127.0.0.1:4199',
+  });
+  await page.addInitScript(() => {
+    const original = navigator.clipboard.writeText.bind(navigator.clipboard);
+    (window as unknown as { __copyCalls: string[] }).__copyCalls = [];
+    navigator.clipboard.writeText = (text: string) => {
+      (window as unknown as { __copyCalls: string[] }).__copyCalls.push(text);
+      return original(text);
+    };
+  });
+
+  await page.goto('/#/runs');
+
+  const panel = page.getByTestId('rundetail-bad-links-panel');
+  // `data-qa`, not `getByRole(..., { name: 'Copy links' })` — that
+  // accessible-name filter stops matching the instant the label flips to
+  // "Copied", so a `toHaveText` assertion against it would wait forever.
+  const copyButton = panel.locator('[data-qa="run-bad-links-copy"]');
+  await copyButton.click();
+
+  await expect(copyButton).toHaveText('Copied');
+  const calls = await page.evaluate(
+    () => (window as unknown as { __copyCalls: string[] }).__copyCalls,
+  );
+  expect(calls).toEqual([
+    'https://www.linkedin.com/jobs/search/?keywords=sre&location=Remote',
+  ]);
+});
+
+test('run detail: loading and error states both show no bad-links panel', async ({
+  page,
+}) => {
+  const row: RunListRow = {
+    ...makeRow({ id: 505, status: 'passed' }),
+    softErrors: { total: 0, groups: [], breakerOpen: false },
+  };
+  await stubIntents(page, []);
+  await stubRunsList(page, [row]);
+  await stubSoftErrors(page, row.id, { total: 0, groups: [], breakerOpen: false });
+  await stubEvents(page, row.id, []);
+
+  let releaseDetail: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let shouldFail = false;
+  await page.route(`**/api/profiles/rajni/runs/${row.id}*`, async (route) => {
+    const url = route.request().url();
+    if (url.includes('/events') || url.includes('/soft-errors')) return route.fallback();
+    await gate;
+    if (shouldFail) {
+      await route.fulfill({
+        status: 500,
+        json: { error: { code: 'server_error', message: 'boom' } },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        ...row,
+        result: { stages: PRODUCED_STAGES },
+        failure: null,
+        syncDryrun: null,
+      },
+    });
+  });
+
+  await page.goto('/#/runs');
+
+  // Loading: the detail fetch hasn't resolved yet — no bad-links panel.
+  await expect(page.getByTestId('rundetail-bad-links-panel')).toHaveCount(0);
+
+  shouldFail = true;
+  releaseDetail?.();
+
+  await expect(page.getByText("Couldn't load this run")).toBeVisible({
+    timeout: DAEMON_SETTLE_TIMEOUT_MS,
+  });
   await expect(page.getByTestId('rundetail-bad-links-panel')).toHaveCount(0);
 });
