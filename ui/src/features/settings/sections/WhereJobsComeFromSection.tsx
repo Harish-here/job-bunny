@@ -295,12 +295,12 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
   // R13 Re-file (spec R13): `buildRefiledRows` (searchUrlsSave.ts) rewrites
   // every misfiled row; PUTs the result directly — bypassing
   // `saveState.save()` entirely, so a Refile never touches `profile.json`
-  // or requires the Lanes card to be valid. On success, `state`/
-  // `savedState` are seeded from the mutation's OWN resolved response via
-  // `reseedRowsFromText` — never from the locally-built rows — the same
-  // PUT-echo fix class as the normal save flow above: a re-file can itself
-  // trigger a merge (two rows misfiled under different headings that land
-  // on the same `page|cleanedUrl` key once corrected).
+  // or requires the Lanes card to be valid. `rows` re-seed both `state`
+  // and `savedState` from the mutation's OWN resolved response (the same
+  // PUT-echo fix as the normal save flow: a re-file can itself trigger a
+  // merge) — but `lanes` is left out of both updates. Folding `state.lanes`
+  // into `savedState` here would silently mark an unsaved lane toggle as
+  // "saved" (isDirty/SaveBar both vanish) for a change Re-file never wrote.
   async function onRefile() {
     setIsRefiling(true);
     try {
@@ -308,9 +308,9 @@ export function WhereJobsComeFromSection({ profile }: { profile: string }) {
       const response = await searchUrlsMutation.mutateAsync(
         serializeSearchUrlRows(refiledRows),
       );
-      const reseeded = { lanes: state.lanes, rows: reseedRowsFromText(response.text) };
-      setState(reseeded);
-      setSavedState(reseeded);
+      const rows = reseedRowsFromText(response.text);
+      setState((s) => ({ ...s, rows }));
+      setSavedState((s) => ({ ...s, rows }));
       setRefileSuccessMessage(
         `Re-filed ${misfiledCount} link${misfiledCount === 1 ? '' : 's'}.`,
       );

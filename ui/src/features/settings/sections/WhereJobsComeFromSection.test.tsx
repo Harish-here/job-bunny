@@ -172,6 +172,56 @@ describe('WhereJobsComeFromSection', () => {
     expect(configApi.putConfigDoc).not.toHaveBeenCalled();
   });
 
+  it('Re-file does not clear a dirty lane toggle or touch profile.json', async () => {
+    // A misfiled row (stored page disagrees with what the URL classifies
+    // as) so the Re-file button renders at all.
+    const MISFILED_ROWS = [
+      {
+        page: 'linkedin__jobs-search-results',
+        label: 'Staff Frontend Engineer',
+        url: 'https://www.linkedin.com/jobs/search/?keywords=staff',
+        touched: true,
+      },
+    ];
+    stubDocs({}, serializeSearchUrlRows(MISFILED_ROWS));
+    vi.mocked(configApi.putConfigDoc).mockResolvedValue({
+      text: serializeSearchUrlRows([
+        {
+          page: 'linkedin__jobs-search',
+          label: 'Staff Frontend Engineer',
+          url: 'https://www.linkedin.com/jobs/search/?keywords=staff',
+          touched: true,
+        },
+      ]),
+    });
+    const user = userEvent.setup();
+    renderSection();
+
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeChecked(),
+    );
+    // Dirty the lanes card only — never clicking the section Save button.
+    await user.click(screen.getByRole('checkbox', { name: 'Greenhouse' }));
+    expect(await screen.findByTestId('save-bar')).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: 'Re-file 1 link' }));
+
+    await waitFor(() =>
+      expect(configApi.putConfigDoc).toHaveBeenCalledWith(
+        'rajni',
+        'search_urls.md',
+        expect.any(String),
+      ),
+    );
+    expect(
+      vi
+        .mocked(configApi.putConfigDoc)
+        .mock.calls.some(([, doc]) => doc === 'profile.json'),
+    ).toBe(false);
+    // The unsaved lane toggle must still show as dirty after Re-file.
+    expect(screen.getByTestId('save-bar')).toBeInTheDocument();
+  });
+
   it('a label-only row with an empty URL never blocks Save', async () => {
     stubDocs();
     vi.mocked(configApi.putConfigDoc).mockResolvedValue({ text: 'ok' });
