@@ -77,6 +77,30 @@ test(
   },
 );
 
+test(
+  'B1: a dirty %20-encoded copy and an already-clean %20-encoded copy of the same ' +
+    'search normalize to the same URL and merge (R10)',
+  () => {
+    const input = doc(
+      'linkedin__jobs-search',
+      '  • Dirty copy - https://www.linkedin.com/jobs/search/?keywords=data%20scientist&currentJobId=123\n' +
+        '  • Clean copy - https://www.linkedin.com/jobs/search/?keywords=data%20scientist\n',
+    );
+    const result = normalizeSearchUrlsDoc(input);
+    assert.equal(result.total, 1);
+
+    const merged = result.changes.filter((c) => c.kind === 'merged');
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]?.label, 'Clean copy');
+    assert.equal(merged[0]?.detail, 'Dirty copy');
+    assert.ok(
+      result.text.includes(
+        'https://www.linkedin.com/jobs/search/?keywords=data%20scientist\n',
+      ),
+    );
+  },
+);
+
 test('(d) unrecognized (but URL-shaped) link throws, message starts "refused: "', () => {
   const input = doc(
     'linkedin__jobs-search',

@@ -81,6 +81,17 @@ function resolvePage(u: URL, rawUrl: string): LinkedInSearchUrlPage {
   throw new UnrecognizedLinkedInSearchUrlError(rawUrl);
 }
 
+/** Decodes a raw (still percent/`+`-encoded) query-string key or value for
+ * comparison purposes only — never used to build output, so it can't
+ * reintroduce the re-encoding bug it's adjacent to. */
+function decodeQueryComponent(raw: string): string {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' '));
+  } catch {
+    return raw;
+  }
+}
+
 /** Classifies a LinkedIn jobs-search URL to its page type and strips
  * ephemeral per-click/session/alert query params (spec R1). Throws
  * `UnrecognizedLinkedInSearchUrlError` for anything that isn't a
@@ -99,27 +110,44 @@ export function classifyLinkedInSearchUrl(
 
   const page = resolvePage(u, rawUrl);
 
+  // Operate on the raw query string, not `u.searchParams` — `URLSearchParams`
+  // rebuilds every surviving pair through application/x-www-form-urlencoded
+  // serialization (e.g. `%20` -> `+`), which re-encodes params the caller never
+  // asked to touch (B1). Splitting/rejoining the raw string keeps every
+  // untouched pair byte-identical and in its original order.
   const removedParams: string[] = [];
-  for (const p of EPHEMERAL_PARAMS) {
-    if (u.searchParams.has(p)) {
-      u.searchParams.delete(p);
-      removedParams.push(p);
-    }
-  }
+  const rawQuery = u.search.startsWith('?') ? u.search.slice(1) : u.search;
+  const pairs = rawQuery.length > 0 ? rawQuery.split('&') : [];
+  const kept: string[] = [];
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=');
+    const rawKey = eq === -1 ? pair : pair.slice(0, eq);
+    const key = decodeQueryComponent(rawKey);
 
-  // A relative window (`r<seconds>`, e.g. `r86400`) is a real filter and stays; an
-  // absolute anchor (`a<epoch>-`, a per-alert "posted after this exact moment" stamp)
-  // goes stale on a recurring search and is stripped.
-  const tpr = u.searchParams.get('f_TPR');
-  if (tpr && /^a\d+/.test(tpr)) {
-    u.searchParams.delete('f_TPR');
-    removedParams.push('f_TPR');
+    if (EPHEMERAL_PARAMS.includes(key)) {
+      removedParams.push(key);
+      continue;
+    }
+
+    // A relative window (`r<seconds>`, e.g. `r86400`) is a real filter and stays; an
+    // absolute anchor (`a<epoch>-`, a per-alert "posted after this exact moment" stamp)
+    // goes stale on a recurring search and is stripped.
+    if (key === 'f_TPR') {
+      const rawValue = eq === -1 ? '' : pair.slice(eq + 1);
+      if (/^a\d+/.test(decodeQueryComponent(rawValue))) {
+        removedParams.push('f_TPR');
+        continue;
+      }
+    }
+
+    kept.push(pair);
   }
+  const cleanedSearch = kept.length > 0 ? `?${kept.join('&')}` : '';
 
   return {
     page,
     label: LINKEDIN_SEARCH_URL_LABELS[page],
-    cleanedUrl: u.toString(),
+    cleanedUrl: `${u.origin}${u.pathname}${cleanedSearch}${u.hash}`,
     removedParams,
   };
 }

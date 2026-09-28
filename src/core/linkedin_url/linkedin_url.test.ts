@@ -94,6 +94,34 @@ test('AC2: strips absolute f_TPR and records it in removedParams', () => {
   assert.deepEqual(result.removedParams, ['f_TPR']);
 });
 
+// B1: query-string re-encoding must not happen. Only the strip-set is removed; every
+// other param — including its original percent-encoding — passes through untouched.
+test('B1: %20 in a surviving param is preserved, not rewritten to +', () => {
+  const result = classifyLinkedInSearchUrl(
+    'https://www.linkedin.com/jobs/search/?keywords=data%20scientist&location=New%20York&currentJobId=123',
+  );
+  assert.equal(
+    result.cleanedUrl,
+    'https://www.linkedin.com/jobs/search/?keywords=data%20scientist&location=New%20York',
+  );
+  assert.deepEqual(result.removedParams, ['currentJobId']);
+});
+
+test('B1: a URL with nothing to strip returns byte-identical input', () => {
+  const input =
+    'https://www.linkedin.com/jobs/search/?keywords=data%20scientist&location=New%20York&f_TPR=r86400';
+  const result = classifyLinkedInSearchUrl(input);
+  assert.equal(result.cleanedUrl, input);
+  assert.deepEqual(result.removedParams, []);
+});
+
+test('B1: surviving param order is preserved exactly (strip in the middle)', () => {
+  const result = classifyLinkedInSearchUrl(
+    'https://www.linkedin.com/jobs/search/?a=1&currentJobId=2&b=3&origin=4&c=5',
+  );
+  assert.equal(result.cleanedUrl, 'https://www.linkedin.com/jobs/search/?a=1&b=3&c=5');
+});
+
 // B12: host check must be exact-or-subdomain, and scheme must be http(s).
 test('B12: rejects a lookalike host (evil-linkedin.com)', () => {
   assert.throws(
