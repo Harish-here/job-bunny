@@ -69,7 +69,12 @@ async function submit(handler: (() => Promise<boolean>) | null): Promise<boolean
 
 beforeEach(() => {
   vi.mocked(getConfigDoc).mockResolvedValue({ text: '' });
-  vi.mocked(writeConfigDocText).mockResolvedValue(undefined);
+  // Realistic default: echoes back the text it was called with, same as the
+  // real PUT-echo response shape — keeps the round-trip test below passing
+  // unmodified while letting the regression test override it for one call.
+  vi.mocked(writeConfigDocText).mockImplementation(async (_profile, _doc, text) => ({
+    text,
+  }));
   vi.mocked(patchProfileConfig).mockResolvedValue(undefined);
 });
 
@@ -150,8 +155,8 @@ describe('Step4Hunt', () => {
     );
 
     expect(screen.getByTestId('wizard-url-warning')).toHaveTextContent(
-      'This looks like a different LinkedIn page type; it will still be saved under ' +
-        'linkedin__jobs-search.',
+      "This looks like a different LinkedIn page type — it'll be filed under its own " +
+        'page type automatically.',
     );
 
     const result = await submit(capture.ref.current);
@@ -442,6 +447,49 @@ describe('Step4Hunt', () => {
       );
       expect(writeConfigDocText).not.toHaveBeenCalled();
       expect(patchProfileConfig).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    'when the PUT response text differs from the sent text (BE normalization, e.g. ' +
+      'stripping an ephemeral param), writtenDocs stores the RESPONSE text, not the ' +
+      'locally-serialized text that was sent',
+    async () => {
+      const capture = makeCapture();
+      const draftRef: { current: WizardDraft } = { current: makeDraft() };
+      render(<Harness registerSubmit={capture.registerSubmit} captureRef={draftRef} />);
+      await fillRow(
+        0,
+        'https://www.linkedin.com/jobs/search/?keywords=backend&currentJobId=123456',
+        'Backend Roles',
+      );
+
+      const sentText = serializeSearchUrls([
+        {
+          label: 'Backend Roles',
+          url: 'https://www.linkedin.com/jobs/search/?keywords=backend&currentJobId=123456',
+        },
+      ]);
+      const CLEANED_TEXT = serializeSearchUrls([
+        {
+          label: 'Backend Roles',
+          url: 'https://www.linkedin.com/jobs/search/?keywords=backend',
+        },
+      ]);
+      vi.mocked(writeConfigDocText).mockImplementationOnce(async () => ({
+        text: CLEANED_TEXT,
+      }));
+
+      const result = await submit(capture.ref.current);
+
+      expect(result).toBe(true);
+      expect(writeConfigDocText).toHaveBeenCalledWith(
+        'wiz-test',
+        'search_urls.md',
+        sentText,
+      );
+      expect(draftRef.current.writtenDocs['search_urls.md']).toBe(CLEANED_TEXT);
+      expect(draftRef.current.writtenDocs['search_urls.md']).not.toBe(sentText);
     },
   );
 });

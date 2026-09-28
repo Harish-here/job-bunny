@@ -210,7 +210,7 @@ describe('Step3About', () => {
     async () => {
       const user = userEvent.setup();
       stubGuardPasses();
-      vi.mocked(wizardApi.writeConfigDocText).mockResolvedValue(undefined);
+      vi.mocked(wizardApi.writeConfigDocText).mockResolvedValue({ text: '' });
       const { getHandler } = renderStep();
 
       await fillValidRequiredFields(user);
@@ -295,7 +295,7 @@ describe('Step3About', () => {
     async () => {
       const user = userEvent.setup();
       stubGuardPasses();
-      vi.mocked(wizardApi.writeConfigDocText).mockResolvedValue(undefined);
+      vi.mocked(wizardApi.writeConfigDocText).mockResolvedValue({ text: '' });
       const onDraftChange = vi.fn();
       const { getHandler, unmount } = renderStep({ onDraftChange });
 
