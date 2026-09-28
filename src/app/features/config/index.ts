@@ -1,3 +1,4 @@
+export type { SearchUrlsSaveReport } from '../../../core/config/search_urls/index.ts';
 export type { BoardProfile } from '../../../ports/board.ts';
 export type { ConfigDocKey } from '../../../ports/config_store.ts';
 export type {
