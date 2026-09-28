@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { FarmingLane, StateStore } from '../../ports/index.ts';
 import type { StageContext, StagePayload } from '../runner/stage.ts';
-import { makeFarmStage } from './farm.ts';
+import { LINK_SOFT_ERRORS_PATH, LinkSoftErrorsSchema, makeFarmStage } from './farm.ts';
 
 function fakeStateStore(): StateStore & {
   store: Map<string, unknown>;
@@ -79,6 +79,7 @@ function makeFakeLane(opts: {
   companiesSeen?: string[];
   throwErr?: Error;
   skipped?: { reason: string };
+  linkSoftErrors?: { url: string; reason: string }[];
 }): FarmingLane {
   return {
     kind: 'farming',
@@ -90,6 +91,7 @@ function makeFakeLane(opts: {
         dropped: (opts.dropped ?? []) as never,
         companiesSeen: opts.companiesSeen ?? [],
         ...(opts.skipped ? { skipped: opts.skipped } : {}),
+        ...(opts.linkSoftErrors ? { linkSoftErrors: opts.linkSoftErrors } : {}),
       };
     },
   };
@@ -372,4 +374,54 @@ test('a skipped lane s own jobs/dropped/companiesSeen are ignored — skipped me
   assert.deepEqual(out.jobs, []);
   assert.deepEqual(out.dropped, []);
   assert.deepEqual(stateStore.store.get('registry/companies_seen.json'), {});
+});
+
+// --- link soft errors side-write (R11) ---
+
+test('link soft errors from an earlier stage-run do not leak into a later stage-run with none', async () => {
+  const stateStore = fakeStateStore();
+
+  const laneWithErrors = makeFakeLane({
+    name: 'linkedin',
+    linkSoftErrors: [{ url: 'https://example.com/bad-1', reason: 'timeout' }],
+  });
+  const firstStage = makeFarmStage([laneWithErrors]);
+  await firstStage.run(emptyPayload(), fakeCtx(stateStore));
+
+  const firstDoc = LinkSoftErrorsSchema.parse(
+    stateStore.store.get(LINK_SOFT_ERRORS_PATH),
+  );
+  assert.deepEqual(firstDoc.links, [
+    { url: 'https://example.com/bad-1', reason: 'timeout' },
+  ]);
+
+  const laneWithoutErrors = makeFakeLane({ name: 'linkedin' });
+  const secondStage = makeFarmStage([laneWithoutErrors]);
+  await secondStage.run(emptyPayload(), fakeCtx(stateStore));
+
+  const secondDoc = LinkSoftErrorsSchema.parse(
+    stateStore.store.get(LINK_SOFT_ERRORS_PATH),
+  );
+  assert.deepEqual(secondDoc.links, []);
+});
+
+test('written link soft errors doc carries a valid ISO writtenAt timestamp captured at write time', async () => {
+  const stateStore = fakeStateStore();
+  const lane = makeFakeLane({
+    name: 'linkedin',
+    linkSoftErrors: [{ url: 'https://example.com/bad-2', reason: 'blocked' }],
+  });
+  const stage = makeFarmStage([lane]);
+
+  const before = Date.now();
+  await stage.run(emptyPayload(), fakeCtx(stateStore));
+  const after = Date.now();
+
+  const doc = LinkSoftErrorsSchema.parse(stateStore.store.get(LINK_SOFT_ERRORS_PATH));
+  const writtenAtMs = Date.parse(doc.writtenAt);
+  assert.ok(!Number.isNaN(writtenAtMs), 'writtenAt must parse as a valid date');
+  assert.ok(
+    writtenAtMs >= before && writtenAtMs <= after,
+    'writtenAt must be captured at write time',
+  );
 });
