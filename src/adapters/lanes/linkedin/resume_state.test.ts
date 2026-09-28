@@ -124,3 +124,40 @@ test('rescanReset clears done (so URLs get rescanned) but never touches a caller
     'job-from-https://example.com/c',
   ]);
 });
+
+test('pickCanaryUrl with an empty done-map returns undefined', async () => {
+  const stateStore = new FakeStateStore();
+  const state = await ResumeState.load(stateStore, '2026-07-21');
+  assert.equal(state.pickCanaryUrl(['https://example.com/a']), undefined);
+});
+
+test('pickCanaryUrl returns undefined when no done url is present in candidateUrls (stale relative to a same-day re-file)', async () => {
+  const stateStore = new FakeStateStore();
+  const state = await ResumeState.load(stateStore, '2026-07-21');
+  state.markDone('https://example.com/a', 3);
+
+  assert.equal(state.pickCanaryUrl(['https://example.com/b']), undefined);
+});
+
+test('pickCanaryUrl prefers a captured>0 entry over a captured===0 entry (chronically barren URL)', async () => {
+  const stateStore = new FakeStateStore();
+  const state = await ResumeState.load(stateStore, '2026-07-21');
+  state.markDone('https://example.com/barren', 0);
+  state.markDone('https://example.com/good', 5);
+
+  assert.equal(
+    state.pickCanaryUrl(['https://example.com/barren', 'https://example.com/good']),
+    'https://example.com/good',
+  );
+});
+
+test('pickCanaryUrl falls back to a captured===0 entry when it is the only one present', async () => {
+  const stateStore = new FakeStateStore();
+  const state = await ResumeState.load(stateStore, '2026-07-21');
+  state.markDone('https://example.com/barren', 0);
+
+  assert.equal(
+    state.pickCanaryUrl(['https://example.com/barren']),
+    'https://example.com/barren',
+  );
+});
