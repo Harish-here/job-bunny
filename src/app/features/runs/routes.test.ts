@@ -152,7 +152,7 @@ function fakeSource(store: BoardStore | null): BoardSource {
     listProfiles: async () => [],
     openStore: async () => store,
     readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),

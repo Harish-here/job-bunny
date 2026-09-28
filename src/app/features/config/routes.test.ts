@@ -68,6 +68,7 @@ function fakeSource(opts: FakeSourceOptions = {}): BoardSource & {
       writeCalls.push({ name, doc, rawText });
       if (opts.writeThrows) throw opts.writeThrows;
       docs.set(doc, rawText);
+      return { text: rawText };
     },
     createProfile: async (name) => {
       createCalls.push(name);

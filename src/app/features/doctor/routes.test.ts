@@ -48,7 +48,7 @@ function fakeSource(runDoctor: BoardSource['runDoctor']): BoardSource {
     listProfiles: async () => [],
     openStore: async () => null,
     readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     runDoctor,
     readDaemonStatus: async () => FAKE_DAEMON_STATUS,

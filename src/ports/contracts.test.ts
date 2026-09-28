@@ -227,6 +227,7 @@ test('a BoardSource satisfies the port and opens a store per profile', async () 
     writeConfigDoc: async (name, doc, rawText) => {
       if (name !== 'rajni') throw new Error(`unknown profile: ${name}`);
       docs.set(doc, rawText);
+      return { text: rawText };
     },
     createProfile: async () => {},
     openIntents: async () => null,
