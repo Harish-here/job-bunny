@@ -61,8 +61,13 @@ const EPHEMERAL_PARAMS = [
 /** Ported unchanged from `lane_add_url.ts:112-127`'s matching logic. Throws
  * `UnrecognizedLinkedInSearchUrlError` (naming the raw input) for anything
  * with no known mapping. */
+function isLinkedInHost(hostname: string): boolean {
+  return hostname === 'linkedin.com' || hostname.endsWith('.linkedin.com');
+}
+
 function resolvePage(u: URL, rawUrl: string): LinkedInSearchUrlPage {
-  if (u.hostname.endsWith('linkedin.com')) {
+  const validScheme = u.protocol === 'https:' || u.protocol === 'http:';
+  if (validScheme && isLinkedInHost(u.hostname)) {
     if (
       /^\/jobs\/search\/?$/.test(u.pathname) ||
       u.pathname.startsWith('/jobs/collections/')

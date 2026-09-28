@@ -94,6 +94,33 @@ test('AC2: strips absolute f_TPR and records it in removedParams', () => {
   assert.deepEqual(result.removedParams, ['f_TPR']);
 });
 
+// B12: host check must be exact-or-subdomain, and scheme must be http(s).
+test('B12: rejects a lookalike host (evil-linkedin.com)', () => {
+  assert.throws(
+    () => classifyLinkedInSearchUrl('https://evil-linkedin.com/jobs/search/'),
+    (err: unknown) => {
+      assert.ok(err instanceof UnrecognizedLinkedInSearchUrlError);
+      assert.equal(err.url, 'https://evil-linkedin.com/jobs/search/');
+      return true;
+    },
+  );
+});
+
+test('B12: rejects a non-http(s) scheme on an otherwise valid host', () => {
+  assert.throws(
+    () => classifyLinkedInSearchUrl('ftp://www.linkedin.com/jobs/search/'),
+    (err: unknown) => {
+      assert.ok(err instanceof UnrecognizedLinkedInSearchUrlError);
+      return true;
+    },
+  );
+});
+
+test('B12: still accepts a genuine linkedin.com subdomain', () => {
+  const result = classifyLinkedInSearchUrl('https://linkedin.com/jobs/search/?keywords=x');
+  assert.equal(result.page, 'linkedin__jobs-search');
+});
+
 // AC3: 3 reject cases — each error's `.url === input` and `.message` starts with `'refused: '`.
 const AC3_CASES = [
   { name: 'recognized-host, unrecognized path', input: 'https://www.linkedin.com/feed/' },
