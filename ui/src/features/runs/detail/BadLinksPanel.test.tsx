@@ -91,6 +91,20 @@ describe('BadLinksPanel — capped list + "+N more"', () => {
     expect(screen.queryByText(/\+\d+ more/)).not.toBeInTheDocument();
   });
 
+  it('B9: "+N more" is a keyboard-accessible disclosure button that reveals the rest', () => {
+    render(<BadLinksPanel links={sixLinks()} />);
+    const toggle = screen.getByRole('button', { name: '+1 more' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(panelList()).getAllByRole('listitem')).toHaveLength(6);
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveTextContent('Show less');
+    // All 6 links now render as their own row, plus the toggle itself.
+    expect(within(panelList()).getAllByRole('listitem')).toHaveLength(7);
+  });
+
   it('each row shows label (or shortened url), the mono shortened url with full-url title, and the reason', () => {
     render(<BadLinksPanel links={TWO_LINKS} />);
     const first = within(panelList()).getAllByRole('listitem')[0] as HTMLElement;

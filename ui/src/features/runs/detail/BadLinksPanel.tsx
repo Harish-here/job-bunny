@@ -52,9 +52,14 @@ export interface BadLinksPanelProps {
  */
 export function BadLinksPanel({ links }: BadLinksPanelProps) {
   const [copied, setCopied] = useState(false);
+  // B9 (QA search-link-intake): "+N more" is a real disclosure, not a
+  // static line — mirrors `DiagnosisPanel.tsx`'s `FallbackEvidence` toggle
+  // idiom (plain `<button>`, `aria-expanded`, no `data-variant` so it never
+  // competes with the panel's own primary action).
+  const [expanded, setExpanded] = useState(false);
   const count = links.length;
-  const visible = links.slice(0, MAX_VISIBLE);
-  const hiddenCount = count - visible.length;
+  const visible = expanded ? links : links.slice(0, MAX_VISIBLE);
+  const hasMore = count > MAX_VISIBLE;
 
   // Mirrors DiagnosisPanel.tsx's `handleCopy` (:201-211) — swallow a denied
   // clipboard permission rather than throw; the links still render, copyable
@@ -99,8 +104,18 @@ export function BadLinksPanel({ links }: BadLinksPanelProps) {
               <span className="text-xs text-muted-foreground">{link.reason}</span>
             </li>
           ))}
-          {hiddenCount > 0 && (
-            <li className="text-xs text-muted-foreground">+{hiddenCount} more</li>
+          {hasMore && (
+            <li>
+              <button
+                type="button"
+                data-qa="run-bad-links-more"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((prev) => !prev)}
+                className="text-xs text-primary underline-offset-4 hover:underline"
+              >
+                {expanded ? 'Show less' : `+${count - MAX_VISIBLE} more`}
+              </button>
+            </li>
           )}
         </ul>
         <div className="mt-2 flex items-center gap-2">
