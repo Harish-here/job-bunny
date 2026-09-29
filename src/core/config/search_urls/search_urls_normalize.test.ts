@@ -295,6 +295,27 @@ test(
   },
 );
 
+test(
+  'a header-less doc keeps a genuine top-of-file user note exactly once ' +
+    '(prefix matching, not positional, must not swallow it as a header line)',
+  () => {
+    const noHeaderInput =
+      'My note: check weekly\n\n' +
+      '## linkedin\n' +
+      '### linkedin__jobs-search\n\n' +
+      '  • Engineer roles - https://www.linkedin.com/jobs/search/?keywords=engineer\n';
+
+    const first = normalizeSearchUrlsDoc(noHeaderInput);
+    const noteLines = first.text.split('\n').filter((l) => l === 'My note: check weekly');
+    assert.equal(noteLines.length, 1);
+    assert.ok(first.text.includes('# Search URLs')); // header still regenerated fresh
+
+    const second = normalizeSearchUrlsDoc(first.text);
+    assert.equal(second.text, first.text);
+    assert.deepEqual(second.changes, []);
+  },
+);
+
 test('resolveSearchUrlLabels keys by cleaned URL, first occurrence wins, never throws', () => {
   const input = doc(
     'linkedin__jobs-search',

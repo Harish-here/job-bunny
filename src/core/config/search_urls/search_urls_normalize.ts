@@ -68,15 +68,21 @@ interface ParsedDoc {
 }
 
 // The header is regenerated unconditionally by `serialize()` (like the channel
-// heading, page headings, and inventory comments below) — so it must be matched
-// POSITIONALLY, not by exact text equality against the current SEED_HEADER
-// constant. A stored doc predating a header wording change (e.g. an old
-// `.md`-suffixed page_inventory reference where the current constant says
-// `.json`) would otherwise fail the equality check, fall through into
-// `topNotes`, and get preserved verbatim ALONGSIDE the freshly-regenerated
-// header — duplicating it. Consuming exactly as many leading non-blank lines
-// as SEED_HEADER itself has, regardless of their content, avoids that.
-const HEADER_LINE_COUNT = SEED_HEADER.split('\n').filter((l) => l !== '').length;
+// heading, page headings, and inventory comments below) — so a pre-channel line
+// is recognized as "the header" by matching one of its three fixed shapes (by
+// PREFIX, not full-text equality), never positionally. A stored doc predating a
+// header wording change (e.g. an old `.md`-suffixed page_inventory reference
+// where the current constant says `.json`) still matches the shared prefix and
+// gets discarded/regenerated rather than duplicated. Prefix matching (as opposed
+// to a positional leading-N-lines count) also means a header-LESS doc's own
+// genuine user note ahead of the channel heading (B11) is never mistaken for a
+// header line just because of where it sits — it's kept only if it doesn't
+// start like one of these three. Each shape is consumed at most once.
+const HEADER_LINE_SHAPES: ((line: string) => boolean)[] = [
+  (line) => line === '# Search URLs',
+  (line) => line.startsWith('Hierarchical: Channel → page → labeled URLs.'),
+  (line) => line.startsWith('Add URLs with `/add-url`'),
+];
 
 // B11: everything that isn't a bullet, a blank line, or a structural line the
 // normalizer regenerates itself (the SEED_HEADER block, the `## linkedin` channel
@@ -87,7 +93,7 @@ function parseDoc(md: string): ParsedDoc {
   const rows: ParsedRow[] = [];
   const topNotes: string[] = [];
   const sectionNotes = new Map<string, string[]>();
-  let headerLinesRemaining = HEADER_LINE_COUNT;
+  const consumedHeaderShapes = new Set<number>();
   let currentSection: string | null = null;
   let seenChannelHeading = false;
 
@@ -98,8 +104,18 @@ function parseDoc(md: string): ParsedDoc {
     if (!seenChannelHeading) {
       if (line === CHANNEL_HEADING) {
         seenChannelHeading = true;
-      } else if (headerLinesRemaining > 0) {
-        headerLinesRemaining--; // positional header line — regenerated, never kept
+        continue;
+      }
+      let shapeIndex = -1;
+      for (let i = 0; i < HEADER_LINE_SHAPES.length; i++) {
+        const shape = HEADER_LINE_SHAPES[i];
+        if (shape && !consumedHeaderShapes.has(i) && shape(line)) {
+          shapeIndex = i;
+          break;
+        }
+      }
+      if (shapeIndex !== -1) {
+        consumedHeaderShapes.add(shapeIndex); // header line — regenerated, never kept
       } else {
         topNotes.push(raw); // ahead of the channel heading, not part of the header
       }
