@@ -86,10 +86,11 @@ test(
 
     const merged = result.changes.filter((c) => c.kind === 'merged');
     assert.equal(merged.length, 1);
-    assert.equal(merged[0]?.label, 'Duplicate search');
-    assert.equal(merged[0]?.detail, 'Primary search');
+    assert.ok(merged[0]);
+    assert.equal(merged[0].label, 'Duplicate search');
+    assert.equal(merged[0].detail, 'Primary search');
 
-    const line = formatSearchUrlChangeLine(merged[0]!);
+    const line = formatSearchUrlChangeLine(merged[0]);
     assert.equal(line, 'merged Duplicate search into Primary search');
     assert.equal(line.split('merged').length - 1, 1);
   },
@@ -263,6 +264,36 @@ test('buildSearchUrlsSaveReport counts changes by kind', () => {
   assert.equal(report.merged, result.changes.filter((c) => c.kind === 'merged').length);
   assert.deepEqual(report.changes, result.changes);
 });
+
+test(
+  'a stale header (old `.md` page_inventory wording) is regenerated, not duplicated ' +
+    'alongside the current SEED_HEADER — round-trips idempotently, exactly one ' +
+    '"Hierarchical:" line',
+  () => {
+    const staleHeaderInput =
+      '# Search URLs\n\n' +
+      'Hierarchical: Channel → page → labeled URLs. One page-type = one inventory ' +
+      'in `src/adapters/lanes/linkedin/page_inventory/<page>.md`; many URLs may live ' +
+      'beneath it.\n' +
+      'Add URLs with `/add-url` (strips ephemeral params). Format: `  • <label> - <url>`\n\n' +
+      '## linkedin\n' +
+      '### linkedin__jobs-search\n' +
+      '<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.md -->\n\n' +
+      '  • Staff Frontend Engineer - https://www.linkedin.com/jobs/search/' +
+      '?keywords=Staff+Frontend+Engineer&f_TPR=r86400&sortBy=R\n';
+
+    const first = normalizeSearchUrlsDoc(staleHeaderInput);
+    const hierarchicalLines = first.text
+      .split('\n')
+      .filter((l) => l.startsWith('Hierarchical:'));
+    assert.equal(hierarchicalLines.length, 1);
+    assert.equal(first.text.split('# Search URLs').length - 1, 1);
+
+    const second = normalizeSearchUrlsDoc(first.text);
+    assert.equal(second.text, first.text);
+    assert.deepEqual(second.changes, []);
+  },
+);
 
 test('resolveSearchUrlLabels keys by cleaned URL, first occurrence wins, never throws', () => {
   const input = doc(

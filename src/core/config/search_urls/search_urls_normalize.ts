@@ -67,6 +67,17 @@ interface ParsedDoc {
   sectionNotes: Map<string, string[]>;
 }
 
+// The header is regenerated unconditionally by `serialize()` (like the channel
+// heading, page headings, and inventory comments below) — so it must be matched
+// POSITIONALLY, not by exact text equality against the current SEED_HEADER
+// constant. A stored doc predating a header wording change (e.g. an old
+// `.md`-suffixed page_inventory reference where the current constant says
+// `.json`) would otherwise fail the equality check, fall through into
+// `topNotes`, and get preserved verbatim ALONGSIDE the freshly-regenerated
+// header — duplicating it. Consuming exactly as many leading non-blank lines
+// as SEED_HEADER itself has, regardless of their content, avoids that.
+const HEADER_LINE_COUNT = SEED_HEADER.split('\n').filter((l) => l !== '').length;
+
 // B11: everything that isn't a bullet, a blank line, or a structural line the
 // normalizer regenerates itself (the SEED_HEADER block, the `## linkedin` channel
 // heading, a `### <page>` heading, or its auto-generated inventory comment) is a
@@ -76,7 +87,7 @@ function parseDoc(md: string): ParsedDoc {
   const rows: ParsedRow[] = [];
   const topNotes: string[] = [];
   const sectionNotes = new Map<string, string[]>();
-  const headerLines = new Set(SEED_HEADER.split('\n'));
+  let headerLinesRemaining = HEADER_LINE_COUNT;
   let currentSection: string | null = null;
   let seenChannelHeading = false;
 
@@ -87,7 +98,9 @@ function parseDoc(md: string): ParsedDoc {
     if (!seenChannelHeading) {
       if (line === CHANNEL_HEADING) {
         seenChannelHeading = true;
-      } else if (!headerLines.has(line)) {
+      } else if (headerLinesRemaining > 0) {
+        headerLinesRemaining--; // positional header line — regenerated, never kept
+      } else {
         topNotes.push(raw); // ahead of the channel heading, not part of the header
       }
       continue;
