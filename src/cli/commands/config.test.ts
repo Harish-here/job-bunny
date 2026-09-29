@@ -43,6 +43,22 @@ function fakeConfigStore(
   return store;
 }
 
+/** `search_urls.md` fixture builder — same shape as `search_urls_save.
+ * test.ts`'s `doc()` helper (AC6's misfiled+dirty / unrecognized-link
+ * cases need a real parseable doc, not a bare string). */
+const SEARCH_URLS_HEADER =
+  '# Search URLs\n\n' +
+  'Hierarchical: Channel → page → labeled URLs.\n' +
+  'Add URLs with `/add-url` (strips ephemeral params). Format: `  • <label> - <url>`';
+
+function searchUrlsDoc(page: string, body: string): string {
+  return (
+    `${SEARCH_URLS_HEADER}\n\n## linkedin\n### ${page}\n` +
+    `<!-- inventory: src/adapters/lanes/linkedin/page_inventory/${page}.json -->\n\n` +
+    body
+  );
+}
+
 function baseDeps(overrides: Partial<ConfigDeps> = {}): Partial<ConfigDeps> {
   return {
     write: () => {},
@@ -151,6 +167,78 @@ test('config set: invalid doc (writeText throws) reports the thrown message on s
   assert.equal(code, 1);
   assert.ok(errors.some((l) => l.includes('bad shape')));
 });
+
+test(
+  'config set: search_urls.md routes through saveSearchUrlsDoc — misfiled+dirty ' +
+    'link prints byte-exact re-filed/cleaned lines and exits 0 (AC6)',
+  async () => {
+    const store = fakeConfigStore();
+    const written: string[] = [];
+
+    const code = await configCommand(
+      { profile: 'rajni', action: 'set', doc: 'search_urls.md' },
+      baseDeps({
+        configStore: () => store,
+        isStdinTty: () => false,
+        readStdin: async () =>
+          searchUrlsDoc(
+            'linkedin__jobs-search',
+            '  • Remote roles - https://www.linkedin.com/jobs/search-results/' +
+              '?keywords=data&currentJobId=123\n',
+          ),
+        write: (line) => written.push(line),
+      }),
+    );
+
+    assert.equal(code, 0);
+    assert.deepEqual(written, [
+      'cleaned Remote roles: removed currentJobId',
+      're-filed Remote roles: Jobs search → Search results',
+    ]);
+    const stored = await store.readText('search_urls.md');
+    assert.ok(stored?.includes('### linkedin__jobs-search-results'));
+    assert.ok(!stored?.includes('currentJobId'));
+  },
+);
+
+test(
+  'config set: search_urls.md unrecognized link exits non-zero and leaves the ' +
+    'stored doc unchanged (AC6)',
+  async () => {
+    const original = searchUrlsDoc(
+      'linkedin__jobs-search',
+      '  • Real - https://www.linkedin.com/jobs/search/?keywords=data\n',
+    );
+    const store = fakeConfigStore({ 'search_urls.md': original });
+    const errors: string[] = [];
+
+    const code = await configCommand(
+      { profile: 'rajni', action: 'set', doc: 'search_urls.md' },
+      baseDeps({
+        configStore: () => store,
+        isStdinTty: () => false,
+        readStdin: async () =>
+          searchUrlsDoc(
+            'linkedin__jobs-search',
+            '  • Bad - https://example.com/not-linkedin\n',
+          ),
+        stderr: (line) => errors.push(line),
+      }),
+    );
+
+    assert.equal(code, 1);
+    assert.ok(errors.some((l) => l.startsWith('refused: ')));
+
+    const written: string[] = [];
+    const getCode = await configCommand(
+      { profile: 'rajni', action: 'get', doc: 'search_urls.md' },
+      baseDeps({ configStore: () => store, writeRaw: (t) => written.push(t) }),
+    );
+
+    assert.equal(getCode, 0);
+    assert.equal(written[0], original);
+  },
+);
 
 // ---------- export ----------
 

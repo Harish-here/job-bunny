@@ -19,6 +19,8 @@
 import { constants } from 'node:fs';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { saveSearchUrlsDoc } from '../../app/features/config/index.ts';
+import { formatSearchUrlChangeLine } from '../../core/config/search_urls/index.ts';
 import type { ConfigStore } from '../../ports/config_store.ts';
 import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
@@ -130,6 +132,15 @@ async function runSet(opts: ConfigCommandOptions, deps: ConfigDeps): Promise<num
   const content = await deps.readStdin();
   const store = deps.configStore(opts.profile);
   try {
+    if (doc === 'search_urls.md') {
+      // The true single call site (spec R3/R4/R9/R10, AC6) — shared with
+      // the board's write path (task 7), never re-implemented inline here.
+      const result = await saveSearchUrlsDoc(store, content);
+      for (const change of result.report.changes) {
+        deps.write(formatSearchUrlChangeLine(change));
+      }
+      return 0;
+    }
     await store.writeText(doc, content);
     return 0;
   } catch (err) {

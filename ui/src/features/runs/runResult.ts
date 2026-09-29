@@ -87,6 +87,30 @@ export function getBiggestDrop(
   return biggest;
 }
 
+export interface LinkSoftError {
+  url: string;
+  label?: string;
+  reason: string;
+}
+
+function isLinkSoftError(value: unknown): value is LinkSoftError {
+  return (
+    isRecord(value) &&
+    typeof value.url === 'string' &&
+    typeof value.reason === 'string' &&
+    (value.label === undefined || typeof value.label === 'string')
+  );
+}
+
+/** Returns `RunDetail.result.linkSoftErrors`, filtering out any malformed
+ * entries (valid siblings survive). `[]` when the field is absent/malformed —
+ * matches "no panel" being the natural, zero-special-casing default at the
+ * call site (`array.length > 0` gate, no null check needed). */
+export function getLinkSoftErrors(result: unknown): LinkSoftError[] {
+  if (!isRecord(result) || !Array.isArray(result.linkSoftErrors)) return [];
+  return result.linkSoftErrors.filter(isLinkSoftError);
+}
+
 /** Aggregate retention over a funnel, after excluding `reconcile` and `farm`
  * by name (see `RETENTION_EXCLUDED_STAGES`) — both are state-sync/additive
  * stages with no meaningful in→out yield, so including them would skew the

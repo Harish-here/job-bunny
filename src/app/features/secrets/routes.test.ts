@@ -56,7 +56,7 @@ function fakeSource(presence: SecretPresence): BoardSource & {
     listProfiles: async () => [],
     openStore: async () => null,
     readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     openIntents: async () => null,
     listSecrets: async () => presence,

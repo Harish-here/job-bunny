@@ -132,3 +132,103 @@ test('formatDigest: omitted catchupSlots is byte-identical to the pre-T5 output 
   assert.equal(withoutOpt, withEmptyArray);
   assert.doesNotMatch(withoutOpt, /CATCH-UP RUN/);
 });
+
+// R11 (Should) — ux-notes.md §5 / mockup.html:638-641 literal block, placed after
+// the funnel block on a passed run with soft-failed search links.
+test('formatDigest: a passed run with linkSoftErrors renders the exact UX §5 block after the funnel', () => {
+  const text = formatDigest(
+    passedResult({
+      linkSoftErrors: [
+        {
+          url: 'https://www.linkedin.com/jobs/search-results/?keywords=sre',
+          label: 'Comcast SRE',
+          reason: 'results list never loaded',
+        },
+        {
+          url: 'https://www.linkedin.com/jobs/search-results/?keywords=zafin',
+          label: 'Zafin',
+          reason: 'results list never loaded',
+        },
+      ],
+    }),
+  );
+  const expectedBlock = [
+    '⚠️ 2 search links failed — LinkedIn is fine (an earlier link still loads):',
+    '  • Comcast SRE — results list never loaded',
+    '  • Zafin — results list never loaded',
+    'Fix: board → Settings → Where jobs come from',
+  ].join('\n');
+  assert.equal(text.endsWith(expectedBlock), true);
+  // directly after the last funnel line, no blank line in between
+  const funnelLastLine =
+    '  • filter: 40 → 12 (dropped — avoidCompany: 5, staleLocation: 3)';
+  assert.match(
+    text,
+    new RegExp(
+      `${funnelLastLine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n⚠️ 2 search links failed`,
+    ),
+  );
+});
+
+test('formatDigest: absent when linkSoftErrors is missing or empty (no block, no trailing noise)', () => {
+  const withoutField = formatDigest(passedResult());
+  const withEmptyArray = formatDigest(passedResult({ linkSoftErrors: [] }));
+  assert.doesNotMatch(withoutField, /search link.*failed/);
+  assert.doesNotMatch(withoutField, /Fix: board/);
+  assert.doesNotMatch(withEmptyArray, /search link.*failed/);
+});
+
+test('formatDigest: singular count reads "1 search link failed"', () => {
+  const text = formatDigest(
+    passedResult({
+      linkSoftErrors: [
+        { url: 'https://linkedin.com/jobs/x', label: 'X', reason: 'timed out' },
+      ],
+    }),
+  );
+  assert.match(text, /⚠️ 1 search link failed — LinkedIn is fine/);
+});
+
+test('formatDigest: labelless entries fall back to a shortened URL', () => {
+  const text = formatDigest(
+    passedResult({
+      linkSoftErrors: [
+        {
+          url: 'https://www.linkedin.com/jobs/search-results/Remote',
+          reason: 'results list never loaded',
+        },
+      ],
+    }),
+  );
+  assert.match(text, /• linkedin\.com\/.*Remote — results list never loaded/);
+});
+
+test('formatDigest: lists up to 5 entries then "+N more" for a 7-entry list', () => {
+  const linkSoftErrors = Array.from({ length: 7 }, (_, i) => ({
+    url: `https://linkedin.com/jobs/x${i}`,
+    label: `Link ${i}`,
+    reason: 'results list never loaded',
+  }));
+  const text = formatDigest(passedResult({ linkSoftErrors }));
+  const bulletCount = (text.match(/^ {2}• Link \d+ —/gm) ?? []).length;
+  assert.equal(bulletCount, 5);
+  assert.match(text, /\+2 more/);
+  assert.doesNotMatch(text, /Link 5/);
+  assert.doesNotMatch(text, /Link 6/);
+});
+
+test('formatDigest: linkSoftErrors on a failed outcome is byte-identical to today (block never renders)', () => {
+  const withoutField = formatDigest(
+    passedResult({ outcome: 'failed', failedStage: 'filter' }),
+  );
+  const withField = formatDigest(
+    passedResult({
+      outcome: 'failed',
+      failedStage: 'filter',
+      linkSoftErrors: [
+        { url: 'https://linkedin.com/jobs/x', label: 'X', reason: 'timed out' },
+      ],
+    }),
+  );
+  assert.equal(withField, withoutField);
+});

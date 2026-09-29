@@ -77,7 +77,7 @@ function fakeSource(mode: Mode): BoardSource {
     listProfiles: async () => [{ name: 'rajni', connector: 'sqlite', hasDb: true }],
     openStore: async () => null,
     readConfigDoc: async () => JSON.stringify({}),
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),

@@ -17,6 +17,11 @@ export const RunResultSchema = z.object({
       dropsByRule: z.record(z.string(), z.number()), // the funnel
     }),
   ),
+  linkSoftErrors: z
+    .array(
+      z.object({ url: z.string(), label: z.string().optional(), reason: z.string() }),
+    )
+    .optional(),
 });
 
 export type RunResult = z.infer<typeof RunResultSchema>;

@@ -74,6 +74,8 @@ import {
   SqliteCheckpointStore,
   SqliteRunIntentStore,
 } from '../../adapters/db/sqlite/index.ts';
+import { saveSearchUrlsDoc } from '../../app/features/config/index.ts';
+import type { SearchUrlsSaveReport } from '../../core/config/search_urls/index.ts';
 import type {
   AutostartOutcome,
   BoardProfile,
@@ -219,7 +221,7 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       name: string,
       doc: ConfigDocKey,
       rawText: string,
-    ): Promise<void> {
+    ): Promise<{ text: string; report?: SearchUrlsSaveReport }> {
       const infos = await listProfileInfos(root);
       if (!infos.some((p) => p.name === name)) {
         throw new Error(`unknown profile: ${name}`);
@@ -227,7 +229,15 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
 
       const store = wireConfigStore(name, { root, liftMode: 'readwrite' });
       try {
+        if (doc === 'search_urls.md') {
+          // MUST await — letting this resolve after `finally`'s
+          // `store.close()` would close the underlying db handle mid-write
+          // (`saveSearchUrlsDoc`'s own internal `writeText` await hasn't
+          // settled yet without this).
+          return await saveSearchUrlsDoc(store, rawText);
+        }
         await store.writeText(doc, rawText);
+        return { text: rawText };
       } finally {
         store.close();
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  isSlugCovered,
+  isPageCovered,
   parseSearchUrlRows,
   serializeSearchUrlRows,
 } from './searchUrls.model';
@@ -25,27 +25,30 @@ const RAJNI_SHAPE =
   ].join('\n') + '\n';
 
 describe('parseSearchUrlRows', () => {
-  it('extracts label/url rows under their ### slug', () => {
+  it('extracts label/url rows under their ### page, all touched', () => {
     const rows = parseSearchUrlRows(RAJNI_SHAPE);
     expect(rows).toEqual([
       {
-        slug: 'linkedin__jobs-search',
+        page: 'linkedin__jobs-search',
         label: 'Staff Frontend Engineer',
         url: 'https://www.linkedin.com/jobs/search/?keywords=Staff+Frontend+Engineer&f_TPR=r86400',
+        touched: true,
       },
       {
-        slug: 'linkedin__jobs-search',
+        page: 'linkedin__jobs-search',
         label: 'Lead Frontend Engineer',
         url: 'https://www.linkedin.com/jobs/search/?keywords=Lead+Frontend+Engineer&f_TPR=r86400',
+        touched: true,
       },
     ]);
+    expect(rows.every((row) => row.touched)).toBe(true);
   });
 
   it('parses a bullet using * and one using -', () => {
     const text = '### s\n* A - https://a.example\n- B - https://b.example\n';
     expect(parseSearchUrlRows(text)).toEqual([
-      { slug: 's', label: 'A', url: 'https://a.example' },
-      { slug: 's', label: 'B', url: 'https://b.example' },
+      { page: 's', label: 'A', url: 'https://a.example', touched: true },
+      { page: 's', label: 'B', url: 'https://b.example', touched: true },
     ]);
   });
 
@@ -57,7 +60,7 @@ describe('parseSearchUrlRows', () => {
   it('drops a group with zero URLs, and returns [] for empty text', () => {
     const text = '### empty-group\n### s\n  • A - https://a.example\n';
     expect(parseSearchUrlRows(text)).toEqual([
-      { slug: 's', label: 'A', url: 'https://a.example' },
+      { page: 's', label: 'A', url: 'https://a.example', touched: true },
     ]);
     expect(parseSearchUrlRows('')).toEqual([]);
   });
@@ -72,22 +75,59 @@ describe('serializeSearchUrlRows', () => {
 
   it('emits the .json inventory extension regardless of the source doc', () => {
     const text = serializeSearchUrlRows([
-      { slug: 'linkedin__jobs-search', label: 'A', url: 'https://a.example' },
+      {
+        page: 'linkedin__jobs-search',
+        label: 'A',
+        url: 'https://a.example',
+        touched: true,
+      },
     ]);
     expect(text).toContain(
       '<!-- inventory: src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json -->',
     );
     expect(text).not.toContain('.md -->');
   });
+
+  // N5 regression: a row with a label but an empty url serializes to a
+  // bullet line with no URL after the trailing " - ", which the shared
+  // bullet-line grammar's regex does not match on either side — so the row
+  // is silently absent from what either side re-parses as a "row."
+  it('drops a label-only row (empty url) on round-trip, keeping the rest', () => {
+    const rows = [
+      {
+        page: 'linkedin__jobs-search',
+        label: 'Foo',
+        url: '',
+        touched: true,
+      },
+      {
+        page: 'linkedin__jobs-search',
+        label: 'Bar',
+        url: 'https://b.example',
+        touched: true,
+      },
+    ];
+    const text = serializeSearchUrlRows(rows);
+    const reparsed = parseSearchUrlRows(text);
+    expect(reparsed.some((row) => row.label === 'Foo')).toBe(false);
+    expect(reparsed).toEqual([
+      {
+        page: 'linkedin__jobs-search',
+        label: 'Bar',
+        url: 'https://b.example',
+        touched: true,
+      },
+    ]);
+  });
 });
 
-describe('isSlugCovered', () => {
+describe('isPageCovered', () => {
   it('covers the two known LinkedIn job-search page types', () => {
-    expect(isSlugCovered('linkedin__jobs-search')).toBe(true);
-    expect(isSlugCovered('linkedin__jobs-search-results')).toBe(true);
+    expect(isPageCovered('linkedin__jobs-search')).toBe(true);
+    expect(isPageCovered('linkedin__jobs-search-results')).toBe(true);
   });
 
-  it('flags any other slug as uncovered', () => {
-    expect(isSlugCovered('linkedin__some-new-page')).toBe(false);
+  it('flags any other page as uncovered', () => {
+    expect(isPageCovered('linkedin__some-new-page')).toBe(false);
   });
 });
