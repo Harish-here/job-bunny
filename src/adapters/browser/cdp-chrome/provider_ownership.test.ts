@@ -73,9 +73,10 @@ function setup(opts: {
   return { provider, calls };
 }
 
-test('ours + no pid file: attaches, never kills or launches', async () => {
+test('ours + no pid file: attaches; neither launch nor close() ever kills or spawns', async () => {
   const { provider, calls } = setup({ actualDir: OUR_DIR, pidfile: undefined });
-  await provider.launch(ctx());
+  const handle = await provider.launch(ctx());
+  await handle.close();
   assert.deepEqual([calls.connect, calls.launch, calls.kill], [1, 0, 0]);
   assert.deepEqual(calls.reads, [WS]);
 });

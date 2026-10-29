@@ -29,17 +29,12 @@ import {
  * deadline-bound behavior lives in ./handles/page_handle.ts.
  *
  * Chrome lifecycle mirrors scripts/lib/browser.js's proven, hard-won
- * ensureChrome pattern, now sourced from a pid file rather than lsof/ps
- * (D12):
+ * ensureChrome pattern, now sourced from a pid file rather than lsof/ps (D12):
  *  - launch() ALWAYS probes CDP reachability (bounded fetch of
  *    `${cdpUrl}/json/version`) before spawning. Unreachable => spawn fresh.
- *    Reachable => FIRST prove the Chrome runs OUR user-data-dir
- *    (./foreign/ownership.ts); a foreign one throws ForeignChromeError —
- *    never attach, kill, or launch over it. Ours + no live pid file =>
- *    attach, never recycle/kill (before decideChromeAction is consulted).
- *    Ours + live pid file => age = pidfileDeps.now() - startedAt, fed into
- *    decideChromeAction: 'reuse' if <= maxAgeMs, else 'recycle' (kill via
- *    the pid file's pid, then respawn).
+ *    Reachable => first prove it runs OUR user-data-dir (./foreign/ownership.ts;
+ *    foreign => ForeignChromeError, never attach/kill/launch). Ours: no live
+ *    pid file => attach, never recycle/kill; else age feeds decideChromeAction.
  *  - The pid file is written by launchChrome from spawn()'s pid; close()
  *    kills exactly that pid — see ./handles/browser_handle.ts's class doc.
  */
@@ -166,8 +161,7 @@ export interface CdpChromeProviderDeps {
    * kill. Injectable so tests never touch the real filesystem or process
    * table. Default: defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;
-  /** Ownership-proof deps (CDP SystemInfo.getInfo user-data-dir read).
-   * Injectable so tests never open a real WebSocket. */
+  /** Ownership-proof deps (CDP user-data-dir read); injectable for tests. */
   ownership?: OwnershipDeps;
   /** Recycle (kill + respawn, same user-data-dir) a reachable Chrome once
    * it's older than this, instead of reusing it indefinitely. Default:
@@ -237,7 +231,6 @@ export class CdpChromeProvider implements BrowserProvider {
       return this.spawnAndConnect(cdpUrl, ctx);
     }
 
-    // Throws ForeignChromeError before any branch below can connect or kill.
     await assertOurChrome({
       version,
       port: this.port,
@@ -263,9 +256,8 @@ export class CdpChromeProvider implements BrowserProvider {
       );
     }
 
-    // pidfileDeps.now() is the single clock for both sides of the pid file
-    // (launchChrome stamps startedAt, launch() ages it), keeping tests
-    // wall-clock-independent.
+    // pidfileDeps.now() is the single clock for both pid-file sides
+    // (stamp + age), keeping tests wall-clock-independent.
     const ageMs = this.pidfileDeps.now().getTime() - Date.parse(pidfile.startedAt);
     const action = decideChromeAction({
       reachable: true,

@@ -752,31 +752,6 @@ test('newPage() falls back to newContext() when the browser reports no contexts'
   assert.equal(createdContext, true);
 });
 
-test('launch() attaches (reuse) to a reachable Chrome with no live pid file, and close() never kills it (ownsProcess === false)', async () => {
-  const launcher = fakeLauncher(4242);
-  const killCalls: unknown[] = [];
-  const provider = new CdpChromeProvider({
-    launchChrome: launcher.launchChrome,
-    ...ownedChrome(),
-    pidfileDeps: fakePidfileDeps({ exists: false }),
-    killChrome: (pid) => {
-      killCalls.push(pid);
-      return true;
-    },
-    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
-  });
-
-  const handle = await provider.launch(fakeCtx());
-  await handle.close();
-
-  assert.equal(
-    launcher.calls.length,
-    0,
-    'expected no spawn — Chrome is already reachable',
-  );
-  assert.deepEqual(killCalls, [], 'expected close() never to kill an unowned Chrome');
-});
-
 test('close() kills the freshly-respawned Chrome pid after a recycle — this run owns the new process, not the old one', async () => {
   const launcher = fakeLauncher(8888);
   const killCalls: unknown[] = [];
