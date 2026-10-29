@@ -3,6 +3,11 @@ import { sleep } from '../../../core/async/index.ts';
 import type { BrowserHandle, BrowserProvider } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
 import { disposeWhenSettled, raceWithTimeout } from './async/index.ts';
+import {
+  assertOurChrome,
+  defaultOwnershipDeps,
+  type OwnershipDeps,
+} from './foreign/index.ts';
 import { CdpChromeBrowserHandle } from './handles/index.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import {
@@ -24,24 +29,14 @@ import {
  * deadline-bound behavior lives in ./handles/page_handle.ts.
  *
  * Chrome lifecycle mirrors scripts/lib/browser.js's proven, hard-won
- * ensureChrome pattern, now sourced from a pid file rather than lsof/ps
- * (D12):
+ * ensureChrome pattern, now sourced from a pid file rather than lsof/ps (D12):
  *  - launch() ALWAYS probes CDP reachability (bounded fetch of
- *    `${cdpUrl}/json/version`) before spawning. Unreachable => spawn fresh
- *    (action 'launch'). Reachable + no live pid file (.chrome-debug/
- *    .jobbunny-chrome.json) => this Chrome was not spawned by this
- *    codebase — attach (reuse), never recycle, never kill; this check
- *    happens BEFORE decideChromeAction is consulted at all. Reachable +
- *    live pid file => age is pidfileDeps.now() - pidfile.startedAt (the
- *    same injected clock launchChrome stamped startedAt with), fed into
- *    decideChromeAction exactly as before: 'reuse' if <= maxAgeMs,
- *    'recycle' (kill via the pid file's pid, then respawn) if older.
- *  - The pid file is written by launchChrome itself, from the pid
- *    spawn() returned — never re-resolved via an OS tool. close() kills
- *    exactly that pid (the one this run spawned, recorded at handle
- *    construction time), not a freshly re-resolved "whoever is listening
- *    on the port now" — see ./handles/browser_handle.ts's class doc for the
- *    close()/ownsProcess rules this feeds.
+ *    `${cdpUrl}/json/version`) before spawning. Unreachable => spawn fresh.
+ *    Reachable => first prove it runs OUR user-data-dir (./foreign/ownership.ts;
+ *    foreign => ForeignChromeError, never attach/kill/launch). Ours: no live
+ *    pid file => attach, never recycle/kill; else age feeds decideChromeAction.
+ *  - The pid file is written by launchChrome from spawn()'s pid; close()
+ *    kills exactly that pid — see ./handles/browser_handle.ts's class doc.
  */
 
 /** Minimal playwright Page surface this adapter drives — narrow so fakes in
@@ -166,6 +161,8 @@ export interface CdpChromeProviderDeps {
    * kill. Injectable so tests never touch the real filesystem or process
    * table. Default: defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;
+  /** Ownership-proof deps (CDP user-data-dir read); injectable for tests. */
+  ownership?: OwnershipDeps;
   /** Recycle (kill + respawn, same user-data-dir) a reachable Chrome once
    * it's older than this, instead of reusing it indefinitely. Default:
    * CHROME_MAX_AGE_MS (24h), matching scripts/lib/browser.js. */
@@ -198,6 +195,7 @@ export class CdpChromeProvider implements BrowserProvider {
   private readonly connectMaxWaitMs: number;
   private readonly cdpReachableFn: CdpReachableFn;
   private readonly pidfileDeps: ChromePidfileDeps;
+  private readonly ownership: OwnershipDeps;
   private readonly maxAgeMs: number;
   private readonly recycleIfOld: boolean;
   private readonly reachabilityTimeoutMs: number;
@@ -216,6 +214,7 @@ export class CdpChromeProvider implements BrowserProvider {
     this.connectMaxWaitMs = deps.connectMaxWaitMs ?? 10_000;
     this.cdpReachableFn = deps.cdpReachable ?? defaultCdpReachable;
     this.pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
+    this.ownership = deps.ownership ?? defaultOwnershipDeps();
     this.maxAgeMs = deps.maxAgeMs ?? CHROME_MAX_AGE_MS;
     this.recycleIfOld = deps.recycleIfOld ?? true;
     this.reachabilityTimeoutMs = deps.reachabilityTimeoutMs ?? 2000;
@@ -232,11 +231,17 @@ export class CdpChromeProvider implements BrowserProvider {
       return this.spawnAndConnect(cdpUrl, ctx);
     }
 
+    await assertOurChrome({
+      version,
+      port: this.port,
+      userDataDir: this.userDataDir,
+      signal: ctx.signal,
+      deps: this.ownership,
+    });
+
     const pidfile = readChromePidfile(this.userDataDir, this.pidfileDeps);
     if (!pidfile) {
-      // Reachable, no live pid file: not ours — attach, never recycle,
-      // never kill (D12/§7.4's "strengthens ownsProcess" branch, applied
-      // BEFORE decideChromeAction is consulted at all).
+      // Ours, no live pid file: attach, never recycle, never kill (D12/§7.4).
       const browser = await this.connectWithRetry(cdpUrl, ctx);
       return new CdpChromeBrowserHandle(
         cdpUrl,
@@ -251,11 +256,8 @@ export class CdpChromeProvider implements BrowserProvider {
       );
     }
 
-    // pidfileDeps.now() is the single clock for BOTH sides of the pid file:
-    // launchChrome stamps startedAt with it, launch() ages that stamp with
-    // it. Default is `() => new Date()`, so production behavior is
-    // identical to Date.now() — but the seam keeps the read side injectable
-    // alongside the write side, so tests are wall-clock-independent.
+    // pidfileDeps.now() is the single clock for both pid-file sides
+    // (stamp + age), keeping tests wall-clock-independent.
     const ageMs = this.pidfileDeps.now().getTime() - Date.parse(pidfile.startedAt);
     const action = decideChromeAction({
       reachable: true,

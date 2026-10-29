@@ -21,10 +21,45 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import type { DoctorCheck } from '../../ports/doctor.ts';
 import { wire } from './compose.ts';
 import { fakeConfigStore } from './testkit.ts';
+
+/** The check proves Chrome ownership by asking the browser for its
+ * --user-data-dir over a raw CDP WebSocket (SystemInfo.getInfo). Stand in for
+ * that socket: the "Chrome" reports `dir`, so the check reaches its pid-file
+ * branch without a real browser. Restored after each test. */
+function fakeChromeUserDataDir(dir: string): void {
+  type Handler = (e: unknown) => void;
+  class FakeWs {
+    private handlers = new Map<string, Handler[]>();
+    constructor() {
+      setImmediate(() => this.fire('open', {}));
+    }
+    private fire(type: string, e: unknown) {
+      for (const fn of this.handlers.get(type) ?? []) fn(e);
+    }
+    addEventListener(type: string, fn: Handler) {
+      this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+    }
+    send() {
+      const data = JSON.stringify({
+        id: 1,
+        result: { commandLine: `chrome --user-data-dir=${dir}` },
+      });
+      setImmediate(() => this.fire('message', { data }));
+    }
+    close() {}
+  }
+  const original = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWs as never;
+  restoreWebSocket = () => {
+    globalThis.WebSocket = original;
+  };
+}
+let restoreWebSocket = () => {};
+afterEach(() => restoreWebSocket());
 
 /** Wires a minimal `linkedin`-lane profile against `root` (the DATA home —
  * NEVER seeded with a fake `src/adapters/...` inventory tree: the
@@ -40,6 +75,7 @@ async function wireLinkedinCdpCheck(
   root: string,
   page = 'linkedin__jobs-search',
 ): Promise<DoctorCheck> {
+  fakeChromeUserDataDir(join(root, 'chrome'));
   const profileJson = JSON.stringify({
     lanes: ['linkedin'],
     connector: 'notion',
@@ -61,7 +97,12 @@ async function wireLinkedinCdpCheck(
   const result = await wire('rajni', {
     root,
     configStore,
-    deps: { browserReachable: async () => ({ browser: 'HeadlessChrome' }) },
+    deps: {
+      browserReachable: async () => ({
+        browser: 'HeadlessChrome',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/abc',
+      }),
+    },
   });
   const check = result.checks.find((c) => c.name === 'cdp-reachable');
   assert.ok(check, 'the linkedin lane must register a cdp-reachable check');
