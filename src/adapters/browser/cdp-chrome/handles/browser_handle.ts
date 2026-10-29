@@ -122,6 +122,7 @@ export class CdpChromeBrowserHandle implements BrowserHandle {
       await raceWithTimeout(
         (async () => this.browser.close?.())(),
         this.disconnectTimeoutMs,
+        'CDP disconnect',
       );
     } catch (err) {
       this.ctx.logger.warn('cdp-chrome: CDP disconnect failed or timed out', {

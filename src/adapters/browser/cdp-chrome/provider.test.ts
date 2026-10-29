@@ -560,7 +560,7 @@ test('launch() reuses a stale-pid-file Chrome without recycling when recycleIfOl
   assert.equal(launcher.calls.length, 0, 'expected no spawn when recycling is disabled');
 });
 
-test('close() is a no-op for a reused Chrome — never kills a process this run did not spawn', async () => {
+test('close() disconnects without killing a reused Chrome — never kills a process this run did not spawn', async () => {
   // Regression test for the 2026-07-25 incident: reuse must not kill the
   // user's own persistent, already-logged-in Chrome on close().
   const launcher = fakeLauncher(7777);
@@ -588,7 +588,7 @@ test('close() is a no-op for a reused Chrome — never kills a process this run 
   assert.deepEqual(killCalls, [], 'expected close() not to kill a reused Chrome');
 });
 
-test('close() is a no-op for a stale-but-kept Chrome when recycleIfOld is false', async () => {
+test('close() disconnects without killing a stale-but-kept Chrome when recycleIfOld is false', async () => {
   const launcher = fakeLauncher(7777);
   const killCalls: unknown[] = [];
   const provider = new CdpChromeProvider({
