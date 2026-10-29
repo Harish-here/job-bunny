@@ -70,24 +70,34 @@ function canonical(
 
 /** Throws ForeignChromeError unless the Chrome that produced `version` is
  * proven to run `userDataDir`. The probe is bounded by `signal` plus 3s;
- * the dir it read (if any) names the foreign Chrome in the error. */
+ * the dir it read (if any) names the foreign Chrome in the error. When the
+ * caller's `signal` is aborted at or after the read, its reason is thrown
+ * instead — a run deadline or cancel is never a foreign Chrome. The internal
+ * 3s timeout still reads as unprovable. `timeoutMs` exists for tests. */
 export async function assertOurChrome(opts: {
   version: unknown;
   port: number;
   userDataDir: string;
   signal: AbortSignal;
   deps: OwnershipDeps;
+  timeoutMs?: number;
 }): Promise<void> {
   const { version, port, userDataDir, signal, deps } = opts;
   const wsUrl = wsUrlOf(version);
   let actualDir: string | undefined;
   if (wsUrl !== undefined) {
     try {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(PROOF_TIMEOUT_MS)]);
+      const bounded = AbortSignal.any([
+        signal,
+        AbortSignal.timeout(opts.timeoutMs ?? PROOF_TIMEOUT_MS),
+      ]);
       actualDir = await deps.readUserDataDir(wsUrl, bounded);
     } catch {
       actualDir = undefined;
     }
+  }
+  if (signal.aborted) {
+    throw signal.reason ?? new DOMException('This operation was aborted', 'AbortError');
   }
   if (
     actualDir !== undefined &&

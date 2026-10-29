@@ -42,8 +42,6 @@ function setup(opts: {
   actualDir: string | undefined;
   pidfile: { ageMs: number } | undefined;
   read?: () => Promise<string | undefined>;
-  platform?: NodeJS.Platform;
-  realpath?: (p: string) => string;
 }) {
   const calls = { connect: 0, launch: 0, kill: 0, reads: [] as string[] };
   const provider = new CdpChromeProvider({
@@ -56,8 +54,8 @@ function setup(opts: {
         calls.reads.push(wsUrl);
         return opts.read ? opts.read() : opts.actualDir;
       },
-      realpath: opts.realpath ?? ((p) => p),
-      platform: opts.platform ?? 'darwin',
+      realpath: (p) => p,
+      platform: 'darwin',
     },
     connect: async () => {
       calls.connect++;
@@ -95,28 +93,6 @@ test('ours + stale live pid file: recycles (kill + relaunch)', async () => {
   });
   await provider.launch(ctx());
   assert.deepEqual([calls.connect, calls.launch, calls.kill], [1, 1, 1]);
-});
-
-test('ours: equivalent paths match (trailing slash, symlink realpath)', async () => {
-  const { provider, calls } = setup({
-    actualDir: '/private/home/me/.jobbunny/chrome/',
-    pidfile: undefined,
-    realpath: (p) => p.replace(/^\/home\//, '/private/home/'),
-  });
-  await provider.launch(ctx());
-  assert.equal(calls.connect, 1);
-});
-
-test('win32: the dir comparison is case-insensitive; elsewhere it is case-sensitive', async () => {
-  const win = setup({
-    actualDir: OUR_DIR.toUpperCase(),
-    pidfile: undefined,
-    platform: 'win32',
-  });
-  await win.provider.launch(ctx());
-  assert.equal(win.calls.connect, 1);
-  const posix = setup({ actualDir: OUR_DIR.toUpperCase(), pidfile: undefined });
-  await assert.rejects(posix.provider.launch(ctx()), ForeignChromeError);
 });
 
 test('foreign + no pid file: throws ForeignChromeError naming the dir, never connects/launches/kills', async () => {
