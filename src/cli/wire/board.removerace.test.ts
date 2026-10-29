@@ -114,4 +114,31 @@ describe('removeProfile racing concurrent requests', () => {
     assert.equal(existsSync(path.join(root, 'profiles', name)), false);
     assert.deepEqual(readdirSync(root), ['profiles'], 'no tombstone left behind');
   });
+
+  test('createProfile refuses a name whose removal is still in flight', async () => {
+    const name = 'victim';
+    await board.createProfile(name);
+    await board.openStore(name);
+    const dataDir = path.join(root, 'profiles', name, 'data');
+    for (let i = 0; i < 3000; i++)
+      writeFileSync(path.join(dataDir, `filler-${i}.txt`), 'x');
+
+    let settled = false;
+    const removal = board.removeProfile(name).finally(() => {
+      settled = true;
+    });
+    await tick(); // guards passed, delete mid-flight
+    assert.equal(settled, false, 'precondition: removal must still be in flight');
+
+    await assert.rejects(
+      board.createProfile(name),
+      /^Error: profile already exists: victim/,
+    );
+    assert.equal((await removal).outcome, 'removed');
+    assert.equal(existsSync(path.join(root, 'profiles', name)), false);
+
+    // once the removal has settled the name is free again
+    await board.createProfile(name);
+    assert.equal(existsSync(path.join(root, 'profiles', name)), true);
+  });
 });

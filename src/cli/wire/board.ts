@@ -258,8 +258,10 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
         throw new Error(`invalid profile name: ${name}`);
       }
 
+      // A name whose removal is in flight is unlisted (so the existence check
+      // below would pass), but its seeds would be moved into the tombstone.
       const infos = await listProfileInfos(root, removing);
-      if (infos.some((p) => p.name === name)) {
+      if (removing.has(name) || infos.some((p) => p.name === name)) {
         throw new Error(`profile already exists: ${name}`);
       }
 
