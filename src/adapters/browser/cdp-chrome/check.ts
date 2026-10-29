@@ -1,4 +1,10 @@
 import type { DoctorCheck, DoctorFinding } from '../../../ports/doctor.ts';
+import {
+  assertOurChrome,
+  defaultOwnershipDeps,
+  ForeignChromeError,
+  type OwnershipDeps,
+} from './foreign/index.ts';
 import { DEFAULT_CDP_PORT, DEFAULT_USER_DATA_DIR } from './launcher.ts';
 import {
   type ChromePidfileDeps,
@@ -20,7 +26,11 @@ import type { CdpReachableFn } from './provider.ts';
  * Chrome on demand when it's unreachable, so an idle-time miss isn't a
  * run-blocking failure — and a reachable-but-unowned Chrome isn't broken
  * either, it's just outside the recycle policy (D12/§7.6's accepted
- * residual risk).
+ * residual risk). A reachable Chrome on a FOREIGN user-data-dir (not proven
+ * ours via CDP SystemInfo.getInfo) is also `warn`, with the provider's
+ * ForeignChromeError message: `red` here would make `run`'s doctor
+ * preflight abort the whole run (greenhouse/keka lanes included), while the
+ * provider already fails only the browser lane loudly and never attaches.
  */
 export interface CdpReachableCheckDeps {
   reachable: CdpReachableFn;
@@ -32,6 +42,8 @@ export interface CdpReachableCheckDeps {
   userDataDir?: string;
   /** Injectable Chrome pid-file deps. Default: defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;
+  /** Injectable ownership-proof deps. Default: defaultOwnershipDeps(). */
+  ownership?: OwnershipDeps;
 }
 
 export function cdpReachableCheck(deps: CdpReachableCheckDeps): DoctorCheck {
@@ -39,6 +51,7 @@ export function cdpReachableCheck(deps: CdpReachableCheckDeps): DoctorCheck {
   const port = deps.port ?? DEFAULT_CDP_PORT;
   const userDataDir = deps.userDataDir ?? DEFAULT_USER_DATA_DIR;
   const pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
+  const ownership = deps.ownership ?? defaultOwnershipDeps();
   return {
     name,
     async run(): Promise<DoctorFinding> {
@@ -50,6 +63,20 @@ export function cdpReachableCheck(deps: CdpReachableCheckDeps): DoctorCheck {
             status: 'warn',
             detail: `Chrome CDP not reachable on :${port} — will be launched on demand`,
           };
+        }
+        try {
+          await assertOurChrome({
+            version,
+            port,
+            userDataDir,
+            signal: new AbortController().signal, // assertOurChrome adds its own 3s bound
+            deps: ownership,
+          });
+        } catch (err) {
+          if (err instanceof ForeignChromeError) {
+            return { check: name, status: 'warn', detail: err.message };
+          }
+          throw err;
         }
         const pidfile = readChromePidfile(userDataDir, pidfileDeps);
         if (!pidfile) {
