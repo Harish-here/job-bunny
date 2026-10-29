@@ -325,6 +325,14 @@ export async function runUrlGroups(
         if (page) await page.close();
       }
 
+      // A completed url attempt — success OR failure — is progress. Only
+      // successful page harvests beat above, so a run of failing urls
+      // (each ~60-120s of pause + goto + readiness wait) would otherwise
+      // outlast the stall watchdog and mask the lane's own all-failed
+      // error with a "stalled" one. Placed after the try/finally so a
+      // hang INSIDE one attempt never reaches it and still trips the stall.
+      ctx.beat();
+
       // markDone only on success — a url whose goto/harvest/newPage
       // threw must be retried on the next fire, not skipped as done.
       // A url cut short by a throttle trip is likewise unfinished: its

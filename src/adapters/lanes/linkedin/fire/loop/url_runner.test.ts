@@ -13,6 +13,7 @@ import {
   type RawCardFixture,
   singlePageInventory,
   URL_1,
+  URL_2,
 } from '../../testkit/index.ts';
 import { runUrlGroups, type UrlRunnerDeps, type UrlRunnerState } from './url_runner.ts';
 
@@ -208,4 +209,49 @@ test('a 100%-invalid page still fails loudly and does NOT warn about identity lo
     undefined,
     'a 100%-invalid page must not also warn about partial loss',
   );
+});
+
+test('a failing url attempt still beats once per attempt (stall watchdog must not mask the lane error)', async () => {
+  const inv = await singlePageInventory();
+  let beats = 0;
+  const ctx = fakeCtx({
+    beat() {
+      beats += 1;
+    },
+  });
+  const state: UrlRunnerState = {
+    stats: [],
+    dropped: [],
+    companiesSeen: new Set(),
+    captureStore: await CaptureStore.load(new FakeStateStore()),
+    resumeState: await ResumeState.load(new FakeStateStore(), '2026-08-09'),
+    throttle: undefined,
+    processedIds: new Set(),
+    attemptedAnyUrl: false,
+    throttleTripped: false,
+    shellJdFailures: 0,
+  };
+  const deps: UrlRunnerDeps = {
+    // newPage throws on both calls: no page is ever harvested, so the
+    // only possible beat is the per-attempt one.
+    browserHandle: new FakeBrowserHandle(newScript(), new Set([0, 1])),
+    inventories: [inv],
+    filterCfg: titleMatchFilterConfig(),
+    stateStore: new FakeStateStore(),
+    maxCardsPerUrl: 40,
+    jitter: async () => {},
+    interUrlPause: async () => {},
+    cacheIds: new Set(),
+    breaker: undefined,
+    breakerState: undefined,
+  };
+  const urls: SearchUrlGroup[] = [{ page: inv.page, urls: [URL_1, URL_2] }];
+
+  await runUrlGroups(urls, state, deps, ctx);
+
+  assert.deepEqual(
+    state.stats.map((s) => s.failed),
+    [true, true],
+  );
+  assert.equal(beats, 2);
 });
