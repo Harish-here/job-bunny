@@ -43,13 +43,16 @@ export type SecretPresence = Record<SecretKey, 'present' | 'absent'>;
 /** The outcome of a guarded `removeProfile` call — see `BoardSource`'s own
  * doc comment for the guard order. `run_in_progress`/`intent_pending`
  * carry the blocking id so the UI can offer "view the run"/"cancel the
- * queued run" instead of a dead end. */
+ * queued run" instead of a dead end. `remove_failed` means the delete itself
+ * could not complete (e.g. a transient Windows file lock); `message` is
+ * user-safe. The profile is left intact unless the message says otherwise. */
 export type RemoveProfileOutcome =
   | { outcome: 'removed' }
   | { outcome: 'not_found' }
   | { outcome: 'protected' }
   | { outcome: 'run_in_progress'; runId: number }
-  | { outcome: 'intent_pending'; intentId: number };
+  | { outcome: 'intent_pending'; intentId: number }
+  | { outcome: 'remove_failed'; message: string };
 
 export interface BoardQuery {
   status?: string;

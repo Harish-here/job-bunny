@@ -325,3 +325,22 @@ test('profileRemoveCommand refuses to remove the "rajni" fixture profile even wi
     assert.equal(stillThere, '{}');
   });
 });
+
+test('profileRemoveCommand reports a failed delete and returns non-zero', async () => {
+  await withTmpRoot(async (root) => {
+    await mkdir(path.join(root, 'profiles', 'acme'), { recursive: true });
+    const lines: string[] = [];
+    const code = await profileRemoveCommand(
+      { profile: 'acme', force: true },
+      {
+        root,
+        write: (l) => lines.push(l),
+        rm: async () => {
+          throw new Error('still in use');
+        },
+      },
+    );
+    assert.equal(code, 1);
+    assert.ok(lines.some((l) => l.includes('still in use')));
+  });
+});

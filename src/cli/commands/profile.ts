@@ -26,10 +26,11 @@
  * real `profiles/`.
  */
 import { constants } from 'node:fs';
-import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PipelineConfigSchema } from '../../core/config/schema.ts';
 import { FilterConfigSchema } from '../../core/filter/config.ts';
+import { removeProfileDir } from '../../ops/profile_remove/index.ts';
 import type { ConfigDocKey, ConfigStore } from '../../ports/config_store.ts';
 import { resolveHome } from '../home/index.ts';
 import { wireConfigStore } from '../wire/index.ts';
@@ -230,7 +231,13 @@ function defaultRemoveDeps(): ProfileRemoveDeps {
   return {
     ...defaultProfileFsDeps(),
     readdir: (p) => readdir(p),
-    rm: (p) => rm(p, { recursive: true, force: true }),
+    rm: async (p) => {
+      // Same helper as the board (`ops/profile_remove`): atomic rename out of
+      // `profiles/` first, so a running board's concurrent probes cannot
+      // recreate files mid-delete (ENOTEMPTY, half-deleted listed profile).
+      const result = await removeProfileDir(p);
+      if (!result.ok) throw new Error(result.message);
+    },
   };
 }
 
@@ -280,7 +287,14 @@ export async function profileRemoveCommand(
     return 1;
   }
 
-  await resolved.rm(profileDir);
+  try {
+    await resolved.rm(profileDir);
+  } catch (err) {
+    resolved.write(
+      `[profile remove] ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
   resolved.write(
     `[profile remove] deleted profiles/${opts.profile}/ (${entries.length} entries)`,
   );

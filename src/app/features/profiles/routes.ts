@@ -61,6 +61,8 @@ function deleteHandler(source: BoardSource) {
             },
           },
         };
+      case 'remove_failed':
+        throw new HttpError(409, 'remove_failed', result.message);
     }
   };
 }
