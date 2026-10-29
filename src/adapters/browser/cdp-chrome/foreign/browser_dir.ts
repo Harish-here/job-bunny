@@ -7,12 +7,20 @@
  */
 
 /** Value after `--user-data-dir=`, up to the next ` --` or end of line (the
- * value may contain spaces), with surrounding quotes stripped. */
+ * value may contain spaces), with surrounding quotes stripped. Windows quotes
+ * a whole argument containing spaces (`"--user-data-dir=C:\a b\c" --x`):
+ * a quote opening right before the flag ends the value at its closing quote. */
 export function parseUserDataDir(commandLine: string): string | undefined {
   const marker = '--user-data-dir=';
   const start = commandLine.indexOf(marker);
   if (start === -1) return undefined;
   const rest = commandLine.slice(start + marker.length);
+  const opener = commandLine[start - 1];
+  if (opener === '"' || opener === "'") {
+    const close = rest.indexOf(opener);
+    const quoted = (close === -1 ? rest : rest.slice(0, close)).trim();
+    return quoted === '' ? undefined : quoted;
+  }
   const end = rest.indexOf(' --');
   const value = (end === -1 ? rest : rest.slice(0, end))
     .trim()

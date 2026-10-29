@@ -27,6 +27,22 @@ test('parseUserDataDir: strips surrounding quotes (double and single)', () => {
   assert.equal(parseUserDataDir("chrome --user-data-dir='/a b/c'"), '/a b/c');
 });
 
+test('parseUserDataDir: Windows quotes the whole arg when the path has spaces', () => {
+  const line =
+    '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" "--user-data-dir=C:\\Users\\John Smith\\.jobbunny\\chrome" --no-first-run';
+  assert.equal(parseUserDataDir(line), 'C:\\Users\\John Smith\\.jobbunny\\chrome');
+  assert.equal(
+    parseUserDataDir(
+      '"C:\\chrome.exe" --remote-debugging-port=9222 "--user-data-dir=C:\\Users\\John Smith\\x"',
+    ),
+    'C:\\Users\\John Smith\\x',
+  );
+  assert.equal(
+    parseUserDataDir('"C:\\chrome.exe" "--user-data-dir=C:\\Users\\me\\x" --a'),
+    'C:\\Users\\me\\x',
+  );
+});
+
 test('parseUserDataDir: undefined when absent or empty', () => {
   assert.equal(parseUserDataDir('chrome --foo'), undefined);
   assert.equal(parseUserDataDir('chrome --user-data-dir= --x'), undefined);

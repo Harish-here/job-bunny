@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
 import { test } from 'node:test';
 import type { OwnershipDeps } from './ownership.ts';
 import { assertOurChrome, ForeignChromeError } from './ownership.ts';
 
 const WS = 'ws://127.0.0.1:9222/devtools/browser/abc';
-const OUR_DIR = '/home/me/.jobbunny/chrome';
+// Platform-derived (drive letter + separators on win32), so the same literal
+// reaches path.resolve on both sides of every comparison.
+const HOME_LINK = join(tmpdir(), 'jb-own', 'home');
+const HOME_REAL = join(tmpdir(), 'jb-own', 'private-home');
+const OUR_DIR = join(HOME_LINK, 'me', '.jobbunny', 'chrome');
 const live = { webSocketDebuggerUrl: WS };
 
 function deps(over: Partial<OwnershipDeps> & { actualDir?: string } = {}) {
@@ -84,12 +90,13 @@ test('missing webSocketDebuggerUrl (or non-object version): foreign without read
 
 test('equivalent paths match: trailing slash, symlink realpath, unresolvable realpath', async () => {
   const sym = deps({
-    actualDir: '/private/home/me/.jobbunny/chrome/',
-    realpath: (p) => p.replace(/^\/home\//, '/private/home/'),
+    actualDir: `${join(HOME_REAL, 'me', '.jobbunny', 'chrome')}${sep}`,
+    realpath: (p) =>
+      p.startsWith(HOME_LINK) ? HOME_REAL + p.slice(HOME_LINK.length) : p,
   });
   await run(sym.d);
   const missing = deps({
-    actualDir: `${OUR_DIR}/`,
+    actualDir: `${OUR_DIR}${sep}`,
     realpath: () => {
       throw new Error('ENOENT');
     },
