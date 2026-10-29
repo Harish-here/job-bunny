@@ -5,7 +5,7 @@ import type { Inventory } from '../inventory.ts';
 import { buildHarvestScript } from './script.ts';
 
 /** Real selectors from src/adapters/lanes/linkedin/page_inventory/
- * linkedin__jobs-search.json (pinned at phase start) — buildHarvestScript
+ * linkedin__jobs-collections.json (pinned at phase start) — buildHarvestScript
  * must target these exactly. */
 function fixtureInventory(overrides: Partial<Inventory> = {}): Inventory {
   return {

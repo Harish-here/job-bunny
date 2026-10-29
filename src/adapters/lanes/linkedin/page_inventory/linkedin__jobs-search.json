@@ -34,7 +34,6 @@
     "cardListNote": "LinkedIn redirects /jobs/search/ to /jobs/search-results/ (2026-10-28) which serves the new hashed-class DOM; this inventory mirrors linkedin__jobs-search-results. Results list is div[componentkey=\"SearchResultsMainContent\"] (scrollable LazyColumn); body used as scope like the sibling inventory",
     "selectorsVerifiedAt": "2026-10-29 (selectors copied from linkedin__jobs-search-results, already live-verified; old .scaffold-layout__list / li[data-occludable-job-id] no longer exist after the redirect)",
     "sourceInventory": "linkedin__jobs-search-results.json (live-verified), supersedes linkedin__jobs-search.md v0 (2026-06-18)",
-    "scrollContainer": "div[componentkey=\"SearchResultsMainContent\"]",
-    "cardLinkNote": ""
+    "scrollContainer": "div[componentkey=\"SearchResultsMainContent\"]"
   }
 }
