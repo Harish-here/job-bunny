@@ -28,7 +28,7 @@
     "jdTitle": ".job-details-jobs-unified-top-card__job-title",
     "jdCompany": ".job-details-jobs-unified-top-card__company-name",
     "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
-    "mustExist": "[componentkey=\"JobsSearchFilters\"]",
+    "mustExist": "div[componentkey=\"SearchResultsMainContent\"]",
     "minJobCards": "0",
     "hashedClassNamesWarning": "this route uses hashed/obfuscated CSS class names (unstable); card identity comes from the stable componentkey attribute",
     "cardListNote": "v0 inventory did not capture a distinct list-container selector for this page (job_list_container/scroll_container both blank in the .md); using document body as scope until /page-analyse regenerates this page for v2",

@@ -11,7 +11,8 @@
  * filenames under `src/adapters/lanes/linkedin/page_inventory/`. */
 export type LinkedInSearchUrlPage =
   | 'linkedin__jobs-search'
-  | 'linkedin__jobs-search-results';
+  | 'linkedin__jobs-search-results'
+  | 'linkedin__jobs-collections';
 
 export interface LinkedInSearchUrlClassification {
   page: LinkedInSearchUrlPage;
@@ -40,6 +41,7 @@ export class UnrecognizedLinkedInSearchUrlError extends Error {
 export const LINKEDIN_SEARCH_URL_LABELS: Record<LinkedInSearchUrlPage, string> = {
   'linkedin__jobs-search': 'Jobs search',
   'linkedin__jobs-search-results': 'Search results',
+  'linkedin__jobs-collections': 'Job collections',
 };
 
 // Ephemeral params that change per click/session/alert — stripped so the same search
@@ -68,11 +70,13 @@ function isLinkedInHost(hostname: string): boolean {
 function resolvePage(u: URL, rawUrl: string): LinkedInSearchUrlPage {
   const validScheme = u.protocol === 'https:' || u.protocol === 'http:';
   if (validScheme && isLinkedInHost(u.hostname)) {
-    if (
-      /^\/jobs\/search\/?$/.test(u.pathname) ||
-      u.pathname.startsWith('/jobs/collections/')
-    ) {
+    if (/^\/jobs\/search\/?$/.test(u.pathname)) {
       return 'linkedin__jobs-search';
+    }
+    // Still serves the old scaffold-layout DOM (2026-10-29), unlike
+    // /jobs/search/ which now redirects to the new search-results DOM.
+    if (u.pathname.startsWith('/jobs/collections/')) {
+      return 'linkedin__jobs-collections';
     }
     if (/^\/jobs\/search-results\/?$/.test(u.pathname)) {
       return 'linkedin__jobs-search-results';

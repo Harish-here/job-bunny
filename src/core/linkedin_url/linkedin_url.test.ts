@@ -64,12 +64,12 @@ test('AC2: /jobs/search/?keywords=x maps to linkedin__jobs-search', () => {
   assert.deepEqual(result.removedParams, []);
 });
 
-test('AC2: /jobs/collections/recommended/ maps to linkedin__jobs-search', () => {
+test('AC2: /jobs/collections/recommended/ maps to linkedin__jobs-collections (old DOM, own inventory)', () => {
   const result = classifyLinkedInSearchUrl(
     'https://www.linkedin.com/jobs/collections/recommended/',
   );
-  assert.equal(result.page, 'linkedin__jobs-search');
-  assert.equal(result.label, 'Jobs search');
+  assert.equal(result.page, 'linkedin__jobs-collections');
+  assert.equal(result.label, 'Job collections');
 });
 
 test('AC2: keeps relative f_TPR=r86400, strips absolute f_TPR=a1726000000-, strips start=25, leaves other params byte-identical and in order', () => {
