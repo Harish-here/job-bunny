@@ -231,27 +231,30 @@ test('close() respects JOBBUNNY_KEEP_BROWSER=1 by delegating the decision to kil
   assert.deepEqual(killCalls, []);
 });
 
-test('close() never calls a browser.close()-style API — only the OS-level pid kill', async () => {
-  // CdpBrowser intentionally has no close() method in its type, but this
-  // guards against a future accidental addition being invoked.
-  let closeAttempted = false;
-  const browser: CdpBrowser & { close?: () => Promise<void> } = {
+test('close() disconnects the playwright connection AND kills the spawned pid', async () => {
+  const closeCalls: string[] = [];
+  const killCalls: Array<number | undefined> = [];
+  const browser: CdpBrowser = {
     newPage: async () => fakePage(),
     close: async () => {
-      closeAttempted = true;
+      closeCalls.push('close');
     },
   };
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
     connect: async () => browser,
-    killChrome: () => true,
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
   });
 
   const handle = await provider.launch(fakeCtx());
   await handle.close();
 
-  assert.equal(closeAttempted, false);
+  assert.deepEqual(closeCalls, ['close']);
+  assert.deepEqual(killCalls, [4242]);
 });
 
 test('launch() retries connect on failure and resolves once it succeeds', async () => {

@@ -1,22 +1,30 @@
 import type { BrowserHandle, PageHandle } from '../../../../ports/browser.ts';
 import type { RunContext } from '../../../../ports/context.ts';
+import { raceWithTimeout } from '../async/index.ts';
 import type { ChromePidfileDeps } from '../ownership/index.ts';
 import type { CdpBrowser, CdpChromeProviderDeps, CdpPage } from '../provider.ts';
 import { CdpChromePageHandle } from './page_handle.ts';
 
+/** Upper bound on the websocket disconnect, so a wedged connection can never
+ * stall close() past a few seconds. */
+export const DEFAULT_DISCONNECT_TIMEOUT_MS = 3000;
+
 /**
- * NEVER call browser.close() on a CDP-attached connection (a live-incident
- * lesson: closing the Browser object over CDP can take the whole Chrome
- * process down with it, an unreliable way to end a session) — release the
- * playwright-side reference and separately kill the OS process by its
- * recorded pid (killChrome), unless JOBBUNNY_KEEP_BROWSER=1.
+ * close() ALWAYS releases the playwright CDP connection, and kills the OS
+ * process only when this run spawned it.
  *
- * close() only ever kills a Chrome process THIS run spawned (action launch,
- * or recycle's kill-then-respawn). A reused instance (action reuse, or a
- * stale-but-not-recycled one) is the user's own persistent session — close()
- * drops the CDP connection reference and leaves it running (2026-07-25
- * incident: a reuse run's close() killed the user's logged-in Chrome
- * mid-session).
+ * Verified against Playwright 1.62.1 (2026-10): for a `connectOverCDP`
+ * browser, `browser.close()` closes only the websocket — it does NOT send
+ * Browser.close and does NOT stop the remote Chrome (probed live: Chrome kept
+ * serving /json/version afterwards). So it is safe on an attached, user-owned
+ * Chrome. Skipping it was the bug: an attached run left the websocket open,
+ * which held node's event loop alive after the pipeline finished.
+ *
+ * Killing is a separate, OS-level step (killChrome) and only ever targets a
+ * Chrome THIS run spawned (action launch, or recycle's kill-then-respawn). A
+ * reused/attached instance is the user's own persistent session — close()
+ * disconnects from it and leaves it running (2026-07-25 incident: a reuse
+ * run's close() killed the user's logged-in Chrome mid-session).
  */
 export class CdpChromeBrowserHandle implements BrowserHandle {
   readonly cdpUrl: string;
@@ -38,6 +46,7 @@ export class CdpChromeBrowserHandle implements BrowserHandle {
    * down the user's own logged-in session out from under them
    * (2026-07-25 incident). */
   private readonly ownsProcess: boolean;
+  private readonly disconnectTimeoutMs: number;
 
   constructor(
     cdpUrl: string,
@@ -49,6 +58,7 @@ export class CdpChromeBrowserHandle implements BrowserHandle {
     userDataDir: string,
     pidfileDeps: ChromePidfileDeps,
     ownsProcess: boolean,
+    disconnectTimeoutMs: number = DEFAULT_DISCONNECT_TIMEOUT_MS,
   ) {
     this.cdpUrl = cdpUrl;
     this.browser = browser;
@@ -59,6 +69,7 @@ export class CdpChromeBrowserHandle implements BrowserHandle {
     this.userDataDir = userDataDir;
     this.pidfileDeps = pidfileDeps;
     this.ownsProcess = ownsProcess;
+    this.disconnectTimeoutMs = disconnectTimeoutMs;
   }
 
   async newPage(): Promise<PageHandle> {
@@ -84,19 +95,38 @@ export class CdpChromeBrowserHandle implements BrowserHandle {
   }
 
   async close(): Promise<void> {
-    // Deliberately NOT calling browser.close() here — see the class-level
-    // doc comment / scripts/lib/browser.js's disconnect() for why. Only the
-    // OS-level process kill actually ends the session.
-    //
-    // This handle didn't spawn Chrome (reuse, or a stale-but-kept instance)
-    // — it's the user's own long-running session, so close() only drops
-    // the CDP connection reference and leaves the OS process alone.
-    if (!this.ownsProcess) return;
+    // Not ours (reuse / attach): drop the websocket, leave Chrome running.
+    if (!this.ownsProcess) {
+      await this.disconnect();
+      return;
+    }
 
-    await this.killChromeFn(this.pid, {
-      env: this.killEnv,
-      userDataDir: this.userDataDir,
-      pidfileDeps: this.pidfileDeps,
-    });
+    // Ours: kill FIRST so the kill's timing/semantics are exactly what they
+    // were before (a wedged disconnect can never delay it); the disconnect
+    // then runs in `finally` so it happens even if the kill throws. Once
+    // Chrome is dead the socket is already gone, so this is near-instant.
+    try {
+      await this.killChromeFn(this.pid, {
+        env: this.killEnv,
+        userDataDir: this.userDataDir,
+        pidfileDeps: this.pidfileDeps,
+      });
+    } finally {
+      await this.disconnect();
+    }
+  }
+
+  /** Bounded, fail-soft websocket disconnect — never throws. */
+  private async disconnect(): Promise<void> {
+    try {
+      await raceWithTimeout(
+        (async () => this.browser.close?.())(),
+        this.disconnectTimeoutMs,
+      );
+    } catch (err) {
+      this.ctx.logger.warn('cdp-chrome: CDP disconnect failed or timed out', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

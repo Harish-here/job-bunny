@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { sleep } from '../../../core/async/index.ts';
 import type { BrowserHandle, BrowserProvider } from '../../../ports/browser.ts';
 import type { RunContext } from '../../../ports/context.ts';
-import { raceWithTimeout } from './async/index.ts';
+import { disposeWhenSettled, raceWithTimeout } from './async/index.ts';
 import { CdpChromeBrowserHandle } from './handles/index.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import {
@@ -69,6 +69,10 @@ export interface CdpBrowserContext {
  * both, so the persistent-context path below is what actually runs. */
 export interface CdpBrowser {
   newPage(): Promise<CdpPage>;
+  /** Over connectOverCDP this closes only the websocket (Playwright 1.62.1),
+   * never the remote Chrome. Optional so the many `{ newPage }` test fakes
+   * stay terse; a real playwright Browser always has it. */
+  close?(): Promise<void>;
   contexts?(): CdpBrowserContext[];
   newContext?(): Promise<CdpBrowserContext>;
 }
@@ -359,10 +363,14 @@ export class CdpChromeProvider implements BrowserProvider {
           cause: ctx.signal.reason ?? lastError,
         });
       }
+      const attempt = this.connect(cdpUrl);
       try {
-        return await raceWithTimeout(this.connect(cdpUrl), deadline - Date.now());
+        return await raceWithTimeout(attempt, deadline - Date.now());
       } catch (err) {
         lastError = err;
+        // The losing attempt may still resolve later — close that Browser so
+        // its websocket can't outlive us and pin the event loop.
+        disposeWhenSettled(attempt);
       }
       if (Date.now() >= deadline) {
         const elapsedMs = Date.now() - start;
