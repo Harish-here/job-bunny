@@ -101,12 +101,12 @@ test('resolvePage maps /jobs/search and /jobs/search/ to linkedin__jobs-search',
   });
 });
 
-test('resolvePage maps anything starting with /jobs/collections/ to linkedin__jobs-search', () => {
+test('resolvePage maps anything starting with /jobs/collections/ to linkedin__jobs-collections', () => {
   assert.deepEqual(
     resolvePage(new URL('https://www.linkedin.com/jobs/collections/recommended')),
     {
       channel: 'linkedin',
-      page: 'linkedin__jobs-search',
+      page: 'linkedin__jobs-collections',
     },
   );
 });

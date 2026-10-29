@@ -125,6 +125,7 @@ describe('isPageCovered', () => {
   it('covers the two known LinkedIn job-search page types', () => {
     expect(isPageCovered('linkedin__jobs-search')).toBe(true);
     expect(isPageCovered('linkedin__jobs-search-results')).toBe(true);
+    expect(isPageCovered('linkedin__jobs-collections')).toBe(true);
   });
 
   it('flags any other page as uncovered', () => {

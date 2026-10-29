@@ -9,7 +9,11 @@ export interface SearchUrlRow {
   touched: boolean;
 }
 
-const COVERED_PAGES = new Set(['linkedin__jobs-search', 'linkedin__jobs-search-results']);
+const COVERED_PAGES = new Set([
+  'linkedin__jobs-search',
+  'linkedin__jobs-search-results',
+  'linkedin__jobs-collections',
+]);
 
 export function isPageCovered(page: string): boolean {
   return COVERED_PAGES.has(page);
