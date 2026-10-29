@@ -66,7 +66,7 @@
  */
 import type { Dirent } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
-import { chmod as fsChmod, mkdir, rm } from 'node:fs/promises';
+import { chmod as fsChmod, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openJobsDb,
@@ -92,13 +92,14 @@ import type {
 import type { ConfigDocKey } from '../../ports/config_store.ts';
 import type { DoctorReport } from '../../ports/doctor.ts';
 import type { RunIntentStore } from '../../ports/run_intents.ts';
-import { PROTECTED_PROFILES, seedProfileDocs } from '../commands/profile.ts';
+import { seedProfileDocs } from '../commands/profile.ts';
 import { resolveHome } from '../home/index.ts';
 import { setBoardAutostart } from './board_autostart_control.ts';
 import { readBoardDaemonStatus } from './board_daemon.ts';
 import { startBoardDaemon, stopBoardDaemon } from './board_daemon_control.ts';
 import { runBoardDoctor } from './board_doctor.ts';
 import { previewFilterRule as previewFilterRuleImpl } from './board_preview.ts';
+import { removeBoardProfile } from './board_remove.ts';
 import { listBoardSecrets, writeBoardSecret } from './board_secrets.ts';
 import { canonicalDbPath, wireConfigStore } from './builders.ts';
 
@@ -160,7 +161,10 @@ async function readProfileInfo(root: string, name: string): Promise<ProfileInfo>
 /** `<root>/profiles`, directories only, sorted. A missing `profiles/`
  * directory itself yields `[]` rather than throwing — the same fail-soft
  * shape `scanProfileSchedules` (ops/daemon/scan) already uses. */
-async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
+async function listProfileInfos(
+  root: string,
+  removing: ReadonlySet<string>,
+): Promise<ProfileInfo[]> {
   let entries: Dirent[];
   try {
     entries = readdirSync(path.join(root, 'profiles'), { withFileTypes: true });
@@ -168,7 +172,7 @@ async function listProfileInfos(root: string): Promise<ProfileInfo[]> {
     return [];
   }
   const names = entries
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && !removing.has(entry.name))
     .map((entry) => entry.name)
     .sort();
   return Promise.all(names.map((name) => readProfileInfo(root, name)));
@@ -179,17 +183,20 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
   const chmodEnvFile = overrides.chmodEnvFile ?? fsChmod;
   const stores = new Map<string, BoardStore>();
   const intentStores = new Map<string, RunIntentStore>();
+  // profiles whose removal is in flight — excluded from every membership
+  // derivation so no request can re-open their db (see `board_remove.ts`)
+  const removing = new Set<string>();
 
   return {
     async listProfiles(): Promise<BoardProfile[]> {
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       return infos.map(({ name, connector, hasDb }) => ({ name, connector, hasDb }));
     },
 
     async openStore(name: string): Promise<BoardStore | null> {
       // Gate 1 — membership, not path math: `name` must be `===` one of
       // the CURRENT directory names, freshly read from disk.
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       const info = infos.find((p) => p.name === name);
       if (!info) return null;
 
@@ -206,7 +213,7 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
     },
 
     async readConfigDoc(name: string, doc: ConfigDocKey): Promise<string | undefined> {
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       if (!infos.some((p) => p.name === name)) return undefined;
 
       const store = wireConfigStore(name, { root, liftMode: 'readonly' });
@@ -222,7 +229,7 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       doc: ConfigDocKey,
       rawText: string,
     ): Promise<{ text: string; report?: SearchUrlsSaveReport }> {
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       if (!infos.some((p) => p.name === name)) {
         throw new Error(`unknown profile: ${name}`);
       }
@@ -251,7 +258,7 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
         throw new Error(`invalid profile name: ${name}`);
       }
 
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       if (infos.some((p) => p.name === name)) {
         throw new Error(`profile already exists: ${name}`);
       }
@@ -273,7 +280,7 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       // against the CURRENT directory names, never path math. The actual
       // check-running (and its own short-lived `configStore` close) lives
       // in `board_doctor.ts` — split out purely for the file-size cap.
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       if (!infos.some((p) => p.name === name)) return null;
       return runBoardDoctor(name, root);
     },
@@ -303,7 +310,7 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       // there is no `hasDb` gate: an intent is durable state a never-run
       // profile must still be able to record, so opening the store is
       // allowed to create-and-migrate the db as a side effect.
-      const infos = await listProfileInfos(root);
+      const infos = await listProfileInfos(root, removing);
       const info = infos.find((p) => p.name === name);
       if (!info) return null;
 
@@ -325,59 +332,26 @@ export function wireBoard(overrides: BoardWireOverrides = {}): BoardSource {
       return writeBoardSecret(root, key, value, chmodEnvFile);
     },
 
-    // Guard order is the design (Task 8) — membership, protected, running
-    // run, pending intent, handle release, delete. See the port's own doc
-    // comment for the rationale.
-    async removeProfile(name: string): Promise<RemoveProfileOutcome> {
-      // Gate 1 — membership, not path math: re-derived against the
-      // CURRENT directory names, same as every other traversal-sensitive
-      // method above. This is what makes an attacker-supplied name safe
-      // to use in a path below.
-      const infos = await listProfileInfos(root);
-      if (!infos.some((p) => p.name === name)) return { outcome: 'not_found' };
-
-      // Gate 2 — protected fixture profile, no I/O. Imported from the CLI
-      // command so the two can never disagree.
-      if (PROTECTED_PROFILES.has(name)) return { outcome: 'protected' };
-
-      // Gate 3 — a running run blocks; a crashed (stale-heartbeat) one
-      // does not, so one wedged run can never make a profile permanently
-      // undeletable.
-      const store = await this.openStore(name);
-      if (store) {
-        const { rows } = store.listRuns({ limit: 1, offset: 0 });
-        if (rows[0]?.status === 'running') {
-          return { outcome: 'run_in_progress', runId: rows[0].id };
-        }
-      }
-
-      // Gate 4 — a pending intent blocks; an expired one does not, so a
-      // dead daemon can never strand the profile.
-      const intents = await this.openIntents(name);
-      if (intents) {
-        const intent = intents.latest(new Date().toISOString());
-        if (intent?.status === 'pending') {
-          return { outcome: 'intent_pending', intentId: intent.id };
-        }
-      }
-
-      // Gate 5 — release memoized handles before deleting anything: an
-      // open sqlite handle makes the directory undeletable on Windows and
-      // leaves a stale handle pointing at a deleted file everywhere else.
-      const openBoardStore = stores.get(name);
-      if (openBoardStore) {
-        openBoardStore.close();
-        stores.delete(name);
-      }
-      const openIntentStore = intentStores.get(name);
-      if (openIntentStore) {
-        openIntentStore.close();
-        intentStores.delete(name);
-      }
-
-      // Gate 6 — delete. Never touches Notion or the network.
-      await rm(path.join(root, 'profiles', name), { recursive: true, force: true });
-      return { outcome: 'removed' };
+    // Guards + delete live in `board_remove.ts` (file-size cap); see its
+    // header for the order and the `removing` set.
+    removeProfile(name: string): Promise<RemoveProfileOutcome> {
+      return removeBoardProfile(
+        {
+          root,
+          listNames: async () =>
+            (await listProfileInfos(root, removing)).map((p) => p.name),
+          openStore: (n) => this.openStore(n),
+          openIntents: (n) => this.openIntents(n),
+          releaseHandles: (n) => {
+            stores.get(n)?.close();
+            stores.delete(n);
+            intentStores.get(n)?.close();
+            intentStores.delete(n);
+          },
+          removing,
+        },
+        name,
+      );
     },
 
     // Thin delegate to `board_preview.ts` (file-size cap, same precedent as
