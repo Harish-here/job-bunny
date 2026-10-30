@@ -35,6 +35,7 @@ const SHARED_DOC_SPECS = [
   'settings-housekeeping.spec.ts',
   'settings-roles-companies.spec.ts',
   'settings-save-model.spec.ts',
+  'settings-search-link-intake.spec.ts',
   'settings-where-you-work.spec.ts',
 ];
 

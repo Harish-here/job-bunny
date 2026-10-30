@@ -1,19 +1,19 @@
 {
   "page": "linkedin__jobs-search",
   "pageType": "details-page",
-  "generatedAt": "2026-07-27",
+  "generatedAt": "2026-10-29",
   "selectors": {
-    "cardList": ".scaffold-layout__list",
-    "card": "li[data-occludable-job-id]",
-    "cardTitle": ".artdeco-entity-lockup__title",
-    "cardCompany": ".artdeco-entity-lockup__subtitle",
-    "cardLocation": ".artdeco-entity-lockup__caption",
-    "cardLink": "a.job-card-container__link",
+    "cardList": "body",
+    "card": "div[componentkey^=\"job-card-component-ref-\"]",
+    "cardTitle": "p",
+    "cardCompany": "div:has(> p) + div > p",
+    "cardLocation": "div:has(> p) + div + p",
+    "cardLink": "div[componentkey^=\"job-card-component-ref-\"]",
     "jdRoot": "[componentkey^=\"JobDetails_AboutTheJob\"]"
   },
   "behaviors": {
     "interactionModel": "new-page",
-    "jobListTrigger": "open the job's /jobs/view/<id>/ URL directly in a fresh tab (robust; avoids fragile list-clicks)",
+    "jobListTrigger": "job ID extracted from componentkey attr; URL built via urlPatternOfJob",
     "paginationType": "url-pages",
     "paginationParam": "start",
     "paginationPageSize": "25",
@@ -22,15 +22,18 @@
     "urlPatternOfJob": "https://www.linkedin.com/jobs/view/<id>/",
     "jdAnchorText": "About the job",
     "maxRawTextChars": "2500",
-    "jobCardIdAttr": "data-occludable-job-id",
-    "scrollContainer": ".scaffold-layout__list",
+    "jobCardIdAttr": "componentkey",
+    "jobCardIdAttrPrefix": "job-card-component-ref-",
     "jdContainer": ".jobs-search__job-details--container",
     "jdTitle": ".job-details-jobs-unified-top-card__job-title",
     "jdCompany": ".job-details-jobs-unified-top-card__company-name",
     "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
-    "mustExist": ".scaffold-layout__list",
+    "mustExist": "div[componentkey=\"SearchResultsMainContent\"]",
     "minJobCards": "1",
-    "selectorsVerifiedAt": "2026-07-27 (jdRoot replaced: direct-nav /jobs/view/ pages use hashed class names and #job-details does not exist there; JD body verified as the unique [componentkey^=\"JobDetails_AboutTheJob\"] element on 2 live jobs, text identical to the jdAnchorText fallback; card selectors re-verified on a live /jobs/search/ page the same day)",
-    "sourceInventory": "linkedin__jobs-search.md (v0, verified live DOM 2026-06-18, Chrome 149, logged-in session, https://www.linkedin.com/jobs/search/)"
+    "hashedClassNamesWarning": "this route uses hashed/obfuscated CSS class names (unstable); card identity comes from the stable componentkey attribute",
+    "cardListNote": "LinkedIn redirects /jobs/search/ to /jobs/search-results/ (2026-10-28) which serves the new hashed-class DOM; this inventory mirrors linkedin__jobs-search-results. Results list is div[componentkey=\"SearchResultsMainContent\"] (scrollable LazyColumn); body used as scope like the sibling inventory",
+    "selectorsVerifiedAt": "2026-10-29 (selectors copied from linkedin__jobs-search-results, already live-verified; old .scaffold-layout__list / li[data-occludable-job-id] no longer exist after the redirect)",
+    "sourceInventory": "linkedin__jobs-search-results.json (live-verified), supersedes linkedin__jobs-search.md v0 (2026-06-18)",
+    "scrollContainer": "div[componentkey=\"SearchResultsMainContent\"]"
   }
 }

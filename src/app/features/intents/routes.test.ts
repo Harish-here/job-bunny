@@ -121,7 +121,7 @@ function fakeSource(opts: {
     listProfiles: async () => [],
     openStore: async () => store,
     readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     openIntents: async (name) => {
       openIntentsCalls.push(name);

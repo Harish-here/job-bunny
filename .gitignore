@@ -10,6 +10,8 @@ data/cache.json
 # Profiles — all profile config/data is local-only; templates/ ships the seeds
 profiles/*
 config.json
+# crash-leftover tombstone from an interrupted profile removal (ops/profile_remove)
+.profile-removing-*
 
 # Dependencies
 node_modules/

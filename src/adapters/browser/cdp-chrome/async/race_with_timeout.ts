@@ -12,12 +12,16 @@
  * Promise.race attaches a handler to it, so a late rejection never surfaces
  * as an unhandled rejection.
  */
-export function raceWithTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
+export function raceWithTimeout<T>(
+  task: Promise<T>,
+  ms: number,
+  label: string = 'connect attempt',
+): Promise<T> {
   let timer: NodeJS.Timeout;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(
       () => {
-        reject(new Error(`connect attempt exceeded ${Math.max(ms, 0)}ms`));
+        reject(new Error(`${label} exceeded ${Math.max(ms, 0)}ms`));
       },
       Math.max(ms, 0),
     );

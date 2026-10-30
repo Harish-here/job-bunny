@@ -31,6 +31,7 @@
 import type { RunResult } from '../../run/index.ts';
 
 const SEPARATOR = '────────────────';
+const MAX_BAD_LINKS_SHOWN = 5;
 
 function funnelLine(stage: RunResult['stages'][number]): string {
   const base = `  • ${stage.name}: ${stage.jobsIn} → ${stage.jobsOut}`;
@@ -38,6 +39,40 @@ function funnelLine(stage: RunResult['stages'][number]): string {
   if (drops.length === 0) return base;
   const breakdown = drops.map(([rule, count]) => `${rule}: ${count}`).join(', ');
   return `${base} (dropped — ${breakdown})`;
+}
+
+/** Fallback label for a link soft-error with no resolved `label` (R-5 in
+ * blueprint-be.md: a link removed from Settings between the soft-failure
+ * and the digest shows up label-less). Mirrors the UI's own `shortenedUrl`
+ * idiom (`BadLinksPanel.tsx`, blueprint.md:836) — hostname + "…" + the last
+ * path segment or query fragment — but this is its own local copy: `core`
+ * has no shared helper (`core-is-pure`), and `ops` may not import `app`/`ui`. */
+function shortenedUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, '');
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const last = segments.at(-1) || parsed.search.replace(/^\?/, '');
+    return last ? `${host}/…/${last}` : host;
+  } catch {
+    return url;
+  }
+}
+
+function badLinksBlock(errors: NonNullable<RunResult['linkSoftErrors']>): string[] {
+  const n = errors.length;
+  const shown = errors.slice(0, MAX_BAD_LINKS_SHOWN);
+  const lines = [
+    `⚠️ ${n} search link${n === 1 ? '' : 's'} failed — LinkedIn is fine (an earlier link still loads):`,
+    ...shown.map(
+      (error) => `  • ${error.label ?? shortenedUrl(error.url)} — ${error.reason}`,
+    ),
+  ];
+  if (n > MAX_BAD_LINKS_SHOWN) {
+    lines.push(`  +${n - MAX_BAD_LINKS_SHOWN} more`);
+  }
+  lines.push('Fix: board → Settings → Where jobs come from');
+  return lines;
 }
 
 export function formatDigest(
@@ -71,6 +106,14 @@ export function formatDigest(
 
   if (result.stages.length > 0) {
     lines.push('', 'Funnel:', ...result.stages.map(funnelLine));
+  }
+
+  // R11 (Should, ux-notes.md §5 / mockup.html:638-641): a passed run with
+  // soft-failed search links names them so the digest still gives a fix
+  // path, without redding the run — a total-outage (`failed`) digest is
+  // untouched, byte-identical to today.
+  if (passed && result.linkSoftErrors?.length) {
+    lines.push(...badLinksBlock(result.linkSoftErrors));
   }
 
   return lines.join('\n');

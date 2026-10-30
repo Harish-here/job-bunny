@@ -1,5 +1,6 @@
 export { type CdpReachableCheckDeps, cdpReachableCheck } from './check.ts';
 export { chromeCandidates, resolveCandidates } from './discovery/index.ts';
+export { ForeignChromeError } from './foreign/index.ts';
 export type {
   ChromeProcessHandle,
   FsDeps,

@@ -53,7 +53,7 @@ function fakeSource(
     listProfiles: async () => PROFILES,
     openStore: async () => null,
     readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     openIntents: async () => null,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
@@ -179,6 +179,20 @@ test('DELETE: a pending intent blocks with the intent id', async () => {
       },
     },
   });
+});
+
+test('DELETE: a failed delete is a 409 remove_failed carrying the message', async () => {
+  const route = findRoute(
+    fakeSource(async () => ({ outcome: 'remove_failed', message: 'still in use' })),
+    'DELETE',
+    '/api/profiles/:name',
+  );
+  await assertHttpError(
+    () => route.handler(req({ params: { name: 'scratchpad' } })),
+    409,
+    'remove_failed',
+    'still in use',
+  );
 });
 
 test('DELETE: a missing name param is a 400', async () => {

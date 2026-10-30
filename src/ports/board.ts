@@ -1,3 +1,4 @@
+import type { SearchUrlsSaveReport } from '../core/config/search_urls/index.ts';
 import type { JD } from '../core/jd/index.ts';
 import type { TrackingFields } from '../core/tracking/index.ts';
 import type {
@@ -42,13 +43,16 @@ export type SecretPresence = Record<SecretKey, 'present' | 'absent'>;
 /** The outcome of a guarded `removeProfile` call — see `BoardSource`'s own
  * doc comment for the guard order. `run_in_progress`/`intent_pending`
  * carry the blocking id so the UI can offer "view the run"/"cancel the
- * queued run" instead of a dead end. */
+ * queued run" instead of a dead end. `remove_failed` means the delete itself
+ * could not complete (e.g. a transient Windows file lock); `message` is
+ * user-safe. The profile is left intact unless the message says otherwise. */
 export type RemoveProfileOutcome =
   | { outcome: 'removed' }
   | { outcome: 'not_found' }
   | { outcome: 'protected' }
   | { outcome: 'run_in_progress'; runId: number }
-  | { outcome: 'intent_pending'; intentId: number };
+  | { outcome: 'intent_pending'; intentId: number }
+  | { outcome: 'remove_failed'; message: string };
 
 export interface BoardQuery {
   status?: string;
@@ -263,8 +267,19 @@ export interface BoardSource {
    * message when `name` fails membership (caller is expected to have
    * already 404'd on that via its own `listProfiles()` check, mirroring
    * `openStoreOrThrow` — this throw is the defense-in-depth backstop, not
-   * the primary signal). */
-  writeConfigDoc(name: string, doc: ConfigDocKey, rawText: string): Promise<void>;
+   * the primary signal).
+   *
+   * Returns the text actually stored — byte-identical to `rawText` for
+   * every doc except `search_urls.md`, which routes through the shared
+   * `saveSearchUrlsDoc` orchestration (spec R3): that doc gets normalized
+   * before being written, so the returned `text` may differ from `rawText`,
+   * and `report` carries the change summary (refiled/cleaned/merged
+   * counts). `report` is present only for `search_urls.md`. */
+  writeConfigDoc(
+    name: string,
+    doc: ConfigDocKey,
+    rawText: string,
+  ): Promise<{ text: string; report?: SearchUrlsSaveReport }>;
   /** Creates `profiles/<name>/data/` + seeds the four config docs (reuses
    * `seedProfileDocs`, Task 7). Throws on an invalid name (fails
    * `^[a-z0-9_-]+$`) or a name that already exists — check the name format

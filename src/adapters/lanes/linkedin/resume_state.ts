@@ -72,6 +72,20 @@ export class ResumeState {
     this.done = {};
   }
 
+  /** A done-today URL suitable as a canary probe target (R6/R7), guaranteed
+   * to be a member of `candidateUrls` (today's freshly re-parsed
+   * `this.urls` — a `done` key from an earlier slot may no longer match a
+   * URL string re-filed/cleaned by a same-day Settings save). Prefers an
+   * entry with a nonzero captured count over one that was fully processed
+   * via cache/dedup alone (a `captured === 0` done URL can be chronically
+   * barren for a fresh `runProbe`, `fire/probe.ts:28-33`). `undefined` when
+   * nothing in `done` is present in `candidateUrls`. */
+  pickCanaryUrl(candidateUrls: readonly string[]): string | undefined {
+    const present = candidateUrls.filter((u) => Object.hasOwn(this.done, u));
+    if (present.length === 0) return undefined;
+    return present.find((u) => (this.done[u] ?? 0) > 0) ?? present[0];
+  }
+
   async persist(stateStore: StateStore): Promise<void> {
     const shape: ResumeStateShape = { date: this.date, done: { ...this.done } };
     await stateStore.writeDoc(RESUME_STATE_PATH, shape);

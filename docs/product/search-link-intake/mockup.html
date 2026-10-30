@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search-link intake — mockup</title>
+<style>
+/* ---------- Design Scale tokens (ux-notes.md §1) ---------- */
+:root{
+  --background:#faf8fd; --foreground:#3d2c55; --card:#ffffff; --muted:#f1ecf8;
+  --muted-foreground:#6e5b87; --border:#e4dbf0; --primary:#7b5ea7; --ring:#7b5ea7;
+  --primary-foreground:#ffffff; --success:#4caf6e; --success-strong:#26703f;
+  --destructive:#d64545; --destructive-strong:#c62c2c; --attention:#ff8a3d; --attention-strong:#a04a06;
+  --sidebar:#f3eefb; --sidebar-accent:#e7def7;
+  --telegram-bubble:#effdde; /* E2 exception */
+  --radius-sm:9.6px; --radius-lg:16px; --radius-xl:22.4px; --radius-4xl:41.6px;
+}
+.dark{
+  --background:#1a1523; --foreground:#e6ddf5; --card:#241d30; --muted:#2e2540;
+  --muted-foreground:#a695c2; --border:#362c4a; --primary:#b79ce0; --ring:#b79ce0;
+  --primary-foreground:#1a1523; --success:#6fcb8e; --success-strong:#6fcb8e;
+  --destructive:#f08a8a; --destructive-strong:#f08a8a; --attention:#ff9e5e; --attention-strong:#ff9e5e;
+  --sidebar:#201a2c; --sidebar-accent:#2e2540;
+  --telegram-bubble:#2b5278; /* E2 exception */
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--background); color:var(--foreground);
+  font-family:system-ui, sans-serif; /* E1 body */
+  font-size:14px; line-height:20px;
+}
+.heading-font{font-family:ui-rounded, system-ui, sans-serif;} /* E1 headings */
+.mono{font-family:ui-monospace, SFMono-Regular, Menlo, monospace;}
+a{color:var(--primary);}
+button{font-family:inherit;color:inherit;cursor:pointer;}
+:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);border-color:var(--ring);}
+
+/* ---------- Mockup chrome (E3 — outside product scale semantics, tokens reused) ---------- */
+.mock-header{
+  display:flex;align-items:center;gap:16px;padding:12px 24px;background:var(--card);
+  border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;flex-wrap:wrap;
+}
+.mock-header .title{font-size:16px;line-height:22px;font-weight:500;}
+.mock-header .meta{font-size:12px;line-height:16px;color:var(--muted-foreground);}
+.mock-header .sep{color:var(--border);}
+.mock-header .spacer{flex:1;}
+.theme-toggle{height:36px;padding:0 10px;border-radius:16px;border:1px solid var(--border);background:var(--card);font-size:12px;}
+main{padding:24px;display:flex;flex-direction:column;gap:24px;margin:0 auto;}
+.frame{border:1px solid var(--border);border-radius:22.4px;background:var(--card);padding:16px;position:relative;}
+.frame-label{font-size:11px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted-foreground);margin-bottom:8px;}
+.frame-title{font-size:18px;line-height:28px;font-weight:600;margin:0 0 4px 0;}
+
+/* ---------- Segmented state switcher ---------- */
+.segmented{display:inline-flex;gap:4px;padding:4px;background:var(--muted);border-radius:16px;margin-bottom:16px;flex-wrap:wrap;}
+.seg-btn{height:36px;padding:0 10px;border-radius:16px;border:1px solid transparent;background:transparent;font-size:12px;color:var(--muted-foreground);}
+.seg-btn.is-active{background:var(--card);color:var(--foreground);border-color:var(--border);font-weight:500;}
+
+/* ---------- Settings shell ---------- */
+.settings-shell{display:flex;border:1px solid var(--border);border-radius:22.4px;overflow:hidden;}
+.settings-sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);padding:16px;display:flex;flex-direction:column;gap:16px;}
+.nav-group-label{font-size:11px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted-foreground);}
+.nav-item{height:36px;display:flex;align-items:center;padding:0 10px;border-radius:16px;font-size:14px;line-height:20px;color:var(--foreground);}
+.nav-item.active{background:var(--sidebar-accent);font-weight:500;}
+.settings-main{flex:1;padding:24px;background:var(--background);}
+.page-title{font-size:18px;line-height:28px;font-weight:600;margin:0 0 16px 0;}
+
+/* ---------- Card ---------- */
+.card{background:var(--card);border:1px solid var(--border);border-radius:22.4px;padding:16px;display:flex;flex-direction:column;gap:16px;}
+.card-title{font-size:16px;line-height:22px;font-weight:500;margin:0;}
+.card-helper{font-size:12px;line-height:16px;color:var(--muted-foreground);margin:0;}
+
+/* ---------- Notices (attention / destructive strips) ---------- */
+.notice{border-radius:16px;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-left:2px solid transparent;}
+.notice-attention{border-left-color:var(--attention);background:color-mix(in srgb, var(--attention) 10%, transparent);}
+.notice-destructive{border-left-color:var(--destructive);background:color-mix(in srgb, var(--destructive) 8%, transparent);}
+.notice-text{font-size:14px;line-height:20px;color:var(--attention-strong);margin:0;}
+.notice-text.is-destructive{color:var(--destructive-strong);}
+
+/* ---------- Row list ---------- */
+.row-list{display:flex;flex-direction:column;gap:8px;}
+.row-card{border:1px solid var(--border);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:4px;}
+.row-line1{display:flex;gap:8px;align-items:flex-start;}
+.row-line2{display:flex;gap:8px;align-items:center;}
+.field{flex:1;display:flex;flex-direction:column;gap:6px;}
+.field.fixed-width{flex:none;width:192px;}
+.field-label{font-size:12px;line-height:16px;color:var(--muted-foreground);}
+.input{height:32px;border-radius:16px;border:1px solid var(--border);background:var(--muted);padding:0 10px;font-size:14px;line-height:20px;color:var(--foreground);width:100%;}
+.input.is-invalid{border-color:var(--destructive);}
+.icon-btn{height:32px;width:32px;flex:none;border-radius:16px;border:1px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;align-self:flex-end;}
+
+/* ---------- Badges ---------- */
+.badge{height:20px;border-radius:41.6px;border:1px solid var(--border);background:var(--card);padding:0 10px;font-size:12px;line-height:20px;display:inline-flex;align-items:center;color:var(--foreground);}
+
+/* ---------- Row notes / errors ---------- */
+.row-note{font-size:12px;line-height:16px;}
+.row-note.is-muted{color:var(--muted-foreground);}
+.row-note.is-attention{color:var(--attention-strong);}
+.link-btn{background:none;border:none;padding:0;font-size:12px;color:var(--primary);text-decoration:underline;}
+.field-error{font-size:12px;line-height:16px;color:var(--destructive-strong);}
+
+/* ---------- Buttons ---------- */
+.btn{height:36px;padding:0 10px;border-radius:16px;font-size:14px;line-height:20px;border:1px solid transparent;display:inline-flex;align-items:center;gap:6px;}
+.btn-primary{background:var(--primary);color:var(--primary-foreground);}
+.btn-outline{background:var(--card);border-color:var(--border);color:var(--foreground);}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--foreground);}
+.btn:disabled{opacity:0.6;cursor:default;}
+
+/* ---------- Skeleton ---------- */
+.skeleton{background:var(--muted);border-radius:16px;height:32px;}
+.skeleton-badge{background:var(--muted);border-radius:41.6px;height:20px;padding:0 24px;display:inline-block;}
+
+/* ---------- SaveBar / ValidationSummary / Success strip ---------- */
+.savebar{border-radius:16px;padding:12px;display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;background:var(--muted);}
+.savebar.is-success{border-left:2px solid var(--success);background:color-mix(in srgb, var(--success) 10%, transparent);}
+.savebar-text{font-size:14px;line-height:20px;}
+.savebar-text.is-success{color:var(--success-strong);}
+.savebar-actions{display:flex;gap:8px;}
+.validation-summary{border-radius:16px;border-left:2px solid var(--destructive);background:color-mix(in srgb, var(--destructive) 8%, transparent);padding:16px;display:flex;flex-direction:column;gap:4px;}
+.validation-summary-title{font-size:14px;line-height:20px;font-weight:500;color:var(--destructive-strong);margin:0;}
+.validation-summary a{font-size:12px;line-height:16px;}
+
+/* ---------- Alert ---------- */
+.alert{border-radius:16px;border-left:2px solid var(--destructive);background:color-mix(in srgb, var(--destructive) 8%, transparent);padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.alert-text{font-size:14px;line-height:20px;color:var(--destructive-strong);margin:0;}
+
+/* ---------- Diagnosis panel (S2) ---------- */
+.diag-panel{border-radius:22.4px;border:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:12px;}
+.diag-panel.is-attention{border-left:2px solid var(--attention);background:color-mix(in srgb, var(--attention) 10%, transparent);}
+.diag-panel.is-destructive{border-left:2px solid var(--destructive);background:color-mix(in srgb, var(--destructive) 8%, transparent);}
+.diag-title{font-size:16px;line-height:22px;font-weight:500;margin:0;}
+.diag-title.is-attention{color:var(--attention-strong);}
+.diag-title.is-destructive{color:var(--destructive-strong);}
+.diag-evidence{font-size:14px;line-height:20px;color:var(--muted-foreground);margin:0;}
+.diag-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.diag-list li{font-size:14px;line-height:20px;display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;}
+.diag-list .diag-label{font-weight:500;}
+.diag-list .diag-url{font-size:12px;line-height:16px;color:var(--muted-foreground);}
+.diag-list .diag-reason{font-size:12px;line-height:16px;color:var(--muted-foreground);}
+.diag-actions{display:flex;gap:8px;}
+
+/* ---------- Telegram (E2 exception) ---------- */
+.telegram-frame{background:var(--muted);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px;flex:1;}
+.telegram-frame-title{font-size:12px;line-height:16px;color:var(--muted-foreground);margin:0 0 4px 0;}
+.telegram-bubble{background:var(--telegram-bubble);border-radius:12px;padding:12px;font-size:12px;line-height:16px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;color:var(--foreground);}
+.digest-block{display:block;}
+.s3-row{display:flex;gap:16px;flex-wrap:wrap;}
+
+/* ---------- Callout badges + annotations ---------- */
+.callout{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:41.6px;background:var(--primary);color:var(--primary-foreground);font-size:11px;line-height:16px;font-weight:500;flex:none;}
+.annotations-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none;}
+.annotations-list li{display:flex;gap:8px;font-size:12px;line-height:16px;align-items:flex-start;}
+.annotations-list .callout{margin-top:1px;}
+
+/* ---------- Misc layout helpers (spacing only from scale) ---------- */
+.gap-1{gap:4px;} .gap-1_5{gap:6px;} .gap-2{gap:8px;} .gap-3{gap:12px;} .gap-4{gap:16px;} .gap-6{gap:24px;}
+.stack{display:flex;flex-direction:column;}
+.sub-row-wrap{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+.sub-row-label{font-size:11px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted-foreground);}
+[hidden]{display:none !important;}
+</style>
+</head>
+<body>
+
+<header class="mock-header">
+  <span class="title heading-font">Search-link intake</span>
+  <span class="sep">·</span>
+  <span class="meta mono">search-link-intake</span>
+  <span class="sep">·</span>
+  <span class="meta">2026-09-28</span>
+  <span class="sep">·</span>
+  <span class="meta">spec: docs/product/search-link-intake/spec.md</span>
+  <span class="spacer"></span>
+  <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle light/dark theme">Light / Dark</button>
+</header>
+
+<main>
+
+<!-- ======================================================= S1 ======================================================= -->
+<section class="frame" data-switcher>
+  <div class="frame-label">S1 — Settings › Where jobs come from › Search URLs card</div>
+  <h2 class="frame-title heading-font">Card states</h2>
+  <div class="segmented" role="tablist" aria-label="S1 card state">
+    <button class="seg-btn is-active" data-state="default" type="button">Default</button>
+    <button class="seg-btn" data-state="empty" type="button">Empty</button>
+    <button class="seg-btn" data-state="loading" type="button">Loading</button>
+    <button class="seg-btn" data-state="error" type="button">Error</button>
+    <button class="seg-btn" data-state="success" type="button">Success</button>
+    <button class="seg-btn" data-state="save-error" type="button">Save-error</button>
+  </div>
+
+  <!-- DEFAULT -->
+  <div class="state-view" data-state="default">
+    <div class="settings-shell">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <div class="nav-group-label">Aim</div>
+        <div class="nav-group-label">Runs</div>
+        <a class="nav-item active" href="#">Where jobs come from</a>
+        <div class="nav-group-label">Output</div>
+        <div class="nav-group-label">Advanced</div>
+      </nav>
+      <div class="settings-main">
+        <h3 class="page-title heading-font">Settings</h3>
+        <div class="card" data-qa="search-urls-card-default">
+          <div class="stack gap-1">
+            <h4 class="card-title heading-font">Search URLs</h4>
+            <p class="card-helper" data-qa="search-urls-helper-default">Paste any LinkedIn jobs link — it's cleaned and filed automatically.</p>
+          </div>
+          <div class="notice notice-attention" data-qa="search-urls-misfile-notice-default">
+            <p class="notice-text">2 links are filed under the wrong page type, so runs read them with the wrong page reader. <span class="callout" title="C6">6</span></p>
+            <button class="btn btn-outline" data-qa="search-urls-refile-button-default" type="button">Re-file 2 links</button>
+          </div>
+          <div class="row-list">
+            <div class="row-card" data-qa="search-url-row-1">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-1">Search URL</label>
+                  <input class="input" id="url-1" data-qa="search-url-input-1" type="text" value="https://www.linkedin.com/jobs/search/?keywords=sre&amp;location=Remote"></div>
+                <div class="field fixed-width"><label class="field-label" for="label-1">Label</label>
+                  <input class="input" id="label-1" data-qa="search-url-label-input-1" type="text" value="Comcast SRE"></div>
+                <button class="icon-btn" data-qa="search-url-remove-1" type="button" aria-label="Remove Comcast SRE">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite">
+                <span class="badge" data-qa="search-url-page-type-badge-1" title="Page type: Jobs search (linkedin__jobs-search)" aria-label="Page type: Jobs search (linkedin__jobs-search)">Jobs search</span>
+                <span class="callout" title="C1">1</span><span class="callout" title="C3">3</span>
+              </div>
+            </div>
+            <div class="row-card" data-qa="search-url-row-2">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-2">Search URL</label>
+                  <input class="input" id="url-2" data-qa="search-url-input-2" type="text" value="https://www.linkedin.com/jobs/search-results/?keywords=platform&amp;location=Remote"></div>
+                <div class="field fixed-width"><label class="field-label" for="label-2">Label</label>
+                  <input class="input" id="label-2" data-qa="search-url-label-input-2" type="text" value="Zafin Platform"></div>
+                <button class="icon-btn" data-qa="search-url-remove-2" type="button" aria-label="Remove Zafin Platform">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite">
+                <span class="badge" data-qa="search-url-page-type-badge-2" title="Page type: Search results (linkedin__jobs-search-results)" aria-label="Page type: Search results (linkedin__jobs-search-results)">Search results</span>
+              </div>
+            </div>
+            <div class="row-card" data-qa="search-url-row-3">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-3">Search URL</label>
+                  <input class="input" id="url-3" data-qa="search-url-input-3" type="text" value="https://www.linkedin.com/jobs/search-results/?keywords=devops&amp;location=Remote"></div>
+                <div class="field fixed-width"><label class="field-label" for="label-3">Label</label>
+                  <input class="input" id="label-3" data-qa="search-url-label-input-3" type="text" value="Acme DevOps"></div>
+                <button class="icon-btn" data-qa="search-url-remove-3" type="button" aria-label="Remove Acme DevOps">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite">
+                <span class="badge" data-qa="search-url-page-type-badge-3" title="Page type: Search results (linkedin__jobs-search-results)" aria-label="Page type: Search results (linkedin__jobs-search-results)">Search results</span>
+                <span class="row-note is-attention" data-qa="search-url-row-note-3">Saved as Jobs search — will be re-filed as Search results.</span>
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-outline" data-qa="search-urls-add-default" type="button">Add another search URL</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EMPTY -->
+  <div class="state-view" data-state="empty" hidden>
+    <div class="settings-shell">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <div class="nav-group-label">Aim</div>
+        <div class="nav-group-label">Runs</div>
+        <a class="nav-item active" href="#">Where jobs come from</a>
+        <div class="nav-group-label">Output</div>
+        <div class="nav-group-label">Advanced</div>
+      </nav>
+      <div class="settings-main">
+        <h3 class="page-title heading-font">Settings</h3>
+        <div class="card" data-qa="search-urls-card-empty">
+          <div class="stack gap-1">
+            <h4 class="card-title heading-font">Search URLs</h4>
+            <p class="card-helper" data-qa="search-urls-helper-empty">Paste any LinkedIn jobs link — it's cleaned and filed automatically.</p>
+          </div>
+          <p class="row-note is-muted" data-qa="search-urls-empty">No LinkedIn searches yet. Paste a link from a LinkedIn jobs search page to start.</p>
+          <div class="row-list">
+            <div class="row-card" data-qa="search-url-row-empty">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-empty">Search URL</label>
+                  <input class="input" id="url-empty" data-qa="search-url-input-empty" type="text" placeholder="Paste a LinkedIn jobs search link…" autofocus></div>
+                <div class="field fixed-width"><label class="field-label" for="label-empty">Label</label>
+                  <input class="input" id="label-empty" data-qa="search-url-label-input-empty" type="text" placeholder="Label"></div>
+                <button class="icon-btn" data-qa="search-url-remove-empty" type="button" aria-label="Remove row">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite"><span class="callout" title="C12">12</span></div>
+            </div>
+          </div>
+          <button class="btn btn-outline" data-qa="search-urls-add-empty" type="button">Add another search URL</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOADING -->
+  <div class="state-view" data-state="loading" hidden>
+    <div class="settings-shell">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <div class="nav-group-label">Aim</div>
+        <div class="nav-group-label">Runs</div>
+        <a class="nav-item active" href="#">Where jobs come from</a>
+        <div class="nav-group-label">Output</div>
+        <div class="nav-group-label">Advanced</div>
+      </nav>
+      <div class="settings-main">
+        <h3 class="page-title heading-font">Settings</h3>
+        <div class="card" data-qa="search-urls-card-loading">
+          <div class="stack gap-1">
+            <h4 class="card-title heading-font">Search URLs</h4>
+            <p class="card-helper" data-qa="search-urls-helper-loading">Paste any LinkedIn jobs link — it's cleaned and filed automatically.</p>
+          </div>
+          <div class="row-list" data-qa="search-urls-skeleton">
+            <div class="row-card">
+              <div class="row-line1"><div class="skeleton" style="flex:1"></div><div class="skeleton" style="width:192px"></div></div>
+              <div class="row-line2"><div class="skeleton-badge"></div><span class="callout" title="C9">9</span></div>
+            </div>
+            <div class="row-card">
+              <div class="row-line1"><div class="skeleton" style="flex:1"></div><div class="skeleton" style="width:192px"></div></div>
+              <div class="row-line2"><div class="skeleton-badge"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ERROR -->
+  <div class="state-view" data-state="error" hidden>
+    <div class="settings-shell">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <div class="nav-group-label">Aim</div>
+        <div class="nav-group-label">Runs</div>
+        <a class="nav-item active" href="#">Where jobs come from</a>
+        <div class="nav-group-label">Output</div>
+        <div class="nav-group-label">Advanced</div>
+      </nav>
+      <div class="settings-main">
+        <h3 class="page-title heading-font">Settings</h3>
+        <div class="card" data-qa="search-urls-card-error">
+          <div class="stack gap-1">
+            <h4 class="card-title heading-font">Search URLs</h4>
+          </div>
+          <div class="alert" data-qa="search-urls-load-error">
+            <p class="alert-text">Couldn't load search links.</p>
+            <button class="btn btn-outline" type="button">Retry</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUCCESS -->
+  <div class="state-view" data-state="success" hidden>
+    <div class="settings-shell">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <div class="nav-group-label">Aim</div>
+        <div class="nav-group-label">Runs</div>
+        <a class="nav-item active" href="#">Where jobs come from</a>
+        <div class="nav-group-label">Output</div>
+        <div class="nav-group-label">Advanced</div>
+      </nav>
+      <div class="settings-main">
+        <h3 class="page-title heading-font">Settings</h3>
+        <div class="card" data-qa="search-urls-card-success">
+          <div class="stack gap-1">
+            <h4 class="card-title heading-font">Search URLs</h4>
+          </div>
+          <div class="row-list">
+            <div class="row-card" data-qa="search-url-row-4">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-4">Search URL</label>
+                  <input class="input" id="url-4" data-qa="search-url-input-4" type="text" value="https://www.linkedin.com/jobs/search/?keywords=sre&amp;location=Remote"></div>
+                <div class="field fixed-width"><label class="field-label" for="label-4">Label</label>
+                  <input class="input" id="label-4" data-qa="search-url-label-input-4" type="text" value="Comcast SRE"></div>
+                <button class="icon-btn" data-qa="search-url-remove-4" type="button" aria-label="Remove Comcast SRE">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite"><span class="badge" data-qa="search-url-page-type-badge-4" title="Page type: Jobs search (linkedin__jobs-search)" aria-label="Page type: Jobs search (linkedin__jobs-search)">Jobs search</span></div>
+            </div>
+            <div class="row-card" data-qa="search-url-row-5">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-5">Search URL</label>
+                  <input class="input" id="url-5" data-qa="search-url-input-5" type="text" value="https://www.linkedin.com/jobs/search-results/?keywords=platform&amp;location=Remote"></div>
+                <div class="field fixed-width"><label class="field-label" for="label-5">Label</label>
+                  <input class="input" id="label-5" data-qa="search-url-label-input-5" type="text" value="Zafin Platform"></div>
+                <button class="icon-btn" data-qa="search-url-remove-5" type="button" aria-label="Remove Zafin Platform">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite"><span class="badge" data-qa="search-url-page-type-badge-5" title="Page type: Search results (linkedin__jobs-search-results)" aria-label="Page type: Search results (linkedin__jobs-search-results)">Search results</span></div>
+            </div>
+          </div>
+          <button class="btn btn-outline" data-qa="search-urls-add-success" type="button">Add another search URL</button>
+          <div class="savebar is-success" data-qa="settings-save-success">
+            <span class="savebar-text is-success">Saved 4 search links. Cleaned 1, merged 1 duplicate. <span class="callout" title="C8">8</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAVE-ERROR -->
+  <div class="state-view" data-state="save-error" hidden>
+    <div class="settings-shell">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <div class="nav-group-label">Aim</div>
+        <div class="nav-group-label">Runs</div>
+        <a class="nav-item active" href="#">Where jobs come from</a>
+        <div class="nav-group-label">Output</div>
+        <div class="nav-group-label">Advanced</div>
+      </nav>
+      <div class="settings-main">
+        <h3 class="page-title heading-font">Settings</h3>
+        <div class="card" data-qa="search-urls-card-save-error">
+          <div class="stack gap-1">
+            <h4 class="card-title heading-font">Search URLs</h4>
+          </div>
+          <div class="validation-summary" data-qa="settings-validation-summary">
+            <p class="validation-summary-title">1 problem to fix</p>
+            <a href="#url-save-error">Zafin — not a LinkedIn jobs search link</a>
+          </div>
+          <div class="row-list">
+            <div class="row-card" data-qa="search-url-row-save-error">
+              <div class="row-line1">
+                <div class="field"><label class="field-label" for="url-save-error">Search URL</label>
+                  <input class="input is-invalid" id="url-save-error" data-qa="search-url-input-save-error" type="text" value="https://www.zafin.com/careers" aria-invalid="true" aria-describedby="err-save-error"></div>
+                <div class="field fixed-width"><label class="field-label" for="label-save-error">Label</label>
+                  <input class="input" id="label-save-error" data-qa="search-url-label-input-save-error" type="text" value="Zafin"></div>
+                <button class="icon-btn" data-qa="search-url-remove-save-error" type="button" aria-label="Remove Zafin">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="row-line2" aria-live="polite"></div>
+              <p class="field-error" id="err-save-error" data-qa="search-url-error-save-error">This isn't a LinkedIn jobs search link. Paste one from linkedin.com/jobs/search, /jobs/search-results or /jobs/collections. <span class="callout" title="C4">4</span></p>
+            </div>
+          </div>
+          <button class="btn btn-outline" data-qa="search-urls-add-save-error" type="button">Add another search URL</button>
+          <div class="savebar" data-qa="settings-savebar-save-error">
+            <span class="savebar-text">Unsaved changes</span>
+            <div class="savebar-actions">
+              <button class="btn btn-ghost" type="button">Discard</button>
+              <button class="btn btn-primary" type="button">Save changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= S1 row sub-states ======================================================= -->
+<section class="frame">
+  <div class="frame-label">S1 — row sub-states</div>
+  <h2 class="frame-title heading-font">One row per sub-state, plus the R13 misfile notice</h2>
+  <div class="card">
+    <div class="notice notice-attention" data-qa="search-urls-misfile-notice-sub">
+      <p class="notice-text">2 links are filed under the wrong page type, so runs read them with the wrong page reader.</p>
+      <button class="btn btn-outline" data-qa="search-urls-refile-button-sub" type="button">Re-file 2 links</button>
+    </div>
+    <div class="row-list">
+
+      <div class="sub-row-wrap"><span class="sub-row-label">typing — focus in URL, not yet blurred</span>
+        <div class="row-card" data-qa="search-url-row-typing">
+          <div class="row-line1">
+            <div class="field"><label class="field-label" for="url-typing">Search URL</label>
+              <input class="input" id="url-typing" data-qa="search-url-input-typing" type="text" value="https://www.linkedin.com/jobs/search/?keywords=sr" autofocus></div>
+            <div class="field fixed-width"><label class="field-label" for="label-typing">Label</label>
+              <input class="input" id="label-typing" data-qa="search-url-label-input-typing" type="text" placeholder="Label"></div>
+            <button class="icon-btn" data-qa="search-url-remove-typing" type="button" aria-label="Remove row">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="row-line2" aria-live="polite"><span class="callout" title="C2">2</span></div>
+        </div>
+      </div>
+
+      <div class="sub-row-wrap"><span class="sub-row-label">recognised, clean — blur/paste, R1 ok, URL unchanged</span>
+        <div class="row-card" data-qa="search-url-row-clean">
+          <div class="row-line1">
+            <div class="field"><label class="field-label" for="url-clean">Search URL</label>
+              <input class="input" id="url-clean" data-qa="search-url-input-clean" type="text" value="https://www.linkedin.com/jobs/search/?keywords=sre&amp;location=Remote"></div>
+            <div class="field fixed-width"><label class="field-label" for="label-clean">Label</label>
+              <input class="input" id="label-clean" data-qa="search-url-label-input-clean" type="text" value="Comcast SRE"></div>
+            <button class="icon-btn" data-qa="search-url-remove-clean" type="button" aria-label="Remove Comcast SRE">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="row-line2" aria-live="polite"><span class="badge" data-qa="search-url-page-type-badge-clean" title="Page type: Jobs search (linkedin__jobs-search)" aria-label="Page type: Jobs search (linkedin__jobs-search)">Jobs search</span></div>
+        </div>
+      </div>
+
+      <div class="sub-row-wrap"><span class="sub-row-label">recognised, cleaned — blur/paste, R1 stripped params</span>
+        <div class="row-card" data-qa="search-url-row-cleaned">
+          <div class="row-line1">
+            <div class="field"><label class="field-label" for="url-cleaned">Search URL</label>
+              <input class="input" id="url-cleaned" data-qa="search-url-input-cleaned" type="text" value="https://www.linkedin.com/jobs/search-results/?keywords=platform&amp;location=Remote"></div>
+            <div class="field fixed-width"><label class="field-label" for="label-cleaned">Label</label>
+              <input class="input" id="label-cleaned" data-qa="search-url-label-input-cleaned" type="text" value="Zafin Platform"></div>
+            <button class="icon-btn" data-qa="search-url-remove-cleaned" type="button" aria-label="Remove Zafin Platform">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="row-line2" aria-live="polite">
+            <span class="badge" data-qa="search-url-page-type-badge-cleaned" title="Page type: Search results (linkedin__jobs-search-results)" aria-label="Page type: Search results (linkedin__jobs-search-results)">Search results</span>
+            <span class="row-note is-muted" data-qa="search-url-row-note-cleaned">Cleaned — removed currentJobId, origin, referralSearchId <span class="callout" title="C5">5</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-row-wrap"><span class="sub-row-label">duplicate — cleaned URL equals an earlier row's</span>
+        <div class="row-card" data-qa="search-url-row-duplicate">
+          <div class="row-line1">
+            <div class="field"><label class="field-label" for="url-duplicate">Search URL</label>
+              <input class="input" id="url-duplicate" data-qa="search-url-input-duplicate" type="text" value="https://www.linkedin.com/jobs/search/?keywords=sre&amp;location=Remote"></div>
+            <div class="field fixed-width"><label class="field-label" for="label-duplicate">Label</label>
+              <input class="input" id="label-duplicate" data-qa="search-url-label-input-duplicate" type="text" value="SRE Remote"></div>
+            <button class="icon-btn" data-qa="search-url-remove-duplicate" type="button" aria-label="Remove SRE Remote">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="row-line2" aria-live="polite">
+            <span class="badge" data-qa="search-url-page-type-badge-duplicate" title="Page type: Jobs search (linkedin__jobs-search)" aria-label="Page type: Jobs search (linkedin__jobs-search)">Jobs search</span>
+            <span class="row-note is-attention" data-qa="search-url-row-note-duplicate">Same search as "Comcast SRE" after cleaning — merged on save. <span class="callout" title="C7">7</span></span>
+            <button class="link-btn" data-qa="search-url-duplicate-remove" type="button">Remove now</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-row-wrap"><span class="sub-row-label">refused — blur, R1 rejects</span>
+        <div class="row-card" data-qa="search-url-row-refused">
+          <div class="row-line1">
+            <div class="field"><label class="field-label" for="url-refused">Search URL</label>
+              <input class="input is-invalid" id="url-refused" data-qa="search-url-input-refused" type="text" value="https://www.zafin.com/careers" aria-invalid="true" aria-describedby="err-refused"></div>
+            <div class="field fixed-width"><label class="field-label" for="label-refused">Label</label>
+              <input class="input" id="label-refused" data-qa="search-url-label-input-refused" type="text" value="Zafin"></div>
+            <button class="icon-btn" data-qa="search-url-remove-refused" type="button" aria-label="Remove Zafin">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="row-line2" aria-live="polite"></div>
+          <p class="field-error" id="err-refused" data-qa="search-url-error-refused">This isn't a LinkedIn jobs search link. Paste one from linkedin.com/jobs/search, /jobs/search-results or /jobs/collections.</p>
+        </div>
+      </div>
+
+      <div class="sub-row-wrap"><span class="sub-row-label">misfiled (R13, stored) — on load, R1 slug ≠ stored heading</span>
+        <div class="row-card" data-qa="search-url-row-misfiled">
+          <div class="row-line1">
+            <div class="field"><label class="field-label" for="url-misfiled">Search URL</label>
+              <input class="input" id="url-misfiled" data-qa="search-url-input-misfiled" type="text" value="https://www.linkedin.com/jobs/search-results/?keywords=devops&amp;location=Remote"></div>
+            <div class="field fixed-width"><label class="field-label" for="label-misfiled">Label</label>
+              <input class="input" id="label-misfiled" data-qa="search-url-label-input-misfiled" type="text" value="Acme DevOps"></div>
+            <button class="icon-btn" data-qa="search-url-remove-misfiled" type="button" aria-label="Remove Acme DevOps">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1L11 11M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="row-line2" aria-live="polite">
+            <span class="badge" data-qa="search-url-page-type-badge-misfiled" title="Page type: Search results (linkedin__jobs-search-results)" aria-label="Page type: Search results (linkedin__jobs-search-results)">Search results</span>
+            <span class="row-note is-attention" data-qa="search-url-row-note-misfiled">Saved as Jobs search — will be re-filed as Search results.</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= S2 ======================================================= -->
+<section class="frame" data-switcher>
+  <div class="frame-label">S2 — Run detail › "Links that failed" panel (R11)</div>
+  <h2 class="frame-title heading-font">Bad-links panel states</h2>
+  <div class="segmented" role="tablist" aria-label="S2 panel state">
+    <button class="seg-btn is-active" data-state="default" type="button">Default</button>
+    <button class="seg-btn" data-state="empty" type="button">Empty</button>
+    <button class="seg-btn" data-state="loading" type="button">Loading</button>
+    <button class="seg-btn" data-state="error" type="button">Error</button>
+  </div>
+
+  <div class="state-view" data-state="default">
+    <div class="diag-panel is-attention" data-qa="run-bad-links-panel-default">
+      <h4 class="diag-title is-attention">2 search links failed — the run continued <span class="callout" title="C10">10</span></h4>
+      <p class="diag-evidence">A link that worked earlier today still loaded, so LinkedIn is fine — these links are the problem.</p>
+      <ul class="diag-list" data-qa="run-bad-links-list-default">
+        <li><span class="diag-label">Comcast SRE</span> · <span class="diag-url mono" title="https://www.linkedin.com/jobs/search/?keywords=sre&amp;location=Remote">linkedin.com/jobs/…/Remote</span> · <span class="diag-reason">results list never loaded</span></li>
+        <li><span class="diag-label">Zafin</span> · <span class="diag-url mono" title="https://www.linkedin.com/jobs/search-results/?keywords=platform&amp;location=Remote">linkedin.com/jobs/…/Remote</span> · <span class="diag-reason">results list never loaded</span></li>
+      </ul>
+      <div class="diag-actions">
+        <a class="btn btn-primary" data-qa="run-bad-links-fix-default" href="#/settings/where-jobs-come-from">Fix in Settings</a>
+        <button class="btn btn-outline" data-qa="run-bad-links-copy-default" type="button">Copy links</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="state-view" data-state="empty" hidden>
+    <p class="row-note is-muted">No soft-failed links — the panel is absent. Run detail is unchanged.</p>
+  </div>
+
+  <div class="state-view" data-state="loading" hidden>
+    <div class="stack gap-2">
+      <div class="skeleton" style="height:20px;width:60%"></div>
+      <div class="skeleton" style="height:14px;width:80%"></div>
+      <div class="skeleton" style="height:14px;width:40%"></div>
+    </div>
+  </div>
+
+  <div class="state-view" data-state="error" hidden>
+    <div class="alert">
+      <p class="alert-text">Couldn't load this run.</p>
+      <button class="btn btn-outline" type="button">Retry</button>
+    </div>
+  </div>
+
+  <div class="frame-label" style="margin-top:16px;">Contrast frame — unchanged total-outage panel</div>
+  <div class="diag-panel is-destructive" data-qa="run-outage-panel">
+    <h4 class="diag-title is-destructive">Run failed — total outage</h4>
+    <p class="diag-evidence">Every attempted LinkedIn URL yielded zero listings — shaped like an expired login, not a per-link fault.</p>
+  </div>
+</section>
+
+<!-- ======================================================= S3 ======================================================= -->
+<section class="frame">
+  <div class="frame-label">S3 — Telegram digest (R11)</div>
+  <h2 class="frame-title heading-font">Three variants</h2>
+  <div class="s3-row">
+    <div class="telegram-frame">
+      <p class="telegram-frame-title">Passed, with bad links <span class="callout" title="C11">11</span></p>
+      <div class="telegram-bubble">✅ Job Bunny — harish (2026-09-30 14:00)
+────────────────
+Funnel: …
+<span class="digest-block" data-qa="digest-bad-links-block">⚠️ 2 search links failed — LinkedIn is fine (an earlier link still loads):
+  • Comcast SRE — results list never loaded
+  • Zafin — results list never loaded
+Fix: board → Settings → Where jobs come from</span></div>
+    </div>
+    <div class="telegram-frame">
+      <p class="telegram-frame-title">Passed, clean (unchanged)</p>
+      <div class="telegram-bubble">✅ Job Bunny — harish (2026-09-30 14:00)
+────────────────
+Funnel: …</div>
+    </div>
+    <div class="telegram-frame">
+      <p class="telegram-frame-title">Total outage (unchanged)</p>
+      <div class="telegram-bubble">🔴 Job Bunny — harish (2026-09-30 14:00)
+────────────────
+Run failed — total outage</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= Annotations ======================================================= -->
+<aside class="frame">
+  <div class="frame-label">Annotations</div>
+  <h2 class="frame-title heading-font">Callouts C1–C12</h2>
+  <ol class="annotations-list">
+    <li><span class="callout">1</span><span>C1 — Human page-type label in the badge; the slug stays one hover away in title/aria.</span></li>
+    <li><span class="callout">2</span><span>C2 — Classify on blur/paste, never mid-type; the badge itself is the positive feedback.</span></li>
+    <li><span class="callout">3</span><span>C3 — No page-type picker and no eyebrow; the badge is output, not input, styled outline.</span></li>
+    <li><span class="callout">4</span><span>C4 — Refused copy names the fix inline, destructive-strong, under the field.</span></li>
+    <li><span class="callout">5</span><span>C5 — "Cleaned" is muted, not a warning — cleaning is good news.</span></li>
+    <li><span class="callout">6</span><span>C6 — R13 as one card notice plus one button — the form's one distinct action while clean.</span></li>
+    <li><span class="callout">7</span><span>C7 — Duplicate warned before save, merged on save; Remove now gives control.</span></li>
+    <li><span class="callout">8</span><span>C8 — Save success reports what the system changed, from the server's R3 report.</span></li>
+    <li><span class="callout">9</span><span>C9 — Skeleton on load (not null), "Re-filing…" disables the button on click.</span></li>
+    <li><span class="callout">10</span><span>C10 — Bad-links panel reuses the DiagnosisPanel idiom with an attention tint, not destructive.</span></li>
+    <li><span class="callout">11</span><span>C11 — Digest names links by label and ends with "Fix:".</span></li>
+    <li><span class="callout">12</span><span>C12 — Empty card auto-adds a focused row — first paste is 0 clicks.</span></li>
+  </ol>
+</aside>
+
+</main>
+
+<script>
+  document.getElementById('theme-toggle').addEventListener('click', function () {
+    document.documentElement.classList.toggle('dark');
+  });
+
+  document.querySelectorAll('[data-switcher]').forEach(function (frame) {
+    var buttons = frame.querySelectorAll('.seg-btn');
+    var views = frame.querySelectorAll('.state-view');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        buttons.forEach(function (b) { b.classList.remove('is-active'); });
+        btn.classList.add('is-active');
+        var state = btn.dataset.state;
+        views.forEach(function (v) { v.hidden = v.dataset.state !== state; });
+      });
+    });
+  });
+</script>
+</body>
+</html>

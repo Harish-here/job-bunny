@@ -375,10 +375,15 @@ test('AC18: a passing run while a failure signature is suppressed still sends it
   const code3 = await run(ctx, passedResult(), PLUS_1H);
   assert.equal(code3, 0);
   assert.equal(notified.length, 2, 'the passing run still sends its digest');
+  // `decideNotification`'s own dedup readDoc/writeDoc are never invoked for a
+  // passing run. But `run.ts` also unconditionally calls
+  // `resolveLinkSoftErrors` after `runPipeline` returns (R11), which issues
+  // its OWN, unrelated `stateStore.readDoc` (the `link_soft_errors.json`
+  // side doc) even on a pass — accounting for the +1 here.
   assert.equal(
     reads.length,
-    readsSoFar,
-    'readDoc/decideNotification are never invoked for a passing run',
+    readsSoFar + 1,
+    "the only read on a passing run is resolveLinkSoftErrors' own — dedup itself never reads",
   );
   assert.equal(
     writes.length,

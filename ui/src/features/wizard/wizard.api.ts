@@ -54,13 +54,17 @@ export async function patchProfileConfig(
 }
 
 /** Thin wrapper over the existing putConfigDoc — kept here so every wizard
- * step imports its config writes from one module. */
+ * step imports its config writes from one module. Returns the PUT
+ * response's own `{ text }` (already a `ConfigGetResponse`, a structural
+ * superset — no new import needed): callers that need the server's
+ * possibly-normalized text back (e.g. `search_urls.md`) read it from the
+ * response instead of trusting the locally-serialized text they sent. */
 export async function writeConfigDocText(
   profile: string,
   doc: ConfigDocName,
   text: string,
-): Promise<void> {
-  await putConfigDoc(profile, doc, text);
+): Promise<{ text: string }> {
+  return putConfigDoc(profile, doc, text);
 }
 
 export type RunIntentOutcome =

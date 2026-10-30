@@ -7,7 +7,8 @@ Status: v1.4, derived 2026-08-10 during the `run-experience-overhaul` spec and c
 spec's interview round 1; extended 2026-08-13 during the `pipeline-stability-hardening` spec,
 which closed the open discovery-channel question; extended again 2026-08-17 during the
 `settings-overhaul` spec, which named a **third hat** and added **JTBD-4**; extended again
-2026-08-25 during the `ui-design-system` spec, which added **JTBD-5** — the first job that belongs
+2026-08-25 during the `ui-design-system` spec, which added **JTBD-5**; v1.5 2026-09-28
+(`search-link-intake`) adds the paste-anything intake expectation under Frustrations. Earlier text: — the first job that belongs
 squarely to the job-seeker hat rather than to the machine. Derived from repo recon + the
 orchestrator's grounding, then corrected against the user's own answers. Refine this file on
 every product run — it is not frozen.
@@ -119,6 +120,16 @@ first two do not cover, because it is the only one worn when nothing is wrong.)*
   `maxProbesPerRun: 25`) are live, unsurfaced, and reachable only as raw JSON in a document the
   board never touches. The user suspected a cap and had no way to check — the suspicion was
   well-founded and the surface simply could not answer it.
+
+- **Evidenced 2026-09-28 (`search-link-intake`).** Three LinkedIn links pasted into board Settings
+  were silently misfiled under the wrong page type. The first sign was days of failed later-slot
+  runs, and every failure page blamed an "outage". The user's stated expectation: *"the urls
+  whatever i paste suppose to work without even sanitizing."* **Standing design consequence (tuner
+  hat):**
+  - Input surfaces accept what the user naturally copies, and derive meaning from it (type, clean
+    form).
+  - They refuse loudly only what they cannot understand.
+  - They never ask the user to hand-clean input, and never file input under a silent default.
 
 ### What this persona is NOT
 

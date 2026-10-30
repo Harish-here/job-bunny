@@ -103,7 +103,10 @@ export interface RunFailure {
  * one, landing on `LiveRunHeader`'s own `estimatedDurationMs = null`
  * default. */
 export interface RunDetailFixture extends RunRow {
-  result: { stages: FunnelStage[] } | null;
+  result: {
+    stages: FunnelStage[];
+    linkSoftErrors?: { url: string; label?: string; reason: string }[];
+  } | null;
   failure: RunFailure | null;
   syncDryrun: unknown;
   estimatedDurationMs?: number | null;

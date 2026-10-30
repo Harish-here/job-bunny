@@ -50,6 +50,7 @@ import {
   type WireResult,
 } from '../wire/index.ts';
 import { sendFailureDigest } from './run_failure_notice.ts';
+import { resolveLinkSoftErrors } from './run_link_soft_errors.ts';
 
 // > structure provider timeout (300_000) so the stall watchdog never
 // false-kills a live batch.
@@ -313,9 +314,22 @@ export async function runCommand(
       },
     );
 
-    ctx.runStore.finishRun(runId, result.outcome, result, resolved.now().toISOString());
+    const enrichedResult = await resolveLinkSoftErrors(result, {
+      stateStore: ctx.stateStore,
+      profile: ctx.profile,
+      root: resolved.root,
+      runStartedAtIso: now.toISOString(),
+      logger: ctx.logger,
+    });
 
-    if (result.outcome === 'passed') {
+    ctx.runStore.finishRun(
+      runId,
+      enrichedResult.outcome,
+      enrichedResult,
+      resolved.now().toISOString(),
+    );
+
+    if (enrichedResult.outcome === 'passed') {
       // R20 — success bypasses the dedup path ENTIRELY: unconditional send,
       // no `readDoc`/`writeDoc`/`decideNotification` at all, byte-identical
       // to the pre-dedup behavior (regression bar).
@@ -323,22 +337,22 @@ export async function runCommand(
       await ctx.notify({
         kind: 'digest',
         profile: opts.profile,
-        text: formatDigest(result, { dryRun: opts.dryRun ?? false }),
+        text: formatDigest(enrichedResult, { dryRun: opts.dryRun ?? false }),
       });
     } else {
       await sendFailureDigest(
         ctx,
         runId,
-        result,
+        enrichedResult,
         opts.profile,
         opts.dryRun ?? false,
         resolved.now().toISOString(),
       );
     }
 
-    console.log(funnelSummary(result, opts.dryRun ?? false));
+    console.log(funnelSummary(enrichedResult, opts.dryRun ?? false));
 
-    return result.outcome === 'passed' ? 0 : 1;
+    return enrichedResult.outcome === 'passed' ? 0 : 1;
   } finally {
     // Flush any buffered run_events before releasing the lock — durability
     // before the process is free to exit (mirrors the old `JsonlLogger`

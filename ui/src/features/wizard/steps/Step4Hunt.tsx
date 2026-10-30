@@ -12,7 +12,6 @@
  * own `wizard-existing-config` notice.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Field, FieldControl, FieldError, FieldLabel } from '../../../components/ui/form';
 import { Input } from '../../../components/ui/input';
@@ -26,15 +25,16 @@ const JOBS_SEARCH_PATHNAME = '/jobs/search/';
 const EXISTING_CONFIG_MESSAGE =
   'This profile already has search URLs. Edit them in Settings.';
 const WARNING_MESSAGE =
-  'This looks like a different LinkedIn page type; it will still be saved under ' +
-  'linkedin__jobs-search.';
+  "This looks like a different LinkedIn page type — it'll be filed under its own " +
+  'page type automatically.';
 
 function emptyRow(): SearchUrlEntry {
   return { label: '', url: '' };
 }
 
 /** Non-blocking heads-up only: the URL still parses and validates fine, it
- * just isn't the `/jobs/search/` shape the wizard files everything under.
+ * just isn't the `/jobs/search/` shape; every recognized LinkedIn jobs
+ * shape is still filed under its own correct page type once saved.
  * An unparseable URL is a validation ERROR (`validateUrlEntry`), handled
  * separately — this returns false rather than warn on garbage input. */
 function isDifferentPageType(rawUrl: string): boolean {
@@ -149,8 +149,8 @@ export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepPr
         return false;
       }
       const text = serializeSearchUrls(entries);
-      await writeConfigDocText(current.profile, 'search_urls.md', text);
-      writtenDocs = { ...current.writtenDocs, 'search_urls.md': text };
+      const response = await writeConfigDocText(current.profile, 'search_urls.md', text);
+      writtenDocs = { ...current.writtenDocs, 'search_urls.md': response.text };
     }
 
     await patchProfileConfig(current.profile, (cfg) => {
@@ -177,16 +177,12 @@ export function Step4Hunt({ draft, onDraftChange, registerSubmit }: WizardStepPr
       <div className="flex flex-col gap-1">
         <h2 className="font-heading text-base font-medium">Where to hunt</h2>
         <p className="text-sm text-muted-foreground">
-          Add your saved LinkedIn job searches below. Every URL is filed under the{' '}
-          <Badge variant="outline">linkedin__jobs-search</Badge> page type, whose
-          inventory lives at{' '}
-          <code className="font-mono text-xs">
-            src/adapters/lanes/linkedin/page_inventory/linkedin__jobs-search.json
-          </code>
-          . Greenhouse and Keka need nothing configured — company discovery is automatic —
-          so this step is about to turn on the <strong>linkedin</strong>,{' '}
-          <strong>greenhouse</strong>, and <strong>keka</strong> lanes. You can leave
-          every row blank; the ATS lanes still work with zero URLs.
+          Add your saved LinkedIn job searches below. Each link is filed under its own
+          page type automatically. Greenhouse and Keka need nothing configured — company
+          discovery is automatic — so this step is about to turn on the{' '}
+          <strong>linkedin</strong>, <strong>greenhouse</strong>, and{' '}
+          <strong>keka</strong> lanes. You can leave every row blank; the ATS lanes still
+          work with zero URLs.
         </p>
       </div>
 

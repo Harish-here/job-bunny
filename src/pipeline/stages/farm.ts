@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { DroppedRecord, JD } from '../../core/jd/index.ts';
 import type { FarmingLane } from '../../ports/index.ts';
 import type { StageContext, StageDef, StagePayload } from '../runner/stage.ts';
@@ -8,6 +9,22 @@ import { CompaniesSeenSchema } from './source.ts';
  * source is the only reader; farm MUST run before source in pipeline
  * order so the side-write exists when source needs it. */
 const COMPANIES_SEEN_PATH = 'registry/companies_seen.json';
+
+/** Per-link soft errors (R11) collected across every FarmingLane this run —
+ * e.g. a saved-search URL that soft-failed without taking down the whole
+ * lane. Written unconditionally (mirrors COMPANIES_SEEN_PATH's always-write
+ * pattern) so a run with zero soft errors never leaves an earlier farm
+ * execution's stale doc readable. This write is profile-global, not
+ * per-run (one state_docs row per key per profile); `writtenAt` is the
+ * staleness guard task 15's reader uses to avoid misattributing a stale
+ * cross-invocation doc to the current run. */
+const LINK_SOFT_ERRORS_PATH = 'lanes/linkedin/link_soft_errors.json';
+const LinkSoftErrorsSchema = z.object({
+  writtenAt: z.string(), // staleness guard, consumed by task 15
+  links: z.array(z.object({ url: z.string(), reason: z.string() })),
+});
+export type LinkSoftErrorsDoc = z.infer<typeof LinkSoftErrorsSchema>;
+export { LINK_SOFT_ERRORS_PATH, LinkSoftErrorsSchema };
 
 /** 90-minute ceiling over a browser-driven farming run. LinkedIn navigation is
  * slower than API-only staging (source.ts's 300s). The LinkedIn lane adds 5–12s
@@ -74,6 +91,7 @@ export function makeFarmStage(
       const farmedJobs: JD[] = [];
       const farmedDropped: DroppedRecord[] = [];
       const seen: Record<string, string[]> = {};
+      const linkSoftErrors: { url: string; reason: string }[] = [];
       let failedLanes = 0;
       let skippedLanes = 0;
 
@@ -95,6 +113,7 @@ export function makeFarmStage(
           farmedJobs.push(...result.jobs);
           farmedDropped.push(...result.dropped);
           seen[lane.name] = result.companiesSeen;
+          if (result.linkSoftErrors) linkSoftErrors.push(...result.linkSoftErrors);
         } catch (err) {
           if (ctx.signal.aborted) throw err; // run-level abort: propagate, no side-write
           // Whole-lane outage: never let one lane's total failure stop the others.
@@ -135,6 +154,13 @@ export function makeFarmStage(
         );
       }
 
+      await ctx.stateStore.writeDoc(
+        LINK_SOFT_ERRORS_PATH,
+        LinkSoftErrorsSchema.parse({
+          writtenAt: new Date().toISOString(),
+          links: linkSoftErrors,
+        }),
+      );
       await ctx.stateStore.writeDoc(COMPANIES_SEEN_PATH, CompaniesSeenSchema.parse(seen));
 
       return {

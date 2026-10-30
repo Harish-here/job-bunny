@@ -4,7 +4,7 @@ import type { Logger, RunContext } from '../../../ports/context.ts';
 import type { ChromeProcessHandle, KillDeps, LauncherDeps } from './launcher.ts';
 import { DEFAULT_USER_DATA_DIR } from './launcher.ts';
 import type { ChromePidfileDeps } from './ownership/index.ts';
-import type { CdpBrowser, CdpPage } from './provider.ts';
+import type { CdpBrowser, CdpChromeProviderDeps, CdpPage } from './provider.ts';
 import { CdpChromeProvider } from './provider.ts';
 
 const noopLogger: Logger = {
@@ -97,6 +97,21 @@ function fakePidfileDeps(
     unlinkSync: () => {},
     pidIsAlive: () => true,
     now: () => now,
+  };
+}
+
+/** A reachable Chrome proven ours (faked getInfo reports our user-data-dir). */
+function ownedChrome(): Pick<CdpChromeProviderDeps, 'cdpReachable' | 'ownership'> {
+  return {
+    cdpReachable: async () => ({
+      Browser: 'Chrome/999',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/abc',
+    }),
+    ownership: {
+      readUserDataDir: async () => DEFAULT_USER_DATA_DIR,
+      realpath: (path) => path,
+      platform: 'darwin',
+    },
   };
 }
 
@@ -231,27 +246,30 @@ test('close() respects JOBBUNNY_KEEP_BROWSER=1 by delegating the decision to kil
   assert.deepEqual(killCalls, []);
 });
 
-test('close() never calls a browser.close()-style API — only the OS-level pid kill', async () => {
-  // CdpBrowser intentionally has no close() method in its type, but this
-  // guards against a future accidental addition being invoked.
-  let closeAttempted = false;
-  const browser: CdpBrowser & { close?: () => Promise<void> } = {
+test('close() disconnects the playwright connection AND kills the spawned pid', async () => {
+  const closeCalls: string[] = [];
+  const killCalls: Array<number | undefined> = [];
+  const browser: CdpBrowser = {
     newPage: async () => fakePage(),
     close: async () => {
-      closeAttempted = true;
+      closeCalls.push('close');
     },
   };
   const provider = new CdpChromeProvider({
     launchChrome: fakeLauncher().launchChrome,
     cdpReachable: async () => null,
     connect: async () => browser,
-    killChrome: () => true,
+    killChrome: (pid) => {
+      killCalls.push(pid);
+      return true;
+    },
   });
 
   const handle = await provider.launch(fakeCtx());
   await handle.close();
 
-  assert.equal(closeAttempted, false);
+  assert.deepEqual(closeCalls, ['close']);
+  assert.deepEqual(killCalls, [4242]);
 });
 
 test('launch() retries connect on failure and resolves once it succeeds', async () => {
@@ -462,7 +480,7 @@ test('launch() reuses a reachable Chrome whose pid-file-recorded age is under ma
   const connectUrls: string[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 60_000 }), // 1 minute old
     connect: async (url) => {
       connectUrls.push(url);
@@ -520,7 +538,7 @@ test('launch() recycles a reachable Chrome whose pid-file-recorded age is over m
   const killCalls: Array<number | undefined> = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }), // 25h
     killChrome: (pid) => {
       killCalls.push(pid);
@@ -541,7 +559,7 @@ test('launch() reuses a stale-pid-file Chrome without recycling when recycleIfOl
   const killCalls: Array<number | undefined> = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }),
     recycleIfOld: false,
     killChrome: (pid) => {
@@ -557,14 +575,14 @@ test('launch() reuses a stale-pid-file Chrome without recycling when recycleIfOl
   assert.equal(launcher.calls.length, 0, 'expected no spawn when recycling is disabled');
 });
 
-test('close() is a no-op for a reused Chrome — never kills a process this run did not spawn', async () => {
+test('close() disconnects without killing a reused Chrome — never kills a process this run did not spawn', async () => {
   // Regression test for the 2026-07-25 incident: reuse must not kill the
   // user's own persistent, already-logged-in Chrome on close().
   const launcher = fakeLauncher(7777);
   const killCalls: unknown[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 60_000 }), // fresh
     killChrome: (pid) => {
       killCalls.push(pid);
@@ -585,12 +603,12 @@ test('close() is a no-op for a reused Chrome — never kills a process this run 
   assert.deepEqual(killCalls, [], 'expected close() not to kill a reused Chrome');
 });
 
-test('close() is a no-op for a stale-but-kept Chrome when recycleIfOld is false', async () => {
+test('close() disconnects without killing a stale-but-kept Chrome when recycleIfOld is false', async () => {
   const launcher = fakeLauncher(7777);
   const killCalls: unknown[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }),
     recycleIfOld: false,
     killChrome: (pid) => {
@@ -640,7 +658,7 @@ test('close() respects JOBBUNNY_KEEP_BROWSER=1 after a recycle-then-spawn (owned
   const killCalls: unknown[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }),
     killEnv: { JOBBUNNY_KEEP_BROWSER: '1' },
     killChrome: (pid, deps) => {
@@ -734,37 +752,12 @@ test('newPage() falls back to newContext() when the browser reports no contexts'
   assert.equal(createdContext, true);
 });
 
-test('launch() attaches (reuse) to a reachable Chrome with no live pid file, and close() never kills it (ownsProcess === false)', async () => {
-  const launcher = fakeLauncher(4242);
-  const killCalls: unknown[] = [];
-  const provider = new CdpChromeProvider({
-    launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
-    pidfileDeps: fakePidfileDeps({ exists: false }),
-    killChrome: (pid) => {
-      killCalls.push(pid);
-      return true;
-    },
-    connect: async () => ({ newPage: async () => fakePage() }) satisfies CdpBrowser,
-  });
-
-  const handle = await provider.launch(fakeCtx());
-  await handle.close();
-
-  assert.equal(
-    launcher.calls.length,
-    0,
-    'expected no spawn — Chrome is already reachable',
-  );
-  assert.deepEqual(killCalls, [], 'expected close() never to kill an unowned Chrome');
-});
-
 test('close() kills the freshly-respawned Chrome pid after a recycle — this run owns the new process, not the old one', async () => {
   const launcher = fakeLauncher(8888);
   const killCalls: unknown[] = [];
   const provider = new CdpChromeProvider({
     launchChrome: launcher.launchChrome,
-    cdpReachable: async () => ({ Browser: 'Chrome/999' }),
+    ...ownedChrome(),
     pidfileDeps: fakePidfileDeps({ pid: 5555, ageMs: 25 * 60 * 60 * 1000 }), // stale -> recycle
     killChrome: (pid) => {
       killCalls.push(pid);

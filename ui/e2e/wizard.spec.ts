@@ -471,3 +471,38 @@ test('wizard: Back then Next past a step that already wrote its own config does 
   await expect(wizardStep(page, 5)).toBeVisible();
   await expect(page.getByTestId('wizard-existing-config')).toHaveCount(0);
 });
+
+test('wizard: step 4 Back-then-Next after a link with ephemeral params does not falsely flag wizard-existing-config', async ({
+  page,
+}) => {
+  const name = uniqueProfileName();
+  createdProfiles.push(name);
+
+  await createProfileStep(page, name);
+  await pickPersonaStep(page, 'backend');
+  await fillAboutStep(page, {
+    homeCity: 'Pune',
+    country: 'India',
+    workType: 'Onsite',
+  });
+  await submitAboutStep(page);
+
+  // Fill a URL carrying an ephemeral param the wizard's own
+  // `serializeSearchUrls` does NOT strip locally — only BE's server-side
+  // `search_urls.md` normalization does. Before this fix, the wizard
+  // compared its OWN locally-serialized (un-normalized) text against the
+  // BE-normalized text read back on the next submit, so this round trip
+  // falsely showed the never-clobber guard.
+  await page
+    .getByLabel('Search URL', { exact: true })
+    .fill('https://www.linkedin.com/jobs/search/?keywords=backend&currentJobId=123456');
+  await page.getByLabel('Label').fill('Backend roles');
+  await clickNext(page);
+  await expect(wizardStep(page, 5)).toBeVisible();
+
+  await clickBack(page);
+  await expect(wizardStep(page, 4)).toBeVisible();
+  await clickNext(page);
+  await expect(wizardStep(page, 5)).toBeVisible();
+  await expect(page.getByTestId('wizard-existing-config')).toHaveCount(0);
+});

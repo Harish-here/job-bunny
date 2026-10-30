@@ -1,5 +1,7 @@
 # Page Inventory — linkedin / linkedin__jobs-search
 
+> 2026-10-29: LinkedIn now redirects `/jobs/search/` to `/jobs/search-results/`; the selectors in `linkedin__jobs-search.json` mirror `linkedin__jobs-search-results`. The notes below describe the old scaffold-layout DOM, now kept in `linkedin__jobs-collections`.
+
 Filled from live DOM analysis on 2026-06-18 (Chrome 149, logged-in session) against
 `https://www.linkedin.com/jobs/search/`. extract.js reads this at runtime (config-driven).
 

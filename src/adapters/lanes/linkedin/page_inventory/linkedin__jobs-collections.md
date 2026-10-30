@@ -1,0 +1,44 @@
+# Page Inventory — linkedin / linkedin__jobs-collections
+
+Filled from live DOM analysis on 2026-06-18 (Chrome 149, logged-in session) against
+`https://www.linkedin.com/jobs/collections/`. extract.js reads this at runtime (config-driven).
+
+## 1. Behavior (manual)
+- interaction_model: new-page
+- job_list_trigger: open the job's /jobs/view/<id>/ URL directly in a fresh tab (robust; avoids fragile list-clicks)
+- pagination_type: url-pages
+- pagination_param: start
+- pagination_page_size: 25
+- max_pages: 4
+- jd_settled_signal: selector-visible
+- url_pattern_of_job: https://www.linkedin.com/jobs/view/<id>/
+- jd_anchor_text: About the job
+- max_raw_text_chars: 2500
+
+## 2. Selectors (from live page analysis)
+### Search page
+- job_list_container: .scaffold-layout__list
+- job_card: li[data-occludable-job-id]
+- job_card_title: .artdeco-entity-lockup__title
+- job_card_company: .artdeco-entity-lockup__subtitle
+- job_card_location: .artdeco-entity-lockup__caption
+- job_card_href: a.job-card-container__link
+- job_card_id_attr: data-occludable-job-id
+- scroll_container: .scaffold-layout__list
+- end_of_results_signal:
+
+### JD panel / page
+- jd_container: .jobs-search__job-details--container
+- jd_title: .job-details-jobs-unified-top-card__job-title
+- jd_company: .job-details-jobs-unified-top-card__company-name
+- jd_body: [componentkey^="JobDetails_AboutTheJob"]
+- jd_metadata: .job-details-jobs-unified-top-card__primary-description-container
+
+2026-07-27: direct-nav `/jobs/view/` pages render under hashed CSS class
+names — `#job-details` does not exist on that surface. The stable hook is
+the `componentkey` attribute `JobDetails_AboutTheJob_<jobId>` (also mirrored
+as the element's `id`); `jd_body` above was updated to match on that prefix.
+
+## 3. Assertions (derived from selectors above)
+- must_exist: [".scaffold-layout__list"]
+- min_job_cards: 1

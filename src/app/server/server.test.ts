@@ -156,7 +156,7 @@ function fakeSource(
     listProfiles: async () => PROFILES,
     openStore: async () => store,
     readConfigDoc: async () => undefined,
-    writeConfigDoc: async () => {},
+    writeConfigDoc: async () => ({ text: '' }),
     createProfile: async () => {},
     openIntents: async () => intents,
     listSecrets: async () => ({ NOTION_TOKEN: 'absent', TELEGRAM_BOT_TOKEN: 'absent' }),
@@ -360,6 +360,7 @@ test('PUT config doc reaches source.writeConfigDoc and echoes { text } back', as
   const source = fakeSource({
     writeConfigDoc: async (name, doc, rawText) => {
       writeCalls.push({ name, doc, rawText });
+      return { text: rawText };
     },
   });
   const server = createBoardServer({

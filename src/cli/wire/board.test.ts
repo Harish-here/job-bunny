@@ -270,6 +270,53 @@ describe('wireBoard — readConfigDoc/writeConfigDoc', () => {
     );
     source.close();
   });
+
+  test('writeConfigDoc on a non-search_urls.md doc returns { text: rawText }, no report', async () => {
+    const source = wireBoard({ root });
+    const filterJson = JSON.stringify({ locations: [] });
+    const result = await source.writeConfigDoc('a', 'filter.json', filterJson);
+    assert.deepEqual(result, { text: filterJson });
+    source.close();
+  });
+
+  test('writeConfigDoc routes search_urls.md through saveSearchUrlsDoc: returns the normalized text plus a save report', async () => {
+    const source = wireBoard({ root });
+    const raw =
+      '# Search URLs\n\n' +
+      '## linkedin\n' +
+      '### linkedin__jobs-search\n' +
+      '  • swe - https://www.linkedin.com/jobs/search/?keywords=swe\n';
+    const result = await source.writeConfigDoc('a', 'search_urls.md', raw);
+    assert.match(result.text, /linkedin__jobs-search/);
+    assert.match(result.text, /keywords=swe/);
+    assert.ok(result.report);
+    assert.equal(result.report?.total, 1);
+    assert.equal(await source.readConfigDoc('a', 'search_urls.md'), result.text);
+    source.close();
+  });
+
+  // AC7: an unrecognized link is refused — the thrown message names the
+  // link and is `refused: `-prefixed (`UnrecognizedLinkedInSearchUrlError`),
+  // and the stored doc is left byte-identical to what it was before the
+  // rejected write (verified via a follow-up readConfigDoc, mirroring a
+  // failed PUT's contract at the HTTP layer).
+  test('writeConfigDoc on search_urls.md with an unrecognized link refuses ("refused: "-prefixed) and leaves the stored doc unchanged', async () => {
+    const source = wireBoard({ root });
+    const before = await source.readConfigDoc('a', 'search_urls.md');
+    const badUrl = 'https://example.com/not-a-linkedin-search';
+    const raw = `# Search URLs\n\n## linkedin\n### unfiled\n  • bad - ${badUrl}\n`;
+    await assert.rejects(
+      () => source.writeConfigDoc('a', 'search_urls.md', raw),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.ok(err.message.startsWith('refused: '));
+        assert.ok(err.message.includes(badUrl));
+        return true;
+      },
+    );
+    assert.equal(await source.readConfigDoc('a', 'search_urls.md'), before);
+    source.close();
+  });
 });
 
 describe('wireBoard — createProfile', () => {

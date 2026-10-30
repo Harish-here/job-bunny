@@ -17,6 +17,7 @@ export type {
 export type {
   ConfigGetResponse,
   CreateProfileResponse,
+  SearchUrlsSaveReport,
 } from '../../../../src/app/features/config/index.ts';
 export type {
   AutostartOutcome,

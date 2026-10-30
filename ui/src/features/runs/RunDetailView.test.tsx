@@ -355,6 +355,58 @@ describe('RunDetailView — threads onRun into the diagnosis panel', () => {
 // + a covered-slots line, both gated purely on `run.kind === 'catchup'` —
 // orthogonal to `OutcomeKind` (design-scale.md), same as task 25's row
 // extension, so a plain `produced` fixture with `kind: 'catchup'` covers it.
+// Task 27: BadLinksPanel wired as an independent conditional, sibling to
+// (never nested inside) the DIAGNOSIS_KINDS gate — see RunDetailView.tsx's
+// own doc comment on `getLinkSoftErrors`. BE only ever populates
+// `linkSoftErrors` on a `'passed'`-outcome result, so the two panels are
+// mutually exclusive by construction; the third case below still asserts
+// that directly rather than relying purely on that construction.
+describe('RunDetailView — bad-links panel (task 27)', () => {
+  it('a produced run with soft-failed links shows the bad-links panel with both rows', () => {
+    const run = detail({
+      status: 'passed',
+      result: {
+        stages: stages(10, 7),
+        linkSoftErrors: [
+          {
+            url: 'https://www.linkedin.com/jobs/search/?location=Remote',
+            reason: 'timed out',
+          },
+          {
+            url: 'https://www.linkedin.com/jobs/search-results/?location=Remote',
+            reason: 'results list never loaded',
+            label: 'Zafin',
+          },
+        ],
+      },
+    });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    const panel = screen.getByTestId('rundetail-bad-links-panel');
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveTextContent('2 search links failed — the run continued');
+  });
+
+  it('a produced run with no soft-failed links shows no bad-links panel', () => {
+    const run = detail({ status: 'passed', result: { stages: stages(10, 7) } });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    expect(screen.queryByTestId('rundetail-bad-links-panel')).not.toBeInTheDocument();
+  });
+
+  it('a failed total-outage run never shows the bad-links panel, only the diagnosis panel', () => {
+    const run = detail({
+      status: 'failed',
+      result: null,
+      failure: { stage: 'structure', error: 'boom', elapsedMs: 500 },
+    });
+    renderDetail({ run, softErrors: EMPTY_SOFT_ERRORS });
+
+    expect(screen.getByTestId('rundetail-diagnosis-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('rundetail-bad-links-panel')).not.toBeInTheDocument();
+  });
+});
+
 describe('RunDetailView — catch-up extension (blueprint.md 1.8)', () => {
   it('a catchup run shows the "Catch-up" badge (via data-qa) and the covered-slots line, exact text', () => {
     const run = detail({

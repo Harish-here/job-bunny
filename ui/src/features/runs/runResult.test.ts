@@ -6,6 +6,7 @@ import {
   getFailedStage,
   getFailureError,
   getFunnelStages,
+  getLinkSoftErrors,
   newMatchCount,
 } from './runResult';
 
@@ -280,5 +281,35 @@ describe('computeRetention', () => {
       endCount: 0,
       retainedPct: 0,
     });
+  });
+});
+
+describe('getLinkSoftErrors', () => {
+  it('returns both entries from a result with 2 valid entries', () => {
+    const result = {
+      linkSoftErrors: [
+        { url: 'https://linkedin.com/jobs/a', label: 'Search A', reason: 'timeout' },
+        { url: 'https://linkedin.com/jobs/b', reason: 'blocked' },
+      ],
+    };
+    expect(getLinkSoftErrors(result)).toEqual(result.linkSoftErrors);
+  });
+
+  it('returns [] for a result with no linkSoftErrors key', () => {
+    expect(getLinkSoftErrors({})).toEqual([]);
+    expect(getLinkSoftErrors(null)).toEqual([]);
+    expect(getLinkSoftErrors(undefined)).toEqual([]);
+  });
+
+  it('filters out a malformed entry (missing reason), valid siblings survive', () => {
+    const result = {
+      linkSoftErrors: [
+        { url: 'https://linkedin.com/jobs/a', reason: 'timeout' },
+        { url: 'https://linkedin.com/jobs/b' /* reason missing */ },
+      ],
+    };
+    expect(getLinkSoftErrors(result)).toEqual([
+      { url: 'https://linkedin.com/jobs/a', reason: 'timeout' },
+    ]);
   });
 });

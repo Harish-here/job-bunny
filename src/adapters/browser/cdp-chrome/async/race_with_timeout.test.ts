@@ -27,3 +27,13 @@ test('raceWithTimeout clamps a negative ms to 0 rather than throwing', async () 
   });
   await assert.rejects(raceWithTimeout(hung, -5), /connect attempt exceeded 0ms/);
 });
+
+test('raceWithTimeout names the caller-supplied label in the timeout message', async () => {
+  const hung = new Promise<never>(() => {
+    // never settles
+  });
+  await assert.rejects(
+    raceWithTimeout(hung, 5, 'CDP disconnect'),
+    /^Error: CDP disconnect exceeded 5ms$/,
+  );
+});

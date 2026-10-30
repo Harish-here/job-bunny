@@ -322,8 +322,9 @@ test('page-level heartbeat: ctx.beat() ticks once per harvested page even when e
   assert.ok(dropped.length >= 2);
   // One page harvested per url (singlePageInventory has no pagination),
   // zero cards ever gate-passed — the page-level beat is the only
-  // heartbeat source here, so it must have ticked exactly twice.
-  assert.equal(beats, 2);
+  // heartbeat source within each url, so it ticks twice, plus one
+  // completed-url-attempt beat per url (two more).
+  assert.equal(beats, 4);
 });
 
 test('pacing: the constructor puts each pacing argument in its own slot (no transposition), read via a structural cast on the four private fields', async () => {

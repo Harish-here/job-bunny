@@ -29,6 +29,23 @@ describe('DocFormGate', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
+  it('renders the caller-supplied errorFallback instead of the default text, while loadError is set', () => {
+    render(
+      <DocFormGate
+        doc="search_urls.md"
+        isLoading={false}
+        loadError={new Error('network error')}
+        parseError={false}
+        errorFallback={<div data-testid="my-error-fallback" />}
+      >
+        <button type="button">Save</button>
+      </DocFormGate>,
+    );
+    expect(screen.getByTestId('my-error-fallback')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-load-error')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+
   it('renders a blocking load-error state and no children when loadError is set', () => {
     render(
       <DocFormGate
