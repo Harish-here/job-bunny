@@ -64,12 +64,14 @@ export function upsertSeen(
 
 /**
  * Records due for a probe by `apiLane` this run: never probed, a
- * not-found probe past its TTL (spec: re-probe after
+ * not-found or stale probe past its TTL (spec: re-probe after
  * reprobeNotFoundAfterDays — comparison is strict, so exactly-at-boundary
- * is NOT yet due), or an errored probe still under the failure cap.
- * 'found' and 'stale' probes, and errored probes at/over the cap, are
- * excluded. Curated records follow the identical rules — curation only
- * affects recordFetchFailure's stale behavior, not probe eligibility.
+ * is NOT yet due; a stale board is a dead board parked for a retry, so it
+ * shares the not-found clock, measured from when it went stale), or an
+ * errored probe still under the failure cap. 'found' probes, and errored
+ * probes at/over the cap, are excluded. Curated records follow the
+ * identical rules — curation only affects recordFetchFailure's stale
+ * behavior, not probe eligibility.
  */
 export function probeCandidates(
   reg: CompanyRecord[],
@@ -83,22 +85,25 @@ export function probeCandidates(
   return reg.filter((r) => {
     const probe = r.probes[apiLane];
     if (!probe || probe.status === 'unprobed') return true;
-    if (probe.status === 'not-found') {
+    if (probe.status === 'not-found' || probe.status === 'stale') {
       if (!probe.probedAt) return true;
       return nowMs - Date.parse(probe.probedAt) > ttlMs;
     }
     if (probe.status === 'error') {
       return probe.failCount < policy.maxProbeFailures;
     }
-    return false; // 'found' or 'stale'
+    return false; // 'found'
   });
 }
 
 /**
  * Applies a probe outcome for the record whose normalizedKey === key.
  * found/not-found reset failCount to 0; error increments the prior
- * failCount. No-op (returns `reg` unchanged) if `key` isn't in the
- * registry.
+ * failCount — except on a stale (dead-board) record, where an errored
+ * re-probe is no evidence either way: it stays stale with probedAt bumped,
+ * so the retry comes after the next TTL instead of the record sliding into
+ * the permanent errored-at-cap state. No-op (returns `reg` unchanged) if
+ * `key` isn't in the registry.
  */
 export function recordProbe(
   reg: CompanyRecord[],
@@ -112,12 +117,15 @@ export function recordProbe(
   return reg.map((r) => {
     if (r.normalizedKey !== key) return r;
 
-    const prevFailCount = r.probes[apiLane]?.failCount ?? 0;
+    const prev = r.probes[apiLane];
+    const prevFailCount = prev?.failCount ?? 0;
     let next: ProbeState;
     if (result.status === 'found') {
       next = { status: 'found', boardRef: result.boardRef, probedAt: now, failCount: 0 };
     } else if (result.status === 'not-found') {
       next = { status: 'not-found', probedAt: now, failCount: 0 };
+    } else if (prev?.status === 'stale') {
+      next = { ...prev, probedAt: now };
     } else {
       next = { status: 'error', probedAt: now, failCount: prevFailCount + 1 };
     }
@@ -146,18 +154,48 @@ export function boardsToFetch(
 }
 
 /**
+ * A board that fetched fine is not failing: reset its consecutive-failure
+ * count. failCount is a CONSECUTIVE counter — without this reset, sporadic
+ * blips over months add up and park a healthy board. No-op unless the
+ * record's probe for `apiLane` is 'found' with failCount > 0.
+ */
+export function recordFetchSuccess(
+  reg: CompanyRecord[],
+  key: string,
+  apiLane: string,
+): CompanyRecord[] {
+  return reg.map((r) => {
+    if (r.normalizedKey !== key) return r;
+    const prev = r.probes[apiLane];
+    if (prev?.status !== 'found' || prev.failCount === 0) return r;
+    return { ...r, probes: { ...r.probes, [apiLane]: { ...prev, failCount: 0 } } };
+  });
+}
+
+/**
  * Records a fetch failure (as opposed to a probe failure) against a
- * previously-found board: increments failCount. Non-curated records move
- * to 'stale' once failCount reaches staleAfterFetchFailures (boardsToFetch
- * then skips them). Curated records flag the failure via failCount but
- * never auto-expire to 'stale' — a human curated the board reference, so
- * only a human retires it. No-op if `key`/`apiLane` has no probe state.
+ * previously-found board: increments the consecutive failCount. Once it
+ * reaches staleAfterFetchFailures the board moves to 'stale'
+ * (boardsToFetch then skips it) and `probedAt` is stamped with `now`, which
+ * starts the clock probeCandidates uses to re-probe it — that re-probe is
+ * the way back if the board returns.
+ *
+ * Two kinds of failure. A transient one (default) keeps the original rule:
+ * curated records only flag it via failCount and never auto-expire — one
+ * 5xx blip must not retire a human-picked board. A `gone` one (the board
+ * answered HTTP 404/410 — definitive, not a hiccup) retires curated records
+ * too: before this, a curated board that was deleted upstream was fetched
+ * and failed on every run forever (no human-facing way to retire it).
+ * `now` is required for the stamp when `gone`; without it a stale record is
+ * stamped with nothing (probeCandidates then treats it as due at once).
+ * No-op if `key`/`apiLane` has no probe state.
  */
 export function recordFetchFailure(
   reg: CompanyRecord[],
   key: string,
   apiLane: string,
   policy: RegistryPolicy,
+  opts: { gone?: boolean; now?: string } = {},
 ): CompanyRecord[] {
   return reg.map((r) => {
     if (r.normalizedKey !== key) return r;
@@ -166,9 +204,17 @@ export function recordFetchFailure(
     if (!prev) return r;
 
     const failCount = prev.failCount + 1;
-    const status: ProbeState['status'] =
-      !r.curated && failCount >= policy.staleAfterFetchFailures ? 'stale' : prev.status;
+    const goesStale =
+      failCount >= policy.staleAfterFetchFailures && (!r.curated || opts.gone === true);
+    const next: ProbeState = goesStale
+      ? {
+          ...prev,
+          failCount,
+          status: 'stale',
+          ...(opts.now !== undefined && { probedAt: opts.now }),
+        }
+      : { ...prev, failCount };
 
-    return { ...r, probes: { ...r.probes, [apiLane]: { ...prev, failCount, status } } };
+    return { ...r, probes: { ...r.probes, [apiLane]: next } };
   });
 }

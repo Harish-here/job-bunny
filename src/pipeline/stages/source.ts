@@ -6,6 +6,7 @@ import {
   type RegistryPolicy,
   RegistrySchema,
   recordFetchFailure,
+  recordFetchSuccess,
   recordProbe,
   upsertSeen,
 } from '../../core/company/index.ts';
@@ -56,6 +57,8 @@ export const CompaniesSeenSchema = z.record(z.string(), z.array(z.string()));
 
 const REGISTRY_PATH = 'registry/companies.json';
 const COMPANIES_SEEN_PATH = 'registry/companies_seen.json';
+// 404/410 = board deleted upstream (definitive); both lanes throw a bare `HTTP <n>`.
+const BOARD_GONE_RE = /^HTTP (404|410)$/;
 
 /**
  * Wall-clock budget given to each API lane's probe+fetch work, composed
@@ -259,6 +262,7 @@ export function makeSourceStage(
 
               try {
                 const { jobs, dropped } = await apiLane.fetchBoard(boardRef, laneCtx);
+                reg = recordFetchSuccess(reg, key, apiLane.name);
                 laneDrops.push(...dropped);
                 for (const job of jobs) {
                   const parsed = JDSchema.safeParse(job);
@@ -326,7 +330,8 @@ export function makeSourceStage(
                   boardRef,
                   error: soft.message,
                 });
-                reg = recordFetchFailure(reg, key, apiLane.name, policy);
+                const gone = BOARD_GONE_RE.test(message);
+                reg = recordFetchFailure(reg, key, apiLane.name, policy, { gone, now });
               }
             }
           }
