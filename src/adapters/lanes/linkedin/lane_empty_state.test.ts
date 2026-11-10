@@ -25,6 +25,10 @@ import {
 test('every attempted url rendering the empty-state marker: the lane returns normally, urls not failed', async () => {
   const inv = await singlePageInventory();
   assert.equal(inv.behaviors.emptyStateMarker, 'svg#empty-room-small');
+  assert.equal(
+    inv.behaviors.emptyStateRequires,
+    'div[componentkey="searchResultsHeaderComponent"]',
+  );
   const script = newScript();
   // The results container never attaches on an empty page; the marker does.
   script.emptyStateUrls.add(URL_1);

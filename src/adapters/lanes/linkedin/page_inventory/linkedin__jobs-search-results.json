@@ -30,6 +30,7 @@
     "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
     "mustExist": "div[componentkey=\"SearchResultsMainContent\"]",
     "emptyStateMarker": "svg#empty-room-small",
+    "emptyStateRequires": "div[componentkey=\"searchResultsHeaderComponent\"]",
     "minJobCards": "0",
     "hashedClassNamesWarning": "this route uses hashed/obfuscated CSS class names (unstable); card identity comes from the stable componentkey attribute",
     "cardListNote": "v0 inventory did not capture a distinct list-container selector for this page (job_list_container/scroll_container both blank in the .md); using document body as scope until /page-analyse regenerates this page for v2",

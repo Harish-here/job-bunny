@@ -55,13 +55,23 @@ function urlFromPattern(inv: Inventory, id: string): string | undefined {
 }
 
 /** Which of the two readiness elements is actually in the DOM: the results
- * list wins when both are (existing path), else the empty-state marker. The
+ * list wins when both are (existing path), else the empty-state marker. When
+ * `requires` is given the marker only counts if that element is ALSO present
+ * (e.g. the results header): the marker alone can be a transient or
+ * logged-out shell, not a genuine zero-result search. The
  * `empty-state-presence` comment is the routing tag test fakes key on. */
-function buildEmptyStatePresenceScript(readySelector: string, marker: string): string {
+function buildEmptyStatePresenceScript(
+  readySelector: string,
+  marker: string,
+  requires?: string,
+): string {
+  const requiresCheck = requires
+    ? ` && document.querySelector(${JSON.stringify(requires)})`
+    : '';
   return `(() => {
   // empty-state-presence
   if (document.querySelector(${JSON.stringify(readySelector)})) return 'results';
-  if (document.querySelector(${JSON.stringify(marker)})) return 'empty';
+  if (document.querySelector(${JSON.stringify(marker)})${requiresCheck}) return 'empty';
   return 'none';
 })()`;
 }
@@ -82,7 +92,10 @@ function buildEmptyStatePresenceScript(readySelector: string, marker: string): s
  * when the results container is absent but this marker is present the page
  * is a genuine zero-result search — returns `[]` (info log) on ANY page
  * index, skipping the minJobCards assertion. Neither present → throws as
- * before. Unset → behavior unchanged.
+ * before. Unset → behavior unchanged. `behaviors.emptyStateRequires`
+ * (optional, a second selector) tightens this: the marker only counts when
+ * that element (the results header) is present too; otherwise the page is
+ * treated as "neither present" and throws. Unset → marker-only.
  *
  * `opts.allowEmpty` (default false, page 1's behavior unchanged): when
  * true, a page that yields zero cards — whether because the readiness
@@ -120,6 +133,9 @@ export async function harvestCards(
   // wait resolves on either, so a genuinely empty page 1 is not mistaken
   // for a failed load. Unset → the bare readySelector, byte-identical.
   const emptyMarker = inv.behaviors.emptyStateMarker || undefined;
+  // behaviors.emptyStateRequires (optional): a second element that must
+  // ALSO be present for the marker to count as a clean empty result.
+  const emptyRequires = inv.behaviors.emptyStateRequires || undefined;
   try {
     await page.waitFor(emptyMarker ? `${readySelector}, ${emptyMarker}` : readySelector, {
       timeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
@@ -140,7 +156,7 @@ export async function harvestCards(
 
   if (emptyMarker) {
     const presence = await page.evaluate<'results' | 'empty' | 'none'>(
-      buildEmptyStatePresenceScript(readySelector, emptyMarker),
+      buildEmptyStatePresenceScript(readySelector, emptyMarker, emptyRequires),
       { timeoutMs: opts.timeoutMs ?? DEFAULT_HARVEST_TIMEOUT_MS },
     );
     if (presence === 'empty') {
@@ -157,7 +173,9 @@ export async function harvestCards(
       if (allowEmpty) return [];
       throw new Error(
         `harvest: results list never attached (selector "${readySelector}"): ` +
-          `readiness resolved but neither the list nor the empty-state marker "${emptyMarker}" is present`,
+          `readiness resolved but neither the list nor the empty-state marker "${emptyMarker}"` +
+          (emptyRequires ? ` with "${emptyRequires}"` : '') +
+          ' is present',
       );
     }
   }

@@ -602,3 +602,61 @@ test('harvestCards: an empty-string emptyStateMarker is treated as unset', async
   ).catch(() => undefined);
   assert.deepEqual(waited, [MUST_EXIST]);
 });
+
+// --- behaviors.emptyStateRequires (marker only counts with the results header) ---
+
+const REQUIRES = 'div[componentkey="searchResultsHeaderComponent"]';
+
+/** Fake page that evaluates the real presence script against a tiny DOM
+ * holding exactly the selectors in `present`. */
+function domPage(present: string[]): PageHandle {
+  return fakePage({
+    waitFor: async () => undefined,
+    evaluate: async (fn) => {
+      assert.ok(fn.includes('empty-state-presence'), 'card read must not run');
+      const document = {
+        querySelector: (sel: string) => (present.includes(sel) ? {} : null),
+      };
+      return new Function('document', `return ${fn}`)(document) as never;
+    },
+  });
+}
+
+function requiresInventory(): Inventory {
+  return fixtureInventory({
+    behaviors: {
+      mustExist: MUST_EXIST,
+      emptyStateMarker: MARKER,
+      emptyStateRequires: REQUIRES,
+      minJobCards: '1',
+    },
+  });
+}
+
+test('harvestCards: marker present but required results header absent throws "results list never attached"', async () => {
+  await assert.rejects(
+    () => harvestCards(domPage([MARKER]), requiresInventory(), fakeCtx()),
+    /results list never attached/,
+  );
+});
+
+test('harvestCards: marker + required results header present is a clean empty result', async () => {
+  const cards = await harvestCards(
+    domPage([MARKER, REQUIRES]),
+    requiresInventory(),
+    fakeCtx(),
+  );
+  assert.deepEqual(cards, []);
+});
+
+test('harvestCards: required header without the marker still throws', async () => {
+  await assert.rejects(
+    () => harvestCards(domPage([REQUIRES]), requiresInventory(), fakeCtx()),
+    /results list never attached/,
+  );
+});
+
+test('harvestCards: marker set without emptyStateRequires keeps marker-only behaviour', async () => {
+  const cards = await harvestCards(domPage([MARKER]), markerInventory(), fakeCtx());
+  assert.deepEqual(cards, []);
+});
