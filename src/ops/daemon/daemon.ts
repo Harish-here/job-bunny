@@ -43,6 +43,7 @@ import {
   applyGateDecline,
   computeCatchupOnlyGate,
   computeReachabilityGate,
+  createWakeSettleTracker,
   runDeferredSweepAndCatchup,
   runRetrospectiveDeferredSweep,
 } from './gate/index.ts';
@@ -70,6 +71,8 @@ export function createDaemon(deps: DaemonDeps): {
   // Bug 7 — catch-up-only tick gate cache; see `computeCatchupOnlyGate`'s
   // own doc comment (`gate/reachability_gate.ts`) for why it lives here.
   let catchupGateCache: CatchupGateCache | undefined;
+  // Declines spawning for WAKE_SETTLE_MS after a suspend-sized gap (DarkWake).
+  const wakeSettle = createWakeSettleTracker();
   // D10, relocated: `serve stop` kills the daemon BEFORE the in-flight
   // child precisely so the daemon's own `await deps.spawnRun(...)` can
   // never resolve and spawn the NEXT owed entry. That ordering only holds
@@ -82,7 +85,10 @@ export function createDaemon(deps: DaemonDeps): {
   let stopping = false;
   let timer: NodeJS.Timeout | undefined;
 
-  async function runOwedBatch(previousLastTickAt: string | undefined): Promise<void> {
+  async function runOwedBatch(
+    previousLastTickAt: string | undefined,
+    hostSettling: boolean,
+  ): Promise<void> {
     const now = deps.now();
     const date = formatLocalDate(now);
 
@@ -176,13 +182,9 @@ export function createDaemon(deps: DaemonDeps): {
       return slotCmp !== 0 ? slotCmp : a.profile.localeCompare(b.profile);
     });
 
-    // Also computed here, BEFORE the reachability gate: `deriveExpiredUnserved`
-    // (grace fully closed, unserved) and `isRunOwed` (grace still open) are
-    // provably disjoint, so a tick that fires ONLY a catch-up (no owed
-    // entries at all) used to skip the probe entirely — R2's "before
-    // spawning, the daemon runs a bounded external reachability probe"
-    // never covered the catch-up path it exists for. Passed straight
-    // through to `runDeferredSweepAndCatchup` below so it is derived once.
+    // Computed BEFORE the reachability gate: `deriveExpiredUnserved` and
+    // `isRunOwed` are provably disjoint, so a catch-up-ONLY tick (no owed
+    // entries) must still be probed (R2). Reused by the sweep below.
     const expired = deriveExpiredUnserved(now, activeSchedules, history);
 
     // step 1.11 (D1/D1b/D3b) — computed ONCE per batch (`gate/
@@ -198,6 +200,7 @@ export function createDaemon(deps: DaemonDeps): {
         now,
         previousLastTickAt,
         deps.probeReachable,
+        hostSettling,
       );
       gate = result.gate;
       catchupGateCache = result.cache;
@@ -208,6 +211,7 @@ export function createDaemon(deps: DaemonDeps): {
         now,
         sorted.length > 0 || expired.length > 0,
         deps.probeReachable,
+        hostSettling,
       );
     }
 
@@ -306,15 +310,10 @@ export function createDaemon(deps: DaemonDeps): {
     // subset, same precedent as `trackSchemaDriftAndNotify` above).
     await runDeferredSweepAndCatchup(deps, now, date, expired, gate, catchupGateFresh);
 
-    // step 1.11a (coordinator-added, 2026-08-13), split into
-    // `gate/deferred_sweep/sweep.ts`'s `runRetrospectiveDeferredSweep` purely to
-    // keep this file under the file-size cap (non-behavioral split, same
-    // precedent as `runDeferredSweepAndCatchup` above) — the day-rollover
-    // backstop: a lid that stays closed for a WHOLE calendar day means
-    // step 1.11's own T4 guard never fires for that day (it only ever
-    // evaluates `today`), and no live catch-up ever runs either. Iterates
-    // the FULL `schedules` list (not `activeSchedules`), since a profile
-    // currently excluded by today's schema-drift check can still owe a
+    // step 1.11a — the day-rollover backstop (`runRetrospectiveDeferredSweep`):
+    // a lid closed a WHOLE calendar day means step 1.11's T4 guard (today
+    // only) never fires. Iterates the FULL `schedules` list (not
+    // `activeSchedules`): a schema-drift-excluded profile can still owe a
     // summary for an earlier date.
     await runRetrospectiveDeferredSweep(deps, now, date, schedules);
   }
@@ -347,6 +346,9 @@ export function createDaemon(deps: DaemonDeps): {
       deps.log('heartbeat-write-failed', { error: String(err) }, 'warn');
     }
 
+    // Every firing, before the guards below (see createWakeSettleTracker).
+    const hostSettling = wakeSettle.observe(previousLastTickAt, deps.now());
+
     // Placed AFTER the heartbeat write (A15.1 is untouchable: the
     // heartbeat runs on every firing, whatever the guards below decide)
     // and alongside the reentrancy guard: a tick that fires between
@@ -355,7 +357,7 @@ export function createDaemon(deps: DaemonDeps): {
     if (ticking) return;
     ticking = true;
     try {
-      await runOwedBatch(previousLastTickAt);
+      await runOwedBatch(previousLastTickAt, hostSettling);
     } catch (err) {
       // Same containment rationale as the heartbeat swallow above: in
       // production this runs inside a bare setInterval callback, where an

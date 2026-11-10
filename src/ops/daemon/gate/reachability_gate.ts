@@ -8,7 +8,7 @@
  * `daemon.ts` calls these two functions directly, no adapter import
  * needed here — `ops/daemon` still may not import `src/adapters/**`).
  */
-import { wasHostSuspended } from '../../../core/schedule/index.ts';
+import { trackWakeSettle, wasHostSuspended } from '../../../core/schedule/index.ts';
 import type { DaemonPidfileDeps } from '../pidfile.ts';
 import { updateDaemonPidfile } from '../pidfile.ts';
 
@@ -33,8 +33,11 @@ export interface ReachabilityGateDecision {
  * `deferred_sweep/sweep.ts`'s catch-up branch does `if (gate.declined) continue;`,
  * that made the throttle meant for a LOG LINE also block the catch-up
  * SPAWN for up to an hour — and the cache is most often populated by the
- * suspend-gap branch, a condition that is by definition already over on
- * the very next tick (the host is awake — that's why the tick fired).
+ * suspend-gap branch, a condition that is no longer over on the very next
+ * tick: the suspend decline now persists for `WAKE_SETTLE_MS` (180s) of
+ * continuous awake time after the gap (see `hostSettling` /
+ * `createWakeSettleTracker`), so the cache it describes still only throttles
+ * log lines.
  * Driven: wake at 20:45 delayed the catch-up by 61 minutes; wake at 23:30
  * lost the day entirely (the cache outlived the date, and the
  * retrospective backstop was already disarmed because T4 had already
@@ -81,6 +84,7 @@ export async function computeCatchupOnlyGate(
   now: Date,
   previousLastTickAt: string | undefined,
   probeReachable: () => Promise<boolean>,
+  hostSettling = false,
 ): Promise<{
   gate: ReachabilityGateDecision;
   cache: CatchupGateCache | undefined;
@@ -91,6 +95,7 @@ export async function computeCatchupOnlyGate(
     now,
     true,
     probeReachable,
+    hostSettling,
   );
   if (!gate.declined || !gate.reasonCode || !gate.reason) {
     // Reachable again (or nothing to attribute) — never trust a stale
@@ -111,7 +116,33 @@ export async function computeCatchupOnlyGate(
   };
 }
 
-/** Step 2's own pseudocode, verbatim: a suspend gap (pure, no I/O) takes
+/** Per-daemon-process wake-settle state (`core/schedule/suspend.ts`'s
+ * `trackWakeSettle`). `observe` must run on EVERY tick firing, including ones
+ * the daemon's reentrancy guard short-circuits, so a sleep that lands
+ * mid-batch is still seen. In-memory on purpose: a fresh process re-derives
+ * the state from the pidfile heartbeat on its first tick. Returns `true`
+ * while the host woke from a suspend-sized gap less than `WAKE_SETTLE_MS`
+ * ago (feed it to the gates' `hostSettling`). */
+export function createWakeSettleTracker(): {
+  observe(previousLastTickAt: string | undefined, now: Date): boolean;
+} {
+  let resumedAtMs: number | undefined;
+  return {
+    observe(previousLastTickAt, now) {
+      const nowMs = now.getTime();
+      const settle = trackWakeSettle(
+        nowMs - Date.parse(previousLastTickAt ?? ''),
+        nowMs,
+        resumedAtMs,
+      );
+      resumedAtMs = settle.resumedAtMs;
+      return settle.declined;
+    },
+  };
+}
+
+/** Step 2's own pseudocode, verbatim (plus the wake-settle window, see
+ * `hostSettling` below): a suspend gap (pure, no I/O) takes
  * priority over a reachability probe (bounded network I/O), and the probe
  * runs at most once, only when there is at least one owed entry to gate —
  * an empty batch spends no network I/O at all, matching today's
@@ -121,6 +152,7 @@ export async function computeReachabilityGate(
   now: Date,
   hasOwedEntries: boolean,
   probeReachable: () => Promise<boolean>,
+  hostSettling = false,
 ): Promise<ReachabilityGateDecision> {
   // `previousLastTickAt` undefined (first tick ever, or an unreadable
   // pidfile) makes `Date.parse` produce NaN, which `wasHostSuspended`
@@ -128,7 +160,11 @@ export async function computeReachabilityGate(
   // false) — the blueprint's own §8 Failure Semantics fallback, no
   // special case needed.
   const gapMs = now.getTime() - Date.parse(previousLastTickAt ?? '');
-  const suspected = wasHostSuspended(gapMs);
+  // `hostSettling` (daemon.ts, `trackWakeSettle`): the host woke from a
+  // suspend-sized gap less than `WAKE_SETTLE_MS` ago. Without it, the tick
+  // AFTER the wake sees only a 30s gap and spawns inside the same short
+  // maintenance DarkWake, which sleeps again and kills the run.
+  const suspected = wasHostSuspended(gapMs) || hostSettling;
   if (suspected) {
     return {
       declined: true,

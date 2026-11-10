@@ -617,7 +617,7 @@ test('bug 8 (CRITICAL): once the network recovers, the very NEXT tick spawns the
   );
 });
 
-test('bug 8 (CRITICAL): first tick suspend-declined, second tick healthy -> spawnCatchup fires exactly once, on the second tick (AC9/AC10 had no test asserting this before bug 8 shipped)', async () => {
+test('bug 8 (CRITICAL): first tick suspend-declined, host settles -> spawnCatchup fires exactly once, on the first tick 180s after the wake (AC9/AC10 had no test asserting this before bug 8 shipped)', async () => {
   const scan = fakeScanDeps(
     { [profilePath('harish')]: profileJson({ times: ['09:00'], graceMinutes: 5 }) },
     { [PROFILES_DIR]: ['harish'] },
@@ -647,13 +647,20 @@ test('bug 8 (CRITICAL): first tick suspend-declined, second tick healthy -> spaw
   await daemon.tick(); // tick 1: suspend-declined -> no spawn, no ledger.
   assert.equal(spawnCatchupCalls.length, 0);
 
-  nowMs += 30_000; // 30s later — the gap since tick 1 is small; no longer suspected.
-  await daemon.tick(); // tick 2: healthy -> spawns.
+  // Wake-settle (daemon_wake_settle.test.ts): ticks inside WAKE_SETTLE_MS of the
+  // wake still decline; the first tick at >= 180s awake spawns.
+  for (let i = 0; i < 5; i++) {
+    nowMs += 30_000;
+    await daemon.tick();
+  }
+  assert.equal(spawnCatchupCalls.length, 0);
+  nowMs += 30_000; // 180s after the wake tick.
+  await daemon.tick();
 
   assert.equal(
     spawnCatchupCalls.length,
     1,
-    'exactly one catch-up, spawned on the SECOND tick — not delayed an hour, not lost',
+    'exactly one catch-up, once the host has settled — not delayed an hour, not lost',
   );
 });
 
@@ -685,8 +692,10 @@ test('bug 8 (CRITICAL): waking at 23:30 with unserved expired slots spawns the c
   await daemon.tick(); // wake tick: suspend-declined.
   assert.equal(spawnCatchupCalls.length, 0);
 
-  nowMs += 30_000; // the very next scheduled tick, still 2026-07-27.
-  await daemon.tick();
+  for (let i = 0; i < 6; i++) {
+    nowMs += 30_000; // the wake-settle window (180s) ends at 23:33, still 2026-07-27.
+    await daemon.tick();
+  }
 
   assert.equal(
     spawnCatchupCalls.length,
