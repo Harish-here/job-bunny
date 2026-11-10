@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { openStderrLog, STDERR_LOG_NAME, watchEarlyExit } from './child_exit.ts';
 
@@ -19,7 +20,7 @@ test('openStderrLog opens <userDataDir>/<log name> for writing and returns the f
     },
   });
   assert.equal(fd, 17);
-  assert.deepEqual(calls, [[`/home/u/chrome/${STDERR_LOG_NAME}`, 'w']]);
+  assert.deepEqual(calls, [[join('/home/u/chrome', STDERR_LOG_NAME), 'w']]);
 });
 
 test('openStderrLog returns undefined instead of throwing when the file cannot be opened', () => {
