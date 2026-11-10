@@ -28,15 +28,15 @@ import {
  * spawned Chrome attached via CDP (playwright's connectOverCDP). PageHandle's
  * deadline-bound behavior lives in ./handles/page_handle.ts.
  *
- * Chrome lifecycle mirrors scripts/lib/browser.js's proven, hard-won
- * ensureChrome pattern, now sourced from a pid file rather than lsof/ps (D12):
+ * Chrome lifecycle mirrors scripts/lib/browser.js's ensureChrome, with
+ * liveness from a pid file rather than lsof/ps (D12):
  *  - launch() ALWAYS probes CDP reachability (bounded fetch of
  *    `${cdpUrl}/json/version`) before spawning. Unreachable => spawn fresh.
  *    Reachable => first prove it runs OUR user-data-dir (./foreign/ownership.ts;
  *    foreign => ForeignChromeError, never attach/kill/launch). Ours: no live
  *    pid file => attach, never recycle/kill; else age feeds decideChromeAction.
- *  - The pid file is written by launchChrome from spawn()'s pid; close()
- *    kills exactly that pid — see ./handles/browser_handle.ts's class doc.
+ *  - launchChrome writes the pid file; close() kills exactly that pid
+ *    (./handles/browser_handle.ts).
  */
 
 /** Minimal playwright Page surface this adapter drives — narrow so fakes in
@@ -133,6 +133,7 @@ export interface CdpChromeProviderDeps {
       userDataDir?: string;
       candidates?: readonly string[];
       headless?: boolean;
+      captureStderr?: boolean;
     },
     deps?: LauncherDeps,
   ) => ChromeProcessHandle;
@@ -142,24 +143,18 @@ export interface CdpChromeProviderDeps {
   candidates?: readonly string[];
   launcherFsDeps?: LauncherDeps;
   killEnv?: NodeJS.ProcessEnv;
-  /** Delay between connectOverCDP retry attempts, in ms. Injectable so tests
-   * run with no real waits. Default 250ms. */
+  /** Delay between connectOverCDP retry attempts, in ms. Default 250ms. */
   connectRetryMs?: number;
-  /** Total time budget for connect retries, in ms, starting from the first
-   * attempt. Injectable so tests run with no real waits. Default 10000ms —
-   * mirrors scripts/lib/browser.js's cdpReachable() poll cap: Chrome needs a
-   * moment to bind its debug port after spawn, so connectOverCDP racing the
-   * spawn without a retry fails intermittently. */
+  /** Total time budget for connect retries, in ms, from the first attempt.
+   * Injectable so tests run with no real waits. Default 10000ms (mirrors
+   * scripts/lib/browser.js's cdpReachable() poll cap). */
   connectMaxWaitMs?: number;
-  /** Probes CDP HTTP reachability on the target port before deciding whether
-   * to spawn. Injectable so tests never make a real network call. Default:
+  /** Probes CDP reachability before deciding whether to spawn. Default:
    * bounded fetch of `${cdpUrl}/json/version`. */
   cdpReachable?: CdpReachableFn;
-  /** Injectable Chrome pid-file deps (D12) — used to read
-   * .chrome-debug/.jobbunny-chrome.json when deciding reuse/recycle/launch,
-   * and passed through to killChrome so close()/recycle clear it after a
-   * kill. Injectable so tests never touch the real filesystem or process
-   * table. Default: defaultChromePidfileDeps(). */
+  /** Injectable Chrome pid-file deps (D12): read when deciding
+   * reuse/recycle/launch, passed to killChrome to clear it. Default:
+   * defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;
   /** Ownership-proof deps (CDP user-data-dir read); injectable for tests. */
   ownership?: OwnershipDeps;
@@ -305,17 +300,15 @@ export class CdpChromeProvider implements BrowserProvider {
         userDataDir: this.userDataDir,
         candidates: this.candidates,
         headless: this.headless,
+        captureStderr: true,
       },
-      // pidfileDeps is threaded in explicitly so the ONE seam governs both
-      // sides of the pid file: without it, launchChrome's write path fell
-      // back to defaultChromePidfileDeps() (real fs) even when this provider
-      // was constructed with injected deps, so the write and the subsequent
-      // read used different worlds.
+      // pidfileDeps is threaded in so ONE seam governs both the write here
+      // and the later read (else the write fell back to the real fs).
       { ...this.launcherFsDeps, pidfileDeps: this.pidfileDeps },
     );
     let browser: CdpBrowser;
     try {
-      browser = await this.connectWithRetry(cdpUrl, ctx);
+      browser = await this.connectWithRetry(cdpUrl, ctx, proc.earlyExit);
     } catch (err) {
       await this.killChromeFn(proc.pid, {
         env: this.killEnv,
@@ -341,21 +334,20 @@ export class CdpChromeProvider implements BrowserProvider {
   }
 
   /**
-   * Chrome needs a moment to bind its debug port after spawn (v0's
-   * scripts/lib/browser.js polls cdpReachable() for up to ~10s before
-   * connecting) — connectOverCDP called immediately after spawn races that
-   * and fails intermittently. Retries connect() on failure, delayed by
-   * connectRetryMs between attempts, bounded by BOTH connectMaxWaitMs and
-   * ctx.signal.
-   *
-   * Each individual connect() attempt is itself raced against the REMAINING
-   * slice of connectMaxWaitMs (2026-07-25 incident: a single connect() call
-   * hung on playwright's own internal ~30s connectOverCDP timeout — well
-   * past the configured 10s cap — because it was `await`ed unconditionally.
-   * The cap must bound total wall-clock time, not just decide whether to
-   * retry after the fact).
+   * Chrome needs a moment to bind its debug port after spawn, so connect()
+   * is retried every connectRetryMs, bounded by BOTH connectMaxWaitMs and
+   * ctx.signal. Each attempt is itself raced against the REMAINING budget
+   * (2026-07-25: one unbounded connect() hung on playwright's ~30s internal
+   * timeout — the cap must bound wall-clock time, not just gate retries).
+   * `earlyExit` (spawn path only) fails fast, with the exit status and
+   * stderr tail, once the spawned Chrome has died (2026-11-03/04: it exited
+   * ~210ms in, yet the loop polled the full 10s and said nothing useful).
    */
-  private async connectWithRetry(cdpUrl: string, ctx: RunContext): Promise<CdpBrowser> {
+  private async connectWithRetry(
+    cdpUrl: string,
+    ctx: RunContext,
+    earlyExit?: () => string | undefined,
+  ): Promise<CdpBrowser> {
     const start = Date.now();
     const deadline = start + this.connectMaxWaitMs;
     let lastError: unknown;
@@ -373,6 +365,14 @@ export class CdpChromeProvider implements BrowserProvider {
         // The losing attempt may still resolve later — close that Browser so
         // its websocket can't outlive us and pin the event loop.
         disposeWhenSettled(attempt);
+      }
+      const exited = earlyExit?.();
+      if (exited) {
+        ctx.logger.error('cdp-chrome: spawned Chrome exited before CDP came up', {
+          cdpUrl,
+          detail: exited,
+        });
+        throw new Error(exited, { cause: lastError });
       }
       if (Date.now() >= deadline) {
         const elapsedMs = Date.now() - start;

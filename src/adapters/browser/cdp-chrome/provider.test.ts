@@ -138,6 +138,7 @@ test('launch() spawns Chrome via the injected launcher and connects to http://12
     userDataDir: DEFAULT_USER_DATA_DIR,
     candidates: undefined,
     headless: false,
+    captureStderr: true,
   } as never);
 });
 
