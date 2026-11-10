@@ -74,7 +74,7 @@ function emptyPayload(): StagePayload {
 function makeFakeLane(opts: {
   name: string;
   probeResults?: Record<string, ProbeResult | 'throw'>;
-  boardJobs?: Record<string, ReturnType<typeof fakeJob>[] | 'throw'>;
+  boardJobs?: Record<string, ReturnType<typeof fakeJob>[] | 'throw' | 'gone'>;
   /** Per-boardRef DroppedRecords `fetchBoard` should return alongside its
    * jobs — models a lane like Greenhouse/Keka that drops a job failing its
    * final JDSchema build (see source.test.ts's dedicated funnel test). */
@@ -95,6 +95,7 @@ function makeFakeLane(opts: {
       opts.fetchCalls?.push(boardRef);
       const jobs = opts.boardJobs?.[boardRef];
       if (jobs === 'throw') throw new Error(`fetch boom for ${boardRef}`);
+      if (jobs === 'gone') throw new Error('HTTP 404');
       return {
         jobs: (jobs ?? []) as never,
         dropped: (opts.boardDropped?.[boardRef] ?? []) as never,
@@ -242,6 +243,54 @@ test('a fetchBoard throwing is soft: recordFetchFailure applied, other boards st
   assert.equal(broken?.probes.greenhouse?.failCount, 1);
   // still 'found' — one failure is below staleAfterFetchFailures (3)
   assert.equal(broken?.probes.greenhouse?.status, 'found');
+});
+
+type RegRow = { probes: Record<string, { status: string; failCount: number }> };
+
+function seedCurated(store: Map<string, unknown>, boardRef: string, failCount: number) {
+  const t = '2026-07-01T00:00:00.000Z';
+  const probes = { greenhouse: { status: 'found', boardRef, failCount } };
+  store.set('registry/companies.json', [
+    {
+      name: 'Co',
+      normalizedKey: 'co',
+      firstSeen: t,
+      lastSeen: t,
+      seenBy: [],
+      curated: true,
+      probes,
+    },
+  ]);
+}
+
+const row = (store: Map<string, unknown>) =>
+  (store.get('registry/companies.json') as RegRow[])[0]?.probes.greenhouse;
+
+test('a curated board answering HTTP 404 on consecutive runs goes stale, then is skipped', async () => {
+  const stateStore = fakeStateStore();
+  seedCurated(stateStore.store, 'dead', 2);
+  const fetchCalls: string[] = [];
+  const lane = makeFakeLane({
+    name: 'greenhouse',
+    boardJobs: { dead: 'gone' },
+    fetchCalls,
+  });
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+
+  await stage.run(emptyPayload(), fakeCtx(stateStore)); // 3rd consecutive failure
+  assert.equal(row(stateStore.store)?.status, 'stale');
+  await stage.run(emptyPayload(), fakeCtx(stateStore)); // next run: skipped
+  assert.deepEqual(fetchCalls, ['dead']);
+});
+
+test('a successful board fetch resets the consecutive failCount', async () => {
+  const stateStore = fakeStateStore();
+  seedCurated(stateStore.store, 'ok', 2);
+  const lane = makeFakeLane({ name: 'greenhouse', boardJobs: { ok: [] } });
+  const stage = makeSourceStage([lane], POLICY, { maxProbesPerRun: 25 });
+
+  await stage.run(emptyPayload(), fakeCtx(stateStore));
+  assert.equal(row(stateStore.store)?.failCount, 0);
 });
 
 test('a whole lane whose probe always throws is soft: zero jobs from it, the other lane still yields jobs', async () => {

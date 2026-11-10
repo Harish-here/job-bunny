@@ -11,4 +11,5 @@ export {
   applyGateDecline,
   computeCatchupOnlyGate,
   computeReachabilityGate,
+  createWakeSettleTracker,
 } from './reachability_gate.ts';

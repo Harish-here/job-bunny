@@ -1,12 +1,20 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import {
+  closeSync as nodeCloseSync,
   existsSync as nodeExistsSync,
+  openSync as nodeOpenSync,
   readFileSync as nodeReadFileSync,
   rmSync as nodeRmSync,
   writeFileSync as nodeWriteFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import {
+  type ChildExitDeps,
+  type ExitWatchableChild,
+  openStderrLog,
+  watchEarlyExit,
+} from './child/index.ts';
 import { resolveCandidates } from './discovery/index.ts';
 import {
   type ChromePidfileDeps,
@@ -77,8 +85,8 @@ export interface FsDeps {
 export type SpawnFn = (
   command: string,
   args: string[],
-  options: { detached: boolean; stdio: 'ignore' },
-) => { pid?: number; unref: () => void };
+  options: { detached: boolean; stdio: 'ignore' | ['ignore', 'ignore', number] },
+) => { pid?: number; unref: () => void } & ExitWatchableChild;
 
 export interface LauncherDeps {
   existsSync?: FsDeps['existsSync'];
@@ -96,6 +104,11 @@ export interface LauncherDeps {
    * by killChrome to clear, <data home>/chrome/.jobbunny-chrome.json.
    * Default: defaultChromePidfileDeps(). */
   pidfileDeps?: ChromePidfileDeps;
+  /** Stderr-capture fs/clock seams (see ./child/child_exit.ts); defaults are
+   * the real node:fs / Date.now. */
+  openSync?: ChildExitDeps['openSync'];
+  closeSync?: ChildExitDeps['closeSync'];
+  nowMs?: ChildExitDeps['nowMs'];
 }
 
 /** Resolves the first candidate path that exists on disk. Throws a clear
@@ -184,10 +197,18 @@ export interface LaunchChromeOptions {
   /** Threaded straight into buildLaunchArgv's `headless` — see its doc
    * comment. Default false. */
   headless?: boolean;
+  /** Sends Chrome's stderr to <userDataDir>/.jobbunny-chrome-stderr.log
+   * (truncated per launch) so an early exit can be explained. Default false:
+   * stderr is discarded. */
+  captureStderr?: boolean;
 }
 
 export interface ChromeProcessHandle {
   pid: number | undefined;
+  /** Undefined while the spawned process is alive; once it has exited (or
+   * failed to start), a ready-to-throw message with its status, time since
+   * launch, and a bounded stderr tail. Absent on handles from fakes. */
+  earlyExit?: () => string | undefined;
 }
 
 /** Spawns Chrome detached (so it survives independently of this process)
@@ -203,7 +224,13 @@ export function launchChrome(
   options: LaunchChromeOptions,
   deps: LauncherDeps = {},
 ): ChromeProcessHandle {
-  const { port, userDataDir = DEFAULT_USER_DATA_DIR, candidates, headless } = options;
+  const {
+    port,
+    userDataDir = DEFAULT_USER_DATA_DIR,
+    candidates,
+    headless,
+    captureStderr,
+  } = options;
   const existsSync = deps.existsSync ?? nodeExistsSync;
   const spawn = deps.spawn ?? (nodeSpawn as unknown as SpawnFn);
   const env = deps.env ?? process.env;
@@ -219,8 +246,28 @@ export function launchChrome(
   const resolvedCandidates = resolveCandidates(process.platform, env, candidates);
   const chromePath = resolveChromePath(resolvedCandidates, { existsSync });
   const argv = buildLaunchArgv({ port, userDataDir, headless });
-  const child = spawn(chromePath, argv, { detached: true, stdio: 'ignore' });
+  const stderrFd = captureStderr
+    ? openStderrLog(userDataDir, { openSync: deps.openSync ?? nodeOpenSync })
+    : undefined;
+  let child: ReturnType<SpawnFn>;
+  try {
+    child = spawn(chromePath, argv, {
+      detached: true,
+      stdio: stderrFd === undefined ? 'ignore' : ['ignore', 'ignore', stderrFd],
+    });
+  } finally {
+    // The child holds its own copy of the fd; ours must not leak.
+    if (stderrFd !== undefined) (deps.closeSync ?? nodeCloseSync)(stderrFd);
+  }
   child.unref();
+  const earlyExit = watchEarlyExit(
+    child,
+    { port, userDataDir, stderrCaptured: stderrFd !== undefined },
+    {
+      readFileSync: deps.readFileSync ?? nodeReadFileSync,
+      nowMs: deps.nowMs ?? Date.now,
+    },
+  );
   if (child.pid != null) {
     const pidfileDeps = deps.pidfileDeps ?? defaultChromePidfileDeps();
     writeChromePidfile(
@@ -229,7 +276,7 @@ export function launchChrome(
       pidfileDeps,
     );
   }
-  return { pid: child.pid };
+  return { pid: child.pid, earlyExit };
 }
 
 export interface KillDeps {

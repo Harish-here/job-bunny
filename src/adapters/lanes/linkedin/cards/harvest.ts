@@ -54,6 +54,28 @@ function urlFromPattern(inv: Inventory, id: string): string | undefined {
   return pattern.replace('<id>', id);
 }
 
+/** Which of the two readiness elements is actually in the DOM: the results
+ * list wins when both are (existing path), else the empty-state marker. When
+ * `requires` is given the marker only counts if that element is ALSO present
+ * (e.g. the results header): the marker alone can be a transient or
+ * logged-out shell, not a genuine zero-result search. The
+ * `empty-state-presence` comment is the routing tag test fakes key on. */
+function buildEmptyStatePresenceScript(
+  readySelector: string,
+  marker: string,
+  requires?: string,
+): string {
+  const requiresCheck = requires
+    ? ` && document.querySelector(${JSON.stringify(requires)})`
+    : '';
+  return `(() => {
+  // empty-state-presence
+  if (document.querySelector(${JSON.stringify(readySelector)})) return 'results';
+  if (document.querySelector(${JSON.stringify(marker)})${requiresCheck}) return 'empty';
+  return 'none';
+})()`;
+}
+
 /**
  * Single batch in-page read of every visible card, mapped to typed
  * HarvestedCards. Never per-card round trips (2026-07-17 stall lesson —
@@ -65,6 +87,15 @@ function urlFromPattern(inv: Inventory, id: string): string | undefined {
  * yields an id and a url (built from behaviors.urlPatternOfJob). A card
  * with neither is skipped with a warn — a malformed card must not kill
  * the harvest.
+ *
+ * `behaviors.emptyStateMarker` (optional, e.g. `svg#empty-room-small`):
+ * when the results container is absent but this marker is present the page
+ * is a genuine zero-result search — returns `[]` (info log) on ANY page
+ * index, skipping the minJobCards assertion. Neither present → throws as
+ * before. Unset → behavior unchanged. `behaviors.emptyStateRequires`
+ * (optional, a second selector) tightens this: the marker only counts when
+ * that element (the results header) is present too; otherwise the page is
+ * treated as "neither present" and throws. Unset → marker-only.
  *
  * `opts.allowEmpty` (default false, page 1's behavior unchanged): when
  * true, a page that yields zero cards — whether because the readiness
@@ -97,8 +128,16 @@ export async function harvestCards(
   // allowEmpty is set, in which case a container that never attached on a
   // tail page just means there's nothing left to paginate, not a failure.
   const readySelector = inv.behaviors.mustExist || inv.selectors.cardList;
+  // behaviors.emptyStateMarker (optional): an element LinkedIn renders
+  // INSTEAD of the results container on a zero-result search. When set the
+  // wait resolves on either, so a genuinely empty page 1 is not mistaken
+  // for a failed load. Unset → the bare readySelector, byte-identical.
+  const emptyMarker = inv.behaviors.emptyStateMarker || undefined;
+  // behaviors.emptyStateRequires (optional): a second element that must
+  // ALSO be present for the marker to count as a clean empty result.
+  const emptyRequires = inv.behaviors.emptyStateRequires || undefined;
   try {
-    await page.waitFor(readySelector, {
+    await page.waitFor(emptyMarker ? `${readySelector}, ${emptyMarker}` : readySelector, {
       timeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
     });
   } catch (err) {
@@ -113,6 +152,32 @@ export async function harvestCards(
     throw new Error(
       `harvest: results list never attached (selector "${readySelector}"): ${message}`,
     );
+  }
+
+  if (emptyMarker) {
+    const presence = await page.evaluate<'results' | 'empty' | 'none'>(
+      buildEmptyStatePresenceScript(readySelector, emptyMarker, emptyRequires),
+      { timeoutMs: opts.timeoutMs ?? DEFAULT_HARVEST_TIMEOUT_MS },
+    );
+    if (presence === 'empty') {
+      // A zero-result search is a clean empty result, not a failure: skip
+      // the card read and the minJobCards assertion (which exists to catch
+      // a broken selector or logout wall, not an empty search).
+      ctx.logger.info('harvest: empty-state marker present — clean empty result', {
+        page: inv.page,
+        emptyMarker,
+      });
+      return [];
+    }
+    if (presence === 'none') {
+      if (allowEmpty) return [];
+      throw new Error(
+        `harvest: results list never attached (selector "${readySelector}"): ` +
+          `readiness resolved but neither the list nor the empty-state marker "${emptyMarker}"` +
+          (emptyRequires ? ` with "${emptyRequires}"` : '') +
+          ' is present',
+      );
+    }
   }
 
   const script = buildHarvestScript(inv);

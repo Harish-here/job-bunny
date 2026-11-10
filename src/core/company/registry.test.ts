@@ -4,6 +4,7 @@ import {
   boardsToFetch,
   probeCandidates,
   recordFetchFailure,
+  recordFetchSuccess,
   recordProbe,
   upsertSeen,
 } from './registry.ts';
@@ -152,7 +153,7 @@ test('probeCandidates: error at the failure cap is NOT a candidate', () => {
   assert.equal(out.length, 0);
 });
 
-test('probeCandidates: found and stale probes are excluded', () => {
+test('probeCandidates: found probes and stale probes within the TTL are excluded', () => {
   const reg = [
     makeRecord({
       normalizedKey: 'found-co',
@@ -160,11 +161,36 @@ test('probeCandidates: found and stale probes are excluded', () => {
     }),
     makeRecord({
       normalizedKey: 'stale-co',
-      probes: { greenhouse: { status: 'stale', boardRef: 'y', failCount: 3 } },
+      probes: {
+        greenhouse: {
+          status: 'stale',
+          boardRef: 'y',
+          probedAt: '2026-07-20T00:00:00.000Z', // went stale yesterday
+          failCount: 3,
+        },
+      },
     }),
   ];
   const out = probeCandidates(reg, 'greenhouse', POLICY, NOW);
   assert.equal(out.length, 0);
+});
+
+test('probeCandidates: a stale (dead) board is re-probed once its TTL has passed — the way back', () => {
+  const reg = [
+    makeRecord({
+      curated: true,
+      probes: {
+        greenhouse: {
+          status: 'stale',
+          boardRef: 'y',
+          probedAt: '2026-06-20T00:00:00.000Z', // 31 days before NOW
+          failCount: 206,
+        },
+      },
+    }),
+  ];
+  const out = probeCandidates(reg, 'greenhouse', POLICY, NOW);
+  assert.equal(out.length, 1);
 });
 
 test('probeCandidates: curated records are probe-eligible under the identical rules', () => {
@@ -247,6 +273,56 @@ test('recordProbe: does not mutate the input record', () => {
   assert.deepEqual(reg[0]?.probes, {});
 });
 
+// ---- recordProbe on a stale board ----
+
+test('recordProbe: a re-probe that finds the board again revives a stale record', () => {
+  const reg = [
+    makeRecord({
+      probes: {
+        greenhouse: { status: 'stale', boardRef: 'old', probedAt: NOW, failCount: 9 },
+      },
+    }),
+  ];
+  const out = recordProbe(
+    reg,
+    'acme-corp',
+    'greenhouse',
+    { status: 'found', boardRef: 'acme' },
+    NOW,
+  );
+  assert.deepEqual(out[0]?.probes.greenhouse, {
+    status: 'found',
+    boardRef: 'acme',
+    probedAt: NOW,
+    failCount: 0,
+  });
+  assert.equal(boardsToFetch(out, 'greenhouse').length, 1);
+});
+
+test('recordProbe: an errored re-probe leaves a stale record stale (retry next TTL), not errored-at-cap', () => {
+  const later = '2026-08-25T00:00:00.000Z';
+  const reg = [
+    makeRecord({
+      probes: {
+        greenhouse: { status: 'stale', boardRef: 'old', probedAt: NOW, failCount: 9 },
+      },
+    }),
+  ];
+  const out = recordProbe(
+    reg,
+    'acme-corp',
+    'greenhouse',
+    { status: 'error', message: 'blip' },
+    later,
+  );
+  assert.deepEqual(out[0]?.probes.greenhouse, {
+    status: 'stale',
+    boardRef: 'old',
+    probedAt: later,
+    failCount: 9,
+  });
+});
+
 // ---- boardsToFetch ----
 
 test('boardsToFetch: returns only found-with-boardRef entries, carrying curated flag', () => {
@@ -322,4 +398,69 @@ test('recordFetchFailure: no-op when there is no probe state for that lane', () 
   const reg = [makeRecord()];
   const out = recordFetchFailure(reg, 'acme-corp', 'greenhouse', POLICY);
   assert.deepEqual(out[0]?.probes, {});
+});
+
+test('recordFetchFailure: a gone (404/410) failure retires a curated record at the threshold and stamps probedAt', () => {
+  const reg = [
+    makeRecord({
+      curated: true,
+      probes: { greenhouse: { status: 'found', boardRef: 'x', failCount: 2 } },
+    }),
+  ];
+  const out = recordFetchFailure(reg, 'acme-corp', 'greenhouse', POLICY, {
+    gone: true,
+    now: NOW,
+  });
+  assert.deepEqual(out[0]?.probes.greenhouse, {
+    status: 'stale',
+    boardRef: 'x',
+    probedAt: NOW,
+    failCount: 3,
+  });
+  assert.equal(boardsToFetch(out, 'greenhouse').length, 0);
+});
+
+test('recordFetchFailure: a gone failure below the threshold only counts', () => {
+  const reg = [
+    makeRecord({
+      curated: true,
+      probes: { greenhouse: { status: 'found', boardRef: 'x', failCount: 1 } },
+    }),
+  ];
+  const out = recordFetchFailure(reg, 'acme-corp', 'greenhouse', POLICY, {
+    gone: true,
+    now: NOW,
+  });
+  assert.deepEqual(out[0]?.probes.greenhouse, {
+    status: 'found',
+    boardRef: 'x',
+    failCount: 2,
+  });
+});
+
+// ---- recordFetchSuccess ----
+
+test('recordFetchSuccess: resets a found board failCount to 0 (consecutive, not lifetime)', () => {
+  const reg = [
+    makeRecord({
+      probes: { greenhouse: { status: 'found', boardRef: 'x', failCount: 2 } },
+    }),
+  ];
+  const out = recordFetchSuccess(reg, 'acme-corp', 'greenhouse');
+  assert.deepEqual(out[0]?.probes.greenhouse, {
+    status: 'found',
+    boardRef: 'x',
+    failCount: 0,
+  });
+});
+
+test('recordFetchSuccess: no-op (same reference) when already clean or lane has no state', () => {
+  const clean = [
+    makeRecord({
+      probes: { greenhouse: { status: 'found', boardRef: 'x', failCount: 0 } },
+    }),
+  ];
+  assert.equal(recordFetchSuccess(clean, 'acme-corp', 'greenhouse')[0], clean[0]);
+  const none = [makeRecord()];
+  assert.equal(recordFetchSuccess(none, 'acme-corp', 'greenhouse')[0], none[0]);
 });

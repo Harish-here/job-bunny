@@ -87,6 +87,10 @@ export interface Script {
    * at all on that page. */
   waitForThrows: Set<string>;
   harvestByUrl: Map<string, RawCardFixture[]>;
+  /** Listing urls that render the inventory's emptyStateMarker INSTEAD of
+   * the results container (a zero-result search): harvestCards' presence
+   * probe reports 'empty' for them, 'results' for every other url. */
+  emptyStateUrls: Set<string>;
   jdTextByUrl: Map<string, string>;
   /** JD urls whose configured-selector (jdRoot) read comes back empty so
    * only the anchor-fallback script yields the scripted text — models a
@@ -110,6 +114,7 @@ export function newScript(): Script {
     gotoThrows: new Set(),
     waitForThrows: new Set(),
     harvestByUrl: new Map(),
+    emptyStateUrls: new Set(),
     jdTextByUrl: new Map(),
     anchorOnlyUrls: new Set(),
     jdShellUrls: new Set(),
@@ -153,6 +158,13 @@ export class FakePage implements PageHandle {
         this.script.jdStalePaneUrls.has(this.lastUrl) ||
         this.script.jdTextByUrl.has(this.lastUrl);
       return (hasText ? 'text' : '') as unknown as T;
+    }
+    // harvestCards' readiness probe (behaviors.emptyStateMarker): which of
+    // results-container / empty-state marker is in the DOM.
+    if (fn.includes('empty-state-presence')) {
+      return (this.script.emptyStateUrls.has(this.lastUrl)
+        ? 'empty'
+        : 'results') as unknown as T;
     }
     // buildHarvestScript's source always declares `cardListSel` — a JD-text
     // script (buildJdSettleScript) never does. This lets one fake `evaluate`

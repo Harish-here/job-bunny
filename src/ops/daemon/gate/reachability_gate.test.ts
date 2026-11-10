@@ -8,6 +8,7 @@ import {
   type CatchupGateCache,
   computeCatchupOnlyGate,
   computeReachabilityGate,
+  createWakeSettleTracker,
 } from './reachability_gate.ts';
 
 const NOW = new Date(2026, 6, 27, 14, 4);
@@ -295,4 +296,53 @@ test('computeCatchupOnlyGate: a large previousLastTickAt gap declines host-aslee
   assert.equal(probed, 0);
   assert.equal(result.gate.reasonCode, 'host-asleep');
   assert.equal(result.cache?.reasonCode, 'host-asleep');
+});
+
+test('computeReachabilityGate: hostSettling declines host-asleep on a small gap, never probing', async () => {
+  let probed = 0;
+  const gate = await computeReachabilityGate(
+    new Date(NOW.getTime() - 30_000).toISOString(),
+    NOW,
+    true,
+    async () => {
+      probed += 1;
+      return true;
+    },
+    true,
+  );
+  assert.deepEqual(gate, {
+    declined: true,
+    reasonCode: 'host-asleep',
+    reason: 'Job Bunny declined to start this run because the host was asleep.',
+  });
+  assert.equal(probed, 0);
+});
+
+test('computeCatchupOnlyGate: hostSettling declines host-asleep on a small gap', async () => {
+  const result = await computeCatchupOnlyGate(
+    undefined,
+    NOW,
+    new Date(NOW.getTime() - 30_000).toISOString(),
+    async () => true,
+    true,
+  );
+  assert.equal(result.gate.reasonCode, 'host-asleep');
+  assert.equal(result.cache?.reasonCode, 'host-asleep');
+});
+
+test('createWakeSettleTracker: a 15-min gap settles only after 180s of continuous awake ticks', () => {
+  const tracker = createWakeSettleTracker();
+  const t0 = NOW.getTime();
+  const at = (ms: number) => new Date(t0 + ms);
+  const iso = (ms: number) => new Date(t0 + ms).toISOString();
+  assert.equal(tracker.observe(iso(-15 * 60_000), at(0)), true);
+  for (let i = 1; i < 6; i++) {
+    assert.equal(tracker.observe(iso((i - 1) * 30_000), at(i * 30_000)), true);
+  }
+  assert.equal(tracker.observe(iso(150_000), at(180_000)), false);
+  assert.equal(tracker.observe(iso(180_000), at(210_000)), false);
+});
+
+test('createWakeSettleTracker: an undefined heartbeat never starts a window', () => {
+  assert.equal(createWakeSettleTracker().observe(undefined, NOW), false);
 });
