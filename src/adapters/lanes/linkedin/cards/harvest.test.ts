@@ -464,3 +464,141 @@ test('harvestCards tolerates an empty page when minJobCards is 0, but says so lo
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] ?? '', /harvested 0 cards/);
 });
+
+// --- behaviors.emptyStateMarker (clean empty search page) ---
+
+const MARKER = 'svg#empty-room-small';
+const MUST_EXIST = 'div[componentkey="SearchResultsMainContent"]';
+
+function markerInventory(minJobCards = '1'): Inventory {
+  return fixtureInventory({
+    behaviors: { mustExist: MUST_EXIST, emptyStateMarker: MARKER, minJobCards },
+  });
+}
+
+/** Fake page whose readiness wait resolves and whose presence probe reports
+ * `presence`; the card-read script must never run on the empty path. */
+function markerPage(
+  presence: 'results' | 'empty' | 'none',
+  waited: string[] = [],
+): PageHandle {
+  return fakePage({
+    waitFor: async (selector) => {
+      waited.push(selector);
+    },
+    evaluate: async (fn) => {
+      if (fn.includes('empty-state-presence')) return presence as never;
+      assert.fail('card read must not run when the page is not a results page');
+    },
+  });
+}
+
+test('harvestCards: marker present + results container absent returns [] without throwing, even with minJobCards 1', async () => {
+  const waited: string[] = [];
+  const infos: string[] = [];
+  const ctx = fakeCtx({
+    logger: {
+      ...noopLogger,
+      info(msg) {
+        infos.push(msg);
+      },
+    },
+  });
+
+  const cards = await harvestCards(markerPage('empty', waited), markerInventory(), ctx);
+
+  assert.deepEqual(cards, []);
+  assert.deepEqual(waited, [`${MUST_EXIST}, ${MARKER}`]);
+  assert.equal(infos.length, 1);
+  assert.match(infos[0] ?? '', /empty-state marker present — clean empty result/);
+});
+
+test('harvestCards: marker configured but results container present takes the existing path unchanged', async () => {
+  const page = fakePage({
+    evaluate: async (fn) => {
+      if (fn.includes('empty-state-presence')) return 'results' as never;
+      return readResult([
+        { title: 'Staff Engineer', company: 'Acme', location: '', href: '/jobs/view/7/' },
+      ]) as never;
+    },
+  });
+
+  const cards = await harvestCards(page, markerInventory(), fakeCtx());
+
+  assert.deepEqual(
+    cards.map((c) => c.id),
+    ['li-7'],
+  );
+});
+
+test('harvestCards: marker configured, container present, zero cards still throws the minJobCards assertion', async () => {
+  const page = fakePage({
+    evaluate: async (fn) =>
+      fn.includes('empty-state-presence')
+        ? ('results' as never)
+        : (readResult([]) as never),
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    /0 card\(s\).*min/,
+  );
+});
+
+test('harvestCards: neither container nor marker attaches still throws "results list never attached"', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    /results list never attached/,
+  );
+});
+
+test('harvestCards: readiness resolved but neither probe hit (race) throws "results list never attached"', async () => {
+  await assert.rejects(
+    () => harvestCards(markerPage('none'), markerInventory(), fakeCtx()),
+    /results list never attached/,
+  );
+});
+
+test('harvestCards: no emptyStateMarker in the inventory waits on the bare selector and keeps the throw (regression)', async () => {
+  const waited: string[] = [];
+  const inv = fixtureInventory({
+    behaviors: { mustExist: MUST_EXIST, minJobCards: '1' },
+  });
+  const page = fakePage({
+    waitFor: async (selector) => {
+      waited.push(selector);
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () => assert.fail('no presence probe without a marker'),
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, inv, fakeCtx()),
+    /results list never attached \(selector "div\[componentkey="SearchResultsMainContent"\]"\)/,
+  );
+  assert.deepEqual(waited, [MUST_EXIST]);
+});
+
+test('harvestCards: an empty-string emptyStateMarker is treated as unset', async () => {
+  const waited: string[] = [];
+  const inv = fixtureInventory({
+    behaviors: { mustExist: MUST_EXIST, emptyStateMarker: '' },
+  });
+  await harvestCards(
+    fakePage({
+      waitFor: async (s) => {
+        waited.push(s);
+      },
+      evaluate: async () => readResult([]) as never,
+    }),
+    inv,
+    fakeCtx(),
+  ).catch(() => undefined);
+  assert.deepEqual(waited, [MUST_EXIST]);
+});

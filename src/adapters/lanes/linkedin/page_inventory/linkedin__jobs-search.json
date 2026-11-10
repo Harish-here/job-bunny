@@ -29,6 +29,7 @@
     "jdCompany": ".job-details-jobs-unified-top-card__company-name",
     "jdMetadata": ".job-details-jobs-unified-top-card__primary-description-container",
     "mustExist": "div[componentkey=\"SearchResultsMainContent\"]",
+    "emptyStateMarker": "svg#empty-room-small",
     "minJobCards": "1",
     "hashedClassNamesWarning": "this route uses hashed/obfuscated CSS class names (unstable); card identity comes from the stable componentkey attribute",
     "cardListNote": "LinkedIn redirects /jobs/search/ to /jobs/search-results/ (2026-10-28) which serves the new hashed-class DOM; this inventory mirrors linkedin__jobs-search-results. Results list is div[componentkey=\"SearchResultsMainContent\"] (scrollable LazyColumn); body used as scope like the sibling inventory",
