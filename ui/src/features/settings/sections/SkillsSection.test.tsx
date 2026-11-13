@@ -43,8 +43,15 @@ describe('SkillsSection', () => {
     const minMatchInput = await screen.findByLabelText('Minimum skill matches');
     expect(minMatchInput).toHaveValue(1);
 
+    // Each keystroke's onChange commit must land before the next action
+    // reads/depends on it — otherwise a delayed commit lets the next
+    // action act on a stale DOM value, e.g. typing "3" after a stale "1"
+    // saves "13" instead of "3", or clicking Save before "3" has committed
+    // saves the pre-type value.
     await user.clear(minMatchInput);
+    await waitFor(() => expect(minMatchInput).toHaveValue(0));
     await user.type(minMatchInput, '3');
+    await waitFor(() => expect(minMatchInput).toHaveValue(3));
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(configApi.putConfigDoc).toHaveBeenCalledTimes(1));
@@ -95,7 +102,10 @@ describe('SkillsSection', () => {
     renderSection();
 
     const minMatchInput = await screen.findByLabelText('Minimum skill matches');
+    // See the round-trip test above for why `clear`'s commit must be
+    // observed before `type` begins.
     await user.clear(minMatchInput);
+    await waitFor(() => expect(minMatchInput).toHaveValue(0));
     await user.type(minMatchInput, '0');
 
     // Surfaced both inline (next to the field) and in SaveBar's validation
