@@ -64,9 +64,8 @@ export interface CdpBrowserContext {
  * both, so the persistent-context path below is what actually runs. */
 export interface CdpBrowser {
   newPage(): Promise<CdpPage>;
-  /** Over connectOverCDP this closes only the websocket (Playwright 1.62.1),
-   * never the remote Chrome. Optional so the many `{ newPage }` test fakes
-   * stay terse; a real playwright Browser always has it. */
+  /** Over connectOverCDP closes only the websocket (Playwright 1.62.1), never
+   * the remote Chrome. Optional for terse `{ newPage }` fakes. */
   close?(): Promise<void>;
   contexts?(): CdpBrowserContext[];
   newContext?(): Promise<CdpBrowserContext>;
@@ -75,9 +74,8 @@ export interface CdpBrowser {
 export type ConnectFn = (cdpUrl: string) => Promise<CdpBrowser>;
 
 const defaultConnect: ConnectFn = async (cdpUrl) => {
-  // noDefaults: this is intended to attach to a real Chrome instance with a
-  // persistent profile (ported from scripts/lib/browser.js's connectCDP) —
-  // without it, connectOverCDP's default context overrides can throw on
+  // noDefaults: attach to a real persistent-profile Chrome (from scripts/lib/
+  // browser.js's connectCDP); the default context overrides can throw on
   // Chrome builds that don't expose them over CDP.
   const browser = await chromium.connectOverCDP(cdpUrl, { noDefaults: true });
   return browser;
@@ -146,8 +144,7 @@ export interface CdpChromeProviderDeps {
   /** Delay between connectOverCDP retry attempts, in ms. Default 250ms. */
   connectRetryMs?: number;
   /** Total time budget for connect retries, in ms, from the first attempt.
-   * Injectable so tests run with no real waits. Default 10000ms (mirrors
-   * scripts/lib/browser.js's cdpReachable() poll cap). */
+   * Default 10000ms (mirrors scripts/lib/browser.js's cdpReachable() cap). */
   connectMaxWaitMs?: number;
   /** Probes CDP reachability before deciding whether to spawn. Default:
    * bounded fetch of `${cdpUrl}/json/version`. */
@@ -168,10 +165,8 @@ export interface CdpChromeProviderDeps {
   recycleIfOld?: boolean;
   /** Bound on the reachability probe fetch, in ms. Default 2000. */
   reachabilityTimeoutMs?: number;
-  /** Launches a freshly spawned Chrome with `--headless=new` when true —
-   * threaded straight into launchChrome/buildLaunchArgv. Only ever applies
-   * on the spawn path (spawnAndConnect); a reused/attached Chrome keeps
-   * whatever mode it was already launched in. Default false. */
+  /** Spawns Chrome with `--headless=new` when true (spawn path only; a
+   * reused/attached Chrome keeps its mode). Default false. */
   headless?: boolean;
 }
 
@@ -336,12 +331,12 @@ export class CdpChromeProvider implements BrowserProvider {
   /**
    * Chrome needs a moment to bind its debug port after spawn, so connect()
    * is retried every connectRetryMs, bounded by BOTH connectMaxWaitMs and
-   * ctx.signal. Each attempt is itself raced against the REMAINING budget
-   * (2026-07-25: one unbounded connect() hung on playwright's ~30s internal
-   * timeout — the cap must bound wall-clock time, not just gate retries).
-   * `earlyExit` (spawn path only) fails fast, with the exit status and
-   * stderr tail, once the spawned Chrome has died (2026-11-03/04: it exited
-   * ~210ms in, yet the loop polled the full 10s and said nothing useful).
+   * ctx.signal. Each attempt is raced against the REMAINING budget
+   * (2026-07-25: one unbounded connect() hung on playwright's ~30s timeout —
+   * the cap must bound wall-clock time, not just gate retries).
+   * `earlyExit` (spawn path only) fails fast, with exit status and stderr
+   * tail, once the spawned Chrome has died (2026-11-03/04: exited ~210ms in,
+   * yet the loop polled the full 10s and said nothing useful).
    */
   private async connectWithRetry(
     cdpUrl: string,
@@ -378,6 +373,11 @@ export class CdpChromeProvider implements BrowserProvider {
         const elapsedMs = Date.now() - start;
         ctx.logger.error('cdp-chrome: gave up connecting to Chrome CDP', {
           cdpUrl,
+          chromeVersion: (
+            (await this.cdpReachableFn(cdpUrl, { timeoutMs: 1000 })) as {
+              Browser?: string;
+            } | null
+          )?.Browser,
           connectMaxWaitMs: this.connectMaxWaitMs,
           elapsedMs,
           error: lastError instanceof Error ? lastError.message : String(lastError),
