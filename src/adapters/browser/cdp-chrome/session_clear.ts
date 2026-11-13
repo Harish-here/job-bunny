@@ -26,7 +26,11 @@ export const SESSION_CLEAR_PROFILE_DIR = 'Default';
 
 /** Session/tab-state entries cleared pre-launch, relative to the profile
  * dir above. `Sessions/` (`Session_*`/`Tabs_*`) is the current (M96+)
- * layout confirmed on disk; the four `Current/Last Session/Tabs` files are
+ * layout confirmed on disk. `Sessions_Encrypted/` holds the same files and
+ * restores tabs on its own (2026-11-13, Chrome 157.0.8103.78: clearing only
+ * `Sessions/` still restored 5 LinkedIn tabs, and `connectOverCDP` took ~8s
+ * against the 10s connect budget — every scheduled run failed at `farm`).
+ * Both must go. The four `Current/Last Session/Tabs` files are
  * the pre-M96 layout, kept as a defensive check in case a future Chrome
  * update (or a restored old profile) reintroduces them. None of these
  * carry auth — cookies/storage/passwords live in separate files/dirs
@@ -34,6 +38,7 @@ export const SESSION_CLEAR_PROFILE_DIR = 'Default';
  * deliberately excludes. */
 export const SESSION_STATE_ENTRIES: readonly string[] = [
   'Sessions',
+  'Sessions_Encrypted',
   'Current Session',
   'Current Tabs',
   'Last Session',

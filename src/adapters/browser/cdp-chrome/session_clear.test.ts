@@ -31,6 +31,11 @@ function makeProfileFixture(): { userDataDir: string; profileDir: string } {
   mkdirSync(sessionsDir, { recursive: true });
   writeFileSync(join(sessionsDir, 'Session_123'), 'fake-session-bytes');
   writeFileSync(join(sessionsDir, 'Tabs_123'), 'fake-tabs-bytes');
+  // Chrome 157 restores from this twin store on its own — see session_clear.ts.
+  const encryptedDir = join(profileDir, 'Sessions_Encrypted');
+  mkdirSync(encryptedDir, { recursive: true });
+  writeFileSync(join(encryptedDir, 'Session_456'), 'fake-encrypted-session-bytes');
+  writeFileSync(join(encryptedDir, 'Tabs_456'), 'fake-encrypted-tabs-bytes');
 
   writeFileSync(
     join(profileDir, 'Preferences'),
@@ -62,6 +67,8 @@ test('clearSessionState removes Sessions/tab-restore files from a temp fixture',
     assert.equal(result.attempted, true);
     assert.ok(result.removedEntries.includes('Sessions'));
     assert.equal(existsSync(join(profileDir, 'Sessions')), false);
+    assert.ok(result.removedEntries.includes('Sessions_Encrypted'));
+    assert.equal(existsSync(join(profileDir, 'Sessions_Encrypted')), false);
   } finally {
     rmSync(userDataDir, { recursive: true, force: true });
   }
