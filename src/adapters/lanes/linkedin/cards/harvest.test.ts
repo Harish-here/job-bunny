@@ -660,3 +660,128 @@ test('harvestCards: marker set without emptyStateRequires keeps marker-only beha
   const cards = await harvestCards(domPage([MARKER]), markerInventory(), fakeCtx());
   assert.deepEqual(cards, []);
 });
+
+test('harvestCards: readiness timeout appends served url/title and an authwall hint', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () =>
+      ({
+        url: 'https://www.linkedin.com/authwall?trk=bf',
+        title: 'Sign Up | LinkedIn',
+      }) as never,
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    (err: Error) => {
+      assert.match(err.message, /results list never attached/);
+      assert.match(err.message, /url=https:\/\/www\.linkedin\.com\/authwall /);
+      assert.doesNotMatch(err.message, /trk=|\?/);
+      assert.match(err.message, /title="Sign Up \| LinkedIn"/);
+      assert.match(err.message, /looks logged out \(authwall\)/);
+      return true;
+    },
+  );
+});
+
+test('harvestCards: readiness timeout on a normal url gives url/title without the logged-out hint', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () =>
+      ({ url: 'https://www.linkedin.com/jobs/search/?x=1', title: 'Jobs' }) as never,
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    (err: Error) => {
+      assert.match(err.message, /title="Jobs"/);
+      assert.doesNotMatch(err.message, /logged out/);
+      return true;
+    },
+  );
+});
+
+test('harvestCards: readiness timeout still throws the original error when reading url/title fails', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () => {
+      throw new Error('context destroyed');
+    },
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    /results list never attached.*timeout waiting for selector.*page url\/title unavailable/,
+  );
+});
+
+test('harvestCards: served url drops query, hash and deeper path segments (checkpoint id)', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () =>
+      ({
+        url: 'https://www.linkedin.com/checkpoint/challenge/AbC123secret?sessionRedirect=https%3A%2F%2Fx#frag',
+        title: 'Security Verification',
+      }) as never,
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    (err: Error) => {
+      assert.match(
+        err.message,
+        /url=https:\/\/www\.linkedin\.com\/checkpoint\/challenge title=/,
+      );
+      assert.doesNotMatch(err.message, /AbC123secret|sessionRedirect|frag/);
+      assert.match(err.message, /looks logged out/);
+      return true;
+    },
+  );
+});
+
+test('harvestCards: served title is capped, single-line and quote-free', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () =>
+      ({
+        url: 'https://www.linkedin.com/jobs/search/',
+        title: `Line one\n"quoted" ${'x'.repeat(300)}`,
+      }) as never,
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    (err: Error) => {
+      const m = /title="([^"]*)"/.exec(err.message);
+      assert.ok(m);
+      assert.ok((m?.[1] ?? '').length <= 120);
+      assert.doesNotMatch(err.message, /\n/);
+      assert.match(err.message, /Line one 'quoted'/);
+      return true;
+    },
+  );
+});
+
+test('harvestCards: unparseable served url reads as unavailable', async () => {
+  const page = fakePage({
+    waitFor: async () => {
+      throw new Error('timeout waiting for selector');
+    },
+    evaluate: async () => ({ url: 'not a url', title: 'T' }) as never,
+  });
+
+  await assert.rejects(
+    () => harvestCards(page, markerInventory(), fakeCtx()),
+    /page url\/title unavailable/,
+  );
+});

@@ -76,6 +76,54 @@ function buildEmptyStatePresenceScript(
 })()`;
 }
 
+const PAGE_INFO_TIMEOUT_MS = 3_000;
+const AUTHWALL_RE = /\/(authwall|login|checkpoint|uas)(\/|\?|$)/i;
+
+/** Origin + first two path segments only: query/hash/deeper segments carry
+ * tokens and sessionRedirect values that must not reach run events/digests. */
+function safeUrl(href: string): { url: string; path: string } | undefined {
+  try {
+    const u = new URL(href);
+    const path = `/${u.pathname.split('/').filter(Boolean).slice(0, 2).join('/')}`;
+    return { url: u.origin + (path === '/' ? '' : path), path };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Best-effort "which page did LinkedIn actually serve" suffix for the
+ * never-attached error, so a logged-out/authwall page is distinguishable from
+ * a changed DOM in run events. Bounded by a short timeout AND ctx.signal;
+ * never throws — any failure reads "page url/title unavailable". */
+async function describeServedPage(page: PageHandle, ctx: RunContext): Promise<string> {
+  try {
+    const read = page.evaluate<{ url?: unknown; title?: unknown }>(
+      '({ url: location.href, title: document.title })',
+      { timeoutMs: PAGE_INFO_TIMEOUT_MS },
+    );
+    read.catch(() => undefined);
+    const aborted = new Promise<never>((_, reject) => {
+      if (ctx.signal.aborted) reject(new Error('aborted'));
+      ctx.signal.addEventListener('abort', () => reject(new Error('aborted')), {
+        once: true,
+      });
+    });
+    const info = await Promise.race([read, aborted]);
+    const safe = typeof info?.url === 'string' ? safeUrl(info.url) : undefined;
+    if (!safe) return ' [page url/title unavailable]';
+    const rawTitle = typeof info.title === 'string' ? info.title : '';
+    const title = rawTitle
+      .replace(/["']/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+    const hint = AUTHWALL_RE.test(safe.path) ? ' — looks logged out (authwall)' : '';
+    return ` [served page: url=${safe.url} title="${title}"${hint}]`;
+  } catch {
+    return ' [page url/title unavailable]';
+  }
+}
+
 /**
  * Single batch in-page read of every visible card, mapped to typed
  * HarvestedCards. Never per-card round trips (2026-07-17 stall lesson —
@@ -150,7 +198,8 @@ export async function harvestCards(
     }
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `harvest: results list never attached (selector "${readySelector}"): ${message}`,
+      `harvest: results list never attached (selector "${readySelector}"): ${message}` +
+        (await describeServedPage(page, ctx)),
     );
   }
 
@@ -175,7 +224,8 @@ export async function harvestCards(
         `harvest: results list never attached (selector "${readySelector}"): ` +
           `readiness resolved but neither the list nor the empty-state marker "${emptyMarker}"` +
           (emptyRequires ? ` with "${emptyRequires}"` : '') +
-          ' is present',
+          ' is present' +
+          (await describeServedPage(page, ctx)),
       );
     }
   }
